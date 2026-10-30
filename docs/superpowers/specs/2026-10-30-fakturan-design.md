@@ -47,12 +47,13 @@ Hlavní zásady:
 - evidence nákladů a přijatých dokladů,
 - plátci DPH, výpočet DPH, kontrolní hlášení, přiznání k DPH,
 - příjmový pokladní doklad a dodací list,
-- objednávky, výzvy k platbě (doklad před fakturou, zálohovou fakturu nenahrazuje),
 - exporty pro účetní programy (Pohoda, Money S3),
 - přílohy k faktuře,
 - dodací adresa zákazníka,
 - sklad a prodejky,
-- hybridní pošta (tisk a odeslání dopisem přes externí službu),
+- cenové nabídky,
+- přístup pro účetní jen ke čtení,
+- odchozí webhooky,
 - podání přímo na daňový portál,
 - platební brány a online platba z odkazu,
 - veřejný odkaz na fakturu pro klienta,
@@ -68,9 +69,6 @@ Není součástí první verze, ale architektura s ním počítá:
 - **2FA (TOTP) a passkeys** přes pluginy Better Auth.
 - **Widget s vlastním kódem** v izolovaném sandboxu: iframe bez přístupu k session, síti a stejnému originu, data dostane jen přes `postMessage`.
 - **Editor rozložení faktur** v aplikaci.
-- **Cenové nabídky.**
-- **Přístup pro účetní** jen ke čtení. Výjimka z izolace účtů, proto vyžaduje vlastní návrh.
-- **Webhooky** spolu s API tokeny.
 - **Další banky** přes nové parsery avíz. **Fio API.** Univerzální open banking.
 - **Souhrnné hlášení** pro identifikované osoby.
 - **Další jazyky faktur**, rozhraní s i18n.
@@ -358,7 +356,7 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 
 ## 11. Odesílání e-mailem (MAIL)
 
-- **MAIL-001** Odeslání z detailu faktury: příjemci, kopie, předmět, text, příloha PDF, volitelně ISDOC.
+- **MAIL-001** Tlačítko „Odeslat klientovi“ je na detailu každé vystavené faktury a po vystavení je nabídnuto hned. Odeslání z detailu faktury: příjemci, kopie, předmět, text, příloha PDF, volitelně ISDOC.
 - **MAIL-002** Předvyplnění ze šablon e-mailů v jazyce faktury, s proměnnými.
 - **MAIL-003** Šablony jsou upravitelné pro každý typ zprávy: faktura, záloha, opravná faktura, upomínka, potvrzení platby.
 - **MAIL-004** Nic se neodešle bez kliknutí uživatele nebo zapnuté automatiky.
