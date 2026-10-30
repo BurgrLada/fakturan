@@ -21,7 +21,9 @@ function withTimeout<T>(job: () => Promise<T>, timeoutMs: number): Promise<T> {
   const expired = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new RenderTimeoutError("PDF render timed out")), timeoutMs);
   });
-  return Promise.race([job(), expired]).finally(() => clearTimeout(timer));
+  // The constructor turns a synchronous throw into a rejection, so the timer is always cleared.
+  const run = new Promise<T>((resolve) => resolve(job()));
+  return Promise.race([run, expired]).finally(() => clearTimeout(timer));
 }
 
 // The timeout frees the queue and the caller; a hung render itself cannot be cancelled.

@@ -213,6 +213,24 @@ describe("vykreslení PDF", () => {
     await expect(next).resolves.toBe("další");
   });
 
+  test("[PDF-001] synchronní chyba renderu zruší časovač a nezanechá nezachycené odmítnutí", async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", record);
+    try {
+      const failed = serializeRender((): Promise<string> => {
+        throw new Error("synchronní selhání");
+      }, 5);
+
+      await expect(failed).rejects.toThrow("synchronní selhání");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+  });
+
   test("[PDF-001] vadný pohled shodí jen svůj render", async () => {
     const good = await viewOf(F.short);
     const broken = renderInvoicePdf({ ...good, lines: null as never });
