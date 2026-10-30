@@ -16,6 +16,7 @@ const schema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   ENCRYPTION_KEY: z
     .string()
+    .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/, "není platné base64")
     .transform((v) => Buffer.from(v, "base64"))
     .refine((b) => b.length === 32, "musí být 32 bajtů v base64"),
   SMTP_HOST: optional,

@@ -28,4 +28,13 @@ describe("crypto", () => {
     expect(() => decryptSecret([v, iv, tag, flipped].join("."))).toThrow();
     expect(() => decryptSecret("v2.a.b.c")).toThrow();
   });
+
+  test("[SEC-003] zkrácený nebo pozměněný tag a pozměněné IV selžou", async () => {
+    const { encryptSecret, decryptSecret } = await import("@/server/crypto");
+    const [v, iv, tag, data] = encryptSecret("abc").split(".");
+    const flip = (s: string) => (s[0] === "A" ? "B" : "A") + s.slice(1);
+    expect(() => decryptSecret([v, iv, tag.slice(0, 11), data].join("."))).toThrow();
+    expect(() => decryptSecret([v, iv, flip(tag), data].join("."))).toThrow();
+    expect(() => decryptSecret([v, flip(iv), tag, data].join("."))).toThrow();
+  });
 });

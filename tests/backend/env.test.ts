@@ -25,6 +25,12 @@ describe("env", () => {
     ).toThrow(/ENCRYPTION_KEY/);
   });
 
+  test("[OPS-003] ENCRYPTION_KEY s neplatnými znaky base64 je odmítnut", () => {
+    expect(() => parseEnv({ ...base, ENCRYPTION_KEY: "!".repeat(43) + "=" })).toThrow(
+      /ENCRYPTION_KEY/,
+    );
+  });
+
   test("[OPS-003] nezapisovatelná složka dat hlásí cestu", () => {
     const file = join(dir, "soubor");
     writeFileSync(file, "");
