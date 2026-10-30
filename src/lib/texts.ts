@@ -237,6 +237,7 @@ export const TEXTS = {
     issue: {
       alreadyIssued: "Doklad už je vystavený",
       supplier: (label: string) => `Doplňte u dodavatele: ${label}`,
+      notVatPayer: (label: string) => `Doplňte v Nastavení, sekce Dodavatel: ${label}`,
       customer: "Vyberte zákazníka",
       noLines: "Přidejte aspoň jednu položku",
       lineName: (position: number) => `Položka ${position}: vyplňte název`,

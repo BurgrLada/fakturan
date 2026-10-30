@@ -1,4 +1,5 @@
-import { Image, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import type { ReactNode } from "react";
 import type { DesignTokens } from "./designs/types";
 import type { InvoiceView, LabeledValue, LineView, PartyView } from "./view";
 
@@ -9,9 +10,19 @@ const LOGO_MAX_WIDTH = 150;
 const LOGO_MAX_HEIGHT = 56;
 const SIGNATURE_MAX_WIDTH = 140;
 const SIGNATURE_MAX_HEIGHT = 56;
+const A4_WIDTH = 595.28;
 const FOOTER_BOTTOM = 22;
+const FOOTER_LINE_HEIGHT = 1.3;
+// Above the average width of Inter capitals, so the reserved space errs towards too much.
+const FOOTER_CHAR_EM = 0.7;
 const TOTALS_WIDTH = "50%";
-const COLUMNS = { quantity: 62, unitPrice: 78, discount: 52, total: 84 };
+const MIN_COLUMNS = { quantity: 62, unitPrice: 78, discount: 52, total: 84 };
+// Wider than a digit of any bundled font: a cell narrower than its amount would break it with a hyphen.
+const AMOUNT_CHAR_EM = 0.66;
+const MAX_NUMBER_COLUMNS_SHARE = 0.6;
+const HEADER_HEIGHT = 26;
+const NAME_CHARS_PER_ROW = 34;
+const DESCRIPTION_CHARS_PER_ROW = 44;
 
 function Muted({ tokens, children }: { tokens: DesignTokens; children: string }) {
   return (
@@ -104,15 +115,16 @@ export function TextBlock({
   );
 }
 
+type TableStyles = ReturnType<typeof tableStyles>;
+
 function LineRow({
   line,
   view,
   tokens,
-  rowStyle,
-}: PartProps & { line: LineView; rowStyle: ReturnType<typeof tableStyles>["row"] }) {
-  const cells = tableStyles(view, tokens);
+  cells,
+}: PartProps & { line: LineView; cells: TableStyles }) {
   return (
-    <View style={rowStyle} wrap={!line.keepTogether}>
+    <View style={cells.row} wrap={!line.keepTogether}>
       <View style={cells.description}>
         <Text style={{ fontWeight: 700 }}>{line.name}</Text>
         {line.description ? (
@@ -129,8 +141,50 @@ function LineRow({
   );
 }
 
+function longestWord(values: string[]): number {
+  return Math.max(0, ...values.flatMap((value) => value.split(" ").map((word) => word.length)));
+}
+
+function numberColumns(view: InvoiceView, tokens: DesignTokens, fontSize: number) {
+  const width = (values: string[], min: number) =>
+    Math.max(min, Math.ceil(longestWord(values) * fontSize * AMOUNT_CHAR_EM) + tokens.spacing.cell);
+  const { lines } = view;
+  return {
+    quantity: width(
+      lines.map((line) => line.quantity),
+      MIN_COLUMNS.quantity,
+    ),
+    unitPrice: width(
+      lines.map((line) => line.unitPrice),
+      MIN_COLUMNS.unitPrice,
+    ),
+    discount: view.hasLineDiscount
+      ? width(
+          lines.map((line) => line.discount),
+          MIN_COLUMNS.discount,
+        )
+      : 0,
+    total: width(
+      lines.map((line) => line.total),
+      MIN_COLUMNS.total,
+    ),
+  };
+}
+
+function fittedColumns(view: InvoiceView, tokens: DesignTokens) {
+  const base = numberColumns(view, tokens, tokens.sizes.base);
+  const used = base.quantity + base.unitPrice + base.discount + base.total;
+  const available = (A4_WIDTH - 2 * tokens.spacing.page) * MAX_NUMBER_COLUMNS_SHARE;
+  if (used <= available) return { widths: base, fontSize: tokens.sizes.base };
+  return {
+    widths: numberColumns(view, tokens, tokens.sizes.small),
+    fontSize: tokens.sizes.small,
+  };
+}
+
 function tableStyles(view: InvoiceView, tokens: DesignTokens) {
-  const number = { textAlign: "right" as const, paddingLeft: tokens.spacing.cell };
+  const { widths, fontSize } = fittedColumns(view, tokens);
+  const number = { textAlign: "right" as const, paddingLeft: tokens.spacing.cell, fontSize };
   return {
     row: {
       flexDirection: "row" as const,
@@ -143,33 +197,58 @@ function tableStyles(view: InvoiceView, tokens: DesignTokens) {
       paddingVertical: tokens.spacing.cell,
       borderBottomWidth: tokens.lineWidth * 2,
       borderBottomColor: view.colors.accent,
-      fontSize: tokens.sizes.small,
       fontWeight: 700,
     },
     description: { flex: 1, gap: 2 },
-    quantity: { ...number, width: COLUMNS.quantity },
-    unitPrice: { ...number, width: COLUMNS.unitPrice },
-    discount: { ...number, width: COLUMNS.discount },
-    total: { ...number, width: COLUMNS.total },
+    quantity: { ...number, width: widths.quantity },
+    unitPrice: { ...number, width: widths.unitPrice },
+    discount: { ...number, width: widths.discount },
+    total: { ...number, width: widths.total },
   };
+}
+
+// react-pdf ignores minPresenceAhead on fixed nodes and leaves them behind when the rows break, so a
+// spacer in front of the table moves it whole unless the header and the first row fit. The spacer
+// cancels the design's gap, which InvoicePage sets to spacing.section, and react-pdf subtracts that
+// negative margin from the presence, so the result adds it back.
+function firstRowPresence(view: InvoiceView, tokens: DesignTokens): number {
+  const first = view.lines[0];
+  const { spacing } = tokens;
+  if (!first) return HEADER_HEIGHT + spacing.section;
+  const rows =
+    Math.ceil(first.name.length / NAME_CHARS_PER_ROW) +
+    (first.keepTogether ? Math.ceil(first.description.length / DESCRIPTION_CHARS_PER_ROW) : 1) +
+    first.description.split("\n").length -
+    1;
+  const rowHeight = rows * tokens.sizes.base * tokens.lineHeight + 2 * spacing.cell;
+  return HEADER_HEIGHT + rowHeight + spacing.section;
 }
 
 export function LinesTable({ view, tokens }: PartProps) {
   const cells = tableStyles(view, tokens);
   const { labels } = view;
+  const heading = (style: TableStyles["total"]) => ({ ...style, fontSize: tokens.sizes.small });
   return (
-    <View>
-      <View style={cells.header} fixed>
-        <Text style={cells.description}>{labels.description}</Text>
-        <Text style={cells.quantity}>{labels.quantity}</Text>
-        <Text style={cells.unitPrice}>{labels.unitPrice}</Text>
-        {view.hasLineDiscount && <Text style={cells.discount}>{labels.discount}</Text>}
-        <Text style={cells.total}>{labels.lineTotal}</Text>
+    <>
+      <View
+        minPresenceAhead={firstRowPresence(view, tokens)}
+        style={{ marginBottom: -tokens.spacing.section }}
+      />
+      <View>
+        <View style={cells.header} fixed>
+          <Text style={{ ...cells.description, fontSize: tokens.sizes.small }}>
+            {labels.description}
+          </Text>
+          <Text style={heading(cells.quantity)}>{labels.quantity}</Text>
+          <Text style={heading(cells.unitPrice)}>{labels.unitPrice}</Text>
+          {view.hasLineDiscount && <Text style={heading(cells.discount)}>{labels.discount}</Text>}
+          <Text style={heading(cells.total)}>{labels.lineTotal}</Text>
+        </View>
+        {view.lines.map((line, index) => (
+          <LineRow key={index} line={line} view={view} tokens={tokens} cells={cells} />
+        ))}
       </View>
-      {view.lines.map((line, index) => (
-        <LineRow key={index} line={line} view={view} tokens={tokens} rowStyle={cells.row} />
-      ))}
-    </View>
+    </>
   );
 }
 
@@ -180,11 +259,14 @@ export function Totals({ view, tokens }: PartProps) {
         <View key={row.label} style={{ flexDirection: "row", justifyContent: "space-between" }}>
           <Text style={row.strong ? { fontWeight: 700 } : {}}>{row.label}</Text>
           <Text
-            style={
-              row.strong
-                ? { fontWeight: 700, fontSize: tokens.sizes.heading, color: view.colors.accent }
-                : {}
-            }
+            style={{
+              flexShrink: 0,
+              ...(row.strong && {
+                fontWeight: 700,
+                fontSize: tokens.sizes.heading,
+                color: view.colors.accent,
+              }),
+            }}
           >
             {row.value}
           </Text>
@@ -222,6 +304,7 @@ export function PaymentBox({ view, tokens }: PartProps) {
           <PaymentRow key={row.label} row={row} tokens={tokens} />
         ))}
       </View>
+      {payment.qrPending && <Muted tokens={tokens}>{labels.qrAfterIssue}</Muted>}
       {payment.qr && (
         <View style={{ alignItems: "center", gap: 2 }}>
           <Image
@@ -250,9 +333,7 @@ export function Signature({ view, tokens }: PartProps) {
   );
 }
 
-// react-pdf drops this text when it inherits a lineHeight, so a design sets lineHeight on its content
-// wrapper, never on the Page. The wrapper needs its own fontSize, which lineHeight is multiplied by.
-export function PageNumber({ view, tokens }: PartProps) {
+function PageNumber({ view, tokens }: PartProps) {
   return (
     <Text
       fixed
@@ -272,7 +353,7 @@ export function PageNumber({ view, tokens }: PartProps) {
   );
 }
 
-export function FooterText({ view, tokens }: PartProps) {
+function FooterText({ view, tokens }: PartProps) {
   if (!view.footer) return null;
   return (
     <Text
@@ -283,6 +364,7 @@ export function FooterText({ view, tokens }: PartProps) {
         right: tokens.spacing.page,
         bottom: FOOTER_BOTTOM + tokens.spacing.section,
         fontSize: tokens.sizes.small,
+        lineHeight: FOOTER_LINE_HEIGHT,
         opacity: tokens.mutedOpacity,
       }}
     >
@@ -291,7 +373,7 @@ export function FooterText({ view, tokens }: PartProps) {
   );
 }
 
-export function Watermark({ view, tokens }: PartProps) {
+function Watermark({ view, tokens }: PartProps) {
   if (!view.watermark) return null;
   const styles = StyleSheet.create({
     mark: {
@@ -311,5 +393,42 @@ export function Watermark({ view, tokens }: PartProps) {
     <Text fixed style={styles.mark}>
       {view.watermark}
     </Text>
+  );
+}
+
+function footerHeight(footer: string, tokens: DesignTokens): number {
+  if (!footer) return 0;
+  const { small } = tokens.sizes;
+  const charsPerRow = Math.floor((A4_WIDTH - 2 * tokens.spacing.page) / (small * FOOTER_CHAR_EM));
+  const rows = footer
+    .split("\n")
+    .reduce((sum, row) => sum + Math.max(1, Math.ceil(row.length / charsPerRow)), 0);
+  return rows * small * FOOTER_LINE_HEIGHT;
+}
+
+// Every design renders through this, so the footer reserve applies to all of them. lineHeight stays
+// on the inner View with its own fontSize: PageNumber vanishes when it inherits lineHeight from Page.
+export function InvoicePage({ view, tokens, children }: PartProps & { children: ReactNode }) {
+  const { spacing, sizes } = tokens;
+  return (
+    <Page
+      size="A4"
+      style={{
+        fontFamily: tokens.fonts.body,
+        fontSize: sizes.base,
+        color: view.colors.text,
+        paddingTop: spacing.page,
+        paddingHorizontal: spacing.page,
+        paddingBottom:
+          FOOTER_BOTTOM + 2 * spacing.section + sizes.small + footerHeight(view.footer, tokens),
+      }}
+    >
+      <Watermark view={view} tokens={tokens} />
+      <View style={{ gap: spacing.section, fontSize: sizes.base, lineHeight: tokens.lineHeight }}>
+        {children}
+      </View>
+      <FooterText view={view} tokens={tokens} />
+      <PageNumber view={view} tokens={tokens} />
+    </Page>
   );
 }

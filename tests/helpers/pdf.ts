@@ -54,6 +54,30 @@ export async function pdfText(pdf: Buffer): Promise<string[]> {
   }
 }
 
+export type PdfTextItem = { text: string; top: number; bottom: number };
+
+// PDF coordinates: y grows upwards from the bottom of the page.
+export async function pdfTextItems(pdf: Buffer, page: number): Promise<PdfTextItem[]> {
+  const task = await open(pdf);
+  try {
+    const doc = await task.promise;
+    const content = await (await doc.getPage(page)).getTextContent();
+    return content.items.flatMap((item) =>
+      "str" in item && item.str.trim()
+        ? [
+            {
+              text: item.str,
+              top: item.transform[5] + item.height,
+              bottom: item.transform[5],
+            },
+          ]
+        : [],
+    );
+  } finally {
+    await task.destroy();
+  }
+}
+
 export async function pdfPagePng(pdf: Buffer, page: number, scale = 2): Promise<Buffer> {
   const task = await open(pdf);
   try {

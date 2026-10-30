@@ -33,6 +33,7 @@ export type DocumentLabels = {
   swift: string;
   variableSymbol: string;
   qrCaption: string;
+  qrAfterIssue: string;
   note: string;
   signature: string;
   page: (current: number, total: number) => string;
@@ -75,6 +76,7 @@ export const LABELS: Record<Language, DocumentLabels> = {
     swift: "SWIFT",
     variableSymbol: "Variabilní symbol",
     qrCaption: "QR platba",
+    qrAfterIssue: "QR po vystavení",
     note: "Poznámka",
     signature: "Podpis",
     page: (current, total) => `Strana ${current} z ${total}`,
@@ -115,6 +117,7 @@ export const LABELS: Record<Language, DocumentLabels> = {
     swift: "SWIFT",
     variableSymbol: "Payment reference",
     qrCaption: "QR payment",
+    qrAfterIssue: "QR after issuing",
     note: "Note",
     signature: "Signature",
     page: (current, total) => `Page ${current} of ${total}`,

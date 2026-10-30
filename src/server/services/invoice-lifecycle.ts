@@ -75,6 +75,15 @@ function supplierProblems(ownerId: string): IssueProblem[] {
   }));
 }
 
+// The statement is printed in the document's language, so only that one has to be filled in.
+function vatStatementProblems(q: Reader, ownerId: string, row: Invoice): IssueProblem[] {
+  const profile = currentParties(q, ownerId, row).snapshot.supplier;
+  if (!profile) return [];
+  const key = row.language === "en" ? "notVatPayerEn" : "notVatPayerCs";
+  if (profile[key].trim()) return [];
+  return [{ field: `supplier.${key}`, message: T.notVatPayer(TEXTS.supplier.fields[key]) }];
+}
+
 type CheckedLine = Pick<
   InvoiceLine,
   "name" | "quantityMilli" | "unitPriceMinor" | "discountKind" | "discountValue"
@@ -173,7 +182,11 @@ export function documentProblems(
 }
 
 function draftProblems(q: Reader, ownerId: string, row: Invoice, lines: InvoiceLine[]) {
-  return [...supplierProblems(ownerId), ...documentProblems(q, ownerId, row, lines)];
+  return [
+    ...supplierProblems(ownerId),
+    ...vatStatementProblems(q, ownerId, row),
+    ...documentProblems(q, ownerId, row, lines),
+  ];
 }
 
 export function checkIssuable(ownerId: string, id: string): IssueProblem[] {

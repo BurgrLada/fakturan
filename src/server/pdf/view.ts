@@ -50,7 +50,7 @@ export type InvoiceView = {
   lines: LineView[];
   hasLineDiscount: boolean;
   totals: TotalRow[];
-  payment: { rows: LabeledValue[]; qr: Buffer | null };
+  payment: { rows: LabeledValue[]; qr: Buffer | null; qrPending: boolean };
   textBefore: string;
   textAfter: string;
   note: string;
@@ -205,10 +205,9 @@ function paymentRows(doc: InvoiceDocument, labels: DocumentLabels): LabeledValue
 
 async function paymentQr(
   doc: InvoiceDocument,
-  labels: DocumentLabels,
   title: string,
-  readImage: ViewOptions["readImage"],
-): Promise<Buffer | null> {
+  opts: ViewOptions,
+): Promise<{ qr: Buffer | null; qrPending: boolean }> {
   const account = doc.snapshot.account;
   const settled = doc.status === "cancelled" || doc.status === "credited";
   const plan = planQr({
@@ -223,11 +222,13 @@ async function paymentQr(
       doc.appearance.showQr && doc.paymentMethod === "transfer" && account !== null && !settled,
     paid: doc.status === "paid",
   });
-  if (plan.kind === "none") return null;
+  if (plan.kind === "none") return { qr: null, qrPending: false };
+  // A draft has neither number nor variable symbol, so a code printed now could not be matched.
+  if (opts.draft) return { qr: null, qrPending: true };
   const logo = doc.appearance.showQrLogo
-    ? await loadImage(doc.images.qrLogoFileId, readImage)
+    ? await loadImage(doc.images.qrLogoFileId, opts.readImage)
     : null;
-  return qrPng(plan.payload, logo, plan.kind);
+  return { qr: await qrPng(plan.payload, logo, plan.kind), qrPending: false };
 }
 
 async function loadImage(
@@ -254,7 +255,7 @@ export async function buildInvoiceView(
   const [logo, signature, qr] = await Promise.all([
     showLogo ? loadImage(doc.images.logoFileId, opts.readImage) : null,
     appearance.showSignature ? loadImage(doc.images.signatureFileId, opts.readImage) : null,
-    paymentQr(doc, labels, title, opts.readImage),
+    paymentQr(doc, title, opts),
   ]);
   const { colors } = design.tokens;
   return {
@@ -277,7 +278,7 @@ export async function buildInvoiceView(
     lines: doc.lines.map((line) => lineView(line, doc.currency, labels.locale)),
     hasLineDiscount: doc.lines.some((line) => line.discountKind !== "none"),
     totals: totalRows(doc, labels),
-    payment: { rows: paymentRows(doc, labels), qr },
+    payment: { rows: paymentRows(doc, labels), ...qr },
     textBefore: printable(doc.textBefore),
     textAfter: printable(doc.textAfter),
     note: printable(doc.note),

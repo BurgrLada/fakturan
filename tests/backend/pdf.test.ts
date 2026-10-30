@@ -10,14 +10,14 @@ import { setClockForTests } from "@/server/clock";
 import { auditLog, user } from "@/server/db/schema";
 import { FONT_FAMILIES, registerFonts } from "@/server/pdf/fonts";
 import { DESIGNS, getDesign, isDesignId } from "@/server/pdf/designs";
-import { renderInvoicePdf, serializeRender } from "@/server/pdf/render";
+import { RenderTimeoutError, renderInvoicePdf, serializeRender } from "@/server/pdf/render";
 import { buildInvoiceView } from "@/server/pdf/view";
 import { checkRateLimit, RATE_RULES } from "@/server/rate-limit";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { saveCustomer } from "@/server/services/customers";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { fileNameFor, invoicePdf } from "@/server/services/invoice-pdf";
-import { cancelInvoice, issueInvoice } from "@/server/services/invoice-lifecycle";
+import { cancelInvoice, checkIssuable, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { newDraftDefaults, saveDraft, type DraftInput } from "@/server/services/invoices";
 import { ensureDefaultSeries } from "@/server/services/number-series";
 import { savePreferences } from "@/server/services/preferences";
@@ -29,7 +29,7 @@ import {
   fixtureLine,
 } from "../fixtures/invoices";
 import { createTestDb } from "../helpers/db";
-import { decodeQr, pdfPagePng, pdfText } from "../helpers/pdf";
+import { decodeQr, pdfPagePng, pdfText, pdfTextItems } from "../helpers/pdf";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -41,6 +41,9 @@ vi.mock("@/server/auth/session", () => ({ actorFromRequest: async () => session.
 
 const { GET: pdfRoute } = await import("@/app/(app)/faktury/[id]/pdf/route");
 const { GET: previewRoute } = await import("@/app/(app)/faktury/[id]/nahled/route");
+
+// Rendering is CPU bound and competes with the other test workers.
+vi.setConfig({ testTimeout: 30_000 });
 
 const db = createTestDb();
 const actor = (userId: string) => ({ userId, source: "web" as const });
@@ -137,6 +140,8 @@ function issued(owner: string, customerId: string, over: Partial<DraftInput> = {
   return id;
 }
 
+const FOOTER_WORDS = /^(?!Dodavatel$).*(spis|značk|bank|spoj|dodav)/i;
+
 const readLogo = (id: string) => (id === FIXTURE_LOGO_ID ? FIXTURE_LOGO_SVG : null);
 
 const viewOf = (doc: InvoiceDocument, draftFlag = false) =>
@@ -200,6 +205,14 @@ describe("vykreslení PDF", () => {
     expect(order).toEqual(["první start", "první konec", "druhý"]);
   });
 
+  test("[PDF-001] render po timeoutu uvolní frontu a volající dostane chybu", async () => {
+    const hung = serializeRender(() => new Promise<string>(() => {}), 5);
+    const next = serializeRender(async () => "další");
+
+    await expect(hung).rejects.toBeInstanceOf(RenderTimeoutError);
+    await expect(next).resolves.toBe("další");
+  });
+
   test("[PDF-001] vadný pohled shodí jen svůj render", async () => {
     const good = await viewOf(F.short);
     const broken = renderInvoicePdf({ ...good, lines: null as never });
@@ -222,6 +235,74 @@ describe("vykreslení PDF", () => {
       expect(page).toContain(`Strana ${index + 1} z ${pages.length}`);
     });
   });
+
+  test.each([
+    ["běžná", "Spisová značka a bankovní spojení dodavatele. "],
+    ["velká písmena", "SPISOVÁ ZNAČKA A BANKOVNÍ SPOJENÍ DODAVATELE. "],
+  ])("[PDF-005] patička 1000 znaků (%s) se nepřekrývá s položkami", async (_, sentence) => {
+    const footer = sentence.repeat(30).slice(0, 999) + "K";
+    const pdf = await render({
+      ...F.long,
+      snapshot: {
+        ...F.long.snapshot,
+        supplier: { ...F.long.snapshot.supplier!, footerText: footer },
+      },
+    });
+
+    const pages = await pdfText(pdf);
+    for (let page = 1; page <= pages.length; page++) {
+      const items = await pdfTextItems(pdf, page);
+      const footerTop = Math.max(
+        ...items.filter((item) => FOOTER_WORDS.test(item.text)).map((item) => item.top),
+      );
+      const content = items.filter((item) => /^(Položka|Popis|Nejsem|Zapsán)/.test(item.text));
+      expect(content.length, `strana ${page}`).toBeGreaterThan(0);
+      expect(Math.min(...content.map((item) => item.bottom))).toBeGreaterThan(footerTop);
+      expect(squeeze(pages[page - 1]!)).toContain(squeeze(footer));
+    }
+    const all = pages.join("\n");
+    for (let i = 1; i <= 300; i++) expect(all).toContain(`Položka ${String(i).padStart(3, "0")}`);
+  });
+
+  test.each([
+    ["běžná", 999_999_900, 999_999_900],
+    ["limitní", 99_999_999_999, 99_999_999_999],
+  ])("[PDF-005] částka %s se nerozdělí", async (_, unitPriceMinor, netMinor) => {
+    const doc: InvoiceDocument = {
+      ...F.short,
+      lines: [fixtureLine({ quantityMilli: 1000, unitPriceMinor, netMinor })],
+      totals: { ...F.short.totals, subtotalMinor: netMinor, totalMinor: netMinor },
+    };
+    const amount = netMinor === 999_999_900 ? "9\\s999\\s999,00" : "999\\s999\\s999,99";
+
+    const text = await textOf(await render(doc));
+
+    const unbroken = new RegExp(`${amount}\\sKč`, "g");
+    expect(text.match(unbroken)).toHaveLength(3);
+  });
+
+  test(
+    "[PDF-005] záhlaví tabulky nezůstane samo na konci strany",
+    { timeout: 60_000 },
+    async () => {
+      const short = F.long.lines.slice(0, 3);
+      const tall = [fixtureLine({ description: "Popis položky. ".repeat(30) }), ...short];
+      for (const lines of [short, tall]) {
+        for (let rows = 20; rows <= 36; rows++) {
+          const pdf = await render({
+            ...F.long,
+            lines,
+            textBefore: Array.from({ length: rows }, (_, i) => `řádek ${i}`).join("\n"),
+          });
+          for (const page of await pdfText(pdf)) {
+            if (page.includes("Množství")) {
+              expect(page, `${rows} řádků`).toMatch(/Položka|Konzultace/);
+            }
+          }
+        }
+      }
+    },
+  );
 
   test("[PDF-005] popis 2000 znaků a slovo 200 znaků bez mezer: text je celý v PDF", async () => {
     const description = `${"Dlouhý popis s háčky a čárkami. ".repeat(63)}Konec.`.slice(-2000);
@@ -366,6 +447,19 @@ describe("vykreslení PDF", () => {
     expect(text).toContain("Koncept");
     expect(text).toContain("10. 3. 2026");
     expect(text).not.toContain("2026-001");
+  });
+
+  test("[QR-005] koncept místo QR ukáže text a číslo ani VS nemá", async () => {
+    const doc = { ...F.short, status: "draft" as const, number: null, variableSymbol: null };
+
+    const view = await viewOf(doc, true);
+
+    expect(view.payment.qr).toBeNull();
+    expect(view.payment.qrPending).toBe(true);
+    expect(await textOf(await renderInvoicePdf(view))).toContain("QR po vystavení");
+
+    const off = await viewOf({ ...doc, appearance: { ...doc.appearance, showQr: false } }, true);
+    expect(off.payment.qrPending).toBe(false);
   });
 
   test("[PDF-001] stornovaný doklad je označený a nemá QR", async () => {
@@ -527,6 +621,28 @@ describe("povinné údaje", () => {
     }
     expect(text).toMatch(/Celkem[\s\S]*3\s000,00\sKč/);
   });
+
+  test.each([
+    ["cs", "supplier.notVatPayerCs", "česky"],
+    ["en", "supplier.notVatPayerEn", "anglicky"],
+  ] as const)(
+    "[INV-040] bez textu o neplátcovství (%s) nejde vystavit",
+    (language, field, label) => {
+      const { owner, customerId } = newOwner();
+      saveSupplier(actor(owner), { ...supplierInput, [field.slice(9)]: "  " });
+      const { id, revision } = draft(owner, customerId, { language });
+
+      const problems = checkIssuable(owner, id);
+
+      expect(problems).toEqual([
+        { field, message: expect.stringMatching(new RegExp(`Dodavatel.*${label}`)) },
+      ]);
+      expect(() => issueInvoice(actor(owner), id, { revision })).toThrow(/Dodavatel/);
+
+      const other = language === "cs" ? "en" : "cs";
+      expect(checkIssuable(owner, draft(owner, customerId, { language: other }).id)).toEqual([]);
+    },
+  );
 
   test("[INV-041] volitelné údaje se vytisknou, jen když jsou vyplněné", async () => {
     const full = await textOf(await render(F.short));
