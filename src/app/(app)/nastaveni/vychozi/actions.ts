@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { z } from "zod";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
+import { ensureDefaultSeries } from "@/server/services/number-series";
 import {
   completeOnboarding,
   preferencesPatchSchema,
@@ -13,22 +13,12 @@ import {
 
 type Failure = { ok: false; error: string };
 
+type ActorOf = Awaited<ReturnType<typeof actorFromRequest>>;
+
 // Only known refusals become messages: requireSession's redirect must keep propagating.
-async function run<Input>(
-  schema: z.ZodType<Input>,
-  raw: unknown,
-  work: (input: Input, actor: Awaited<ReturnType<typeof actorFromRequest>>) => void,
-): Promise<{ ok: true } | Failure> {
-  await requireSession();
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: parsed.error.issues[0]?.message ?? TEXTS.preferences.validation.invalid,
-    };
-  }
+async function guarded(work: (actor: ActorOf) => void): Promise<{ ok: true } | Failure> {
   try {
-    work(parsed.data, await actorFromRequest());
+    work(await actorFromRequest());
     revalidatePath("/nastaveni/vychozi");
     revalidatePath("/pruvodce");
     revalidatePath("/");
@@ -40,13 +30,26 @@ async function run<Input>(
 }
 
 export async function savePreferencesAction(raw: unknown) {
-  return run(preferencesPatchSchema, raw, (input, actor) => {
-    savePreferences(actor, input);
-  });
+  await requireSession();
+  const parsed = preferencesPatchSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false as const,
+      error: parsed.error.issues[0]?.message ?? TEXTS.preferences.validation.invalid,
+    };
+  }
+  return guarded((actor) => savePreferences(actor, parsed.data));
+}
+
+export async function ensureSeriesAction() {
+  await requireSession();
+  return guarded((actor) => ensureDefaultSeries(actor));
 }
 
 export async function completeOnboardingAction() {
-  return run(preferencesPatchSchema, {}, (_input, actor) => {
+  await requireSession();
+  return guarded((actor) => {
+    ensureDefaultSeries(actor);
     completeOnboarding(actor);
   });
 }

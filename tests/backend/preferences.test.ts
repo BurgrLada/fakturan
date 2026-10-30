@@ -138,7 +138,6 @@ describe("datum vystavení a formáty", () => {
   test("[SET-033] datum vystavení jde nastavit na poslední den minulého měsíce", () => {
     seed("d1");
     const now = new Date("2026-03-15T10:00:00Z");
-    setClockForTests({ now: () => now });
     expect(defaultIssueDate(getPreferences("d1").issueDateMode, now)).toBe("2026-03-15");
 
     savePreferences(actor("d1"), { issueDateMode: "last_day_previous_month" });
@@ -251,6 +250,20 @@ describe("izolace a mazání účtu", () => {
         return current.dueDays === id && current.note === "změna" ? 1 : 0;
       },
     });
+  });
+
+  test("[SET-030] uložení jednoho účtu nezmění řádek druhého", () => {
+    seed("i1");
+    seed("i2");
+    savePreferences(actor("i1"), { dueDays: 21, note: "A" });
+    const before = rows("i1");
+
+    savePreferences(actor("i2"), { dueDays: 3, note: "B", language: "en" });
+    completeOnboarding(actor("i2"));
+
+    expect(rows("i1")).toEqual(before);
+    expect(getPreferences("i1")).toMatchObject({ dueDays: 21, note: "A", language: "cs" });
+    expect(isOnboarded("i1")).toBe(false);
   });
 
   test("[SET-030] tabulka je mezi daty smazanými s účtem a smaže se", () => {

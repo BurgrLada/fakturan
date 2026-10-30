@@ -7,6 +7,7 @@ import { saveBankAccountAction } from "@/app/(app)/nastaveni/ucty/actions";
 import { lookupAresAction, saveSupplierAction } from "@/app/(app)/nastaveni/dodavatel/actions";
 import {
   completeOnboardingAction,
+  ensureSeriesAction,
   savePreferencesAction,
 } from "@/app/(app)/nastaveni/vychozi/actions";
 import { ChoiceField } from "@/components/settings/preferences-form";
@@ -196,6 +197,7 @@ function SeriesStep({ series }: { series: OnboardingProps["series"] }) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">{T.seriesIntro}</p>
+      {series.length === 0 && <p className="text-sm">{T.seriesPending}</p>}
       <ul className="flex flex-col gap-1 text-sm">
         {series.map((row) => (
           <li key={row.id}>
@@ -277,7 +279,13 @@ export function Onboarding(props: OnboardingProps) {
   }
 
   function advance() {
-    if (following) router.push(stepHref(following));
+    if (step === "series") {
+      startTransition(async () => {
+        const result = await ensureSeriesAction();
+        if (!result.ok) setError(result.error);
+        else if (following) router.push(stepHref(following));
+      });
+    } else if (following) router.push(stepHref(following));
     else finish();
   }
 

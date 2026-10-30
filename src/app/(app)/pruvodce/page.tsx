@@ -6,9 +6,9 @@ import { Onboarding } from "@/components/settings/onboarding";
 import { EMPTY_SUPPLIER } from "@/components/settings/supplier-form";
 import { parseStep, type OnboardingStep } from "@/lib/onboarding";
 import { TEXTS } from "@/lib/texts";
-import { actorFromRequest, requireSession } from "@/server/auth/session";
+import { requireSession } from "@/server/auth/session";
 import { listBankAccounts } from "@/server/services/bank-accounts";
-import { ensureDefaultSeries, listSeries } from "@/server/services/number-series";
+import { listSeries } from "@/server/services/number-series";
 import { getPreferences, isOnboarded } from "@/server/services/preferences";
 import { getSupplier, missingSupplierFields } from "@/server/services/supplier";
 
@@ -26,7 +26,6 @@ async function OnboardingContent({ params }: { params: Promise<{ krok?: string |
   const { krok } = await params;
   const { user } = await requireSession();
   if (isOnboarded(user.id)) redirect("/");
-  ensureDefaultSeries(await actorFromRequest());
   const profile = getSupplier(user.id);
   const preferences = getPreferences(user.id);
   const step = parseStep(krok) ?? resumeStep(user.id, Boolean(profile?.logoFileId));

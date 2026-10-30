@@ -1,4 +1,5 @@
 import "server-only";
+import { isNull } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
 import {
@@ -108,24 +109,33 @@ export function savePreferences(actor: Actor, raw: PreferencesPatch): void {
   });
 }
 
+class AlreadyOnboarded extends Error {}
+
 export function completeOnboarding(actor: Actor): void {
   const userId = ownerOf(actor);
-  if (isOnboarded(userId)) return;
-  mutate(actor, "preferences.onboarding_complete", (tx, audit) => {
-    const at = clock.now();
-    tx.insert(preferences)
-      .values({ userId, updatedAt: at, onboardingCompletedAt: at })
-      .onConflictDoUpdate({
-        target: preferences.userId,
-        set: { onboardingCompletedAt: at, updatedAt: at },
-      })
-      .run();
-    audit({
-      entity: "preferences",
-      entityId: userId,
-      ownerId: userId,
-      scope: "user",
-      after: { onboardingCompletedAt: at.toISOString() },
+  try {
+    mutate(actor, "preferences.onboarding_complete", (tx, audit) => {
+      const row = tx.select().from(preferences).where(scoped(userId).where(preferences)).get();
+      // Thrown to roll back: mutate refuses a transaction without an audit entry.
+      if (row?.onboardingCompletedAt) throw new AlreadyOnboarded();
+      const at = clock.now();
+      tx.insert(preferences)
+        .values({ userId, updatedAt: at, onboardingCompletedAt: at })
+        .onConflictDoUpdate({
+          target: preferences.userId,
+          set: { onboardingCompletedAt: at, updatedAt: at },
+          setWhere: isNull(preferences.onboardingCompletedAt),
+        })
+        .run();
+      audit({
+        entity: "preferences",
+        entityId: userId,
+        ownerId: userId,
+        scope: "user",
+        after: { onboardingCompletedAt: at.toISOString() },
+      });
     });
-  });
+  } catch (error) {
+    if (!(error instanceof AlreadyOnboarded)) throw error;
+  }
 }

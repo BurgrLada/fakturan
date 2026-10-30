@@ -201,10 +201,10 @@ export const TEXTS = {
     supplierIntro: "Zadejte IČO a údaje se předvyplní z ARES, můžete je upravit.",
     accountIntro: "Účet, na který vám budou chodit platby. Další přidáte v Nastavení.",
     seriesIntro: "Faktury se číslují podle výchozí řady. Formát jde změnit v Nastavení.",
+    seriesPending: "Výchozí řady se založí při pokračování.",
     seriesEdit: "Upravit řady",
     logoIntro: "Logo se zobrazí na faktuře. Podporuje PNG, JPEG, WebP a SVG.",
     lookIntro: "Jazyk a design, které se použijí na nových fakturách.",
-    saveFailed: "Uložení se nepovedlo",
   },
   numberSeries: {
     title: "Číselné řady",
