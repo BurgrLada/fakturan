@@ -19,11 +19,6 @@ const T = TEXTS.customers;
 
 export const metadata: Metadata = { title: `${T.detailTitle} | ${TEXTS.appName}` };
 
-// The app shell reads the pathname, so a route needs at least one known param to prerender its shell.
-export function generateStaticParams() {
-  return [{ id: "novy" }];
-}
-
 function toValues(row: Customer): CustomerValues {
   return {
     id: row.id,
@@ -55,7 +50,6 @@ function vatLine(row: Customer): string {
 async function CustomerContent({ params }: Pick<PageProps<"/zakaznici/[id]">, "params">) {
   const { id } = await params;
   const { user } = await requireSession();
-  if (id === "novy") return <CustomerForm initial={null} />;
   const row = getCustomer(user.id, id);
   if (!row) notFound();
   const duplicate = duplicateIcoOf(db, user.id, row);
@@ -66,7 +60,7 @@ async function CustomerContent({ params }: Pick<PageProps<"/zakaznici/[id]">, "p
           <AlertDescription>{T.duplicateIco(duplicate)}</AlertDescription>
         </Alert>
       )}
-      <CustomerForm key={row.updatedAt.getTime()} initial={toValues(row)} />
+      <CustomerForm initial={toValues(row)} />
       <section className="flex flex-col gap-3 sm:max-w-xl">
         <h2 className="text-lg">{T.vat.title}</h2>
         <p className="text-sm text-muted-foreground">{vatLine(row)}</p>

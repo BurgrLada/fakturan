@@ -15,11 +15,14 @@ const TABS = [
 ];
 
 export function SettingsTabs() {
-  const pathname = usePathname();
+  return <SettingsTabsView pathname={usePathname()} />;
+}
+
+export function SettingsTabsView({ pathname }: { pathname: string | null }) {
   return (
     <nav aria-label={TEXTS.settings.nav} className="flex gap-1 overflow-x-auto border-b">
       {TABS.map((tab) => {
-        const active = pathname.startsWith(tab.href);
+        const active = pathname !== null && pathname.startsWith(tab.href);
         return (
           <Link
             key={tab.href}

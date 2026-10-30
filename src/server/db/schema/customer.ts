@@ -23,6 +23,7 @@ export const customer = sqliteTable(
     extraEmails: text("extra_emails", { mode: "json" }).$type<string[]>().notNull().default([]),
     phone: text().notNull().default(""),
     note: text().notNull().default(""),
+    searchText: text("search_text").notNull().default(""),
     dueDays: integer("due_days"),
     language: text({ enum: LANGUAGES }),
     currency: text({ enum: CURRENCIES }),

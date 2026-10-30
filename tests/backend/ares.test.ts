@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { lookupAresAction } from "@/app/(app)/nastaveni/dodavatel/actions";
+import { lookupAresAction } from "@/app/(app)/ares-actions";
 import { lookupAres } from "@/server/external/ares";
 import { createTestDb } from "../helpers/db";
 

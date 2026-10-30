@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
-import { lookupAresAction } from "@/app/(app)/nastaveni/dodavatel/actions";
+import { lookupAresAction } from "@/app/(app)/ares-actions";
 import { saveCustomerAction } from "@/app/(app)/zakaznici/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -175,6 +175,7 @@ export function CustomerForm({ initial }: { initial: CustomerValues | null }) {
         return;
       }
       setMessage({ ok: true, text: T.saved });
+      router.refresh();
     });
   }
 

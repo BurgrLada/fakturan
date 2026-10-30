@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   archiveCustomerAction,
   deleteCustomerAction,
+  restoreCustomerAction,
   saveCustomerAction,
   verifyVatAction,
 } from "@/app/(app)/zakaznici/actions";
@@ -110,6 +111,38 @@ describe("seznam zákazníků", () => {
     expect(listCustomers("c1", { q: "%" }).rows).toEqual([]);
     expect(listCustomers("c1", { foreign: true }).rows.map((c) => c.name)).toEqual(["Gama GmbH"]);
     expect(searchCustomers("c1", "ta", 1).map((c) => c.name)).toEqual(["Beta s.r.o."]);
+  });
+
+  test("[CUS-001] hledání nerozlišuje diakritiku ani velikost písmen", () => {
+    saveCustomer(actor("c1"), input({ name: "Škoda Auto a.s.", ico: "", dic: "", email: "" }));
+    saveCustomer(actor("c1"), input({ name: "ŘEZNÍK Novák", ico: "", dic: "", email: "" }));
+    const names = (q: string) => listCustomers("c1", { q }).rows.map((c) => c.name);
+
+    for (const q of ["škoda", "skoda", "ŠKODA", "SKODA"])
+      expect(names(q)).toEqual(["Škoda Auto a.s."]);
+    expect(names("reznik")).toEqual(["ŘEZNÍK Novák"]);
+    expect(names("řezník")).toEqual(["ŘEZNÍK Novák"]);
+    expect(searchCustomers("c1", "skoda", 5)).toHaveLength(1);
+  });
+
+  test("[CUS-001] úprava zákazníka přepočítá text pro hledání", () => {
+    const { id } = saveCustomer(actor("c1"), input({ name: "Stará", ico: "", dic: "" }));
+    saveCustomer(actor("c1"), input({ id, name: "Čerstvá", ico: "", dic: "" }));
+
+    expect(listCustomers("c1", { q: "stara" }).rows).toEqual([]);
+    expect(listCustomers("c1", { q: "cerstva" }).rows).toHaveLength(1);
+  });
+
+  test("[AUD-009] audit uložení má před i po stejný tvar", () => {
+    const { id } = saveCustomer(actor("c1"), input({ ico: "" }));
+    saveCustomer(actor("c1"), input({ id, ico: "", note: "nově" }));
+
+    const [, second] = db.select().from(auditLog).where(eq(auditLog.entityId, id)).all();
+    const before = second.before as Record<string, unknown>;
+    const after = second.after as Record<string, unknown>;
+    expect(Object.keys(before).sort()).toEqual(Object.keys(after).sort());
+    expect(before.note).toBe("");
+    expect(after.note).toBe("nově");
   });
 
   test("[CUS-001] adresa v URL se čte tolerantně a neplatné hodnoty se zahodí", () => {
@@ -338,6 +371,7 @@ describe("server actions", () => {
     const results = [
       await saveCustomerAction({ ...input({ name: "Přepsáno" }), id: mine }),
       await archiveCustomerAction({ id: mine }),
+      await restoreCustomerAction({ id: mine }),
       await deleteCustomerAction({ id: mine }),
       await verifyVatAction({ id: mine }),
     ];

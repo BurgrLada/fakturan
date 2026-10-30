@@ -7,13 +7,17 @@ import { TEXTS } from "@/lib/texts";
 import { cn } from "@/lib/utils";
 
 export function NavLinks({ keys }: { keys: NavKey[] }) {
-  const pathname = usePathname();
+  return <NavLinksView keys={keys} pathname={usePathname()} />;
+}
+
+// Without a pathname nothing is marked active: the Suspense fallback cannot read the URL.
+export function NavLinksView({ keys, pathname }: { keys: NavKey[]; pathname: string | null }) {
   const items = NAV_ITEMS.filter((entry) => keys.includes(entry.key));
   return (
     <nav aria-label={TEXTS.shell.mainNav}>
       <ul className="flex flex-col gap-1">
         {items.map((entry) => {
-          const active = isActive(entry, pathname);
+          const active = pathname !== null && isActive(entry, pathname);
           return (
             <li key={entry.key}>
               <Link

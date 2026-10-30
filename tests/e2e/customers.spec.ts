@@ -37,7 +37,14 @@ test("[CUS-004] nový zákazník předvyplněný z ARES", async ({ page, freshAp
 
   await expect(page.getByRole("heading", { name: "Karta zákazníka" })).toBeVisible();
   await expect(page.getByLabel("Název nebo jméno")).toHaveValue("Alza.cz a.s.");
-  await expect(page.getByText("Uložení zákazníka")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  await page.getByLabel("Poznámka").fill("Platí vždy předem");
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Zákazník je uložený.")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("Zákazník je uložený.")).toBeVisible();
+  await expect(page.getByText("Uložení zákazníka").first()).toBeVisible();
 
   await page.goto(`${freshApp.baseURL}/zakaznici`);
   await expect(page.getByRole("link", { name: "Alza.cz a.s." })).toBeVisible();
@@ -73,12 +80,12 @@ test("[CUS-001] hledání a filtr přežijí obnovení stránky", async ({ page,
   await expect(page.getByRole("link", { name: "Alfa s.r.o." })).toBeHidden();
 
   await page.getByLabel("Původ").selectOption("");
-  await page.getByLabel("Hledat").fill("alf");
+  await page.getByLabel("Hledat").fill("ALF");
   await page.getByRole("button", { name: "Filtrovat" }).click();
-  await expect(page).toHaveURL(/q=alf/);
+  await expect(page).toHaveURL(/q=ALF/);
 
   await page.reload();
-  await expect(page.getByLabel("Hledat")).toHaveValue("alf");
+  await expect(page.getByLabel("Hledat")).toHaveValue("ALF");
   await expect(page.getByRole("link", { name: "Alfa s.r.o." })).toBeVisible();
   await expect(page.getByRole("link", { name: "Beta GmbH" })).toBeHidden();
 });

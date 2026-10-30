@@ -3,10 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { TEXTS } from "@/lib/texts";
-import { lookupAres, type AresResult } from "@/server/external/ares";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
-import { RATE_RULES } from "@/server/rate-limit";
-import { enforceRateLimit, ServiceError } from "@/server/services/access";
+import { ServiceError } from "@/server/services/access";
 import {
   clearSupplierImage,
   saveSupplier,
@@ -17,7 +15,6 @@ import {
 type Failure = { ok: false; error: string };
 
 const imageKind = z.enum(["logo", "qr_logo", "signature"]);
-const icoInput = z.object({ ico: z.string().trim().max(20) });
 const clearInput = z.object({ kind: imageKind });
 const uploadInput = z.object({ kind: imageKind, file: z.instanceof(File) });
 
@@ -53,21 +50,6 @@ export async function saveSupplierAction(raw: unknown) {
     saveSupplier(actor, input);
     return {};
   });
-}
-
-export async function lookupAresAction(
-  raw: unknown,
-): Promise<{ ok: true; result: AresResult | null } | Failure> {
-  await requireSession();
-  const parsed = icoInput.safeParse(raw);
-  if (!parsed.success) return { ok: false, error: TEXTS.supplier.validation.invalid };
-  try {
-    enforceRateLimit(await actorFromRequest(), RATE_RULES.aresLookup);
-  } catch (error) {
-    if (error instanceof ServiceError) return { ok: false, error: error.message };
-    throw error;
-  }
-  return { ok: true, result: await lookupAres(parsed.data.ico) };
 }
 
 export async function uploadSupplierImageAction(formData: FormData) {

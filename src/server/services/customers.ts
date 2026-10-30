@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, isNotNull, isNull, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
 import {
@@ -9,6 +9,7 @@ import {
   isDomesticCountry,
   type CustomerStatus,
 } from "@/lib/customers";
+import { foldText } from "@/lib/fold-text";
 import { isValidIco } from "@/lib/ico";
 import { LANGUAGES, type Preferences } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
@@ -125,10 +126,18 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
+// Accents and case are folded away on both sides, because SQLite LIKE only ignores ASCII case.
+function searchTextOf(v: Pick<Customer, "name" | "ico" | "dic" | "email">): string {
+  return foldText([v.name, v.ico, v.dic, v.email].join("\n"));
+}
+
 function matches(q: string): SQL {
-  const pattern = `%${escapeLike(q)}%`;
-  const like = (column: AnyColumn) => sql`${column} LIKE ${pattern} ESCAPE '\\'`;
-  return sql`(${like(customer.name)} OR ${like(customer.ico)} OR ${like(customer.dic)} OR ${like(customer.email)})`;
+  return sql`${customer.searchText} LIKE ${`%${escapeLike(foldText(q))}%`} ESCAPE '\\'`;
+}
+
+function snapshot(row: Customer) {
+  const { userId: _u, createdAt: _c, updatedAt: _t, searchText: _s, ...rest } = row;
+  return rest;
 }
 
 function conditions(ownerId: string, filter: CustomerFilter): SQL {
@@ -200,11 +209,13 @@ export function saveCustomer(
     const id = before?.id ?? randomUUID();
     const now = clock.now();
     // The verification belongs to the VAT ID that was checked.
+    const searchText = searchTextOf(values);
     const vatChanged = before !== null && before.dic !== values.dic;
     if (before) {
       tx.update(customer)
         .set({
           ...values,
+          searchText,
           ...(vatChanged ? { vatVerifiedAt: null, vatValid: null } : {}),
           updatedAt: now,
         })
@@ -212,7 +223,7 @@ export function saveCustomer(
         .run();
     } else {
       tx.insert(customer)
-        .values({ id, userId, ...values, createdAt: now, updatedAt: now })
+        .values({ id, userId, ...values, searchText, createdAt: now, updatedAt: now })
         .run();
     }
     audit({
@@ -220,8 +231,8 @@ export function saveCustomer(
       entityId: id,
       ownerId: userId,
       scope: "user",
-      before,
-      after: values,
+      before: before && snapshot(before),
+      after: snapshot(findOwned(tx, userId, id)),
     });
     return { id, duplicateOfIco: duplicateIcoOf(tx, userId, { id, ico: values.ico }) };
   });

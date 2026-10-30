@@ -1,9 +1,12 @@
-import { SettingsTabs } from "@/components/settings-tabs";
+import { Suspense } from "react";
+import { SettingsTabs, SettingsTabsView } from "@/components/settings-tabs";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <SettingsTabs />
+      <Suspense fallback={<SettingsTabsView pathname={null} />}>
+        <SettingsTabs />
+      </Suspense>
       {children}
     </>
   );

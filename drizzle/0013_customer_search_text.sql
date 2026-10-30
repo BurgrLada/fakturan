@@ -1,0 +1,1 @@
+ALTER TABLE `customer` ADD `search_text` text DEFAULT '' NOT NULL;

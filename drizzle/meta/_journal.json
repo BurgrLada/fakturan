@@ -92,6 +92,13 @@
       "when": 1793366173725,
       "tag": "0012_customers",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1793366738933,
+      "tag": "0013_customer_search_text",
+      "breakpoints": true
     }
   ]
 }

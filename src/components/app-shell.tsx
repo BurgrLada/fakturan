@@ -1,7 +1,6 @@
 "use client";
 
 import { Menu, X } from "lucide-react";
-import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -20,9 +19,7 @@ export function AppShell({
   account: ReactNode;
   children: ReactNode;
 }) {
-  const pathname = usePathname();
-  const [openOn, setOpenOn] = useState<string | null>(null);
-  const open = openOn === pathname;
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="flex min-h-svh flex-1 flex-col md:flex-row">
@@ -41,13 +38,17 @@ export function AppShell({
           aria-expanded={open}
           aria-controls={SIDEBAR_ID}
           aria-label={open ? TEXTS.shell.closeMenu : TEXTS.shell.openMenu}
-          onClick={() => setOpenOn(open ? null : pathname)}
+          onClick={() => setOpen(!open)}
         >
           {open ? <X /> : <Menu />}
         </Button>
       </div>
+      {/* Closing on link clicks keeps the shell free of usePathname, which would block prerendering dynamic routes. */}
       <aside
         id={SIDEBAR_ID}
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest("a")) setOpen(false);
+        }}
         className={cn(
           "flex-col gap-6 border-b bg-sidebar p-4 text-sidebar-foreground md:sticky md:top-0 md:flex md:h-svh md:w-60 md:shrink-0 md:overflow-y-auto md:border-r md:border-b-0",
           open ? "flex" : "hidden",

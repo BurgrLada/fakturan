@@ -2,11 +2,11 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import {
-  lookupAresAction,
   removeSupplierImageAction,
   saveSupplierAction,
   uploadSupplierImageAction,
 } from "@/app/(app)/nastaveni/dodavatel/actions";
+import { lookupAresAction } from "@/app/(app)/ares-actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

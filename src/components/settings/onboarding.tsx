@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
 import { saveBankAccountAction } from "@/app/(app)/nastaveni/ucty/actions";
-import { lookupAresAction, saveSupplierAction } from "@/app/(app)/nastaveni/dodavatel/actions";
+import { lookupAresAction } from "@/app/(app)/ares-actions";
+import { saveSupplierAction } from "@/app/(app)/nastaveni/dodavatel/actions";
 import {
   completeOnboardingAction,
   ensureSeriesAction,

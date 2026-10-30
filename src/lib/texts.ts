@@ -38,7 +38,6 @@ export const TEXTS = {
     title: "Zákazníci",
     intro: "Odběratelé, kterým fakturujete. Údaje se předvyplní do nových faktur.",
     add: "Nový zákazník",
-    newTitle: "Nový zákazník",
     filters: "Filtr zákazníků",
     search: "Hledat",
     searchPlaceholder: "Název, IČO, DIČ nebo e-mail",
