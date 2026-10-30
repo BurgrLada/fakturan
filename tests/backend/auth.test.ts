@@ -658,6 +658,45 @@ describe("hesla a relace", () => {
     expect(auditRows("auth.session_revoke").length).toBe(revokesBefore + 1);
   });
 
+  test("[AUTH-011] ukončení jedné a všech relací je v auditu po jednom záznamu", async () => {
+    const a = await createAdmin(plainAuth);
+    const b = new Browser(plainAuth);
+    await b.signIn("admin@example.cz");
+    const c = new Browser(plainAuth);
+    await c.signIn("admin@example.cz");
+    const before = auditRows("auth.session_revoke").length;
+    const sessionCount = db.select().from(session).all().length;
+    const bToken = decodeURIComponent(b.cookies.get("better-auth.session_token")!).split(".")[0];
+
+    expect((await a.request("/revoke-session", { body: { token: bToken } })).status).toBe(200);
+    expect(await b.sessionUser()).toBeNull();
+    expect(auditRows("auth.session_revoke")).toHaveLength(before + 1);
+
+    expect((await a.request("/revoke-sessions", { body: {} })).status).toBe(200);
+    expect(await a.sessionUser()).toBeNull();
+    expect(auditRows("auth.session_revoke")).toHaveLength(before + sessionCount);
+  });
+
+  test.each(["/revoke-session", "/revoke-sessions"])(
+    "[AUTH-011] selhání auditu na %s se dostane ke klientovi a relace zůstanou",
+    async (path) => {
+      const a = await createAdmin(plainAuth);
+      const b = new Browser(plainAuth);
+      await b.signIn("admin@example.cz");
+      const token = decodeURIComponent(b.cookies.get("better-auth.session_token")!).split(".")[0];
+      db.$client.exec(
+        "CREATE TRIGGER fail_revoke BEFORE INSERT ON audit_log WHEN NEW.action = 'auth.session_revoke' BEGIN SELECT RAISE(ABORT, 'audit down'); END",
+      );
+      try {
+        expect((await a.request(path, { body: { token } })).status).toBe(500);
+        expect(await a.sessionUser()).not.toBeNull();
+        expect(await b.sessionUser()).not.toBeNull();
+      } finally {
+        db.$client.exec("DROP TRIGGER fail_revoke");
+      }
+    },
+  );
+
   test("[AUTH-012] změna hesla ukončí ostatní relace i bez žádosti klienta", async () => {
     const a = await createAdmin(plainAuth);
     const b = new Browser(plainAuth);

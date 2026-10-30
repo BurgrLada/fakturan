@@ -27,8 +27,8 @@ const LOGIN_METHODS: Record<string, string> = {
 // Every failed social login ends here: a distinct reason would reveal whether an account exists.
 export const SOCIAL_REJECTED_PATH = "/prihlaseni?chyba=pozvanka";
 
-// Paths that act on the signed-in user; revocations are audited per deleted session, sign-out in
-// the before hook because the endpoint swallows errors from session deletion.
+// Paths that act on the signed-in user; revocations are audited per deleted session. Sign-out and
+// single revocations are audited in the before hook, as those endpoints swallow session-delete errors.
 const USER_EVENTS: Record<string, AuditAction> = {
   "/change-password": "auth.password_change",
   "/change-email": "auth.email_change_request",
@@ -37,8 +37,6 @@ const USER_EVENTS: Record<string, AuditAction> = {
 };
 
 const SESSION_END_PATHS = new Set([
-  "/revoke-session",
-  "/revoke-sessions",
   "/revoke-other-sessions",
   "/change-password",
   "/reset-password",
@@ -144,6 +142,24 @@ export async function auditAuthEndpoint(ctx: Ctx, env: Env): Promise<void> {
     ownerId: userId,
     after: failed ? { reason: failed.code } : undefined,
   });
+}
+
+export function auditRevocations(
+  ctx: Ctx,
+  env: Env,
+  userId: string,
+  sessions: { id: string }[],
+): void {
+  for (const { id } of sessions) {
+    recordAuthEvent(ctx, env, {
+      action: "auth.session_revoke",
+      actorId: userId,
+      ownerId: userId,
+      entity: "session",
+      entityId: id,
+      after: { path: ctx.path },
+    });
+  }
 }
 
 export function auditSessionEnd(

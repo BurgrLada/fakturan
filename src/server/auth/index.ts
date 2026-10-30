@@ -11,6 +11,7 @@ import { isInstanceMailConfigured, sendInstanceMail } from "../mail/instance";
 import { mutate } from "../services/mutation";
 import {
   auditAuthEndpoint,
+  auditRevocations,
   auditSessionEnd,
   recordAuthEvent,
   SOCIAL_REJECTED_PATH,
@@ -81,6 +82,21 @@ function assertPasswordAllowed(
     });
   }
   throw new APIError("BAD_REQUEST", { code: problem, message: PASSWORD_MESSAGES[problem] });
+}
+
+async function auditRevocation(
+  ctx: GenericEndpointContext,
+  env: Env,
+  userId: string,
+  token: unknown,
+): Promise<void> {
+  const { internalAdapter } = ctx.context;
+  if (ctx.path === "/revoke-sessions") {
+    auditRevocations(ctx, env, userId, await internalAdapter.listSessions(userId));
+    return;
+  }
+  const target = typeof token === "string" ? await internalAdapter.findSession(token) : null;
+  if (target?.session.userId === userId) auditRevocations(ctx, env, userId, [target.session]);
 }
 
 async function resetTokenOwner(
@@ -257,6 +273,10 @@ export function createAuth(env: Env) {
               entityId: current.session.id,
             });
           }
+        }
+        if (ctx.path === "/revoke-session" || ctx.path === "/revoke-sessions") {
+          const current = await getSessionFromCtx(ctx, { disableRefresh: true });
+          if (current) await auditRevocation(ctx, env, current.user.id, body.token);
         }
         if (ctx.path === "/reset-password") {
           const owner = await resetTokenOwner(ctx, body.token ?? ctx.query?.token);
