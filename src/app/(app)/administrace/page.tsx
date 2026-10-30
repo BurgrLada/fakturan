@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
+import { PageLoading } from "@/components/page-loading";
 import { z } from "zod";
 import { InvitationsPanel } from "@/components/admin/invitations-panel";
 import { UsersTable } from "@/components/admin/users-table";
@@ -113,7 +114,7 @@ export default function AdminPage({ searchParams }: PageProps<"/administrace">) 
   return (
     <>
       <h1 className="font-brand text-2xl">Administrace</h1>
-      <Suspense>
+      <Suspense fallback={<PageLoading />}>
         <AdminContent searchParams={searchParams} />
       </Suspense>
     </>

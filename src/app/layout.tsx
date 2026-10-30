@@ -3,6 +3,7 @@ import { Geist_Mono, Source_Sans_3, Roboto_Slab } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { spaceGrotesk } from "@/lib/fonts";
+import { THEME_SCRIPT } from "@/lib/theme";
 
 const robotoSlabHeading = Roboto_Slab({ subsets: ["latin"], variable: "--font-roboto-slab" });
 
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="cs"
+      suppressHydrationWarning
       className={cn(
         "h-full",
         "antialiased",
@@ -32,6 +34,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         robotoSlabHeading.variable,
       )}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

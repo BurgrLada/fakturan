@@ -1,6 +1,8 @@
 export const ACTION_LABELS: Record<string, string> = {
   "access.denied": "Odmítnutý přístup",
   "account.link": "Propojení účtu poskytovatele",
+  "audit.export": "Export historie",
+  "auth.account_link_failed": "Neúspěšné propojení účtu poskytovatele",
   "auth.account_unlink": "Odpojení účtu poskytovatele",
   "auth.account_unlink_failed": "Neúspěšné odpojení účtu poskytovatele",
   "auth.email_change_request": "Žádost o změnu e-mailu",

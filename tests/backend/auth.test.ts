@@ -371,6 +371,102 @@ describe("přihlášení", () => {
     });
   });
 
+  describe("propojené účty", () => {
+    const linkAuth = createAuth(
+      testEnv({ GITHUB_CLIENT_ID: "gh-id", GITHUB_CLIENT_SECRET: "gh-secret" }),
+    );
+    const LINK_ERROR = "/nastaveni/ucet?chyba=propojeni";
+
+    async function link(browser: Browser) {
+      const start = await browser.request("/link-social", {
+        body: {
+          provider: "github",
+          callbackURL: "/nastaveni/ucet",
+          errorCallbackURL: LINK_ERROR,
+        },
+      });
+      const { url } = (await start.json()) as { url: string };
+      const state = new URL(url).searchParams.get("state")!;
+      return browser.request(`/callback/github?code=kod&state=${encodeURIComponent(state)}`);
+    }
+
+    async function accounts(browser: Browser) {
+      const res = await browser.request("/list-accounts");
+      return (await res.json()) as { id: string; providerId: string }[];
+    }
+
+    async function providers(browser: Browser): Promise<string[]> {
+      return (await accounts(browser)).map((a) => a.providerId).sort();
+    }
+
+    async function unlink(browser: Browser, providerId: string) {
+      const target = (await accounts(browser)).find((a) => a.providerId === providerId)!;
+      return browser.request("/unlink-account", { body: { accountId: target.id } });
+    }
+
+    test("[AUTH-006] přihlášený uživatel přidá a odebere propojený účet", async () => {
+      const browser = await createAdmin(linkAuth);
+      fakeGithub("admin@example.cz");
+
+      const linked = await link(browser);
+
+      expect(linked.headers.get("location")).toBe("/nastaveni/ucet");
+      expect(await providers(browser)).toEqual(["credential", "github"]);
+      expect(auditRows("account.link").at(-1)).toMatchObject({ after: { providerId: "github" } });
+
+      const unlinked = auditRows("auth.account_unlink").length;
+      const removed = await unlink(browser, "github");
+      expect(removed.status).toBe(200);
+      expect(await providers(browser)).toEqual(["credential"]);
+      expect(auditRows("auth.account_unlink")).toHaveLength(unlinked + 1);
+    });
+
+    test("[AUTH-006] poslední způsob přihlášení odebrat nejde", async () => {
+      const browser = await createAdmin(linkAuth);
+
+      const failed = auditRows("auth.account_unlink_failed").length;
+
+      const res = await unlink(browser, "credential");
+
+      expect(res.status).toBe(400);
+      expect(await providers(browser)).toEqual(["credential"]);
+      expect(auditRows("auth.account_unlink_failed")).toHaveLength(failed + 1);
+    });
+
+    test("[AUTH-006] selhání propojení vede na vlastní chybu, ne na odmítnutí pozvánky", async () => {
+      const browser = await createAdmin(linkAuth);
+      fakeGithub("jiny@example.cz");
+      const loginFailures = auditRows("auth.login_failed").length;
+
+      const res = await link(browser);
+
+      expect(res.headers.get("location")).toBe(`${BASE}${LINK_ERROR}`);
+      expect(await providers(browser)).toEqual(["credential"]);
+      expect(auditRows("auth.account_link_failed").at(-1)).toMatchObject({
+        after: { method: "github" },
+      });
+      expect(auditRows("auth.login_failed")).toHaveLength(loginFailures);
+    });
+
+    test("[AUTH-006] cizí požadavek bez relace s chybovou adresou propojení dostane jednotnou zprávu", async () => {
+      await createAdmin(linkAuth);
+      const stranger = new Browser(linkAuth);
+      fakeGithub("cizi@example.cz");
+      const start = await stranger.request("/sign-in/social", {
+        body: { provider: "github", callbackURL: "/", errorCallbackURL: LINK_ERROR },
+      });
+      const state = new URL(((await start.json()) as { url: string }).url).searchParams.get(
+        "state",
+      )!;
+
+      const res = await stranger.request(
+        `/callback/github?code=kod&state=${encodeURIComponent(state)}`,
+      );
+
+      expect(res.headers.get("location")).toBe(`${BASE}/prihlaseni?chyba=pozvanka`);
+    });
+  });
+
   test("[AUTH-015] tajemství Apple je ES256 JWT s platností nejvýš 6 měsíců", async () => {
     const { privateKey } = await generateKeyPair("ES256", { extractable: true });
     const pem = await exportPKCS8(privateKey);

@@ -1,10 +1,25 @@
+import { Suspense } from "react";
 import { SessionKeepAlive } from "@/components/auth/session-controls";
+import { AppShell } from "@/components/app-shell";
+import { NavLinks } from "@/components/nav-links";
+import { AccountMenu, defaultNavKeys, SessionNav } from "@/components/session-nav";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4">
+    <AppShell
+      nav={
+        <Suspense fallback={<NavLinks keys={defaultNavKeys} />}>
+          <SessionNav />
+        </Suspense>
+      }
+      account={
+        <Suspense>
+          <AccountMenu />
+        </Suspense>
+      }
+    >
       {children}
       <SessionKeepAlive />
-    </main>
+    </AppShell>
   );
 }

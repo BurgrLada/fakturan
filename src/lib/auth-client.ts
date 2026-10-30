@@ -12,6 +12,8 @@ const MESSAGES: Record<string, string> = {
   EMAIL_NOT_VERIFIED: "E-mail ještě není potvrzený. Poslali jsme vám nový odkaz.",
   USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "Účet s tímto e-mailem už existuje.",
   INVALID_TOKEN: "Odkaz už neplatí, požádejte o nový.",
+  FAILED_TO_UNLINK_LAST_ACCOUNT: "Poslední způsob přihlášení nejde odebrat.",
+  SESSION_NOT_FRESH: "Z bezpečnostních důvodů se nejdřív znovu přihlaste.",
   BANNED_USER: "Tento účet je deaktivovaný.",
 };
 

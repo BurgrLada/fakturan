@@ -1,6 +1,6 @@
 import "server-only";
 import type { GenericEndpointContext } from "better-auth";
-import { isAPIError } from "better-auth/api";
+import { getSessionFromCtx, isAPIError } from "better-auth/api";
 import { z } from "zod";
 import { emailHash } from "../audit/email-hash";
 import type { AuditAction } from "../audit/record";
@@ -27,6 +27,9 @@ const LOGIN_METHODS: Record<string, string> = {
 
 // Every failed social login ends here: a distinct reason would reveal whether an account exists.
 export const SOCIAL_REJECTED_PATH = "/prihlaseni?chyba=pozvanka";
+
+// Only a signed-in user may be sent here, so it cannot be used to probe accounts.
+export const LINK_FAILED_PATH = "/nastaveni/ucet?chyba=propojeni";
 
 // Paths that act on the signed-in user; revocations are audited per deleted session. Sign-out and
 // single revocations are audited in the before hook, as those endpoints swallow session-delete errors.
@@ -103,6 +106,18 @@ export async function auditAuthEndpoint(ctx: Ctx, env: Env): Promise<void> {
   if (isOAuthCallback) {
     const rejected = oauthError(ctx, env);
     if (!rejected) return;
+    const current = await getSessionFromCtx(ctx, { disableRefresh: true });
+    const isLinking =
+      current && new URL(rejected.location, env.BETTER_AUTH_URL).pathname === "/nastaveni/ucet";
+    if (isLinking) {
+      recordAuthEvent(ctx, env, {
+        action: "auth.account_link_failed",
+        actorId: current.user.id,
+        ownerId: current.user.id,
+        after: { method: ctx.params?.id, reason: rejected.reason },
+      });
+      throw ctx.redirect(new URL(LINK_FAILED_PATH, env.BETTER_AUTH_URL).href);
+    }
     recordAuthEvent(ctx, env, {
       action: "auth.login_failed",
       ownerId: null,

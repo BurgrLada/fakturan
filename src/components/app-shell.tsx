@@ -1,0 +1,68 @@
+"use client";
+
+import { Menu, X } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useState, type ReactNode } from "react";
+import { Logo } from "@/components/logo";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { TEXTS } from "@/lib/texts";
+import { cn } from "@/lib/utils";
+
+const SIDEBAR_ID = "sidebar";
+
+export function AppShell({
+  nav,
+  account,
+  children,
+}: {
+  nav: ReactNode;
+  account: ReactNode;
+  children: ReactNode;
+}) {
+  const pathname = usePathname();
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const open = openOn === pathname;
+
+  return (
+    <div className="flex min-h-svh flex-1 flex-col md:flex-row">
+      <a
+        href="#obsah"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-background focus:p-2"
+      >
+        {TEXTS.shell.skipToContent}
+      </a>
+      <div className="flex items-center justify-between border-b bg-sidebar px-4 py-2 md:hidden">
+        <span className="font-brand text-lg">{TEXTS.appName}</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-expanded={open}
+          aria-controls={SIDEBAR_ID}
+          aria-label={open ? TEXTS.shell.closeMenu : TEXTS.shell.openMenu}
+          onClick={() => setOpenOn(open ? null : pathname)}
+        >
+          {open ? <X /> : <Menu />}
+        </Button>
+      </div>
+      <aside
+        id={SIDEBAR_ID}
+        className={cn(
+          "flex-col gap-6 border-b bg-sidebar p-4 text-sidebar-foreground md:sticky md:top-0 md:flex md:h-svh md:w-60 md:shrink-0 md:overflow-y-auto md:border-r md:border-b-0",
+          open ? "flex" : "hidden",
+        )}
+      >
+        <Logo className="w-36" />
+        {nav}
+        <div className="mt-auto flex flex-col gap-3">
+          <ThemeToggle />
+          {account}
+        </div>
+      </aside>
+      <main id="obsah" className="min-w-0 flex-1 p-4 md:p-8">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">{children}</div>
+      </main>
+    </div>
+  );
+}

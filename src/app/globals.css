@@ -63,7 +63,7 @@
   --secondary: color-mix(in oklab, var(--foreground) 6%, var(--background));
   --secondary-foreground: #1e1a1c;
   --muted: color-mix(in oklab, var(--foreground) 8%, var(--background));
-  --muted-foreground: color-mix(in oklab, var(--foreground) 62%, var(--background));
+  --muted-foreground: color-mix(in oklab, var(--foreground) 66%, var(--background));
   --accent: #e7c469;
   --accent-foreground: #1e1a1c;
   --destructive: oklch(0.577 0.245 27.325);

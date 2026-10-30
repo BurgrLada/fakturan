@@ -1,0 +1,159 @@
+import { readFile } from "node:fs/promises";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
+
+const PASSWORD = "správné-kůň-baterie-sponka";
+
+async function registerAdmin(page: Page, baseURL: string) {
+  await page.goto(`${baseURL}/registrace`);
+  await page.getByLabel("Jméno").fill("Správce");
+  await page.getByLabel("E-mail").fill("admin@example.cz");
+  await page.getByLabel("Heslo").fill(PASSWORD);
+  await page.getByRole("button", { name: "Vytvořit účet" }).click();
+  await expect(page.getByRole("heading", { name: "Přehled" })).toBeVisible();
+}
+
+const isDark = (page: Page) =>
+  page.evaluate(() => document.documentElement.classList.contains("dark"));
+
+test("[UI-009] nepřihlášený je z přehledu poslán na přihlášení", async ({ page, freshApp }) => {
+  await page.goto(freshApp.baseURL);
+  await expect(page).toHaveURL(/\/prihlaseni$/);
+});
+
+test("[UI-009] přehled bez dat ukazuje prázdný stav s další akcí", async ({ page, freshApp }) => {
+  await registerAdmin(page, freshApp.baseURL);
+  await expect(page.getByRole("heading", { name: "Vítejte ve Fakturanu" })).toBeVisible();
+  await page.getByRole("link", { name: "Otevřít nastavení účtu" }).click();
+  await expect(page.getByRole("heading", { name: "Účet", level: 1 })).toBeVisible();
+});
+
+test("[UI-009] nehotová sekce ukáže prázdný stav Připravujeme, neznámá adresa 404", async ({
+  page,
+  freshApp,
+}) => {
+  await registerAdmin(page, freshApp.baseURL);
+  await page
+    .getByRole("navigation", { name: "Hlavní navigace" })
+    .getByRole("link", { name: "Faktury" })
+    .click();
+  await expect(page.getByRole("heading", { name: "Faktury" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Připravujeme" })).toBeVisible();
+  const missing = await page.goto(`${freshApp.baseURL}/neexistuje`);
+  expect(missing?.status()).toBe(404);
+});
+
+test("[UI-005] [SET-035] přepínač motivu a volba podle systému přetrvá", async ({
+  page,
+  freshApp,
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await registerAdmin(page, freshApp.baseURL);
+  expect(await isDark(page)).toBe(false);
+
+  await page.getByRole("button", { name: "Tmavý" }).click();
+  expect(await isDark(page)).toBe(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  expect(await isDark(page)).toBe(true);
+  await expect(page.getByRole("button", { name: "Tmavý" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Světlý" }).click();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  expect(await isDark(page)).toBe(false);
+
+  await page.getByRole("button", { name: "Podle systému" }).click();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(() => isDark(page)).toBe(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  expect(await isDark(page)).toBe(true);
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect.poll(() => isDark(page)).toBe(false);
+});
+
+test("[UI-007] navigace funguje na šířce 390 px bez vodorovného posunu", async ({
+  page,
+  freshApp,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await registerAdmin(page, freshApp.baseURL);
+  const noOverflow = () =>
+    page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    );
+
+  const nav = page.getByRole("navigation", { name: "Hlavní navigace" });
+  await expect(nav).toBeHidden();
+  expect(await noOverflow()).toBe(true);
+
+  await page.getByRole("button", { name: "Otevřít nabídku" }).click();
+  await expect(nav).toBeVisible();
+  await nav.getByRole("link", { name: "Zákazníci" }).click();
+  await expect(page.getByRole("heading", { name: "Připravujeme" })).toBeVisible();
+  await expect(nav).toBeHidden();
+
+  for (const path of ["/nastaveni/ucet", "/nastaveni/historie", "/administrace"]) {
+    await page.goto(`${freshApp.baseURL}${path}`);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.getByText("Načítání…")).toHaveCount(0);
+    expect(await noOverflow(), path).toBe(true);
+  }
+});
+
+test("[ADM-001] administrátor vidí v navigaci Administraci", async ({ page, freshApp }) => {
+  await registerAdmin(page, freshApp.baseURL);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Hlavní navigace" })
+      .getByRole("link", { name: "Administrace" }),
+  ).toBeVisible();
+});
+
+test("[AUTH-006] [AUD-009] účet ukazuje způsoby přihlášení a vlastní historii", async ({
+  page,
+  freshApp,
+}) => {
+  await registerAdmin(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/ucet`);
+  await expect(page.getByRole("heading", { name: "Způsoby přihlášení" })).toBeVisible();
+  await expect(
+    page
+      .getByRole("listitem")
+      .filter({ hasText: "Heslo" })
+      .getByRole("button", { name: "Odebrat" }),
+  ).toBeDisabled();
+  await expect(page.getByText("Poslední způsob přihlášení nejde odebrat.")).toBeVisible();
+  const history = page.getByRole("heading", { name: "Historie účtu" }).locator("..");
+  await expect(history.getByText("Nový účet")).toBeVisible();
+
+  await page.goto(`${freshApp.baseURL}/nastaveni/ucet?chyba=propojeni`);
+  await expect(page.getByText(/nepodařilo propojit/)).toBeVisible();
+});
+
+test("[AUD-007] [EXP-004] historie se filtruje a exportuje do CSV", async ({ page, freshApp }) => {
+  await registerAdmin(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/historie`);
+  const rows = page.getByRole("row");
+  await expect(rows.filter({ hasText: "Nový účet" })).toHaveCount(1);
+
+  await page.getByLabel("Akce").selectOption("auth.first_admin");
+  await page.getByRole("button", { name: "Filtrovat" }).click();
+  await expect(page).toHaveURL(/action=auth\.first_admin/);
+  await expect(rows.filter({ hasText: "Nový účet" })).toHaveCount(0);
+  await expect(rows.filter({ hasText: "První administrátor" })).toHaveCount(1);
+
+  await page
+    .getByRole("row", { name: /První administrátor/ })
+    .getByText("Detail")
+    .click();
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Exportovat CSV" }).click(),
+  ]);
+  const csv = await readFile((await download.path())!, "utf8");
+  expect(csv).toContain("První administrátor");
+  expect(csv).not.toContain("Nový účet");
+
+  await page.goto(`${freshApp.baseURL}/nastaveni/historie`);
+  await expect(page.getByRole("row").filter({ hasText: "Export historie" })).toHaveCount(1);
+});

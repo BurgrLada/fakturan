@@ -1,7 +1,9 @@
 "use server";
 
+import { updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { accountTag } from "@/server/account-cache";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
 import { deleteOwnAccount } from "@/server/services/users";
@@ -19,4 +21,9 @@ export async function deleteOwnAccountAction(raw: unknown): Promise<{ error: str
     throw error;
   }
   redirect("/prihlaseni");
+}
+
+export async function refreshAccountData(): Promise<void> {
+  const { user } = await requireSession();
+  updateTag(accountTag(user.id));
 }
