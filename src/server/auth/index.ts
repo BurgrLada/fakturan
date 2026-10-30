@@ -1,0 +1,233 @@
+import "server-only";
+import { betterAuth, type GenericEndpointContext } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { admin } from "better-auth/plugins";
+import { db } from "../db";
+import * as schema from "../db/schema";
+import { env as defaultEnv, type Env } from "../env";
+import { isInstanceMailConfigured, sendInstanceMail } from "../mail/instance";
+import { mutate } from "../services/mutation";
+import { auditAuthEndpoint, auditSessionEnd, recordAuthEvent, validEmail } from "./audit-hooks";
+import { isCommonPassword, MIN_PASSWORD_LENGTH } from "./passwords";
+import { enabledProviders, socialProviders } from "./providers";
+import { webActor } from "./request-actor";
+import { canRegister, INVITE_COOKIE, isSignupOpen } from "./signup-guard";
+
+const DAY_SECONDS = 86_400;
+
+export const AUTH_ERROR_INVITE_REQUIRED = "INVITE_REQUIRED";
+export const AUTH_ERROR_PASSWORD_COMPROMISED = "PASSWORD_COMPROMISED";
+
+// Disabled over HTTP: these would bypass the invitation, last-admin and audit rules, and
+// impersonation would let an admin read another account's data (ADM-007).
+const ADMIN_PATHS = [
+  "/admin/create-user",
+  "/admin/set-role",
+  "/admin/set-user-password",
+  "/admin/update-user",
+  "/admin/list-users",
+  "/admin/get-user",
+  "/admin/ban-user",
+  "/admin/unban-user",
+  "/admin/list-user-sessions",
+  "/admin/revoke-user-session",
+  "/admin/revoke-user-sessions",
+  "/admin/remove-user",
+  "/admin/has-permission",
+  "/admin/impersonate-user",
+  "/admin/stop-impersonating",
+];
+
+// Not 403: with mandatory email verification Better Auth turns a 403 from a user hook into a
+// generic success response, which would tell a refused signup that it worked.
+function inviteRequired(): APIError {
+  return new APIError("BAD_REQUEST", {
+    code: AUTH_ERROR_INVITE_REQUIRED,
+    message: "Přístup je jen na pozvánku",
+  });
+}
+
+function assertPasswordAllowed(password: unknown): void {
+  if (typeof password === "string" && isCommonPassword(password)) {
+    throw new APIError("BAD_REQUEST", {
+      code: AUTH_ERROR_PASSWORD_COMPROMISED,
+      message: "Toto heslo je mezi známými uniklými hesly",
+    });
+  }
+}
+
+function guardSignup(
+  ctx: GenericEndpointContext | null,
+  env: Env,
+  newUser: { email: string; emailVerified: boolean },
+) {
+  const isSocial = ctx?.path === "/callback/:id";
+  const decision = mutate(
+    webActor(ctx?.headers, null, env),
+    "auth.signup_rejected",
+    (tx, audit) => {
+      const result = canRegister(tx, newUser.email, ctx?.getCookie(INVITE_COOKIE) ?? undefined, {
+        verifiedEmail: isSocial && newUser.emailVerified,
+      });
+      const base = { entity: "user", entityId: null, ownerId: null, scope: "instance" } as const;
+      if (!result.allowed) {
+        audit({ ...base, after: { email: newUser.email } });
+      } else if (result.invitationId) {
+        audit({
+          ...base,
+          action: "invitation.accept",
+          entity: "invitation",
+          entityId: result.invitationId,
+          after: { email: newUser.email, role: result.role },
+        });
+      } else {
+        audit({ ...base, action: "auth.first_admin", after: { email: newUser.email } });
+      }
+      return result;
+    },
+  );
+  if (decision.allowed) return { data: { role: decision.role } };
+  if (isSocial) throw ctx.redirect(new URL("/prihlaseni?chyba=pozvanka", env.BETTER_AUTH_URL).href);
+  throw inviteRequired();
+}
+
+export function createAuth(env: Env) {
+  const mailEnabled = isInstanceMailConfigured(env);
+
+  const mail = (to: string, subject: string, text: string) =>
+    sendInstanceMail({ to, subject, text }, env);
+
+  return betterAuth({
+    appName: "Fakturan",
+    baseURL: env.BETTER_AUTH_URL,
+    secret: env.BETTER_AUTH_SECRET,
+    database: drizzleAdapter(db, { provider: "sqlite", schema }),
+    telemetry: { enabled: false },
+    disabledPaths: ADMIN_PATHS,
+    trustedOrigins: enabledProviders(env).includes("apple") ? ["https://appleid.apple.com"] : [],
+    onAPIError: { errorURL: "/prihlaseni" },
+    socialProviders: socialProviders(env),
+    plugins: [admin({ defaultRole: "user", adminRoles: ["admin"] })],
+    account: { encryptOAuthTokens: true },
+    session: { expiresIn: 30 * DAY_SECONDS, updateAge: DAY_SECONDS },
+    user: { changeEmail: { enabled: mailEnabled } },
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: MIN_PASSWORD_LENGTH,
+      requireEmailVerification: mailEnabled,
+      revokeSessionsOnPasswordReset: true,
+      resetPasswordTokenExpiresIn: 3600,
+      sendResetPassword: mailEnabled
+        ? ({ user, url }) =>
+            mail(
+              user.email,
+              "Obnova hesla ve Fakturanu",
+              `Heslo obnovíte na této adrese, odkaz platí 1 hodinu:\n\n${url}\n`,
+            )
+        : undefined,
+      onPasswordReset: async ({ user }) => {
+        recordAuthEvent(null, env, {
+          action: "auth.password_reset",
+          actorId: user.id,
+          ownerId: user.id,
+        });
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: mailEnabled,
+      sendOnSignIn: mailEnabled,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: mailEnabled
+        ? ({ user, url }) =>
+            mail(
+              user.email,
+              "Potvrzení e-mailu ve Fakturanu",
+              `Adresu potvrdíte kliknutím na tento odkaz:\n\n${url}\n`,
+            )
+        : undefined,
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (newUser, ctx) => guardSignup(ctx, env, newUser),
+          after: async (created, ctx) => {
+            recordAuthEvent(ctx, env, {
+              action: "user.create",
+              actorId: created.id,
+              ownerId: created.id,
+              after: { email: created.email, name: created.name, role: created.role },
+            });
+          },
+        },
+        update: {
+          after: async (updated, ctx) => {
+            recordAuthEvent(ctx, env, {
+              action: "user.update",
+              actorId: ctx?.context.session?.user.id ?? null,
+              ownerId: updated.id,
+              after: {
+                email: updated.email,
+                emailVerified: updated.emailVerified,
+                name: updated.name,
+                role: updated.role,
+                banned: updated.banned,
+              },
+            });
+          },
+        },
+      },
+      account: {
+        create: {
+          after: async (created, ctx) => {
+            recordAuthEvent(ctx, env, {
+              action: "account.link",
+              actorId: created.userId,
+              ownerId: created.userId,
+              entity: "account",
+              entityId: created.id,
+              after: { providerId: created.providerId },
+            });
+          },
+        },
+      },
+      session: {
+        delete: { after: async (deleted, ctx) => auditSessionEnd(ctx, env, deleted) },
+      },
+    },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        if (ctx.path === "/sign-up/email") {
+          if (!isSignupOpen(db, ctx.getCookie(INVITE_COOKIE) ?? undefined)) {
+            recordAuthEvent(ctx, env, {
+              action: "auth.signup_rejected",
+              ownerId: null,
+              after: { email: validEmail(body.email) },
+            });
+            throw inviteRequired();
+          }
+          assertPasswordAllowed(body.password);
+        }
+        if (ctx.path === "/reset-password") assertPasswordAllowed(body.newPassword);
+        if (ctx.path === "/change-password") {
+          assertPasswordAllowed(body.newPassword);
+          return { context: { body: { ...body, revokeOtherSessions: true } } };
+        }
+      }),
+      after: createAuthMiddleware(async (ctx) => auditAuthEndpoint(ctx, env)),
+    },
+  });
+}
+
+export type Auth = ReturnType<typeof createAuth>;
+
+let cached: Auth | undefined;
+
+// Lazy, so `next build` does not need secrets.
+export const auth: Auth = new Proxy({} as Auth, {
+  get(_, prop) {
+    cached ??= createAuth(defaultEnv);
+    return cached[prop as keyof Auth];
+  },
+});
