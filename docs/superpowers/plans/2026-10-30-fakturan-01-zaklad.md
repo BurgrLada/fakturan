@@ -451,3 +451,16 @@ Expected: vše projde.
 git add -A
 git commit -m "feat(ops): add docker image, health check, logging and sentry"
 ```
+
+---
+
+## Přenos do dalších plánů
+
+- **SEC-006:** ověřit první server actions se vstupem (plán 2).
+- **SEC-001, SEC-002, AUD-002:** brána je nehlídá, ale nejsou úplné. Pravidla pro odesílání, import a export, izolace přes server actions a události PDF a exportu potřebují testy v plánech 3, 4 a 8.
+- **ADM-005:** zastavení úloh u deaktivovaného uživatele (plán 4).
+- **ADM-009:** nabídka zálohy před smazáním účtu (plán 8).
+- **MON-003, OPS-004, OPS-005:** chyby plánovače, stav plánovače v health checku, denní záloha (plán 4).
+- **ARC-005:** prokázat na první skutečné položce `use cache`.
+- **`USER_OWNED_TABLES`:** každá nová tabulka s vlastníkem do seznamu, jinak spadne strukturální test.
+- **Známé drobnosti:** e2e `smoke.spec.ts` jednou selhal s „Execution context was destroyed“ a neopakoval se; omezený 429 na `/callback/:id` ukazuje surový JSON; `next build` varuje před `process.exit` v Edge, kód je hlídaný pro Node runtime.
