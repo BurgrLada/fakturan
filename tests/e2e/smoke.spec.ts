@@ -4,6 +4,9 @@ test("[TST-004] [UI-001] domovská stránka ukazuje logo a favicon", async ({ pa
   await page.goto(freshApp.baseURL);
   const logo = page.getByRole("img", { name: "Fakturan" }).first();
   await expect(logo).toBeVisible();
-  expect(await logo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  // Anonymous `/` redirects on the client, which can destroy the context of a single evaluate.
+  await expect
+    .poll(() => logo.evaluate((img: HTMLImageElement) => img.naturalWidth).catch(() => 0))
+    .toBeGreaterThan(0);
   await expect(page.locator('link[rel~="icon"]').first()).toHaveAttribute("href", /.+/);
 });
