@@ -73,6 +73,57 @@ describe("ukládání souborů", () => {
     expect(text).not.toMatch(/script|onload|onclick|foreignObject|javascript:/i);
   });
 
+  test("[SEC-005] reálné logo si zachová styly, přechody a lokální odkazy", () => {
+    const svg = Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10">` +
+        `<defs><linearGradient id="g"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient>` +
+        `<linearGradient id="h" xlink:href="#g"/></defs>` +
+        `<style>.a{fill:url(#h)}</style>` +
+        `<rect style="fill:#123456;stroke:url(#g)" width="5" height="5"/><circle class="a" fill="url(#g)" r="2"/></svg>`,
+    );
+
+    const text = readOwnedFile(
+      actor("u1"),
+      storeFile(actor("u1"), "logo", svg, "l.svg").id,
+    ).data.toString("utf8");
+
+    expect(text).toContain("fill:#123456");
+    expect(text).toContain("<linearGradient");
+    expect(text).toContain("<stop");
+    expect(text).toContain('fill="url(#g)"');
+    expect(text).toContain("fill:url(#h)");
+    expect(text).toMatch(/xlink:href="#g"/);
+  });
+
+  test("[SEC-005] @import, externí url() a odkazy javascript: a http: se odstraní", () => {
+    const svg = Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">` +
+        `<style>@import url(http://evil.example/x.css); .a{fill:red}</style>` +
+        `<rect style="fill:url(http://evil.example/p.svg#x)" width="1" height="1"/>` +
+        `<rect style="width:expression(alert(1))" width="1" height="1"/>` +
+        `<use href="javascript:alert(1)"/><use xlink:href="http://evil.example/a.svg#b"/></svg>`,
+    );
+
+    const text = readOwnedFile(
+      actor("u1"),
+      storeFile(actor("u1"), "logo", svg, "l.svg").id,
+    ).data.toString("utf8");
+
+    expect(text).not.toMatch(/@import|evil\.example|expression|javascript:|http:\/\/evil/i);
+    expect(text).toContain("fill:red");
+  });
+
+  test("[SEC-005] neznámý druh souboru je odmítnut", () => {
+    expect(() => storeFile(actor("u1"), "evil" as never, PNG, "a.png")).toThrow("druh");
+  });
+
+  test("[SEC-005] soubor přesně 2 MB projde, o bajt větší ne", () => {
+    const pad = (n: number) => Buffer.concat([PNG, Buffer.alloc(n - PNG.length)]);
+
+    expect(storeFile(actor("u1"), "logo", pad(2 * 1024 * 1024), "a.png").id).toBeTruthy();
+    expect(() => storeFile(actor("u1"), "logo", pad(2 * 1024 * 1024 + 1), "a.png")).toThrow("2 MB");
+  });
+
   test("[SEC-005] soubor nad 2 MB je odmítnut", () => {
     const big = Buffer.concat([PNG, Buffer.alloc(2 * 1024 * 1024)]);
 
@@ -162,6 +213,16 @@ describe("route souborů", () => {
     expect((await get(id)).status).toBe(404);
   });
 
+  test("[SEC-005] nelatinský název jde v hlavičce jako filename*=UTF-8", async () => {
+    const { id } = storeFile(actor("u1"), "logo", PNG, "Žluťoučký kůň.png");
+
+    session.userId = "u1";
+    const header = (await get(id)).headers.get("content-disposition") ?? "";
+
+    expect(header).toContain("filename*=UTF-8''%C5%BDlu%C5%A5ou%C4%8Dk%C3%BD%20k%C5%AF%C5%88.png");
+    expect(header).toMatch(/^inline; filename="[\x20-\x7e]+";/);
+  });
+
   test("[SEC-005] vlastník dostane soubor s bezpečnými hlavičkami", async () => {
     const { id } = storeFile(actor("u1"), "logo", PNG, "logo.png");
 
@@ -170,7 +231,7 @@ describe("route souborů", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
-    expect(response.headers.get("content-disposition")).toContain("logo.png");
+    expect(response.headers.get("content-disposition")).toContain('filename="logo.png"');
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-security-policy")).toBe("sandbox");
     expect(Buffer.from(await response.arrayBuffer())).toEqual(PNG);

@@ -16,6 +16,7 @@ import {
   verification,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { logger } from "../logger";
 import { removeUserDir } from "../files/store";
 import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
@@ -184,6 +185,14 @@ function purgeAccount(
   });
 }
 
+function removeAccountFiles(userId: string): void {
+  try {
+    removeUserDir(userId);
+  } catch (error) {
+    logger.warn("Složku souborů smazaného účtu se nepodařilo odstranit", { error });
+  }
+}
+
 export function deleteUser(actor: Actor, userId: string, confirmEmail: string): void {
   mutate(actor, "user.delete", (tx, audit) => {
     assertAdmin(tx, actor);
@@ -195,7 +204,7 @@ export function deleteUser(actor: Actor, userId: string, confirmEmail: string): 
     assertNotLastAdmin(tx, target);
     purgeAccount(tx, target, audit, false);
   });
-  removeUserDir(userId);
+  removeAccountFiles(userId);
 }
 
 function passwordHash(userId: string): string | null {
@@ -251,5 +260,5 @@ export async function deleteOwnAccount(
     }
     purgeAccount(tx, target, audit, true);
   });
-  removeUserDir(userId);
+  removeAccountFiles(userId);
 }

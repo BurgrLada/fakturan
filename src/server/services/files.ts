@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { file, type FileKind } from "../db/schema";
+import { FILE_KINDS, file, type FileKind } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { readBlob, removeBlob, writeBlob } from "../files/store";
 import { InvalidFileError, validateImage } from "../files/validate";
+import { logger } from "../logger";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
 
@@ -34,6 +35,7 @@ export function storeFile(
   name: string,
 ): { id: string } {
   const userId = ownerOf(actor);
+  if (!FILE_KINDS.includes(kind)) throw new ServiceError("Neplatný druh souboru");
   let valid;
   try {
     valid = validateImage(data);
@@ -111,5 +113,9 @@ export function deleteFile(actor: Actor, id: string): void {
       before: { kind: row.kind, mimeType: row.mimeType, size: row.size },
     });
   });
-  removeBlob(userId, id);
+  try {
+    removeBlob(userId, id);
+  } catch (error) {
+    logger.warn("Soubor se nepodařilo odstranit z disku", { fileId: id, error });
+  }
 }

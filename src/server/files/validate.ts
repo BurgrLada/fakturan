@@ -30,12 +30,43 @@ function looksLikeSvg(data: Buffer): boolean {
   );
 }
 
+const LOCAL_URL = /url\(\s*(["']?)\s*#[^)]*\)/gi;
+
+// Scripting vectors in CSS survive only through escapes or these constructs, so any hit empties it.
+function cleanCss(css: string): string {
+  if (/\\|expression\s*\(|javascript:|behavior\s*:|-moz-binding/i.test(css)) return "";
+  const withoutImports = css.replace(/@import[^;]*;?/gi, "");
+  const stripped = withoutImports.replace(LOCAL_URL, "");
+  return /url\s*\(/i.test(stripped) ? "" : withoutImports;
+}
+
+purifier.addHook("uponSanitizeElement", (node, data) => {
+  if (data.tagName === "style") node.textContent = cleanCss(node.textContent ?? "");
+});
+
+purifier.addHook("uponSanitizeAttribute", (_node, data) => {
+  if (data.attrName === "style") {
+    data.attrValue = cleanCss(data.attrValue);
+  } else if (data.attrName === "href" || data.attrName === "xlink:href") {
+    if (!data.attrValue.trim().startsWith("#")) data.keepAttr = false;
+    else data.forceKeepAttr = true;
+  }
+});
+
 function sanitizeSvg(source: string): Buffer {
   const clean = purifier.sanitize(source, {
     USE_PROFILES: { svg: true, svgFilters: true },
-    FORBID_TAGS: ["script", "foreignObject", "use", "image", "a", "style", "animate", "set"],
-    FORBID_ATTR: ["href", "xlink:href", "style"],
-    ADD_URI_SAFE_ATTR: [],
+    ADD_ATTR: ["xlink:href"],
+    FORBID_TAGS: [
+      "script",
+      "foreignObject",
+      "image",
+      "a",
+      "animate",
+      "set",
+      "animateTransform",
+      "animateMotion",
+    ],
   });
   if (!/^\s*<svg[\s>]/i.test(clean)) throw new InvalidFileError("Neplatný soubor SVG");
   return Buffer.from(clean, "utf8");
