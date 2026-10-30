@@ -4,11 +4,10 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { auditLog, file, supplier, user } from "@/server/db/schema";
+import { DEFAULT_NOT_VAT_PAYER_CS, DEFAULT_NOT_VAT_PAYER_EN } from "@/lib/supplier-defaults";
 import { readOwnedFile } from "@/server/services/files";
 import {
   clearSupplierImage,
-  DEFAULT_NOT_VAT_PAYER_CS,
-  DEFAULT_NOT_VAT_PAYER_EN,
   getSupplier,
   isValidIco,
   missingSupplierFields,
@@ -138,7 +137,7 @@ describe("profil dodavatele", () => {
     expect(getSupplier("s6")?.footerText).toBe("Děkuji za spolupráci.");
   });
 
-  test("[SET-002] missingSupplierFields vrátí chybějící údaje", () => {
+  test("missingSupplierFields vrátí chybějící údaje", () => {
     seed("s7");
     expect(missingSupplierFields("s7")).toEqual([
       "Jméno nebo firma",
@@ -168,20 +167,26 @@ describe("profil dodavatele", () => {
   });
 
   test("[SET-010] izolace profilu", async () => {
+    const marker = (id: string) => `Změněno ${id}`;
     await assertIsolated<string>({
       create: (ownerId) => {
         seed(ownerId);
         saveSupplier(actor(ownerId), input({ name: `Firma ${ownerId}` }));
+        setSupplierImage(actor(ownerId), "logo", PNG, "logo.png");
         return ownerId;
       },
       find: (ownerId, id) => {
         const row = getSupplier(ownerId);
-        return row?.userId === id ? row : null;
+        return row?.userId === id && row.logoFileId ? row : null;
       },
       update: (ownerId, id) => {
-        if (ownerId !== id) return 0;
-        saveSupplier(actor(ownerId), input({ name: "Změněno" }));
-        return 1;
+        saveSupplier(actor(ownerId), input({ name: marker(id) }));
+        return getSupplier(id)?.name === marker(id) ? 1 : 0;
+      },
+      remove: (ownerId, id) => {
+        const had = getSupplier(id)?.logoFileId;
+        clearSupplierImage(actor(ownerId), "logo");
+        return had && !getSupplier(id)?.logoFileId ? 1 : 0;
       },
     });
   });

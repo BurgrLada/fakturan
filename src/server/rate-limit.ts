@@ -31,6 +31,7 @@ export const RATE_RULES = {
   sendUser: rule("sendUser", 60, 60),
   importUser: rule("importUser", 60, 60),
   exportUser: rule("exportUser", 60, 60),
+  aresLookup: rule("aresLookup", 30, 60),
   monitoringIp: rule("monitoringIp", 120, 60),
 } as const satisfies Record<string, RateRule>;
 

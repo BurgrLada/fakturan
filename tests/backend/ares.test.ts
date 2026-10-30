@@ -1,5 +1,23 @@
-import { describe, expect, test, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { lookupAresAction } from "@/app/(app)/nastaveni/dodavatel/actions";
 import { lookupAres } from "@/server/external/ares";
+import { createTestDb } from "../helpers/db";
+
+vi.mock("@/server/auth/session", () => ({
+  requireSession: async () => ({}),
+  actorFromRequest: async () => ({ userId: "u1", source: "web" }),
+}));
+vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
+vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
+vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+vi.stubEnv("DATA_DIR", mkdtempSync(join(tmpdir(), "fakturan-ares-")));
+
+createTestDb();
+afterEach(() => vi.unstubAllGlobals());
 
 const REPLY = {
   ico: "27082440",
@@ -76,5 +94,19 @@ describe("ARES", () => {
     const result = await lookupAres("27082440", async () => json(reply));
 
     expect(result?.street).toBe("Malá Lhota 12");
+  });
+});
+
+describe("ARES akce", () => {
+  test("[CUS-004] vyhledávání v ARES je omezené na 30 dotazů za minutu na uživatele", async () => {
+    const fetcher = vi.fn(async () => json(REPLY));
+    vi.stubGlobal("fetch", fetcher);
+
+    const results = [];
+    for (let i = 0; i < 31; i += 1) results.push(await lookupAresAction({ ico: "27082440" }));
+
+    expect(results.slice(0, 30).every((r) => r.ok)).toBe(true);
+    expect(results[30]).toMatchObject({ ok: false });
+    expect(fetcher).toHaveBeenCalledTimes(30);
   });
 });

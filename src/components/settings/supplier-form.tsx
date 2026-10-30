@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DEFAULT_NOT_VAT_PAYER_CS, DEFAULT_NOT_VAT_PAYER_EN } from "@/lib/supplier-defaults";
 import { TEXTS } from "@/lib/texts";
 
 type Values = {
@@ -49,8 +50,8 @@ const EMPTY: Values = {
   contactPerson: "",
   vatIdentified: false,
   footerText: "",
-  notVatPayerCs: "Nejsem plátce DPH.",
-  notVatPayerEn: "I am not a VAT payer.",
+  notVatPayerCs: DEFAULT_NOT_VAT_PAYER_CS,
+  notVatPayerEn: DEFAULT_NOT_VAT_PAYER_EN,
 };
 
 const IMAGE_KINDS: ImageKind[] = ["logo", "qr_logo", "signature"];

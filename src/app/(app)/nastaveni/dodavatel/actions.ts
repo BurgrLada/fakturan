@@ -2,9 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { TEXTS } from "@/lib/texts";
 import { lookupAres, type AresResult } from "@/server/external/ares";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
-import { ServiceError } from "@/server/services/access";
+import { RATE_RULES } from "@/server/rate-limit";
+import { enforceRateLimit, ServiceError } from "@/server/services/access";
 import {
   clearSupplierImage,
   saveSupplier,
@@ -31,7 +33,10 @@ async function run<Input, Output extends object>(
   await requireSession();
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Neplatné údaje" };
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? TEXTS.supplier.validation.invalid,
+    };
   }
   try {
     const output = await work(parsed.data, await actorFromRequest());
@@ -55,7 +60,13 @@ export async function lookupAresAction(
 ): Promise<{ ok: true; result: AresResult | null } | Failure> {
   await requireSession();
   const parsed = icoInput.safeParse(raw);
-  if (!parsed.success) return { ok: false, error: "Neplatné údaje" };
+  if (!parsed.success) return { ok: false, error: TEXTS.supplier.validation.invalid };
+  try {
+    enforceRateLimit(await actorFromRequest(), RATE_RULES.aresLookup);
+  } catch (error) {
+    if (error instanceof ServiceError) return { ok: false, error: error.message };
+    throw error;
+  }
   return { ok: true, result: await lookupAres(parsed.data.ico) };
 }
 
