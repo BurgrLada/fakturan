@@ -19,7 +19,7 @@ db.$client.exec("CREATE TABLE probe (id TEXT PRIMARY KEY, v TEXT)");
 const actor: Actor = { userId: "u1", source: "web" };
 
 function entry(ownerId: string | null = "u1", scope: "user" | "instance" = "user") {
-  return { entity: "probe", entityId: "1", ownerId, scope };
+  return { entity: scope === "user" ? "probe" : "user", entityId: "1", ownerId, scope };
 }
 
 function rowsOf(ownerId: string) {
@@ -116,6 +116,36 @@ describe("mutate", () => {
       userAgent: null,
       requestId: null,
     });
+  });
+
+  test("[AUD-010] uživatelský záznam bez vlastníka se odmítne a změna se vrátí", () => {
+    const before = db.select().from(auditLog).all().length;
+
+    expect(() =>
+      mutate(actor, "probe.orphan", (tx, audit) => {
+        tx.run(sql`INSERT INTO probe VALUES ('orphan', 'x')`);
+        audit({ entity: "invoice", entityId: "1", ownerId: null, scope: "user" });
+      }),
+    ).toThrow("bez vlastníka");
+
+    expect(probeCount("orphan")).toBe(0);
+    expect(db.select().from(auditLog).all()).toHaveLength(before);
+  });
+
+  test("[ADM-007] záznam instance smí jmenovat jen entity instance", () => {
+    expect(() =>
+      mutate(actor, "probe.leak", (_tx, audit) =>
+        audit({ entity: "invoice", entityId: "1", ownerId: "u1", scope: "instance" }),
+      ),
+    ).toThrow("invoice");
+
+    for (const entity of ["user", "session", "account", "invitation", "rate_limit", "route"]) {
+      expect(() =>
+        mutate(actor, "probe.ok", (_tx, audit) =>
+          audit({ entity, entityId: null, ownerId: null, scope: "instance" }),
+        ),
+      ).not.toThrow();
+    }
   });
 
   test("[AUD-005] selhání zápisu auditu vrátí změnu zpět", () => {
@@ -450,6 +480,37 @@ describe("audit guard", () => {
       writeFileSync(join(dir, "sub", "bad2.ts"), "db\n  .update(t);");
 
       expect(findWritesOutsideMutate(dir).sort()).toEqual(["bad.ts", "sub/bad2.ts"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("[AUD-011] kontrola služeb najde i přejmenovaný nebo surový přístup k databázi", () => {
+    const dir = mkdtempSync(join(tmpdir(), "fakturan-guard-"));
+    const bad = {
+      "import-alias.ts": 'import { db as store } from "../db";\nstore.insert(t).values({});',
+      "const-alias.ts": "const store = db;\nstore.update(t);",
+      "typed-alias.ts": "const store: Db = db;\nstore.delete(t);",
+      "cast-alias.ts": "const store = db as Db;\nstore.run(q);",
+      "chain-alias.ts": "const a = db;\nconst b = a;\nb.transaction(fn);",
+      "param.ts": "function save(store: Db) {\n  store.insert(t);\n}",
+      "bracket.ts": 'db["insert"](t);',
+      "destructured.ts": "const { insert } = db;\ninsert(t);",
+      "client.ts": "const raw = handle.$client;\nraw.exec(q);",
+      "create-db.ts": "const own = createDb(path);",
+    };
+    try {
+      for (const [name, source] of Object.entries(bad)) writeFileSync(join(dir, name), source);
+      writeFileSync(
+        join(dir, "reads.ts"),
+        'import { db as reader } from "../db";\nconst rows = reader.select().from(t);\nrows.at(0);',
+      );
+      writeFileSync(
+        join(dir, "tx.ts"),
+        'const value = db.select().from(t).get();\nmutate(actor, "a.b", (tx) => tx.update(t));',
+      );
+
+      expect(findWritesOutsideMutate(dir).sort()).toEqual(Object.keys(bad).sort());
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -22,7 +22,7 @@ import {
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "./passwords";
 import { enabledProviders, socialProviders } from "./providers";
 import { enforceAuthRateLimit } from "./rate-limits";
-import { webActor } from "./request-actor";
+import { linkRequestHeaders, webActor } from "./request-actor";
 import { canRegister, INVITE_COOKIE, isSignupOpen } from "./signup-guard";
 
 const DAY_SECONDS = 86_400;
@@ -270,6 +270,7 @@ export function createAuth(env: Env) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        linkRequestHeaders(ctx.headers, ctx.request?.headers);
         const body = (ctx.body ?? {}) as Record<string, unknown>;
         enforceAuthRateLimit(ctx, env);
         if (ctx.path === "/sign-up/email") {

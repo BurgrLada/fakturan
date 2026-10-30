@@ -21,7 +21,8 @@ import { mutate } from "./mutation";
 
 export type Role = "admin" | "user";
 
-// Every table with account data; later plans add theirs here so deletion stays complete (ADM-006).
+// Every table with account data, enforced by a schema test in users.test.ts (ADM-006). Deleted in
+// this order, so a table with a non-cascading foreign key must precede the table it references.
 export const USER_OWNED_TABLES = [session, account];
 
 const REAUTH_WINDOW_MS = 15 * 60_000;
@@ -87,6 +88,7 @@ export function listUsers(actor: Actor) {
 
 export function setRole(actor: Actor, userId: string, role: Role): void {
   assertAdmin(db, actor);
+  assertNotSelf(actor, userId);
   const current = db.select({ role: user.role }).from(user).where(eq(user.id, userId)).get();
   if (current?.role === role) return;
   mutate(actor, "user.role_change", (tx, audit) => {

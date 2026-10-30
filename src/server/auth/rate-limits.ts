@@ -62,6 +62,11 @@ function checksFor(ctx: GenericEndpointContext, env: Env): Check[] {
         { rule: RATE_RULES.resetPasswordIp, key: ip },
         ...(email ? [{ rule: RATE_RULES.resetPasswordIpEmail, key: `${ip}|${email}` }] : []),
       ];
+    // Both write an audit row per failure, and that row can never be deleted.
+    case "/reset-password":
+      return [{ rule: RATE_RULES.resetPasswordSubmitIp, key: ip }];
+    case "/callback/:id":
+      return [{ rule: RATE_RULES.socialCallbackIp, key: ip }];
     case "/send-verification-email":
       return [{ rule: RATE_RULES.verificationMailIp, key: ip }];
     case "/sign-in/social":

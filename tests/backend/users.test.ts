@@ -2,11 +2,13 @@ import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
+import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { ACTION_LABELS, auditActionLabel } from "@/lib/audit-labels";
 import { auth } from "@/server/auth";
 import { requireAdmin, requireSession } from "@/server/auth/session";
 import { setClockForTests } from "@/server/clock";
+import * as schema from "@/server/db/schema";
 import {
   account,
   auditLog,
@@ -30,6 +32,7 @@ import {
   setRole,
   USER_OWNED_TABLES,
 } from "@/server/services/users";
+import { findUnregisteredOwnedTables } from "../helpers/audit-guard";
 import { Browser, BASE, PASSWORD, type Auth } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
 
@@ -89,6 +92,10 @@ function productionAuditActions(): string[] {
   const failed = ["password_change", "email_change_request", "profile_update", "account_unlink"];
   return [...new Set([...actions, ...failed.map((a) => `auth.${a}_failed`)])];
 }
+
+// purgeAccount handles these by hand: the audit tables have their own purge, and invitations are
+// matched by e-mail as well as by id.
+const EXCEPTIONS = ["audit_log", "audit_purge", "invitation"];
 
 function roleOf(id: string) {
   return db.select().from(user).where(eq(user.id, id)).get()?.role;
@@ -205,7 +212,7 @@ describe("role a poslední administrátor", () => {
     seedUser("u1", "u1@example.cz");
     seedUser("a2", "a2@example.cz", "admin", true);
 
-    expect(() => setRole(admin, ADMIN_ID, "user")).toThrow("Poslední administrátor");
+    expect(() => setRole(admin, ADMIN_ID, "user")).toThrow("Vlastní účet");
     expect(() => deactivateUser(admin, ADMIN_ID)).toThrow("Vlastní účet");
     expect(() => deleteUser(admin, ADMIN_ID, "admin@example.cz")).toThrow("Vlastní účet");
     await expect(deleteOwnAccount(admin, { createdAt: new Date() }, undefined)).rejects.toThrow(
@@ -223,7 +230,7 @@ describe("role a poslední administrátor", () => {
     expect(auditRows("user.role_change")).toHaveLength(before);
   });
 
-  test("[ADM-004] deaktivovaný kolega se jako náhradní administrátor nepočítá", () => {
+  test("[ADM-004] deaktivovaný kolega se jako náhradní administrátor nepočítá", async () => {
     seedUser("a2", "a2@example.cz", "admin", true);
     seedUser("a3", "a3@example.cz", "admin");
     const third = { userId: "a3", source: "web" } as const;
@@ -231,7 +238,19 @@ describe("role a poslední administrátor", () => {
     deactivateUser(admin, "a3");
 
     expect(() => setRole(third, ADMIN_ID, "user")).toThrow("oprávnění");
-    expect(() => setRole(admin, ADMIN_ID, "user")).toThrow("Poslední administrátor");
+    await expect(deleteOwnAccount(admin, { createdAt: new Date() }, undefined)).rejects.toThrow(
+      "Poslední administrátor",
+    );
+  });
+
+  test("[ADM-004] admin si neodebere správu sám, i když je tu druhý", () => {
+    seedUser("a2", "a2@example.cz", "admin");
+    const before = auditRows("user.role_change").length;
+
+    expect(() => setRole(admin, ADMIN_ID, "user")).toThrow("Vlastní účet");
+
+    expect(roleOf(ADMIN_ID)).toBe("admin");
+    expect(auditRows("user.role_change")).toHaveLength(before);
   });
 
   test("[ADM-004] admin nesmaže ani nedeaktivuje sám sebe přes administraci", () => {
@@ -315,8 +334,25 @@ describe("smazání účtu", () => {
     expect(db.select().from(invitation).all()).toEqual([]);
   });
 
-  test("[ADM-006] seznam dat účtu pokrývá relace a propojené účty", () => {
+  test("[ADM-006] každá tabulka s vlastníkem je v seznamu dat účtu nebo ve výjimkách", () => {
     expect(USER_OWNED_TABLES).toEqual(expect.arrayContaining([session, account]));
+    expect(findUnregisteredOwnedTables(schema, USER_OWNED_TABLES, EXCEPTIONS)).toEqual([]);
+  });
+
+  test("[ADM-006] výjimka platí jen pro tabulku, která vlastníka opravdu má", () => {
+    const owned = findUnregisteredOwnedTables(schema, [], []);
+    expect(owned).toEqual(expect.arrayContaining(EXCEPTIONS));
+  });
+
+  test("[ADM-006] kontrola najde novou tabulku podle sloupce i cizího klíče", () => {
+    const byOwner = sqliteTable("t_by_owner", { ownerId: text("owner_id") });
+    const byUser = sqliteTable("t_by_user", { userId: text("user_id") });
+    const byForeignKey = sqliteTable("t_by_fk", { author: text().references(() => user.id) });
+    const unrelated = sqliteTable("t_unrelated", { id: text() });
+
+    expect(
+      findUnregisteredOwnedTables({ user, byOwner, byUser, byForeignKey, unrelated }, [byUser], []),
+    ).toEqual(["t_by_owner", "t_by_fk"]);
   });
 
   async function auditTrailAfterDeletion(

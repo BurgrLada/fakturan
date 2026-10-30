@@ -140,14 +140,18 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                 <TableCell>{row.createdAt}</TableCell>
                 <TableCell>{row.lastLoginAt}</TableCell>
                 <TableCell className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={pending}
-                    onClick={() => perform(() => setRoleAction({ userId: row.id, role: nextRole }))}
-                  >
-                    {nextRole === "admin" ? "Povýšit" : "Odebrat správu"}
-                  </Button>
+                  {!self && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() =>
+                        perform(() => setRoleAction({ userId: row.id, role: nextRole }))
+                      }
+                    >
+                      {nextRole === "admin" ? "Povýšit" : "Odebrat správu"}
+                    </Button>
+                  )}
                   {!self && row.status === "active" && (
                     <Button
                       variant="outline"

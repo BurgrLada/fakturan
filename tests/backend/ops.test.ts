@@ -130,6 +130,8 @@ describe("instance status", () => {
     vi.stubEnv("BETTER_AUTH_SECRET", "x".repeat(32));
     vi.stubEnv("ENCRYPTION_KEY", validEnv.ENCRYPTION_KEY);
     vi.stubEnv("SMTP_HOST", "smtp.example.cz");
+    vi.stubEnv("SMTP_PORT", "587");
+    vi.stubEnv("SMTP_FROM", "fakturan@example.cz");
     vi.stubEnv("SMTP_PASSWORD", "tajne-heslo-smtp");
     vi.stubEnv("SENTRY_DSN", "https://klic@errors.example.cz/1");
     const status = getInstanceStatus({ userId: "adm", source: "web" });
@@ -142,6 +144,19 @@ describe("instance status", () => {
     const json = JSON.stringify(status);
     expect(json).not.toContain("tajne-heslo-smtp");
     expect(json).not.toContain("errors.example.cz");
+  });
+
+  test("[ADM-008] SMTP bez odesílatele se nehlásí jako nastavené", async () => {
+    for (const [k, v] of Object.entries(validEnv)) vi.stubEnv(k, v);
+    vi.stubEnv("SMTP_HOST", "smtp.example.cz");
+    vi.stubEnv("SMTP_PORT", "587");
+    vi.stubEnv("SMTP_FROM", "");
+    // env caches its first parse, so this case needs fresh modules.
+    vi.resetModules();
+    vi.doMock("@/server/db", () => ({ db }));
+    const fresh = await import("@/server/services/instance-status");
+
+    expect(fresh.getInstanceStatus({ userId: "adm", source: "web" }).smtpConfigured).toBe(false);
   });
 
   test("[ADM-008] stav instance je jen pro administrátora", () => {

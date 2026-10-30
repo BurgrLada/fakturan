@@ -121,6 +121,8 @@ describe("checkRateLimit", () => {
     expect(RATE_RULES.loginIp).toMatchObject({ limit: 20, windowSeconds: 60 });
     expect(RATE_RULES.loginEmail).toMatchObject({ limit: 50, windowSeconds: 3600 });
     expect(RATE_RULES.resetPasswordIpEmail).toMatchObject({ limit: 3, windowSeconds: 3600 });
+    expect(RATE_RULES.resetPasswordSubmitIp).toMatchObject({ limit: 10, windowSeconds: 3600 });
+    expect(RATE_RULES.socialCallbackIp).toMatchObject({ limit: 30, windowSeconds: 60 });
     expect(RATE_RULES.signupIp).toMatchObject({ limit: 5, windowSeconds: 3600 });
     expect(RATE_RULES.invitationsUser).toMatchObject({ limit: 20, windowSeconds: 3600 });
     for (const name of ["sendUser", "importUser", "exportUser"] as const) {
@@ -292,6 +294,54 @@ describe("rate limiting reset hesla a registrace", () => {
       post(auth, "/sign-up/email", { name: "Jan", email: `s${i}@example.cz`, password: PASSWORD });
     for (let i = 0; i < 5; i++) expect((await signUp(i)).status).not.toBe(429);
     expect((await signUp(5)).status).toBe(429);
+  });
+});
+
+describe("anonymní koncové body zapisující audit", () => {
+  const github = createAuth(
+    testEnv({ GITHUB_CLIENT_ID: "gh-id", GITHUB_CLIENT_SECRET: "gh-secret" }),
+  );
+  const forgedCallback = () =>
+    github.handler(new Request(`${BASE}/api/auth/callback/github?state=podvrzeny`));
+  const forgedReset = (client: Auth = auth, headers?: Record<string, string>) =>
+    post(client, "/reset-password", { token: "neexistuje", newPassword: PASSWORD }, headers);
+
+  test("[SEC-001] [AUD-006] smyčka s neplatným tokenem obnovy nezaplní audit", async () => {
+    const failed = auditRows("auth.password_reset_failed").length;
+    const exceeded = auditRows("rate_limit.exceeded").length;
+    const { limit } = RATE_RULES.resetPasswordSubmitIp;
+
+    for (let i = 0; i < limit; i++) expect((await forgedReset()).status).not.toBe(429);
+    for (let i = 0; i < 5; i++) expect((await forgedReset()).status).toBe(429);
+
+    expect(auditRows("auth.password_reset_failed")).toHaveLength(failed + limit);
+    expect(auditRows("rate_limit.exceeded")).toHaveLength(exceeded + 1);
+    expect(auditRows("rate_limit.exceeded")[0].after).toMatchObject({
+      rule: "resetPasswordSubmitIp",
+      path: "/reset-password",
+    });
+  });
+
+  test("[SEC-001] limit obnovy hesla platí pro každou IP zvlášť", async () => {
+    const { limit } = RATE_RULES.resetPasswordSubmitIp;
+    for (let i = 0; i < limit; i++) {
+      await forgedReset(proxied, { "x-forwarded-for": "1.1.1.1" });
+    }
+    expect((await forgedReset(proxied, { "x-forwarded-for": "1.1.1.1" })).status).toBe(429);
+    expect((await forgedReset(proxied, { "x-forwarded-for": "2.2.2.2" })).status).not.toBe(429);
+  });
+
+  test("[SEC-001] [AUD-006] podvržený návrat od poskytovatele audit nezaplní", async () => {
+    const failed = auditRows("auth.login_failed").length;
+    const exceeded = auditRows("rate_limit.exceeded").length;
+    const { limit } = RATE_RULES.socialCallbackIp;
+
+    for (let i = 0; i < limit; i++) expect((await forgedCallback()).status).not.toBe(429);
+    for (let i = 0; i < 5; i++) expect((await forgedCallback()).status).toBe(429);
+
+    expect(auditRows("auth.login_failed")).toHaveLength(failed + limit);
+    expect(auditRows("rate_limit.exceeded")).toHaveLength(exceeded + 1);
+    expect(auditRows("rate_limit.exceeded")[0].after).toMatchObject({ rule: "socialCallbackIp" });
   });
 });
 

@@ -96,4 +96,16 @@ describe("relace v serverových komponentách", () => {
     expect(webActor(good, null, parseEnv(envValues)).requestId).not.toBe("req-1.a_B");
     expect(webActor(bad, null, trusted).requestId).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  test("[AUD-003] jeden požadavek má jedno ID, jiný požadavek jiné", () => {
+    const env = parseEnv(envValues);
+    const request = new Headers();
+    const other = new Headers();
+
+    expect(webActor(request, null, env).requestId).toBe(webActor(request, "u1", env).requestId);
+    expect(webActor(other, null, env).requestId).not.toBe(webActor(request, null, env).requestId);
+    expect(webActor(undefined, null, env).requestId).not.toBe(
+      webActor(undefined, null, env).requestId,
+    );
+  });
 });

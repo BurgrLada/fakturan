@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import type { Actor } from "../audit/context";
 import { db } from "../db";
 import { env } from "../env";
+import { isInstanceMailConfigured } from "../mail/instance";
 import pkg from "../../../package.json";
 import { assertAdmin } from "./access";
 
@@ -23,7 +24,7 @@ export function getInstanceStatus(actor: Actor) {
     databaseBytes: fileSize(path) + fileSize(`${path}-wal`),
     scheduler: "not_started" as const,
     lastBackupAt: null as Date | null,
-    smtpConfigured: Boolean(env.SMTP_HOST),
+    smtpConfigured: isInstanceMailConfigured(env),
     monitoringConfigured: Boolean(env.SENTRY_DSN),
   };
 }

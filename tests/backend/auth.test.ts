@@ -855,6 +855,45 @@ describe("audit přihlašování", () => {
     expect(JSON.stringify(failed)).not.toContain("spatne-heslo");
   });
 
+  test("[AUD-003] všechny záznamy jedné registrace nesou stejné ID požadavku", async () => {
+    const before = db.select().from(auditLog).all().length;
+
+    await createAdmin(plainAuth);
+    const rows = db.select().from(auditLog).all().slice(before);
+    await new Browser(plainAuth).signIn("admin@example.cz");
+    const next = db.select().from(auditLog).all().at(-1);
+
+    expect(rows.map((r) => r.action)).toEqual(
+      expect.arrayContaining(["user.create", "account.link", "auth.login"]),
+    );
+    expect(new Set(rows.map((r) => r.requestId)).size).toBe(1);
+    expect(rows[0].requestId).toBeTruthy();
+    expect(next?.requestId).not.toBe(rows[0].requestId);
+  });
+
+  test("[AUD-003] obnova hesla koreluje změnu hesla a odvolání relací", async () => {
+    const browser = await createAdmin(plainAuth);
+    const admin = db.select().from(user).get()!;
+    const token = "token-obnovy";
+    await (
+      await plainAuth.$context
+    ).internalAdapter.createVerificationValue({
+      identifier: `reset-password:${token}`,
+      value: admin.id,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const before = db.select().from(auditLog).all().length;
+
+    const res = await browser.request("/reset-password", {
+      body: { token, newPassword: `${PASSWORD}-nove` },
+    });
+
+    expect(res.status).toBe(200);
+    const rows = db.select().from(auditLog).all().slice(before);
+    expect(rows.map((r) => r.action)).toContain("auth.password_reset");
+    expect(new Set(rows.map((r) => r.requestId)).size).toBe(1);
+  });
+
   test("odhlášení, vznik účtu a odmítnutá hesla jsou v auditu bez hesla", async () => {
     const browser = await createAdmin(plainAuth);
     const admin = db.select().from(user).get()!;
