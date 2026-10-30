@@ -25,6 +25,7 @@ export const RATE_RULES = {
   socialLoginIp: rule("socialLoginIp", 30, 60),
   signupIp: rule("signupIp", 5, 3600),
   invitationsUser: rule("invitationsUser", 20, 3600),
+  accountDeleteUser: rule("accountDeleteUser", 5, 3600),
   sendUser: rule("sendUser", 60, 60),
   importUser: rule("importUser", 60, 60),
   exportUser: rule("exportUser", 60, 60),

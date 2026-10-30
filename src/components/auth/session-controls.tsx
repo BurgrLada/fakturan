@@ -31,10 +31,26 @@ export function SignOutButton() {
   );
 }
 
-// Only this endpoint can rewrite the cookie, see getCurrentSession.
+const SESSION_CHECK_MS = 60_000;
+
+// Only this endpoint can rewrite the cookie, see getCurrentSession. It also ends a tab whose session
+// was revoked elsewhere (ADM-005); a failed request must not look like a lost session.
 export function SessionKeepAlive() {
   useEffect(() => {
-    void authClient.getSession();
+    async function check() {
+      if (document.visibilityState !== "visible") return;
+      const { data, error } = await authClient.getSession();
+      if (!data && !error) window.location.assign("/prihlaseni");
+    }
+    void check();
+    const interval = setInterval(check, SESSION_CHECK_MS);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
   }, []);
   return null;
 }

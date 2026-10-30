@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient, authErrorMessage } from "@/lib/auth-client";
 
-export function RegisterForm() {
+export function RegisterForm({ invitedEmail }: { invitedEmail?: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -58,7 +58,15 @@ export function RegisterForm() {
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">E-mail</Label>
-        <Input id="email" name="email" type="email" autoComplete="email" required />
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          defaultValue={invitedEmail}
+          readOnly={Boolean(invitedEmail)}
+          required
+        />
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="password">Heslo</Label>

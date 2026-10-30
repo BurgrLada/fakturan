@@ -18,7 +18,7 @@ export type SignupDecision =
 
 type Reader = Pick<Db | Tx, "select">;
 
-function hashToken(token: string): string {
+export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
