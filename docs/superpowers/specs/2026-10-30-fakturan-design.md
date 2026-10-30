@@ -624,6 +624,15 @@ Cíl: maximální pokrytí e2e testy podle této specifikace, doplněné backend
 - **TST-009** Izolace a role: matice uživatel/administrátor/cizí uživatel přes všechny entity.
 - **TST-010** Souběh: přidělení čísla a plánovač pod paralelním spuštěním.
 - **TST-011** CI na každý commit: oxfmt check, oxlint, typová kontrola, Vitest, Playwright, build.
+- **TST-012** Vlastnostní testy (`fast-check`) pokrývají výpočty částek, slev a zaokrouhlení, přepočty měn, přidělování čísel a výpočet plánů. Invariant: součet položek a slev vždy odpovídá celkové částce.
+- **TST-013** Mutační testy (Stryker) běží nad jádrem: peníze, číselné řady, párování plateb, plánovač. Mutační skóre jádra je aspoň 90 %. Spouští se před vydáním, ne na každý commit.
+- **TST-014** Sada ručně spočítaných vzorových faktur s očekávanými částkami. Každý design má schválený referenční výstup.
+- **TST-015** Výstupy se ověřují zpětným čtením: QR se dekóduje a porovná s fakturou, ISDOC se validuje proti schématu a částky se porovnají s dokladem.
+- **TST-016** U každé automatiky test ověří, že při vypnuté volbě nedostane SMTP žádnou zprávu, včetně doběhu po výpadku.
+- **TST-017** Scénáře selhání uprostřed akce: nedostupné SMTP, plný disk, ukončení procesu během odesílání a běhu plánovače. Výsledek nesmí být duplicita ani ztráta dokladu.
+- **TST-018** Po každém e2e toku běží kontrola souladu dat: stav faktury odpovídá platbám, přehledy odpovídají součtu dokladů, audit obsahuje každou změnu.
+- **TST-019** Migrace se testují upgradem z každé vydané verze databáze. Záloha a obnova dají shodná data.
+- **TST-020** Před prvním ostrým použitím proběhne lokální import skutečných faktur mimo repozitář a porovnání součtů se zdrojovým systémem.
 
 Kritické e2e toky: první spuštění a onboarding, pozvánka, faktura od nuly po úhradu z avíza, zahraniční faktura v EUR, záloha → faktura, čtvrtletní pravidelná faktura, upomínka, import z CSV, záloha a obnovení účtu, přizpůsobení dashboardu a import JSON.
 

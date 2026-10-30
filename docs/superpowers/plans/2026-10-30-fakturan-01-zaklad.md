@@ -456,6 +456,7 @@ git commit -m "feat(ops): add docker image, health check, logging and sentry"
 
 ## Přenos do dalších plánů
 
+- **Testovací standard TST-012 až TST-020:** závazný pro všechny další plány. Plán 3 začíná úkolem, který zavede `fast-check`, Stryker a kontrolu souladu dat.
 - **SEC-006:** ověřit první server actions se vstupem (plán 2).
 - **SEC-001, SEC-002, AUD-002:** brána je nehlídá, ale nejsou úplné. Pravidla pro odesílání, import a export, izolace přes server actions a události PDF a exportu potřebují testy v plánech 3, 4 a 8.
 - **ADM-005:** zastavení úloh u deaktivovaného uživatele (plán 4).
