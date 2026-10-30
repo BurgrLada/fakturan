@@ -18,6 +18,7 @@ import {
 } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
+import { recordCatalogUse } from "./catalog";
 import { currentParties } from "./invoice-document";
 import { automaticSymbol, documentProblems, NotIssuableError } from "./invoice-lifecycle";
 import {
@@ -79,12 +80,31 @@ function balanceWarningOf(row: Invoice): BalanceWarning {
   return row.status === "paid" && row.paidMinor < row.totalMinor ? "underpaid" : "none";
 }
 
-function resultOf(row: Invoice): EditResult {
+function resultOf(row: Invoice, changed: boolean): EditResult {
   return {
     revision: row.revision,
-    resendSuggested: row.status === "sent",
+    resendSuggested: changed && row.status === "sent",
     balanceWarning: balanceWarningOf(row),
   };
+}
+
+// Lines are rewritten on every edit, so only uses beyond those already counted may add up.
+function recordAddedCatalogUse(
+  tx: Tx,
+  ownerId: string,
+  before: Pick<InvoiceLine, "catalogItemId">[],
+  after: Pick<LineRow, "catalogItemId">[],
+): void {
+  const counted = new Map<string, number>();
+  for (const { catalogItemId } of before) {
+    if (catalogItemId) counted.set(catalogItemId, (counted.get(catalogItemId) ?? 0) + 1);
+  }
+  for (const { catalogItemId } of after) {
+    if (!catalogItemId) continue;
+    const left = counted.get(catalogItemId) ?? 0;
+    if (left > 0) counted.set(catalogItemId, left - 1);
+    else recordCatalogUse(tx, ownerId, catalogItemId);
+  }
 }
 
 function documentOf(row: Invoice, lines: InvoiceLine[]): InvoiceDocument {
@@ -136,6 +156,7 @@ function applyChange(
       .where(scoped(ownerId).where(invoiceLine, (t, { eq }) => eq(t.invoiceId, id)))
       .run();
     insertLines(tx, ownerId, id, rows);
+    recordAddedCatalogUse(tx, ownerId, beforeLines, rows);
   }
 
   const after = findOwned(tx, ownerId, id);
@@ -157,7 +178,7 @@ function applyChange(
       ...(changes && { lines: changes.after }),
     },
   });
-  return resultOf(after);
+  return resultOf(after, true);
 }
 
 function accountSnapshotFor(
@@ -203,7 +224,7 @@ export function updateIssuedInvoice(actor: Actor, id: string, raw: IssuedInput):
         beforeLines.length === rows.length &&
         rows.every((row, i) => matches(beforeLines[i]!, row))
       ) {
-        throw new Unchanged(resultOf(before));
+        throw new Unchanged(resultOf(before, false));
       }
 
       assertReferencesOwned(tx, userId, { ...before, ...parsed.data });
@@ -226,7 +247,7 @@ export function refreshCustomerSnapshot(actor: Actor, id: string): EditResult {
       const customerSnapshot = currentParties(tx, userId, before).snapshot.customer;
       if (!customerSnapshot) throw new ServiceError(V.customerNotFound);
       const values = { customerSnapshot, customerName: customerSnapshot.name };
-      if (matches(before, values)) throw new Unchanged(resultOf(before));
+      if (matches(before, values)) throw new Unchanged(resultOf(before, false));
       return applyChange(tx, audit, userId, before, { values });
     }),
   );
@@ -313,7 +334,8 @@ export function restoreVersion(actor: Actor, versionId: string): EditResult {
 
       const document = withLiveReferences(tx, userId, version.document);
       const current = documentOf(before, linesOf(tx, userId, before.id));
-      if (diffInvoices(current, document).length === 0) throw new Unchanged(resultOf(before));
+      if (diffInvoices(current, document).length === 0)
+        throw new Unchanged(resultOf(before, false));
       if (document.number && isNumberTaken(tx, userId, document.number, before.id)) {
         throw new ServiceError(V.numberTaken);
       }

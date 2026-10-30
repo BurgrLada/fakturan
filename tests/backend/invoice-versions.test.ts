@@ -22,7 +22,7 @@ import {
   hideBankAccount,
   saveBankAccount,
 } from "@/server/services/bank-accounts";
-import { saveCatalogItem } from "@/server/services/catalog";
+import { getCatalogItem, saveCatalogItem } from "@/server/services/catalog";
 import { saveCustomer } from "@/server/services/customers";
 import {
   cancelInvoice,
@@ -221,6 +221,14 @@ describe("úprava vystaveného dokladu", () => {
       note: "Nová poznámka",
       sentAt,
     });
+  });
+
+  test("[INV-020] odeslaná faktura bez změny opětovné odeslání nenabídne", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    markSent(actor(owner), id);
+
+    expect(update(owner, id).resendSuggested).toBe(false);
   });
 
   test("[INV-020] vystavená faktura opětovné odeslání nenabízí a revize roste", () => {
@@ -651,6 +659,38 @@ describe("verze", () => {
     expect(audits(id, "invoice.restore_version")).toEqual([]);
   });
 
+  test("[INV-021] obnovení vrátí součty i čisté částky z cen a slev staré verze", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId, {
+      lines: [line({ discountKind: "percent", discountValue: 1000 })],
+      discountKind: "percent",
+      discountValue: 1000,
+    });
+    update(owner, id, {
+      lines: [line({ unitPriceMinor: 100_000 })],
+      discountKind: "amount",
+      discountValue: 5_000,
+    });
+    expect(detail(owner, id)).toMatchObject({
+      subtotalMinor: 200_000,
+      discountMinor: 5_000,
+      totalMinor: 195_000,
+    });
+
+    restoreVersion(actor(owner), listVersions(owner, id)[0]!.id);
+
+    const row = detail(owner, id);
+    expect(row).toMatchObject({
+      discountKind: "percent",
+      discountValue: 1000,
+      subtotalMinor: 270_000,
+      discountMinor: 27_000,
+      totalMinor: 243_000,
+    });
+    expect(row.lines.map((l) => l.netMinor)).toEqual([270_000]);
+    assertConsistent(db, owner);
+  });
+
   test("[INV-021] obnovení zapíše audit", () => {
     const { owner, customerId } = newOwner();
     const { id } = issued(owner, customerId);
@@ -676,6 +716,18 @@ describe("verze", () => {
     const { id } = issued(owner, customerId);
     update(owner, id, { note: "Změna" });
     cancelInvoice(actor(owner), id);
+
+    expectRefused(
+      () => restoreVersion(actor(owner), listVersions(owner, id)[0]!.id),
+      V.notEditable,
+    );
+  });
+
+  test("[INV-021] dobropisovaný doklad obnovit nejde", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    update(owner, id, { note: "Změna" });
+    db.update(invoice).set({ status: "credited" }).where(eq(invoice.id, id)).run();
 
     expectRefused(
       () => restoreVersion(actor(owner), listVersions(owner, id)[0]!.id),
@@ -818,6 +870,41 @@ describe("verze", () => {
   });
 });
 
+describe("použití položek ceníku", () => {
+  const uses = (owner: string, id: string) => getCatalogItem(owner, id)!.useCount;
+
+  test("[CAT-002] úprava započítá jen nově přidanou položku ceníku", () => {
+    const { owner, customerId } = newOwner();
+    const { id: kept } = saveCatalogItem(actor(owner), catalogInput("Stálá"));
+    const { id: added } = saveCatalogItem(actor(owner), catalogInput("Nová"));
+    const { id } = issued(owner, customerId, { lines: [line({ catalogItemId: kept })] });
+    expect(uses(owner, kept)).toBe(1);
+
+    update(owner, id, {
+      lines: [
+        line({ catalogItemId: kept, name: "Přejmenovaná" }),
+        line({ catalogItemId: added }),
+        line({ catalogItemId: added }),
+      ],
+    });
+    expect([uses(owner, kept), uses(owner, added)]).toEqual([1, 2]);
+
+    update(owner, id, { note: "Jen poznámka" });
+    expect([uses(owner, kept), uses(owner, added)]).toEqual([1, 2]);
+  });
+
+  test("[CAT-002] obnovení započítá položku, která na dokladu mezitím nebyla", () => {
+    const { owner, customerId } = newOwner();
+    const { id: item } = saveCatalogItem(actor(owner), catalogInput("Položka"));
+    const { id } = issued(owner, customerId, { lines: [line({ catalogItemId: item })] });
+    update(owner, id, { lines: [line()] });
+
+    restoreVersion(actor(owner), listVersions(owner, id)[0]!.id);
+
+    expect(uses(owner, item)).toBe(2);
+  });
+});
+
 describe("číslo dokladu", () => {
   test("[INV-022] obsazené číslo je odmítnuté, stejné číslo téhož dokladu projde", () => {
     const { owner, customerId } = newOwner();
@@ -915,6 +1002,16 @@ describe("údaje zákazníka", () => {
       },
     });
     assertConsistent(db, owner);
+  });
+
+  test("[CUS-008] konceptu ani dobropisovanému dokladu údaje obnovit nejde", () => {
+    const { owner, customerId } = newOwner();
+    const draft = saveDraft(actor(owner), newDraftDefaults(owner, customerId));
+    expectRefused(() => refreshCustomerSnapshot(actor(owner), draft.id), V.notEditable);
+
+    const { id } = issued(owner, customerId);
+    db.update(invoice).set({ status: "credited" }).where(eq(invoice.id, id)).run();
+    expectRefused(() => refreshCustomerSnapshot(actor(owner), id), V.notEditable);
   });
 
   test("[CUS-008] obnovení bez změny zákazníka nic nevytvoří", () => {

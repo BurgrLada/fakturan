@@ -202,7 +202,7 @@ export const TEXTS = {
     },
   },
   invoices: {
-    stale: "Koncept se mezitím změnil nebo už je vystavený. Obnovte stránku a zkuste to znovu.",
+    stale: "Doklad se mezitím změnil. Obnovte stránku a zkuste to znovu.",
     validation: {
       forbidden: "Na tuto akci nemáte oprávnění",
       invalid: "Neplatné údaje",
