@@ -1,14 +1,15 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { computeTotals } from "@/lib/invoice-totals";
 import { setClockForTests } from "@/server/clock";
+import { userDir } from "@/server/files/store";
 import {
   auditLog,
   catalogItem,
-  customer,
+  file,
   invoice,
   invoiceLine,
   numberSeries,
@@ -49,6 +50,7 @@ import {
   setSupplierImage,
   type SupplierInput,
 } from "@/server/services/supplier";
+import { deleteUser } from "@/server/services/users";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { runAllocateWorkers } from "../helpers/run-workers";
@@ -94,25 +96,27 @@ const supplierInput: SupplierInput = {
   notVatPayerEn: "I am not a VAT payer.",
 };
 
+const customerInput = (name: string) => ({
+  name,
+  street: "Krátká 2",
+  city: "Brno",
+  zip: "602 00",
+  country: "Česká republika",
+  ico: "",
+  dic: "",
+  email: "",
+  extraEmails: [],
+  phone: "",
+  note: "",
+  dueDays: null,
+  language: null,
+  currency: null,
+  designId: null,
+  remindersEnabled: null,
+});
+
 const newCustomer = (owner: string, name = "Alfa s.r.o.") =>
-  saveCustomer(actor(owner), {
-    name,
-    street: "Krátká 2",
-    city: "Brno",
-    zip: "602 00",
-    country: "Česká republika",
-    ico: "",
-    dic: "",
-    email: "",
-    extraEmails: [],
-    phone: "",
-    note: "",
-    dueDays: null,
-    language: null,
-    currency: null,
-    designId: null,
-    remindersEnabled: null,
-  }).id;
+  saveCustomer(actor(owner), customerInput(name)).id;
 
 const newAccount = (owner: string, currency: "CZK" | "EUR" = "CZK") =>
   saveBankAccount(actor(owner), {
@@ -167,13 +171,13 @@ const fields = (owner: string, id: string) => checkIssuable(owner, id).map((p) =
 const counters = (owner: string) =>
   db.select().from(numberSeriesCounter).where(eq(numberSeriesCounter.userId, owner)).all();
 
-const audits = (id: string) =>
+const audit = (id: string, action: string) =>
   db
     .select()
     .from(auditLog)
     .where(eq(auditLog.entityId, id))
     .all()
-    .map((row) => row.action);
+    .find((row) => row.action === action);
 
 beforeEach(() => setClockForTests({ now: () => NOW }));
 afterEach(() => setClockForTests(null));
@@ -367,8 +371,106 @@ describe("vystavení", () => {
       revision: revision + 1,
     });
     expect(row.searchText).toContain("2026-001");
-    expect(audits(id)).toContain("invoice.issue");
     assertConsistent(db, owner);
+  });
+
+  test("[AUD-009] audit vystavení nese číslo, řadu a dosazené texty", () => {
+    const { owner, customerId } = newOwner();
+    const seriesId = listSeries(owner).find((row) => row.documentType === "invoice")!.id;
+    const { id, revision } = save(owner, customerId, {
+      seriesId,
+      note: "Rok {{rok}}",
+      lines: [line({ name: "Služby {{rok}}" })],
+    });
+
+    issueInvoice(actor(owner), id, { revision });
+
+    expect(audit(id, "invoice.issue")).toMatchObject({
+      before: {
+        status: "draft",
+        number: null,
+        note: "Rok {{rok}}",
+        lines: { changed: [{ name: "Služby {{rok}}" }] },
+      },
+      after: {
+        status: "issued",
+        number: "2026-001",
+        seriesId,
+        note: "Rok 2026",
+        lines: { changed: [{ name: "Služby 2026" }] },
+      },
+    });
+  });
+
+  test("[TST-018] vystavení přepíše částky řádků z téhož výpočtu jako hlavičku", () => {
+    const { owner, customerId } = newOwner();
+    const { id, revision } = save(owner, customerId);
+    db.update(invoiceLine).set({ netMinor: 1 }).where(eq(invoiceLine.invoiceId, id)).run();
+
+    issueInvoice(actor(owner), id, { revision });
+
+    expect(getInvoice(owner, id)?.lines[0]?.netMinor).toBe(300_000);
+    expect(getInvoice(owner, id)?.totalMinor).toBe(300_000);
+    assertConsistent(db, owner);
+  });
+
+  test("[SET-030] vystavený doklad drží formát data z okamžiku vystavení", () => {
+    const { owner, customerId } = newOwner();
+    savePreferences(actor(owner), { dateFormat: "dd.MM.yyyy" });
+    const { id } = issueNew(owner, customerId, { note: "{{obdobi_od}}" });
+    const draft = save(owner, customerId);
+
+    savePreferences(actor(owner), { dateFormat: "yyyy-MM-dd" });
+
+    expect(loadInvoiceDocument(owner, id)).toMatchObject({
+      dateFormat: "dd.MM.yyyy",
+      note: "01.03.2026",
+    });
+    expect(loadInvoiceDocument(owner, draft.id)?.dateFormat).toBe("yyyy-MM-dd");
+    expect(getInvoice(owner, draft.id)?.dateFormat).toBeNull();
+  });
+
+  test("[TPL-004] text přerostlý po dosazení je odmítnutý s pojmenovaným polem", () => {
+    const { owner } = newOwner();
+    const customerId = newCustomer(owner, "Velmi dlouhý název zákazníka s.r.o.");
+    const tooLong = "{{zakaznik}}".repeat(100);
+    const { id, revision } = save(owner, customerId, {
+      textBefore: "{{zakaznik}}".repeat(100),
+      textAfter: tooLong,
+      note: tooLong,
+      lines: [line({ name: "x".repeat(180) + "{{zakaznik}}", description: tooLong })],
+    });
+
+    expect(fields(owner, id)).toEqual([
+      "textBefore",
+      "textAfter",
+      "note",
+      "lines.0.name",
+      "lines.0.description",
+    ]);
+    expect(() => issueInvoice(actor(owner), id, { revision })).toThrow(NotIssuableError);
+    expect(counters(owner)).toEqual([]);
+  });
+
+  test("[TPL-004] kontrola délky počítá se skutečným číslem řady", () => {
+    const { owner, customerId } = newOwner();
+    const longSeries = saveSeries(actor(owner), {
+      name: "Dlouhá",
+      documentType: "invoice",
+      template: "FAKTURA-DLOUHA-SERIE-{RRRR}-{NNN}",
+      reset: "yearly",
+    });
+    const name = "x".repeat(183) + "{{cislo_faktury}}";
+    const onLong = save(owner, customerId, { seriesId: longSeries, lines: [line({ name })] });
+    const onDefault = save(owner, customerId, { lines: [line({ name })] });
+
+    expect(fields(owner, onLong.id)).toEqual(["lines.0.name"]);
+    expect(fields(owner, onDefault.id)).toEqual([]);
+    expect(() =>
+      issueInvoice(actor(owner), onDefault.id, { ...onDefault, seriesId: longSeries }),
+    ).toThrow(NotIssuableError);
+    expect(counters(owner)).toEqual([]);
+    expect(getInvoice(owner, onDefault.id)?.status).toBe("draft");
   });
 
   test("[INV-001] zastaralá revize je odmítnutá a číslo se nespotřebuje", () => {
@@ -592,10 +694,7 @@ describe("vystavení", () => {
   test("[CUS-008] přejmenování zákazníka nezmění vystavený doklad", () => {
     const { owner, customerId, accountId } = newOwner();
     const { id } = issueNew(owner, customerId);
-    db.update(customer)
-      .set({ name: "Beta a.s.", city: "Ostrava" })
-      .where(eq(customer.id, customerId))
-      .run();
+    saveCustomer(actor(owner), { ...customerInput("Beta a.s."), id: customerId, city: "Ostrava" });
     saveSupplier(actor(owner), { ...supplierInput, name: "Nové jméno" });
     db.run(sql`UPDATE bank_account SET name = 'Přejmenovaný' WHERE id = ${accountId}`);
 
@@ -610,7 +709,7 @@ describe("vystavení", () => {
   test("[CUS-008] vystavení vezme aktuální jméno zákazníka, ne to z konceptu", () => {
     const { owner, customerId } = newOwner();
     const { id, revision } = save(owner, customerId);
-    db.update(customer).set({ name: "Beta a.s." }).where(eq(customer.id, customerId)).run();
+    saveCustomer(actor(owner), { ...customerInput("Beta a.s."), id: customerId });
 
     issueInvoice(actor(owner), id, { revision });
 
@@ -620,7 +719,7 @@ describe("vystavení", () => {
   test("[CUS-008] koncept čte strany dokladu z aktuálních dat", () => {
     const { owner, customerId } = newOwner();
     const { id } = save(owner, customerId, { note: "{{zakaznik}} {{cislo_faktury}}|" });
-    db.update(customer).set({ name: "Beta a.s." }).where(eq(customer.id, customerId)).run();
+    saveCustomer(actor(owner), { ...customerInput("Beta a.s."), id: customerId });
 
     const doc = loadInvoiceDocument(owner, id)!;
 
@@ -738,10 +837,30 @@ describe("životní cyklus", () => {
 
     restoreInvoice(actor(owner), id);
     expect(getInvoice(owner, id)).toMatchObject({ status: "sent", cancelledFrom: null, number });
-    expect(audits(id)).toEqual(
-      expect.arrayContaining(["invoice.cancel", "invoice.restore", "invoice.mark_sent"]),
-    );
+    expect(audit(id, "invoice.mark_sent")).toMatchObject({
+      before: { status: "issued" },
+      after: { status: "sent" },
+    });
+    expect(audit(id, "invoice.cancel")).toMatchObject({
+      before: { status: "sent" },
+      after: { status: "cancelled", cancelledFrom: "sent" },
+    });
+    expect(audit(id, "invoice.restore")).toMatchObject({
+      before: { status: "cancelled", cancelledFrom: "sent" },
+      after: { status: "sent", cancelledFrom: null },
+    });
     assertConsistent(db, owner);
+  });
+
+  test("[INV-003] vrácení storna neodeslané faktury obnoví stav vystavená", () => {
+    const { owner, customerId } = newOwner();
+    const { id, number } = issueNew(owner, customerId);
+
+    cancelInvoice(actor(owner), id);
+    expect(getInvoice(owner, id)).toMatchObject({ status: "cancelled", cancelledFrom: "issued" });
+
+    restoreInvoice(actor(owner), id);
+    expect(getInvoice(owner, id)).toMatchObject({ status: "issued", cancelledFrom: null, number });
   });
 
   test("[INV-003] storno jde jen z vystavené a odeslané, vrátit jen stornovanou", () => {
@@ -813,6 +932,34 @@ describe("obrázky vystavených dokladů", () => {
       qrLogoFileId: profile.qrLogoFileId,
     });
     expect(readOwnedFile(actor(owner), profile.signatureFileId!).mimeType).toBe("image/png");
+  });
+
+  test("[ADM-006] smazání účtu s vystaveným dokladem a logem nic nezanechá", () => {
+    const { owner, customerId } = newOwner();
+    const adminId = `admin-${owner}`;
+    const now = new Date();
+    db.insert(user)
+      .values({
+        id: adminId,
+        name: adminId,
+        email: `${adminId}@example.cz`,
+        role: "admin",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    setSupplierImage(actor(owner), "logo", PNG, "logo.png");
+    const { id } = issueNew(owner, customerId);
+    setSupplierImage(actor(owner), "logo", PNG, "nove.png");
+    expect(existsSync(userDir(owner))).toBe(true);
+
+    deleteUser(actor(adminId), owner, `${owner}@example.cz`);
+
+    expect(db.select().from(invoice).where(eq(invoice.userId, owner)).all()).toEqual([]);
+    expect(db.select().from(invoiceLine).where(eq(invoiceLine.invoiceId, id)).all()).toEqual([]);
+    expect(db.select().from(file).where(eq(file.userId, owner)).all()).toEqual([]);
+    expect(existsSync(userDir(owner))).toBe(false);
+    assertConsistent(db, owner);
   });
 
   test("[CUS-008] bez odkazu z dokladu se starý soubor smaže jako dřív", () => {

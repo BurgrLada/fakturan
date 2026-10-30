@@ -143,10 +143,7 @@ export function loadInvoiceDocument(ownerId: string, id: string): InvoiceDocumen
 
   const { snapshot, images } = currentParties(db, ownerId, row);
   const customerName = snapshot.customer?.name ?? row.customerName;
-  const texts = renderDocumentTexts(
-    row,
-    document.lines,
-    variablesFor(ownerId, row, "", customerName),
-  );
-  return { ...document, ...texts, customerName, snapshot, images };
+  const ctx = variablesFor(ownerId, row, "", customerName);
+  const texts = renderDocumentTexts(row, document.lines, ctx);
+  return { ...document, ...texts, dateFormat: ctx.dateFormat, customerName, snapshot, images };
 }

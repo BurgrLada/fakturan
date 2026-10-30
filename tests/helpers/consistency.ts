@@ -67,6 +67,7 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
     if (!row.supplierSnapshot || !row.customerSnapshot) {
       problems.push(`${label}: vystavený doklad nemá snapshoty`);
     }
+    if (!row.dateFormat) problems.push(`${label}: vystavený doklad nemá formát data`);
     if (row.paymentMethod === "transfer" && !row.accountSnapshot) {
       problems.push(`${label}: převod bez snapshotu účtu`);
     }

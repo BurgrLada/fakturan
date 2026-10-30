@@ -248,6 +248,13 @@ export const TEXTS = {
       exchangeRate: (currency: string) => `Vyplňte kurz ${currency}`,
       noSeries: "Pro tento typ dokladu není číselná řada",
       seriesType: "Číselná řada nepatří k tomuto typu dokladu",
+      textBefore: "Text před položkami je po dosazení proměnných příliš dlouhý",
+      textAfter: "Text za položkami je po dosazení proměnných příliš dlouhý",
+      note: "Poznámka je po dosazení proměnných příliš dlouhá",
+      lineNameLong: (position: number) =>
+        `Položka ${position}: název je po dosazení proměnných příliš dlouhý`,
+      lineDescriptionLong: (position: number) =>
+        `Položka ${position}: popis je po dosazení proměnných příliš dlouhý`,
     },
     tags: {
       notFound: "Štítek neexistuje",

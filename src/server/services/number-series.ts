@@ -21,7 +21,7 @@ import { clock } from "../clock";
 import { db, type Db, type Tx } from "../db";
 import { invoice, numberSeries, numberSeriesCounter } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { ServiceError } from "./access";
+import { ServiceError, type Reader } from "./access";
 import { mutate } from "./mutation";
 
 export type NumberSeries = typeof numberSeries.$inferSelect;
@@ -364,6 +364,26 @@ export function deleteSeries(actor: Actor, id: string): void {
       before: series,
     });
   });
+}
+
+// A preview for checks outside the issuing transaction; allocateNumber may still skip past it.
+export function peekNumber(
+  q: Reader,
+  ownerId: string,
+  series: NumberSeries,
+  date: CalendarDate,
+): string {
+  const key = periodKey(series.reset, date);
+  const counter = q
+    .select({ next: numberSeriesCounter.next })
+    .from(numberSeriesCounter)
+    .where(
+      scoped(ownerId).where(numberSeriesCounter, (t, { and, eq }) =>
+        and(eq(t.seriesId, series.id), eq(t.periodKey, key)),
+      ),
+    )
+    .get();
+  return formatNumber(series.template, date, counter?.next ?? 1);
 }
 
 // Must run inside the caller's mutate. The upsert is a single statement, and a rollback of the

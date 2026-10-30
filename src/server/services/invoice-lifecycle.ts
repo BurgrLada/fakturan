@@ -17,6 +17,8 @@ import {
   diffLines,
   findOwned,
   linesOf,
+  MAX_DOCUMENT_TEXT,
+  MAX_LINE_NAME,
   ownerOf,
   searchTextOf,
   sumsOf,
@@ -25,7 +27,7 @@ import {
   type InvoiceLine,
 } from "./invoices";
 import { mutate } from "./mutation";
-import { allocateNumber, defaultSeriesFor, type NumberSeries } from "./number-series";
+import { allocateNumber, defaultSeriesFor, peekNumber, type NumberSeries } from "./number-series";
 import { getPreferences } from "./preferences";
 import { missingSupplierKeys } from "./supplier";
 
@@ -145,23 +147,61 @@ function draftProblems(q: Reader, ownerId: string, row: Invoice, lines: InvoiceL
 export function checkIssuable(ownerId: string, id: string): IssueProblem[] {
   const row = findOwned(db, ownerId, id);
   if (row.status !== "draft") return [{ field: "status", message: T.alreadyIssued }];
-  const found = draftProblems(db, ownerId, row, linesOf(db, ownerId, id));
+  const lines = linesOf(db, ownerId, id);
+  const found = draftProblems(db, ownerId, row, lines);
   const picked = pickSeries(db, ownerId, row, row.seriesId);
-  return "problem" in picked ? [...found, picked.problem] : found;
+  if ("problem" in picked) found.push(picked.problem);
+  const number =
+    "series" in picked && row.issueDate
+      ? peekNumber(db, ownerId, picked.series, row.issueDate)
+      : "";
+  return [...found, ...textProblems(issuedTexts(db, ownerId, row, lines, number))];
 }
 
-function issuedTexts(tx: Tx, userId: string, row: Invoice, lines: InvoiceLine[], number: string) {
-  const parties = currentParties(tx, userId, row);
+// Variables can outgrow the limits saveDraft enforced, and editing an issued document validates
+// against the same limits, so an oversized text would make the document uneditable.
+function textProblems(texts: {
+  textBefore: string;
+  textAfter: string;
+  note: string;
+  lines: Pick<InvoiceLine, "name" | "description">[];
+}): IssueProblem[] {
+  const found: IssueProblem[] = [];
+  for (const field of ["textBefore", "textAfter", "note"] as const) {
+    if (texts[field].length > MAX_DOCUMENT_TEXT) found.push({ field, message: T[field] });
+  }
+  texts.lines.forEach((line, i) => {
+    if (line.name.length > MAX_LINE_NAME) {
+      found.push({ field: `lines.${i}.name`, message: T.lineNameLong(i + 1) });
+    }
+    if (line.description.length > MAX_DOCUMENT_TEXT) {
+      found.push({ field: `lines.${i}.description`, message: T.lineDescriptionLong(i + 1) });
+    }
+  });
+  return found;
+}
+
+function issuedTexts(
+  q: Reader,
+  userId: string,
+  row: Invoice,
+  lines: InvoiceLine[],
+  number: string,
+) {
+  const parties = currentParties(q, userId, row);
   const customerName = parties.snapshot.customer?.name ?? row.customerName;
-  const texts = renderDocumentTexts(row, lines, variablesFor(userId, row, number, customerName));
-  return { ...texts, ...parties, customerName };
+  const ctx = variablesFor(userId, row, number, customerName);
+  const texts = renderDocumentTexts(row, lines, ctx);
+  return { ...texts, ...parties, customerName, dateFormat: ctx.dateFormat };
 }
 
 function storeLines(tx: Tx, before: InvoiceLine[], after: InvoiceLine[]): void {
   after.forEach((line, i) => {
-    if (line.name === before[i]!.name && line.description === before[i]!.description) return;
+    const { name, description, netMinor } = line;
+    const old = before[i]!;
+    if (name === old.name && description === old.description && netMinor === old.netMinor) return;
     tx.update(invoiceLine)
-      .set({ name: line.name, description: line.description })
+      .set({ name, description, netMinor })
       .where(eq(invoiceLine.id, line.id))
       .run();
   });
@@ -192,11 +232,17 @@ export function issueInvoice(
     const totals = totalsOf(lines, row);
     const { number } = allocateNumber(tx, userId, picked.series.id, row.issueDate!);
     const texts = issuedTexts(tx, userId, row, lines, number);
+    const overLimit = textProblems(texts);
+    if (overLimit.length > 0) throw new NotIssuableError(overLimit);
+    const issuedLines = texts.lines.map((line, i) => ({
+      ...line,
+      netMinor: totals.lines[i]!.netMinor,
+    }));
     const automaticSymbol =
       getPreferences(userId).variableSymbolFormat === "digits" ? variableSymbolFrom(number) : "";
     const now = clock.now();
 
-    storeLines(tx, lines, texts.lines);
+    storeLines(tx, lines, issuedLines);
     for (const line of lines) {
       if (line.catalogItemId) recordCatalogUse(tx, userId, line.catalogItemId);
     }
@@ -210,6 +256,7 @@ export function issueInvoice(
         variableSymbolManual: manualSymbol !== undefined,
         seriesId: picked.series.id,
         customerName: texts.customerName,
+        dateFormat: texts.dateFormat,
         textBefore: texts.textBefore,
         textAfter: texts.textAfter,
         note: texts.note,
@@ -228,7 +275,7 @@ export function issueInvoice(
       .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
       .run();
 
-    const changes = diffLines(lines, texts.lines);
+    const changes = diffLines(lines, issuedLines);
     audit({
       entity: "invoice",
       entityId: id,

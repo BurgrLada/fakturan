@@ -12,7 +12,7 @@ import { CURRENCIES } from "@/lib/currency";
 import { INVOICE_STATUSES, INVOICE_TYPES, type Appearance } from "@/lib/invoice";
 import type { AccountSnapshot, CustomerSnapshot, SupplierSnapshot } from "@/lib/invoice-document";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
-import { LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
+import { DATE_FORMATS, LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
 import { user } from "./auth";
 import { bankAccount } from "./bank-account";
 import { catalogItem } from "./catalog";
@@ -69,6 +69,8 @@ export const invoice = sqliteTable(
     supplierSnapshot: text("supplier_snapshot", { mode: "json" }).$type<SupplierSnapshot>(),
     customerSnapshot: text("customer_snapshot", { mode: "json" }).$type<CustomerSnapshot>(),
     accountSnapshot: text("account_snapshot", { mode: "json" }).$type<AccountSnapshot>(),
+    // Fixed when issuing, so a later preference change cannot redraw an issued document.
+    dateFormat: text("date_format", { enum: DATE_FORMATS }),
     logoFileId: imageRef("logo_file_id"),
     qrLogoFileId: imageRef("qr_logo_file_id"),
     signatureFileId: imageRef("signature_file_id"),

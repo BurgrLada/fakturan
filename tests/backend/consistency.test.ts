@@ -66,6 +66,7 @@ function addLine(ownerId: string, invoiceId: string, netMinor: number): void {
 
 const issued = {
   status: "issued",
+  dateFormat: "d. M. yyyy",
   supplierSnapshot: { name: "Dodavatel" } as SupplierSnapshot,
   customerSnapshot: { name: "Zákazník" } as CustomerSnapshot,
 } as const;
@@ -181,6 +182,13 @@ describe("assertConsistent", () => {
     createInvoice(owner, { status: "issued", number: "1" });
 
     expect(() => assertConsistent(db, owner)).toThrow(/nemá snapshoty/);
+  });
+
+  test("[TST-018] odhalí vystavený doklad bez formátu data", () => {
+    const owner = createUser();
+    createInvoice(owner, { ...issued, number: "1", dateFormat: null });
+
+    expect(() => assertConsistent(db, owner)).toThrow(/nemá formát data/);
   });
 
   test("[TST-018] odhalí převod bez snapshotu účtu", () => {

@@ -2,7 +2,7 @@ import type { Appearance, InvoiceStatus, InvoiceType } from "./invoice";
 import type { DiscountKind, RoundingMode } from "./invoice-totals";
 import type { Currency } from "./currency";
 import type { CalendarDate } from "./number-format";
-import type { Language, PaymentMethod } from "./preferences";
+import type { DateFormat, Language, PaymentMethod } from "./preferences";
 
 export type SupplierSnapshot = {
   name: string;
@@ -104,6 +104,8 @@ type DocumentHeader = {
   discountKind: DiscountKind;
   discountValue: number;
   rounding: RoundingMode;
+  // Null only on a draft row; loadInvoiceDocument fills it with the current preference.
+  dateFormat: DateFormat | null;
 };
 
 export type InvoiceDocument = DocumentHeader & {
@@ -153,6 +155,7 @@ export function invoiceDocument(row: DocumentRow): InvoiceDocument {
     discountKind: row.discountKind,
     discountValue: row.discountValue,
     rounding: row.rounding,
+    dateFormat: row.dateFormat,
     appearance: row.appearance,
     lines: row.lines.map((line) => ({
       catalogItemId: line.catalogItemId,

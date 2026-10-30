@@ -185,9 +185,9 @@ function isUsedByInvoice(ownerId: string, id: string): boolean {
 // The swap is already committed, so a leftover file must not turn it into a failure. Checking after
 // the commit is safe: issuing reads the profile, which no longer points at this file.
 function discardFile(actor: Actor, id: string | null): void {
-  if (!id || isUsedByInvoice(ownerOf(actor), id)) return;
+  if (!id) return;
   try {
-    deleteFile(actor, id);
+    if (!isUsedByInvoice(ownerOf(actor), id)) deleteFile(actor, id);
   } catch (error) {
     logger.warn("Starý obrázek dodavatele se nepodařilo smazat", { fileId: id, error });
   }

@@ -43,6 +43,8 @@ import { linkTags, tagsOf, type Tag } from "./tags";
 const V = TEXTS.invoices.validation;
 const MAX_LINES = 500;
 const MAX_EXCHANGE_RATE_MICROS = 1_000_000_000_000;
+export const MAX_LINE_NAME = 200;
+export const MAX_DOCUMENT_TEXT = 2000;
 
 export type Invoice = typeof invoice.$inferSelect;
 export type InvoiceLine = typeof invoiceLine.$inferSelect;
@@ -81,8 +83,8 @@ function withoutStrayDiscount<T extends { discountKind: DiscountKind; discountVa
 const lineSchema = z
   .object({
     catalogItemId: reference,
-    name: text(200),
-    description: text(2000),
+    name: text(MAX_LINE_NAME),
+    description: text(MAX_DOCUMENT_TEXT),
     quantityMilli: z
       .number(V.quantity)
       .int(V.quantity)
@@ -135,9 +137,9 @@ export const draftInputSchema = z
     paymentMethod: z.enum(PAYMENT_METHODS, V.paymentMethod),
     orderRef: text(200),
     reference: text(200),
-    textBefore: text(2000),
-    textAfter: text(2000),
-    note: text(2000),
+    textBefore: text(MAX_DOCUMENT_TEXT),
+    textAfter: text(MAX_DOCUMENT_TEXT),
+    note: text(MAX_DOCUMENT_TEXT),
     ...discountFields,
     rounding: z.enum(ROUNDING_MODES, V.rounding),
     appearance: appearanceSchema,
