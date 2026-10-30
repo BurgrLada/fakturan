@@ -342,7 +342,7 @@ test('[PDF-001] standalone obraz vyrenderuje PDF s logem SVG', ...) // docker-pd
 - [ ] **Step 2: Ověř selhání:** `npx vitest run tests/backend/pdf.test.ts`, FAIL.
 - [ ] **Step 3: Implementuj render a `cisty`** podle rozhraní. Zkus nejdřív jeden dokument s českým textem, teprve pak tabulku.
 - [ ] **Step 4: Ověř:** `npm test`, PASS.
-- [ ] **Step 5: Ověř obraz:** `docker build -t fakturan-ci . && E2E_DOCKER_IMAGE=fakturan-ci npx playwright test docker-pdf`, PASS.
+- [ ] **Step 5: Ověř obraz:** `docker build -t fakturan-ci .` a v kontejneru spusť `node scripts/pdf-smoke.mjs`, který vyrenderuje fixture s logem SVG a skončí kódem 0. Plný test `E2E_DOCKER_IMAGE=fakturan-ci npx playwright test docker-pdf` se zapne v Task 9.
 - [ ] **Step 6: Commit** `feat(pdf): render invoices with first design`
 
 ---
@@ -425,7 +425,7 @@ test('[SEC-006] akce odmítnou neplatný vstup a cizí ID', ...)
 
 - [ ] **Step 2: Ověř selhání:** `npx playwright test invoice-form`, FAIL.
 - [ ] **Step 3: Implementuj** formulář a actions.
-- [ ] **Step 4: Ověř:** `npm test` a `npx playwright test invoice-form`, PASS.
+- [ ] **Step 4: Ověř:** `npm test`, `npx playwright test invoice-form` a `E2E_DOCKER_IMAGE=fakturan-ci npx playwright test docker-pdf` po novém `docker build`, PASS.
 - [ ] **Step 5: Commit** `feat(invoices): add invoice form with autosave and preview`
 
 ---
