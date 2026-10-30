@@ -262,6 +262,7 @@ describe("údaje zákazníka", () => {
     expect(() => saveCustomer(actor("c1"), input({ dueDays: 400 }))).toThrow("Splatnost");
     expect(() => saveCustomer(actor("c1"), input({ language: "de" as "cs" }))).toThrow("jazyk");
     expect(() => saveCustomer(actor("c1"), input({ currency: "XYZ" as "CZK" }))).toThrow("měna");
+    expect(() => saveCustomer(actor("c1"), input({ designId: "neexistuje" }))).toThrow("design");
   });
 
   test("[CUS-009] duplicitní IČO vrátí upozornění a uloží se", () => {

@@ -37,6 +37,16 @@ export type DocumentLabels = {
   note: string;
   signature: string;
   page: (current: number, total: number) => string;
+  sample: {
+    customer: string;
+    street: string;
+    city: string;
+    zip: string;
+    country: string;
+    lineName: string;
+    lineDescription: string;
+    secondLineName: string;
+  };
 };
 
 export const LABELS: Record<Language, DocumentLabels> = {
@@ -80,6 +90,16 @@ export const LABELS: Record<Language, DocumentLabels> = {
     note: "Poznámka",
     signature: "Podpis",
     page: (current, total) => `Strana ${current} z ${total}`,
+    sample: {
+      customer: "Ukázkový zákazník s.r.o.",
+      street: "Vzorová 12",
+      city: "Praha",
+      zip: "110 00",
+      country: "Česká republika",
+      lineName: "Konzultace",
+      lineDescription: "Návrh řešení a příprava podkladů",
+      secondLineName: "Grafické práce",
+    },
   },
   en: {
     locale: "en-GB",
@@ -121,5 +141,15 @@ export const LABELS: Record<Language, DocumentLabels> = {
     note: "Note",
     signature: "Signature",
     page: (current, total) => `Page ${current} of ${total}`,
+    sample: {
+      customer: "Sample Customer Ltd.",
+      street: "12 Example Street",
+      city: "Prague",
+      zip: "110 00",
+      country: "Czech Republic",
+      lineName: "Consulting",
+      lineDescription: "Solution design and preparation",
+      secondLineName: "Graphic design",
+    },
   },
 };

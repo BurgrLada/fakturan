@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
 import { TEXTS } from "@/lib/texts";
+import { designChoices } from "@/server/pdf/designs";
 import { requireSession } from "@/server/auth/session";
 import { db } from "@/server/db";
 import { duplicateIcoOf, getCustomer, type Customer } from "@/server/services/customers";
@@ -60,7 +61,7 @@ async function CustomerContent({ params }: Pick<PageProps<"/zakaznici/[id]">, "p
           <AlertDescription>{T.duplicateIco(duplicate)}</AlertDescription>
         </Alert>
       )}
-      <CustomerForm initial={toValues(row)} />
+      <CustomerForm initial={toValues(row)} designs={designChoices()} />
       <section className="flex flex-col gap-3 sm:max-w-xl">
         <h2 className="text-lg">{T.vat.title}</h2>
         <p className="text-sm text-muted-foreground">{vatLine(row)}</p>

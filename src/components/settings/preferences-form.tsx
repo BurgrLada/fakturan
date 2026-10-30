@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { CURRENCIES } from "@/lib/currency";
+import { ROUNDING_MODES } from "@/lib/invoice-totals";
 import {
   DATE_FORMATS,
   ISSUE_DATE_MODES,
@@ -21,7 +22,7 @@ import { TEXTS } from "@/lib/texts";
 const T = TEXTS.preferences;
 
 type FlagKey = "showLogo" | "showQr" | "showQrLogo" | "showSignature" | "showDuzp";
-type TextKey = "unit" | "accentColor" | "textBefore" | "textAfter" | "note";
+type TextKey = "unit" | "pdfFileName" | "textBefore" | "textAfter" | "note";
 type ChoiceKey =
   | "language"
   | "currency"
@@ -29,45 +30,72 @@ type ChoiceKey =
   | "paymentMethod"
   | "issueDateMode"
   | "dateFormat"
-  | "variableSymbolFormat";
+  | "variableSymbolFormat"
+  | "rounding";
+
+export type ChoiceOption = { value: string; label: string };
+
+// Owned by /nastaveni/designy: saving this form must not put back what was stale here.
+const LOOK_FIELDS: readonly string[] = [
+  "designId",
+  "accentColor",
+  "surfaceColor",
+  "textColor",
+  "lineColor",
+  "logoPosition",
+];
 
 const FLAGS: FlagKey[] = ["showLogo", "showQr", "showQrLogo", "showSignature", "showDuzp"];
 
-const CHOICES: Record<ChoiceKey, { values: readonly string[]; label: (value: string) => string }> =
-  {
-    language: { values: LANGUAGES, label: (v) => T.languages[v as keyof typeof T.languages] },
-    currency: { values: CURRENCIES, label: (v) => v },
-    designId: { values: ["cisty"], label: (v) => T.designs[v as keyof typeof T.designs] },
-    paymentMethod: {
-      values: PAYMENT_METHODS,
-      label: (v) => T.paymentMethods[v as keyof typeof T.paymentMethods],
-    },
-    issueDateMode: {
-      values: ISSUE_DATE_MODES,
-      label: (v) => T.issueDateModes[v as keyof typeof T.issueDateModes],
-    },
-    dateFormat: {
-      values: DATE_FORMATS,
-      label: (v) => T.dateFormats[v as keyof typeof T.dateFormats],
-    },
-    variableSymbolFormat: {
-      values: VARIABLE_SYMBOL_FORMATS,
-      label: (v) => T.variableSymbolFormats[v as keyof typeof T.variableSymbolFormats],
-    },
-  };
+const CHOICES: Record<
+  Exclude<ChoiceKey, "designId">,
+  { values: readonly string[]; label: (value: string) => string }
+> = {
+  language: { values: LANGUAGES, label: (v) => T.languages[v as keyof typeof T.languages] },
+  currency: { values: CURRENCIES, label: (v) => v },
+  paymentMethod: {
+    values: PAYMENT_METHODS,
+    label: (v) => T.paymentMethods[v as keyof typeof T.paymentMethods],
+  },
+  issueDateMode: {
+    values: ISSUE_DATE_MODES,
+    label: (v) => T.issueDateModes[v as keyof typeof T.issueDateModes],
+  },
+  dateFormat: {
+    values: DATE_FORMATS,
+    label: (v) => T.dateFormats[v as keyof typeof T.dateFormats],
+  },
+  variableSymbolFormat: {
+    values: VARIABLE_SYMBOL_FORMATS,
+    label: (v) => T.variableSymbolFormats[v as keyof typeof T.variableSymbolFormats],
+  },
+  rounding: {
+    values: ROUNDING_MODES,
+    label: (v) => T.roundings[v as keyof typeof T.roundings],
+  },
+};
 
 export function ChoiceField({
   name,
   value,
   onChange,
   idPrefix = "pref",
+  options,
 }: {
   name: ChoiceKey;
   value: string;
   onChange: (name: ChoiceKey, value: string) => void;
   idPrefix?: string;
+  options?: ChoiceOption[];
 }) {
-  const choice = CHOICES[name];
+  const choices =
+    options ??
+    (name === "designId"
+      ? []
+      : CHOICES[name].values.map((option) => ({
+          value: option,
+          label: CHOICES[name as Exclude<ChoiceKey, "designId">].label(option),
+        })));
   return (
     <div className="flex flex-col gap-2">
       <Label htmlFor={`${idPrefix}-${name}`}>{T.fields[name]}</Label>
@@ -76,9 +104,9 @@ export function ChoiceField({
         value={value}
         onChange={(event) => onChange(name, event.target.value)}
       >
-        {choice.values.map((option) => (
-          <option key={option} value={option}>
-            {choice.label(option)}
+        {choices.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </NativeSelect>
@@ -102,7 +130,9 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
       <div className="flex flex-col gap-2">
         <Label htmlFor={id}>{T.fields[name]}</Label>
         <Input id={id} value={values[name]} onChange={(event) => set(name, event.target.value)} />
-        {name === "accentColor" && <p className="text-sm text-muted-foreground">{T.accentHint}</p>}
+        {name === "pdfFileName" && (
+          <p className="text-sm text-muted-foreground">{T.pdfFileNameHint}</p>
+        )}
       </div>
     );
   }
@@ -110,8 +140,9 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     startTransition(async () => {
+      const owned = Object.entries(values).filter(([key]) => !LOOK_FIELDS.includes(key));
       const result = await savePreferencesAction({
-        ...values,
+        ...Object.fromEntries(owned),
         dueDays: dueDays.trim() === "" ? Number.NaN : Number(dueDays),
       });
       setMessage(result.ok ? { ok: true, text: T.saved } : { ok: false, text: result.error });
@@ -140,12 +171,12 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
         <ChoiceField name="language" value={values.language} onChange={choose} />
         <ChoiceField name="currency" value={values.currency} onChange={choose} />
         <ChoiceField name="paymentMethod" value={values.paymentMethod} onChange={choose} />
+        <ChoiceField name="rounding" value={values.rounding} onChange={choose} />
         {text("unit")}
+        {text("pdfFileName")}
       </section>
       <section className="flex flex-col gap-4">
         <h2 className="text-lg">{T.sections.look}</h2>
-        <ChoiceField name="designId" value={values.designId} onChange={choose} />
-        {text("accentColor")}
         {FLAGS.map((name) => (
           <div key={name} className="flex items-center gap-2">
             <input

@@ -67,13 +67,13 @@ describe("výchozí hodnoty", () => {
   test("[SET-030] uložená hodnota se sloučí s výchozími a audituje", () => {
     seed("p2");
 
-    savePreferences(actor("p2"), { dueDays: 30, language: "en", designId: "moderni" });
+    savePreferences(actor("p2"), { dueDays: 30, language: "en", designId: "mono" });
 
     expect(getPreferences("p2")).toEqual({
       ...DEFAULT_PREFERENCES,
       dueDays: 30,
       language: "en",
-      designId: "moderni",
+      designId: "mono",
     });
     expect(rows("p2")).toHaveLength(1);
     const [entry] = audits("p2", "preferences.save");
@@ -97,6 +97,7 @@ describe("výchozí hodnoty", () => {
     expect(() => savePreferences(actor("p4"), { currency: "XYZ" as "CZK" })).toThrow();
     expect(() => savePreferences(actor("p4"), { language: "de" as "cs" })).toThrow();
     expect(() => savePreferences(actor("p4"), { designId: "" })).toThrow();
+    expect(() => savePreferences(actor("p4"), { designId: "neexistuje" })).toThrow();
     expect(() => savePreferences(actor("p4"), { unit: " " })).toThrow();
     expect(rows("p4")).toEqual([]);
   });

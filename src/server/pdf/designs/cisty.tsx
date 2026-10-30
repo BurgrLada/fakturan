@@ -1,15 +1,5 @@
 import { Text, View } from "@react-pdf/renderer";
-import {
-  Details,
-  InvoicePage,
-  LinesTable,
-  Logo,
-  Parties,
-  PaymentBox,
-  Signature,
-  TextBlock,
-  Totals,
-} from "../parts";
+import { Details, InvoiceBody, InvoicePage, Logo, Parties } from "../parts";
 import type { InvoiceView } from "../view";
 import type { DesignTokens, InvoiceDesign } from "./types";
 
@@ -58,15 +48,7 @@ function CistyPage({ view }: { view: InvoiceView }) {
       </View>
       <Parties view={view} tokens={tokens} />
       <Details view={view} tokens={tokens} />
-      <TextBlock text={view.textBefore} tokens={tokens} />
-      <LinesTable view={view} tokens={tokens} />
-      <Totals view={view} tokens={tokens} />
-      <TextBlock text={view.textAfter} tokens={tokens} />
-      <PaymentBox view={view} tokens={tokens} />
-      <TextBlock text={view.note} label={view.labels.note} tokens={tokens} />
-      <TextBlock text={view.vatStatement} tokens={tokens} />
-      <TextBlock text={view.registryNote} tokens={tokens} />
-      <Signature view={view} tokens={tokens} />
+      <InvoiceBody view={view} tokens={tokens} />
     </InvoicePage>
   );
 }

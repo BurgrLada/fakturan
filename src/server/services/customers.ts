@@ -20,6 +20,7 @@ import { czech } from "../db/collation";
 import { customer, invoice } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { lookupVies, splitVatId, type ViesState } from "../external/vies";
+import { isDesignId } from "../pdf/designs";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError, type Reader } from "./access";
 import type { Page } from "./audit-read";
@@ -52,11 +53,7 @@ export const customerInputSchema = z
     dueDays: z.number(V.dueDays).int(V.dueDays).min(0, V.dueDays).max(365, V.dueDays).nullable(),
     language: z.enum(LANGUAGES, V.language).nullable(),
     currency: z.enum(CURRENCIES, V.currency).nullable(),
-    designId: z
-      .string(V.designId)
-      .trim()
-      .regex(/^[a-z0-9-]{1,40}$/, V.designId)
-      .nullable(),
+    designId: z.string(V.designId).trim().refine(isDesignId, V.designId).nullable(),
     remindersEnabled: z.boolean(V.invalid).nullable(),
   })
   .superRefine((value, ctx) => {

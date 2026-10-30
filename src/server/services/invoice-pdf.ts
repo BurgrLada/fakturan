@@ -34,7 +34,7 @@ export function fileNameFor(
   return `${bounded || labels.documentTypes.invoice.toLocaleLowerCase(labels.locale)}.pdf`;
 }
 
-function ownerImageReader(ownerId: string) {
+export function ownerImageReader(ownerId: string) {
   const actor: Actor = { userId: ownerId, source: "system" };
   return (fileId: string): Buffer | null => {
     try {

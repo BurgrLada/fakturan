@@ -7,6 +7,8 @@ import { parentPort, workerData } from "node:worker_threads";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const stub = pathToFileURL(join(root, "tests/helpers/server-only.ts")).href;
+// The designs are JSX, which Node's type stripping cannot load, and allocation never renders one.
+const designsStub = pathToFileURL(join(root, "tests/helpers/designs-stub.ts")).href;
 
 function withExtension(path) {
   if (existsSync(`${path}.ts`)) return `${path}.ts`;
@@ -16,6 +18,7 @@ function withExtension(path) {
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "server-only") return { url: stub, shortCircuit: true };
+    if (specifier.endsWith("/pdf/designs")) return { url: designsStub, shortCircuit: true };
     if (specifier.startsWith("@/")) {
       const path = withExtension(join(root, "src", specifier.slice(2)));
       return { url: pathToFileURL(path).href, shortCircuit: true };

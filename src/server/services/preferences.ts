@@ -15,6 +15,7 @@ import {
   type Preferences,
 } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
+import { isDesignId } from "../pdf/designs";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
@@ -31,13 +32,14 @@ export const designIdSchema = z
   .string(V.designId)
   .trim()
   .regex(/^[a-z0-9-]{1,40}$/, V.designId);
+export const knownDesignIdSchema = designIdSchema.refine(isDesignId, V.designId);
 export const logoPositionSchema = z.enum(LOGO_POSITIONS, V.logoPosition);
 
 export const preferencesSchema = z.object({
   dueDays: z.number(V.dueDays).int(V.dueDays).min(0, V.dueDays).max(365, V.dueDays),
   language: z.enum(LANGUAGES, V.language),
   currency: z.enum(CURRENCIES, V.currency),
-  designId: designIdSchema,
+  designId: knownDesignIdSchema,
   accentColor: colorSchema,
   surfaceColor: colorSchema,
   textColor: colorSchema,

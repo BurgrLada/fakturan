@@ -11,6 +11,7 @@ const TABS = [
   { href: "/nastaveni/ucty", label: TEXTS.settings.bankAccounts },
   { href: "/nastaveni/rady", label: TEXTS.settings.numberSeries },
   { href: "/nastaveni/vychozi", label: TEXTS.settings.defaults },
+  { href: "/nastaveni/designy", label: TEXTS.settings.designs },
   { href: "/nastaveni/historie", label: TEXTS.settings.history },
 ];
 

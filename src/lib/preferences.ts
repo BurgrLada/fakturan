@@ -46,6 +46,8 @@ export type Preferences = {
   fxBasis: FxBasis;
 };
 
+export type DesignChoice = { id: string; name: string };
+
 export const DEFAULT_PREFERENCES: Preferences = {
   dueDays: 14,
   language: "cs",

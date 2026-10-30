@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CustomerForm } from "@/components/customers/customer-form";
 import { buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
+import { designChoices } from "@/server/pdf/designs";
 
 const T = TEXTS.customers;
 
@@ -15,7 +16,7 @@ export default function NewCustomerPage() {
         {T.back}
       </Link>
       <h1 className="font-brand text-2xl">{T.add}</h1>
-      <CustomerForm initial={null} />
+      <CustomerForm initial={null} designs={designChoices()} />
     </>
   );
 }

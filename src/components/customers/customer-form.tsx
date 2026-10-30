@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { CURRENCIES } from "@/lib/currency";
 import { DOMESTIC_COUNTRY } from "@/lib/customers";
-import { LANGUAGES } from "@/lib/preferences";
+import { LANGUAGES, type DesignChoice } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.customers;
@@ -132,7 +132,13 @@ function toPayload(values: CustomerValues) {
   };
 }
 
-export function CustomerForm({ initial }: { initial: CustomerValues | null }) {
+export function CustomerForm({
+  initial,
+  designs,
+}: {
+  initial: CustomerValues | null;
+  designs: DesignChoice[];
+}) {
   const router = useRouter();
   const [values, setValues] = useState<CustomerValues>(initial ?? EMPTY_CUSTOMER);
   const [pending, startTransition] = useTransition();
@@ -247,7 +253,7 @@ export function CustomerForm({ initial }: { initial: CustomerValues | null }) {
         <Choice
           name="designId"
           value={values.designId}
-          options={[{ value: "cisty", label: TEXTS.preferences.designs.cisty }]}
+          options={designs.map(({ id, name }) => ({ value: id, label: name }))}
           {...fieldProps}
         />
         <Choice

@@ -18,6 +18,7 @@ import { buttonVariants, Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ONBOARDING_STEPS, type OnboardingStep } from "@/lib/onboarding";
+import type { DesignChoice } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.onboarding;
@@ -29,6 +30,7 @@ export type OnboardingProps = {
   series: { id: string; name: string; template: string }[];
   language: string;
   designId: string;
+  designs: DesignChoice[];
 };
 
 type Message = { ok: boolean; text: string } | null;
@@ -218,10 +220,12 @@ function SeriesStep({ series }: { series: OnboardingProps["series"] }) {
 function LookStep({
   language,
   designId,
+  designs,
   go,
 }: {
   language: string;
   designId: string;
+  designs: DesignChoice[];
   go: () => void;
 }) {
   const [values, setValues] = useState({ language, designId });
@@ -253,6 +257,7 @@ function LookStep({
         idPrefix="ob"
         name="designId"
         value={values.designId}
+        options={designs.map(({ id, name }) => ({ value: id, label: name }))}
         onChange={(name, value) => choose(name as "designId", value)}
       />
       <div>
@@ -316,7 +321,13 @@ export function Onboarding(props: OnboardingProps) {
         </div>
       )}
       {step === "look" && (
-        <LookStep key={step} language={props.language} designId={props.designId} go={advance} />
+        <LookStep
+          key={step}
+          language={props.language}
+          designId={props.designId}
+          designs={props.designs}
+          go={advance}
+        />
       )}
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
         {previous && (

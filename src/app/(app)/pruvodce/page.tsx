@@ -7,6 +7,7 @@ import { EMPTY_SUPPLIER } from "@/components/settings/supplier-form";
 import { parseStep, type OnboardingStep } from "@/lib/onboarding";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
+import { designChoices } from "@/server/pdf/designs";
 import { listBankAccounts } from "@/server/services/bank-accounts";
 import { listSeries } from "@/server/services/number-series";
 import { getPreferences, isOnboarded } from "@/server/services/preferences";
@@ -60,6 +61,7 @@ async function OnboardingContent({ params }: { params: Promise<{ krok?: string |
         .map(({ id, name, template }) => ({ id, name, template }))}
       language={preferences.language}
       designId={preferences.designId}
+      designs={designChoices()}
     />
   );
 }
