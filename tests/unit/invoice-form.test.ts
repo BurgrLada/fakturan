@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   applyCustomerDefaults,
+  changeTaxableDate,
+  draftFields,
   blankLine,
   changeIssueDate,
   computeFormTotals,
@@ -175,12 +177,14 @@ describe("formulář faktury", () => {
   });
 
   test("[INV-019] vyplněné DUZP zapne jeho zobrazení v PDF", () => {
-    expect(toDocumentFields(form({ taxableDate: "2026-03-01" }))).toMatchObject({
+    const filled = changeTaxableDate(form(), "2026-03-01");
+    expect(toDocumentFields(filled)).toMatchObject({
       fields: { taxableDate: "2026-03-01", appearance: { showDuzp: true } },
     });
-    expect(toDocumentFields(form({ taxableDate: "" }))).toMatchObject({
-      fields: { taxableDate: null, appearance: { showDuzp: false } },
-    });
+
+    const off = { ...filled.appearance, showDuzp: false };
+    const edited = changeTaxableDate({ ...filled, appearance: off }, "2026-03-02");
+    expect(edited.appearance.showDuzp).toBe(false);
   });
 
   test("[FOR-002] účet se volí podle měny, výchozí má přednost", () => {
@@ -242,6 +246,44 @@ describe("formulář faktury", () => {
     expect(changeIssueDate(form(), "2026-04-01", new Set(["dueDate"] as const))).toMatchObject({
       issueDate: "2026-04-01",
       dueDate: "2026-03-24",
+    });
+  });
+
+  test("[INV-010] zákazník nevypne zobrazení vyplněného DUZP", () => {
+    const filled = changeTaxableDate(form(), "2026-03-01");
+    const next = applyCustomerDefaults(filled, defaults, new Set(), accounts);
+    expect(next.appearance).toMatchObject({ designId: "mono", showDuzp: true });
+  });
+
+  test("[SEC-006] formulář nese jen své pole a typ dokladu se nepřepisuje", () => {
+    const values = formFromDocument(
+      {
+        ...document,
+        customerId: null,
+        seriesId: null,
+        lines: [],
+        status: "paid",
+        number: "1",
+      } as Parameters<typeof formFromDocument>[0],
+      "ks",
+    );
+    expect(values).not.toHaveProperty("status");
+    expect(values).not.toHaveProperty("number");
+
+    const result = toDocumentFields(values);
+    if (!result.ok) throw new Error("neplatné");
+    expect(draftFields("advance", values, result.fields)).toMatchObject({ type: "advance" });
+    expect(result.fields).not.toHaveProperty("status");
+  });
+
+  test("[SET-031] neplatná barva je pole k opravě, prázdná platí", () => {
+    const colors = { ...document.appearance.colors };
+    expect(toDocumentFields(form())).toMatchObject({ ok: true });
+
+    const appearance = { ...document.appearance, colors: { ...colors, accent: "modrá" } };
+    expect(toDocumentFields(form({ appearance }))).toEqual({
+      ok: false,
+      invalid: ["field-color-accent"],
     });
   });
 

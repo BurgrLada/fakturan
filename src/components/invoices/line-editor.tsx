@@ -67,6 +67,7 @@ function LineRow({
     isDragging,
   } = useSortable({ id: line.key });
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const id = (field: string) => `line-${line.key}-${field}`;
   const isInvalid = (field: string) => invalid.has(id(field)) || undefined;
 
@@ -82,19 +83,27 @@ function LineRow({
   }
 
   async function toCatalog() {
+    const priceMinor = line.price.trim() ? parseMoney(line.price) : 0;
+    if (priceMinor === null || priceMinor < 0) {
+      setCatalogError(TEXTS.catalog.validation.price);
+      return;
+    }
     setCatalogError(null);
+    setSaving(true);
     try {
       const result = await saveLineToCatalogAction({
         name: line.name,
         description: line.description,
         unit: line.unit,
-        priceMinor: parseMoney(line.price || "0") ?? 0,
+        priceMinor,
         currency,
       });
       if (result.ok) onChange({ catalogItemId: result.id, priceCurrency: currency });
       else setCatalogError(result.error);
     } catch {
       setCatalogError(T.network);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -217,10 +226,10 @@ function LineRow({
               type="button"
               variant="outline"
               size="sm"
-              disabled={!line.name.trim()}
+              disabled={saving || !line.name.trim()}
               onClick={toCatalog}
             >
-              {L.toCatalog}
+              {saving ? L.toCatalogPending : L.toCatalog}
             </Button>
           )}
           <Button
@@ -255,7 +264,7 @@ export function LineEditor({
   units: string[];
   defaultUnit: string;
   invalid: ReadonlySet<string>;
-  onChange: (lines: FormLine[]) => void;
+  onChange: (update: (lines: FormLine[]) => FormLine[]) => void;
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -265,16 +274,24 @@ export function LineEditor({
 
   function onDragEnd({ active, over }: DragEndEvent) {
     if (!over || active.id === over.id) return;
-    onChange(arrayMove(lines, positionOf(active.id) - 1, positionOf(over.id) - 1));
+    onChange((current) => {
+      const indexOf = (key: unknown) => current.findIndex((line) => line.key === key);
+      return arrayMove(current, indexOf(active.id), indexOf(over.id));
+    });
   }
 
+  // Applied to the latest lines: a catalog save answers after the person may have typed further.
   function patch(key: string, change: Partial<FormLine>) {
-    onChange(lines.map((line) => (line.key === key ? { ...line, ...change } : line)));
+    onChange((current) =>
+      current.map((line) => (line.key === key ? { ...line, ...change } : line)),
+    );
   }
 
   function remove(key: string) {
-    const rest = lines.filter((line) => line.key !== key);
-    onChange(rest.length > 0 ? rest : [blankLine(defaultUnit)]);
+    onChange((current) => {
+      const rest = current.filter((line) => line.key !== key);
+      return rest.length > 0 ? rest : [blankLine(defaultUnit)];
+    });
   }
 
   return (
@@ -325,7 +342,7 @@ export function LineEditor({
         <Button
           type="button"
           variant="outline"
-          onClick={() => onChange([...lines, blankLine(defaultUnit)])}
+          onClick={() => onChange((current) => [...current, blankLine(defaultUnit)])}
         >
           <Plus aria-hidden /> {L.add}
         </Button>

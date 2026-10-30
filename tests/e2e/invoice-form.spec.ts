@@ -100,6 +100,17 @@ async function draftPdf(page: Page) {
   return (await pdfText(await response.body())).join("\n");
 }
 
+async function invite(page: Page, email: string, baseURL: string): Promise<string> {
+  await page.goto(`${baseURL}/administrace`);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("tab", { name: "Pozvánky" }).click();
+  await page.getByLabel("E-mail pozvaného").fill(email);
+  await page.getByRole("button", { name: "Pozvat" }).click();
+  const link = page.getByLabel("Odkaz pozvánky");
+  await expect(link).toBeVisible();
+  return link.inputValue();
+}
+
 async function ready(page: Page, baseURL: string) {
   await register(page, baseURL);
   await addSupplier(page, baseURL);
@@ -119,7 +130,7 @@ test("[INV-010] vyberu zákazníka, položku z ceníku a vystavím", async ({ pa
 
   await page.goto(`${baseURL}/faktury`);
   await page.getByRole("link", { name: "Nová faktura" }).click();
-  await page.waitForURL(/faktury\/nova/);
+  await page.waitForURL(/upravit$/);
   await page.waitForLoadState("networkidle");
 
   await expect(page.getByLabel("Datum vystavení")).not.toHaveValue("");
@@ -410,7 +421,8 @@ test("[INV-017] nová stránka bez změny koncept nezaloží", async ({ page, fr
   await page.getByRole("button", { name: "Přidat položku" }).click();
   await page.waitForTimeout(2000);
 
-  await expect(page).toHaveURL(/faktury\/nova$/);
+  await expect(page.getByTestId("save-status")).toHaveText("Koncept vznikne první změnou.");
+  await page.reload();
   await expect(page.getByTestId("save-status")).toHaveText("Koncept vznikne první změnou.");
 });
 
@@ -449,7 +461,7 @@ test("[INV-017] výpadek odpovědi nezamkne formulář a nezaloží druhý konce
   await openForm(page, baseURL);
 
   let lost = 0;
-  await page.route(/\/faktury\/nova$/, async (route) => {
+  await page.route(/\/(nova|upravit)$/, async (route) => {
     if (route.request().method() !== "POST" || lost > 0) return route.fallback();
     lost += 1;
     await route.fetch();
@@ -622,12 +634,252 @@ test("[INV-026] bez štítků je PDF stejné, štítek jde založit ve formulá�
   expect(after).not.toContain("Marketing");
 });
 
-test("[SEC-002] cizí nebo neznámý doklad vrátí 404", async ({ page, freshApp }) => {
-  await register(page, freshApp.baseURL);
-  const form = await page.goto(`${freshApp.baseURL}/faktury/neexistuje/upravit`);
+test("[INV-017] založení zákazníka ve formuláři zachová rozepsaná data bez odmítnutí", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Poznámka").fill("první");
+  await settled(page);
+  await page.getByLabel("Poznámka").fill("druhá");
+
+  await page.getByRole("combobox", { name: "Zákazník" }).fill("Nový klient");
+  await page.getByRole("option", { name: "Založit zákazníka „Nový klient“" }).click();
+  await page.getByRole("button", { name: "Uložit zákazníka" }).click();
+  await expect(page.getByRole("button", { name: "Uložit zákazníka" })).toBeHidden();
+
+  await expect(page.getByLabel("Poznámka")).toHaveValue("druhá");
+  await expect(page.getByRole("combobox", { name: "Zákazník" })).toHaveValue("Nový klient");
+  await page.getByLabel("Poznámka").fill("třetí");
+  await settled(page);
+  await expect(page.getByText("Doklad se mezitím změnil.")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByLabel("Poznámka")).toHaveValue("třetí");
+  await expect(page.getByRole("combobox", { name: "Zákazník" })).toHaveValue("Nový klient");
+});
+
+test("[INV-017] adresa i strom sedí po prvním uložení a Zpět nevyvolá odmítnutí", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await page.goto(`${baseURL}/faktury`);
+  await page.getByRole("link", { name: "Nová faktura" }).click();
+  await page.waitForURL(/upravit$/);
+  await page.waitForLoadState("networkidle");
+  const url = page.url();
+  await page.getByLabel("Poznámka").fill("před odchodem");
+  await settled(page);
+  expect(page.url()).toBe(url);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/faktury$/);
+  await page.goForward();
+  await expect(page).toHaveURL(url);
+  await expect(page.getByLabel("Poznámka")).toHaveValue("před odchodem");
+  await page.getByLabel("Poznámka").fill("po návratu");
+  await settled(page);
+  await expect(page.getByText("Doklad se mezitím změnil.")).toHaveCount(0);
+});
+
+test("[INV-017] odchod během čekání na uložení nepřepíše adresu cizí stránky", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+
+  await page.getByLabel("Poznámka").fill("rozepsané");
+  await page.getByRole("link", { name: "Ceník" }).click();
+  await page.waitForURL(/\/cenik$/);
+  await page.waitForTimeout(2500);
+
+  await expect(page).toHaveURL(/\/cenik$/);
+  await page.goBack();
+  await expect(page.getByLabel("Poznámka")).toHaveValue("rozepsané");
+});
+
+test("[INV-017] neplatný formulář varuje před odchodem uvnitř aplikace", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await fillLine(page, 0, "Práce", "abc");
+  await expect(page.getByTestId("save-status")).toContainText("Opravte");
+
+  const answers = [false, true];
+  page.on("dialog", (dialog) => (answers.shift() ? dialog.accept() : dialog.dismiss()));
+  await page.getByRole("link", { name: "Ceník" }).click();
+  await page.waitForTimeout(500);
+  await expect(page).toHaveURL(/upravit$/);
+
+  await page.getByRole("link", { name: "Ceník" }).click();
+  await page.waitForURL(/\/cenik$/);
+  expect(answers).toEqual([]);
+});
+
+test("[INV-017] obsah odmítnutý serverem varuje a Vystavit řekne proč nic neudělá", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Reference", { exact: true }).fill("x".repeat(201));
+  await expect(page.getByTestId("save-status")).toHaveText("Text je příliš dlouhý");
+
+  await page.getByRole("button", { name: "Vystavit" }).click();
+  await expect(page.getByText("Změny se nepodařilo uložit")).toBeVisible();
+
+  let asked = 0;
+  page.on("dialog", (dialog) => {
+    asked += 1;
+    return dialog.dismiss();
+  });
+  await page.getByRole("link", { name: "Ceník" }).click();
+  await page.waitForTimeout(500);
+  expect(asked).toBe(1);
+  await expect(page).toHaveURL(/upravit$/);
+});
+
+test("[INV-020] neuložená úprava vystavené faktury varuje před odchodem", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await openForm(page, baseURL);
+  await cashInvoice(page);
+  await settled(page);
+  await issue(page);
+  await page.goto(`${page.url()}/upravit`);
+  await page.waitForLoadState("networkidle");
+
+  await page.getByLabel("Poznámka").fill("neuloženo");
+  let asked = 0;
+  page.on("dialog", (dialog) => {
+    asked += 1;
+    return dialog.dismiss();
+  });
+  await page.getByRole("link", { name: "Ceník" }).click();
+  await page.waitForTimeout(500);
+  expect(asked).toBe(1);
+  await expect(page).toHaveURL(/upravit$/);
+});
+
+test("[INV-017] vypršená relace při ukládání vede na přihlášení", async ({ page, freshApp }) => {
+  const { baseURL, dataDir } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Poznámka").fill("před vypršením");
+  await settled(page);
+
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  sqlite.prepare("DELETE FROM session").run();
+  sqlite.close();
+
+  await page.getByLabel("Poznámka").fill("po vypršení");
+  await expect(page.getByRole("link", { name: "Přihlásit se" })).toBeVisible();
+  await expect(page.getByText("zkouším to znovu")).toHaveCount(0);
+});
+
+test("[SET-030] vzhled konkrétní faktury jde změnit ve sbalené sekci", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await openForm(page, baseURL);
+  await cashInvoice(page);
+  await expect(page.getByLabel("Design")).toBeHidden();
+
+  await page.getByText("Vzhled dokladu").click();
+  await page.getByLabel("Design").selectOption({ label: "Mono" });
+  await page.getByLabel("Akcent").fill("#123456");
+  await page.getByLabel("Umístění loga").selectOption("right");
+  await page.getByLabel("Zobrazit QR platbu").uncheck();
+  await settled(page);
+
+  await page.reload();
+  await page.getByText("Vzhled dokladu").click();
+  await expect(page.getByLabel("Design")).toHaveValue("mono");
+  await expect(page.getByLabel("Akcent")).toHaveValue("#123456");
+  await expect(page.getByLabel("Umístění loga")).toHaveValue("right");
+  await expect(page.getByLabel("Zobrazit QR platbu")).not.toBeChecked();
+});
+
+test("[SET-031] neplatná barva dokladu se neuloží a je zvýrazněná", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByText("Vzhled dokladu").click();
+  await page.getByLabel("Akcent").fill("modrá");
+
+  await expect(page.getByLabel("Akcent")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByTestId("save-status")).toContainText("Opravte");
+});
+
+test("[INV-013] uložení do ceníku nepřepíše psaný text a odmítne neplatnou cenu", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await fillLine(page, 0, "Audit", "abc");
+  await page.getByRole("button", { name: "Uložit do ceníku" }).click();
+  await expect(page.getByText("Zadejte platnou cenu")).toBeVisible();
+  await expect(page.getByText("Uloženo v ceníku")).toHaveCount(0);
+
+  await page.getByLabel("Cena za jednotku").fill("100");
+  await settled(page);
+  await page.route(/\/upravit$/, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    return route.fallback();
+  });
+  await page.getByRole("button", { name: "Uložit do ceníku" }).click();
+  await expect(page.getByRole("button", { name: "Ukládám…" })).toBeDisabled();
+  await page.getByLabel("Popis položky").fill("psáno během ukládání");
+  await expect(page.getByText("Uloženo v ceníku")).toBeVisible();
+  await expect(page.getByLabel("Popis položky")).toHaveValue("psáno během ukládání");
+
+  await page.goto(`${baseURL}/cenik`);
+  await expect(page.getByRole("link", { name: "Audit" })).toBeVisible();
+});
+
+test("[SEC-002] cizí nebo neznámý doklad vrátí 404", async ({ page, browser, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Poznámka").fill("moje");
+  await settled(page);
+  const foreign = page.url();
+  const url = await invite(page, "host@example.cz", baseURL);
+  const context = await browser.newContext();
+  const guest = await context.newPage();
+  await guest.goto(url);
+  await guest.getByRole("button", { name: "Pokračovat k registraci" }).click();
+  await guest.getByLabel("Jméno").fill("Host");
+  await guest.getByLabel("Heslo").fill(PASSWORD);
+  await guest.getByRole("button", { name: "Vytvořit účet" }).click();
+  await expect(guest.getByText("host@example.cz", { exact: true })).toBeVisible();
+
+  const form = await guest.goto(foreign);
   expect(form?.status()).toBe(404);
-  const detail = await page.goto(`${freshApp.baseURL}/faktury/neexistuje`);
+  const detail = await guest.goto(foreign.replace(/\/upravit$/, ""));
   expect(detail?.status()).toBe(404);
-  const create = await page.goto(`${freshApp.baseURL}/faktury/nova`);
+  const unknown = await guest.goto(`${baseURL}/faktury/neexistuje/upravit`);
+  expect(unknown?.status()).toBe(404);
+  const create = await guest.goto(`${baseURL}/faktury/nova`);
   expect(create?.status()).toBe(200);
+  await expect(guest).toHaveURL(/upravit$/);
+  await context.close();
 });

@@ -28,7 +28,7 @@ import { createTestDb } from "../helpers/db";
 const session = vi.hoisted(() => ({ userId: "x1" }));
 
 vi.mock("@/server/auth/session", () => ({
-  requireSession: async () => ({ user: { id: session.userId } }),
+  getCurrentSession: async () => (session.userId ? { user: { id: session.userId } } : null),
   actorFromRequest: async () => ({ userId: session.userId, source: "web" }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
@@ -208,6 +208,12 @@ describe("akce formuláře faktury", () => {
     ];
     for (const result of foreign) expect(result).toMatchObject({ ok: false });
     expect(getInvoice(owner, own.id)).toMatchObject({ status: "draft", revision: own.revision });
+  });
+
+  test("[INV-017] vypršená relace je hlášená, ne přesměrovaná", async () => {
+    session.userId = "";
+
+    expect(await saveDraftAction({})).toMatchObject({ ok: false, expired: true });
   });
 
   test("[SEC-006] podstrčené součty, stav a číslo se ignorují", async () => {

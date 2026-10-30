@@ -143,6 +143,42 @@ describe("automatické ukládání", () => {
     expect(states.at(-1)).toBe("saved");
   });
 
+  test("[INV-017] návrat z odmítnutého na potvrzený obsah srovná stav i flush", async () => {
+    const replies: Promise<SaveReply<number>>[] = [
+      ok(1),
+      Promise.resolve({ kind: "rejected", error: "Špatně" }),
+    ];
+    const { saver, sent, states } = harness(() => replies.shift()!);
+    saver.change("a", { note: "a" });
+    await vi.advanceTimersByTimeAsync(1500);
+    saver.change("b", { note: "b" });
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(saver.flush()).resolves.toBe(false);
+
+    saver.change("a", { note: "a" });
+
+    expect(states.at(-1)).toBe("saved");
+    await expect(saver.flush()).resolves.toBe(true);
+    expect(sent).toHaveLength(2);
+  });
+
+  test("[INV-017] odmítnutý obsah zůstává problémem, dokud se nezmění", async () => {
+    const { saver } = harness(() => Promise.resolve({ kind: "rejected", error: "Špatně" }));
+    saver.change("a", { note: "a" });
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(saver.hasFailed()).toBe(true);
+  });
+
+  test("[INV-017] vypršená relace zamkne ukládání", async () => {
+    const { saver, states } = harness(() => Promise.resolve({ kind: "expired" }));
+    saver.change("a", { note: "a" });
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(states.at(-1)).toBe("expired");
+    await expect(saver.flush()).resolves.toBe(false);
+  });
+
   test("[INV-017] flush pošle čekající změnu hned a dá vědět o výsledku", async () => {
     const { saver, sent } = harness(() => ok());
 

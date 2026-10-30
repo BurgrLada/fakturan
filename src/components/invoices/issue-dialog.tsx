@@ -42,15 +42,18 @@ export function IssueDialog({
   const [symbol, setSymbol] = useState<string | null>(null);
   const automatic = summary?.variableSymbol ?? "";
   const shown = symbol ?? automatic;
+  const cancel = () => {
+    if (pending) return;
+    setSymbol(null);
+    onCancel();
+  };
   const wrongMonth = summary?.issueDate?.slice(0, 7) !== summary?.today.slice(0, 7);
 
   return (
     <AlertDialog
       open={summary !== null}
       onOpenChange={(open) => {
-        if (open) return;
-        setSymbol(null);
-        onCancel();
+        if (!open) cancel();
       }}
     >
       <AlertDialogContent>
@@ -92,7 +95,7 @@ export function IssueDialog({
             </Alert>
           )}
           <AlertDialogFooter>
-            <Button type="button" variant="outline" onClick={onCancel}>
+            <Button type="button" variant="outline" disabled={pending} onClick={cancel}>
               {T.cancel}
             </Button>
             <Button type="submit" disabled={pending}>

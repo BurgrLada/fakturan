@@ -1,4 +1,5 @@
 import type { Currency } from "./currency";
+import { isHexColor } from "./contrast";
 import { addDays, daysBetween, toDiscount, type Appearance } from "./invoice";
 import {
   computeTotals,
@@ -163,18 +164,30 @@ const parseAmount = (input: string): number | null => {
 };
 
 export function formFromDocument(document: FormDocument, defaultUnit: string): FormValues {
-  const { lines, exchangeRateMicros, discountValue, ...rest } = document;
   return {
-    ...rest,
+    customerId: document.customerId,
+    seriesId: document.seriesId,
+    bankAccountId: document.bankAccountId,
     issueDate: document.issueDate ?? "",
     dueDate: document.dueDate ?? "",
     taxableDate: document.taxableDate ?? "",
-    exchangeRate: formatRate(exchangeRateMicros),
-    discount: formatDiscount(document.discountKind, discountValue),
+    language: document.language,
+    currency: document.currency,
+    exchangeRate: formatRate(document.exchangeRateMicros),
+    paymentMethod: document.paymentMethod,
+    orderRef: document.orderRef,
+    reference: document.reference,
+    textBefore: document.textBefore,
+    textAfter: document.textAfter,
+    note: document.note,
+    discountKind: document.discountKind,
+    discount: formatDiscount(document.discountKind, document.discountValue),
+    rounding: document.rounding,
+    appearance: document.appearance,
     // Keys must match between server and client render, so they come from the position.
     lines:
-      lines.length > 0
-        ? lines.map((line, i) => ({
+      document.lines.length > 0
+        ? document.lines.map((line, i) => ({
             key: `saved-${i}`,
             catalogItemId: line.catalogItemId,
             name: line.name,
@@ -239,11 +252,16 @@ export function toDocumentFields(values: FormValues): FieldsResult {
       values.discountKind === "none"
         ? 0
         : checked("field-discount", parseAmount(values.discount), 0),
-    // The PDF prints the date only with this flag, and a filled date is meant to be printed.
-    appearance: values.taxableDate ? { ...values.appearance, showDuzp: true } : values.appearance,
     lines,
   };
+  for (const [name, color] of Object.entries(values.appearance.colors)) {
+    if (color && !isHexColor(color)) invalid.push(`field-color-${name}`);
+  }
   return invalid.length > 0 ? { ok: false, invalid } : { ok: true, fields };
+}
+
+export function draftFields(type: string, values: FormValues, fields: DocumentFields) {
+  return { ...fields, type, customerId: values.customerId, seriesId: values.seriesId };
 }
 
 export function computeFormTotals(values: FormValues): Totals | null {
@@ -289,6 +307,15 @@ export function changeCurrency(
   };
 }
 
+// The PDF prints the date only with showDuzp, and a date just filled in is meant to be printed.
+export function changeTaxableDate(values: FormValues, taxableDate: string): FormValues {
+  const appearance =
+    taxableDate && !values.taxableDate
+      ? { ...values.appearance, showDuzp: true }
+      : values.appearance;
+  return { ...values, taxableDate, appearance };
+}
+
 export function changeIssueDate(
   values: FormValues,
   issueDate: string,
@@ -317,7 +344,12 @@ export function applyCustomerDefaults(
     ...values,
     language: unlessTouched("language"),
     paymentMethod: unlessTouched("paymentMethod"),
-    appearance: unlessTouched("appearance"),
+    appearance: touched.has("appearance")
+      ? values.appearance
+      : {
+          ...defaults.appearance,
+          showDuzp: defaults.appearance.showDuzp || values.appearance.showDuzp,
+        },
     dueDate:
       touched.has("dueDate") || !values.issueDate
         ? values.dueDate
@@ -351,12 +383,4 @@ export function fieldTarget(field: string, values: FormValues, accountCount: num
   if (line) return { href: `#line-${line.key}-${LINE_FIELDS[part!] ?? "name"}`, external: false };
   const name = field === "exchangeRateMicros" ? "exchangeRate" : field;
   return { href: `#field-${name}`, external: false };
-}
-
-export function newClientId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

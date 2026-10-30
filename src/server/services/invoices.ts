@@ -218,6 +218,12 @@ export function getInvoice(ownerId: string, id: string): InvoiceDetail | null {
   };
 }
 
+// A form opens under an id chosen in advance, so the address stays valid before the first save.
+export function isFreeDraftId(id: string): boolean {
+  if (!z.uuid().safeParse(id).success) return false;
+  return !db.select({ id: invoice.id }).from(invoice).where(eq(invoice.id, id)).get();
+}
+
 export function newDraftDefaults(ownerId: string, customerId: string | null): DraftInput {
   const prefs = getPreferences(ownerId);
   const defaults = customerId ? customerDefaults(ownerId, customerId, prefs) : prefs;

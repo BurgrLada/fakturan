@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type KeyboardEvent } from "react";
+import { useRef, useState, useTransition, type KeyboardEvent } from "react";
 import { searchCustomersAction } from "@/app/(app)/faktury/actions";
 import { saveCustomerAction } from "@/app/(app)/zakaznici/actions";
 import { EMPTY_CUSTOMER, toPayload } from "@/components/customers/customer-form";
@@ -33,6 +33,7 @@ export function CustomerPicker({
   const [panel, setPanel] = useState<Record<PanelField, string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const creating = useRef(false);
 
   async function search(q: string): Promise<Option[]> {
     const result = await searchCustomersAction({ q });
@@ -45,7 +46,8 @@ export function CustomerPicker({
   }
 
   function create() {
-    if (!panel) return;
+    if (!panel || creating.current) return;
+    creating.current = true;
     startTransition(async () => {
       try {
         const result = await saveCustomerAction(toPayload({ ...EMPTY_CUSTOMER, ...panel }));
@@ -57,12 +59,14 @@ export function CustomerPicker({
         setPanel(null);
       } catch {
         setError(T.network);
+      } finally {
+        creating.current = false;
       }
     });
   }
 
   function onPanelKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
       event.preventDefault();
       create();
     } else if (event.key === "Escape") {

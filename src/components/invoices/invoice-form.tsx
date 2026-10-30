@@ -30,21 +30,22 @@ import {
   applyCustomerDefaults,
   changeCurrency,
   changeIssueDate,
+  changeTaxableDate,
   computeFormTotals,
+  draftFields,
   fieldTarget,
-  newClientId,
   nonEmptyLines,
   toDocumentFields,
   type AccountChoice,
-  type DocumentFields,
   type FormValues,
   type TouchedField,
 } from "@/lib/invoice-form";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { formatMoney } from "@/lib/money";
-import { LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
+import { LANGUAGES, PAYMENT_METHODS, type DesignChoice } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import { useRouteShown } from "@/lib/use-route-shown";
+import { AppearanceSection } from "./appearance-section";
 import { CustomerPicker } from "./customer-picker";
 import { IssueDialog, type IssueSummary } from "./issue-dialog";
 import { LineEditor } from "./line-editor";
@@ -60,7 +61,9 @@ type Saved = { id: string; revision: number; problems: Problem[] };
 type Payload = { draft: Record<string, unknown>; tags: string[] };
 
 export type InvoiceFormProps = {
-  id: string | null;
+  id: string;
+  saved: boolean;
+  type: string;
   mode: "draft" | "issued";
   status: string;
   number: string;
@@ -74,20 +77,12 @@ export type InvoiceFormProps = {
   units: string[];
   tagOptions: string[];
   defaultUnit: string;
+  designs: DesignChoice[];
 };
 
-function draftOf(values: FormValues, fields: DocumentFields): Record<string, unknown> {
-  return {
-    ...fields,
-    type: "invoice",
-    customerId: values.customerId,
-    seriesId: values.seriesId,
-  };
-}
-
-function payloadOf(values: FormValues, tags: string[]): Payload | null {
+function payloadOf(type: string, values: FormValues, tags: string[]): Payload | null {
   const result = toDocumentFields(values);
-  return result.ok ? { draft: draftOf(values, result.fields), tags } : null;
+  return result.ok ? { draft: draftFields(type, values, result.fields), tags } : null;
 }
 
 const keyOf = (payload: Payload | null) => JSON.stringify(payload);
@@ -104,22 +99,23 @@ function Field({ id, label, children }: { id: string; label: string; children: R
 function statusText(status: SaveStatus, hasId: boolean): string {
   if (status.kind === "error") return status.message;
   if (status.kind === "idle") return hasId ? T.status.idleSaved : T.status.idle;
-  if (status.kind === "stale") return "";
+  if (status.kind === "stale" || status.kind === "expired") return "";
   return T.status[status.kind];
 }
 
 function Form(props: InvoiceFormProps) {
-  const { mode, accounts, series, units, tagOptions, defaultUnit } = props;
+  const { id, type, mode, accounts, series, units, tagOptions, defaultUnit, designs } = props;
   const router = useRouter();
   const [values, setValues] = useState(props.initial);
   const [tags, setTags] = useState(props.initialTags);
   const [number, setNumber] = useState(props.number);
   const [customerName, setCustomerName] = useState(props.customerName);
-  const [savedId, setSavedId] = useState(props.id);
+  const [saved, setSaved] = useState(props.saved);
   const [revision, setRevision] = useState(props.revision);
   const [problems, setProblems] = useState(props.initialProblems);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
-  const [locked, setLocked] = useState(false);
+  const [lock, setLock] = useState<"stale" | "expired" | null>(null);
+  const locked = lock !== null;
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [notices, setNotices] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -128,37 +124,34 @@ function Form(props: InvoiceFormProps) {
   const shown = useRouteShown();
 
   const touched = useRef(new Set<TouchedField>());
-  const identity = useRef({ id: props.id, revision: props.revision, clientId: "" });
+  const identity = useRef({ exists: props.saved, revision: props.revision });
   const problemsRef = useRef<HTMLDivElement>(null);
+  const customerTicket = useRef(0);
+  const savedIssued = useRef(JSON.stringify([props.initial, props.initialTags, props.number]));
+  const needsConfirm = useRef<() => boolean>(() => false);
 
   const [saver] = useState(
     () =>
       new DraftSaver<Payload, Saved>({
-        baseline: keyOf(payloadOf(props.initial, props.initialTags)),
+        baseline: keyOf(payloadOf(type, props.initial, props.initialTags)),
         send: async ({ draft, tags: names }) => {
-          const { id, revision: current } = identity.current;
-          if (!id) identity.current.clientId ||= newClientId();
-          const reference = id
-            ? { id, revision: current }
-            : { clientId: identity.current.clientId };
-          const result = await saveDraftAction({ draft: { ...draft, ...reference }, tags: names });
-          if (result.ok) return { kind: "saved", result };
-          if (result.stale) return { kind: "stale" };
-          return { kind: "rejected", error: result.error };
+          const { exists, revision: current } = identity.current;
+          const reference = exists ? { id, revision: current } : { clientId: id };
+          const reply = await saveDraftAction({ draft: { ...draft, ...reference }, tags: names });
+          if (reply.ok) return { kind: "saved", result: reply };
+          if (reply.expired) return { kind: "expired" };
+          if (reply.stale) return { kind: "stale" };
+          return { kind: "rejected", error: reply.error };
         },
-        onSaved: (saved) => {
-          const created = !identity.current.id;
-          identity.current.id = saved.id;
-          identity.current.revision = saved.revision;
-          setSavedId(saved.id);
-          setRevision(saved.revision);
-          setProblems(saved.problems);
-          // Keeps the same form instance, so typing carries on while a reload finds the draft.
-          if (created) window.history.replaceState(null, "", `/faktury/${saved.id}/upravit`);
+        onSaved: (result) => {
+          identity.current = { exists: true, revision: result.revision };
+          setSaved(true);
+          setRevision(result.revision);
+          setProblems(result.problems);
         },
         onStatus: (next) => {
           setStatus(next);
-          if (next.kind === "stale") setLocked(true);
+          if (next.kind === "stale" || next.kind === "expired") setLock(next.kind);
         },
       }),
   );
@@ -173,21 +166,53 @@ function Form(props: InvoiceFormProps) {
 
   useEffect(() => {
     if (mode !== "draft" || !result.ok) return;
-    const payload = { draft: draftOf(values, result.fields), tags };
+    const payload = { draft: draftFields(type, values, result.fields), tags };
     saver.change(keyOf(payload), payload);
-  }, [mode, saver, values, tags, result]);
+  }, [mode, type, saver, values, tags, result]);
 
   useEffect(() => {
-    if (mode !== "draft") return;
+    needsConfirm.current = () => {
+      if (locked) return false;
+      if (mode === "issued") {
+        return JSON.stringify([values, tags, number]) !== savedIssued.current;
+      }
+      return !result.ok || saver.hasFailed();
+    };
+  });
+
+  useEffect(() => {
+    const dirty = () => mode === "draft" && saver.isDirty();
     const warn = (event: BeforeUnloadEvent) => {
-      if (saver.isDirty()) event.preventDefault();
+      if (needsConfirm.current() || dirty()) event.preventDefault();
+    };
+    // Next has no way to block a navigation, so links are stopped before its handler sees them.
+    const guardLink = (event: MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      const link = (event.target as Element).closest<HTMLAnchorElement>("a[href]");
+      if (!link || link.target || link.hasAttribute("download")) return;
+      const url = new URL(link.href);
+      if (url.origin !== location.origin || url.pathname === location.pathname) return;
+      const stop = () => {
+        event.preventDefault();
+        event.stopPropagation();
+      };
+      if (needsConfirm.current()) {
+        if (!window.confirm(T.leaveConfirm)) stop();
+      } else if (dirty()) {
+        stop();
+        void saver.flush().then((ok) => {
+          if (ok || window.confirm(T.leaveConfirm)) router.push(url.pathname + url.search);
+        });
+      }
     };
     window.addEventListener("beforeunload", warn);
+    document.addEventListener("click", guardLink, true);
     return () => {
       window.removeEventListener("beforeunload", warn);
-      void saver.flush();
+      document.removeEventListener("click", guardLink, true);
+      if (mode === "draft") void saver.flush();
     };
-  }, [mode, saver]);
+  }, [mode, router, saver]);
 
   function set<K extends TouchedField>(field: K, value: FormValues[K]) {
     touched.current.add(field);
@@ -195,10 +220,13 @@ function Form(props: InvoiceFormProps) {
   }
 
   async function pickCustomer(customer: { id: string; name: string }) {
+    customerTicket.current += 1;
+    const ticket = customerTicket.current;
     setCustomerName(customer.name);
     setValues((current) => ({ ...current, customerId: customer.id }));
     try {
       const reply = await customerDefaultsAction({ customerId: customer.id });
+      if (ticket !== customerTicket.current) return;
       if (!reply.ok) {
         setMessage({ ok: false, text: reply.error });
         return;
@@ -224,15 +252,18 @@ function Form(props: InvoiceFormProps) {
     }
     setBusy(true);
     try {
-      if (!(await saver.flush())) return;
-      const { id } = identity.current;
-      if (!id) {
+      if (!(await saver.flush())) {
+        if (!saver.isLocked()) setMessage({ ok: false, text: T.saveFailed });
+        return;
+      }
+      if (!identity.current.exists) {
         setMessage({ ok: false, text: T.emptyDraft });
         return;
       }
       const preview = await issuePreviewAction({ id });
       if (!preview.ok) {
-        setMessage({ ok: false, text: preview.error });
+        if (preview.expired) setLock("expired");
+        else setMessage({ ok: false, text: preview.error });
         return;
       }
       if (preview.problems.length > 0) {
@@ -250,7 +281,7 @@ function Form(props: InvoiceFormProps) {
   }
 
   async function reloadPreview() {
-    const preview = await issuePreviewAction({ id: identity.current.id });
+    const preview = await issuePreviewAction({ id });
     if (preview.ok) setSummary(preview);
     else setDialogError(preview.error);
   }
@@ -260,12 +291,13 @@ function Form(props: InvoiceFormProps) {
     const next = changeIssueDate(values, summary.today, touched.current);
     touched.current.add("issueDate");
     setValues(next);
-    const payload = payloadOf(next, tags);
+    const payload = payloadOf(type, next, tags);
     if (!payload) return;
     setBusy(true);
     try {
       saver.change(keyOf(payload), payload);
       if (await saver.flush()) await reloadPreview();
+      else setDialogError(T.saveFailed);
     } catch {
       setDialogError(T.network);
     } finally {
@@ -274,18 +306,21 @@ function Form(props: InvoiceFormProps) {
   }
 
   async function confirmIssue(variableSymbol: string | undefined) {
-    const { id, revision: current } = identity.current;
     setBusy(true);
     setDialogError(null);
     try {
-      const issued = await issueAction({ id, revision: current, variableSymbol });
+      const issued = await issueAction({
+        id,
+        revision: identity.current.revision,
+        variableSymbol,
+      });
       if (issued.ok) {
         router.push(`/faktury/${issued.id}`);
         return;
       }
-      if (issued.stale) {
+      if (issued.stale || issued.expired) {
         setSummary(null);
-        setLocked(true);
+        setLock(issued.expired ? "expired" : "stale");
         return;
       }
       if (issued.problems) {
@@ -312,16 +347,18 @@ function Form(props: InvoiceFormProps) {
     setBusy(true);
     try {
       const reply = await updateIssuedAction({
-        id: identity.current.id,
+        id,
         tags,
         document: { ...result.fields, number, revision: identity.current.revision },
       });
       if (!reply.ok) {
-        if (reply.stale) setLocked(true);
+        if (reply.expired) setLock("expired");
+        else if (reply.stale) setLock("stale");
         else setMessage({ ok: false, text: reply.error });
         return;
       }
       identity.current.revision = reply.revision;
+      savedIssued.current = JSON.stringify([values, tags, number]);
       setRevision(reply.revision);
       setMessage({ ok: true, text: T.saved });
       setNotices([
@@ -349,12 +386,15 @@ function Form(props: InvoiceFormProps) {
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
       <form onSubmit={submit} className="flex min-w-0 flex-col gap-6">
-        {locked && (
+        {lock && (
           <Alert variant="destructive" role="alert">
             <AlertDescription className="flex flex-col items-start gap-2">
-              {TEXTS.invoices.stale}
-              <a className="underline" href={`/faktury/${savedId}/upravit`}>
-                {T.refresh}
+              {lock === "stale" ? TEXTS.invoices.stale : T.sessionExpired}
+              <a
+                className="underline"
+                href={lock === "stale" ? `/faktury/${id}/upravit` : "/prihlaseni"}
+              >
+                {lock === "stale" ? T.refresh : T.login}
               </a>
             </AlertDescription>
           </Alert>
@@ -370,10 +410,10 @@ function Form(props: InvoiceFormProps) {
             data-testid="save-status"
             className={`text-sm ${status.kind === "error" || status.kind === "offline" || !result.ok ? "text-destructive" : "text-muted-foreground"}`}
           >
-            {result.ok ? statusText(status, savedId !== null) : T.status.invalid}
+            {result.ok ? statusText(status, saved) : T.status.invalid}
           </p>
         )}
-        {mode === "draft" && savedId && (
+        {mode === "draft" && saved && (
           <div ref={problemsRef} tabIndex={-1} className="outline-none">
             {problems.length > 0 ? (
               <Alert aria-label={T.summaryTitle}>
@@ -424,6 +464,7 @@ function Form(props: InvoiceFormProps) {
                   name={customerName}
                   invalid={problems.some((problem) => problem.field === "customerId")}
                   onNameChange={(name) => {
+                    customerTicket.current += 1;
                     setCustomerName(name);
                     setValues((current) => ({ ...current, customerId: null }));
                   }}
@@ -490,7 +531,11 @@ function Form(props: InvoiceFormProps) {
                   id="field-taxableDate"
                   type="date"
                   value={values.taxableDate}
-                  onChange={(event) => set("taxableDate", event.target.value)}
+                  onChange={(event) => {
+                    const { value } = event.target;
+                    touched.current.add("taxableDate");
+                    setValues((current) => changeTaxableDate(current, value));
+                  }}
                 />
               </Field>
               <Field id="field-currency" label={F.currency}>
@@ -579,7 +624,9 @@ function Form(props: InvoiceFormProps) {
               units={units}
               defaultUnit={defaultUnit}
               invalid={invalid}
-              onChange={(lines) => setValues((current) => ({ ...current, lines }))}
+              onChange={(update) =>
+                setValues((current) => ({ ...current, lines: update(current.lines) }))
+              }
             />
           </section>
 
@@ -688,17 +735,14 @@ function Form(props: InvoiceFormProps) {
                 />
               </Field>
             ))}
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={values.appearance.showQr}
-                onChange={(event) =>
-                  set("appearance", { ...values.appearance, showQr: event.target.checked })
-                }
-              />
-              {F.showQr}
-            </label>
           </section>
+
+          <AppearanceSection
+            value={values.appearance}
+            designs={designs}
+            invalid={invalid}
+            onChange={(patch) => set("appearance", { ...values.appearance, ...patch })}
+          />
 
           <section className="flex flex-col gap-4">
             <h2 className="text-lg">{T.sections.tags}</h2>
@@ -712,7 +756,7 @@ function Form(props: InvoiceFormProps) {
           </div>
         </fieldset>
       </form>
-      <PdfPreview id={savedId} revision={revision} />
+      <PdfPreview id={saved ? id : null} revision={revision} />
       <IssueDialog
         summary={summary}
         pending={busy}

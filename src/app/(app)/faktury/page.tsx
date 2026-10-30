@@ -10,7 +10,7 @@ export default function Page() {
     <>
       <PlannedSection navKey="invoices" />
       <div>
-        <Link href="/faktury/nova" className={buttonVariants()}>
+        <Link href="/faktury/nova" prefetch={false} className={buttonVariants()}>
           {TEXTS.invoices.add}
         </Link>
       </div>

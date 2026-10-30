@@ -1,12 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/server/auth";
 import { recordAdminDenial } from "@/server/auth/session";
 import { getCatalogItem } from "@/server/services/catalog";
 import { getCustomer } from "@/server/services/customers";
-import { getInvoice } from "@/server/services/invoices";
+import { getInvoice, isFreeDraftId } from "@/server/services/invoices";
 
 const DETAIL = /^\/(?:(zakaznici|cenik)\/([^/]+)|(faktury)\/([^/]+)(?:\/upravit)?)$/;
-const NEW_PAGES = new Set(["novy", "nova"]);
+const NEW_PAGES = new Set(["/zakaznici/novy", "/cenik/novy"]);
+const NEW_INVOICE = "/faktury/nova";
 const FINDERS = {
   zakaznici: getCustomer,
   cenik: getCatalogItem,
@@ -32,17 +34,33 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // The id is chosen here so the form's address and route match from the start: a later URL swap
+  // would leave the router on the old route and a refresh would remount the form.
+  if (pathname === NEW_INVOICE && session && request.method === "GET") {
+    const target = request.nextUrl.clone();
+    target.pathname = `/faktury/${randomUUID()}/upravit`;
+    return NextResponse.redirect(target);
+  }
+
   const detail = DETAIL.exec(pathname);
   const section = (detail?.[1] ?? detail?.[3]) as keyof typeof FINDERS | undefined;
   const id = detail?.[2] ?? detail?.[4];
-  if (section && id && session && request.method === "GET" && !NEW_PAGES.has(id)) {
+  if (
+    section &&
+    id &&
+    session &&
+    request.method === "GET" &&
+    !NEW_PAGES.has(pathname) &&
+    pathname !== NEW_INVOICE
+  ) {
     let key: string;
     try {
       key = decodeURIComponent(id);
     } catch {
       return notFound();
     }
-    if (!FINDERS[section](session.user.id, key)) return notFound();
+    const unsavedForm = pathname.endsWith("/upravit") && isFreeDraftId(key);
+    if (!FINDERS[section](session.user.id, key) && !unsavedForm) return notFound();
   }
   return NextResponse.next();
 }

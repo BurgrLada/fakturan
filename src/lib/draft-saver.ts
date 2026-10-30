@@ -1,6 +1,7 @@
 export type SaveReply<R> =
   | { kind: "saved"; result: R }
   | { kind: "stale" }
+  | { kind: "expired" }
   | { kind: "rejected"; error: string };
 
 export type SaveStatus =
@@ -10,6 +11,7 @@ export type SaveStatus =
   | { kind: "saved" }
   | { kind: "offline" }
   | { kind: "stale" }
+  | { kind: "expired" }
   | { kind: "error"; message: string };
 
 type Entry<P> = { key: string; payload: P };
@@ -46,8 +48,9 @@ export class DraftSaver<P, R> {
     const settled = this.unconfirmed ? this.unconfirmed.key : this.confirmedKey;
     if (key === this.wanted?.key) return;
     if (key === settled) {
-      if (!this.wanted) return;
+      if (!this.wanted && !this.failed) return;
       this.wanted = null;
+      this.failed = false;
       this.clearTimer();
       if (!this.unconfirmed) this.options.onStatus({ kind: "saved" });
       return;
@@ -59,6 +62,14 @@ export class DraftSaver<P, R> {
 
   isDirty(): boolean {
     return this.wanted !== null || this.unconfirmed !== null;
+  }
+
+  isLocked(): boolean {
+    return this.locked;
+  }
+
+  hasFailed(): boolean {
+    return this.failed;
   }
 
   async flush(): Promise<boolean> {
@@ -107,11 +118,11 @@ export class DraftSaver<P, R> {
 
       this.unconfirmed = null;
       this.failed = reply.kind !== "saved";
-      if (reply.kind === "stale") {
+      if (reply.kind === "stale" || reply.kind === "expired") {
         this.locked = true;
         this.wanted = null;
         this.clearTimer();
-        this.options.onStatus({ kind: "stale" });
+        this.options.onStatus({ kind: reply.kind });
         return;
       }
       if (reply.kind === "rejected") {

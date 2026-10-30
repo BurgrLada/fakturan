@@ -6,7 +6,7 @@ import { CURRENCIES } from "@/lib/currency";
 import { daysBetween } from "@/lib/invoice";
 import type { CustomerDefaults } from "@/lib/invoice-form";
 import { TEXTS } from "@/lib/texts";
-import { actorFromRequest, requireSession } from "@/server/auth/session";
+import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
 import { searchCustomers } from "@/server/services/customers";
@@ -28,7 +28,13 @@ import {
 import { ensureDefaultSeries } from "@/server/services/number-series";
 import { assertTagNames, setInvoiceTags } from "@/server/services/tags";
 
-type Failure = { ok: false; error: string; stale?: true; problems?: IssueProblem[] };
+type Failure = {
+  ok: false;
+  error: string;
+  stale?: true;
+  expired?: true;
+  problems?: IssueProblem[];
+};
 type Actor = Awaited<ReturnType<typeof actorFromRequest>>;
 
 const V = TEXTS.invoices.validation;
@@ -55,13 +61,16 @@ const lineInput = z.object({
   currency: z.enum(CURRENCIES, V.currency),
 });
 
-// Only known refusals become messages: requireSession's redirect must keep propagating.
+// An expired session is reported instead of redirected: a redirect would take the unsaved form away
+// before the person can see what was lost.
 async function run<Input, Output extends object>(
   schema: z.ZodType<Input>,
   raw: unknown,
   work: (input: Input, actor: Actor) => Output | Promise<Output>,
 ): Promise<({ ok: true } & Output) | Failure> {
-  await requireSession();
+  if (!(await getCurrentSession())) {
+    return { ok: false, expired: true, error: TEXTS.invoices.form.sessionExpired };
+  }
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? V.invalid };
