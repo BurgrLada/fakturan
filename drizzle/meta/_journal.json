@@ -99,6 +99,13 @@
       "when": 1793366738933,
       "tag": "0013_customer_search_text",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1793367057669,
+      "tag": "0014_catalog",
+      "breakpoints": true
     }
   ]
 }
