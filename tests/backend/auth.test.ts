@@ -770,9 +770,11 @@ describe("hesla a relace", () => {
   });
 
   test("[AUTH-014] relace platí 30 dní a obnoví se při aktivitě", async () => {
+    const day = 86_400_000;
+    // better-auth reads the clock separately for createdAt and expiresAt; a frozen Date makes the 30-day span exact.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-02T10:00:00.000Z") });
     const browser = await createAdmin(plainAuth);
     const created = db.select().from(session).get()!;
-    const day = 86_400_000;
     expect(created.expiresAt.getTime() - created.createdAt.getTime()).toBe(30 * day);
 
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 29 * day });

@@ -131,7 +131,8 @@ describe("checkRateLimit", () => {
   });
 });
 
-describe("rate limiting přihlášení", () => {
+// Every non-limited attempt runs a real scrypt (~75 ms), and some tests make 50 of them.
+describe("rate limiting přihlášení", { timeout: 30_000 }, () => {
   test("[SEC-001] [AUD-002] šesté přihlášení za minutu vrátí 429 a zapíše audit", async () => {
     const before = auditRows("rate_limit.exceeded").length;
     for (let i = 0; i < 5; i++) expect((await signIn(auth, "jan@example.cz")).status).toBe(401);
