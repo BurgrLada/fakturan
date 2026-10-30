@@ -38,5 +38,6 @@ export async function POST(request: Request) {
     return new Response(null, { status: err instanceof TooLarge ? 413 : 400 });
   }
   const res = await relayEnvelope(body, process.env.SENTRY_DSN);
+  await res.body?.cancel().catch(() => {});
   return new Response(null, { status: res.ok ? 200 : res.status });
 }

@@ -2,6 +2,7 @@ import { parseDsn, sameDsn } from "./dsn";
 
 export const MAX_ENVELOPE_BYTES = 1_000_000;
 const SEND_TIMEOUT_MS = 5000;
+const READ_TIMEOUT_MS = 5000;
 
 type Send = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -15,16 +16,27 @@ export async function readCapped(request: Request, max = MAX_ENVELOPE_BYTES): Pr
   if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel();
-      throw new TooLarge();
+  // A stalled client must not hold the connection open: cancelling makes the pending read settle.
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => {});
+  }, READ_TIMEOUT_MS);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) {
+        await reader.cancel();
+        throw new TooLarge();
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    clearTimeout(timer);
   }
+  if (timedOut) throw new Error("timeout");
   return Buffer.concat(chunks);
 }
 

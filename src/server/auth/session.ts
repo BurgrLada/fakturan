@@ -20,7 +20,8 @@ export async function getCurrentSession(): Promise<Session | null> {
   });
   // Deactivation deletes sessions, but a login racing it can still leave a row behind (ADM-005).
   if (!session || session.user.banned) return null;
-  await setMonitoringUser(session.user.id);
+  // Monitoring must never break authentication.
+  await setMonitoringUser(session.user.id).catch(() => {});
   return session;
 }
 

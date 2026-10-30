@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { publicDsn, sameDsn } from "@/server/monitoring/dsn";
-import { relayEnvelope } from "@/server/monitoring/tunnel";
+import { readCapped, relayEnvelope } from "@/server/monitoring/tunnel";
 import { RATE_RULES } from "@/server/rate-limit";
 import { createTestDb } from "../helpers/db";
 
@@ -98,6 +98,24 @@ describe("POST /api/monitoring", () => {
     const res = await post(envelope(DSN), { origin: "https://evil.example" });
     expect(res.status).toBe(403);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("zastavené tělo se po časovém limitu odmítne", async () => {
+    vi.useFakeTimers();
+    try {
+      const body = new ReadableStream({ start: (c) => c.enqueue(new Uint8Array(3)) });
+      const request = new Request("https://f.example.cz/x", {
+        method: "POST",
+        body,
+        duplex: "half",
+      } as RequestInit);
+      const pending = readCapped(request);
+      const assertion = expect(pending).rejects.toThrow("timeout");
+      await vi.advanceTimersByTimeAsync(6000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("platná obálka z vlastního Originu projde a po vyčerpání limitu přijde 429", async () => {

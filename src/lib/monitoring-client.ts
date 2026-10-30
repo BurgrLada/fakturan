@@ -35,6 +35,6 @@ export function reportClientError(error: unknown): void {
   void monitoring().then((sentry) => sentry?.captureException(error));
 }
 
-export function identifyClientUser(id: string): void {
-  void monitoring().then((sentry) => sentry?.setUser({ id }));
+export function identifyClientUser(id: string | null): void {
+  void monitoring().then((sentry) => sentry?.setUser(id === null ? null : { id }));
 }

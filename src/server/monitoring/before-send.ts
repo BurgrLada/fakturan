@@ -13,11 +13,18 @@ export const DATA_COLLECTION = {
 } as const;
 
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
-// Invitation links carry a bearer token in the path.
-const PATH_TOKEN = /(\/pozvanka\/)[^/?#\s"']+/g;
+// Bearer tokens: invitation links, Better Auth's /reset-password/<token> (and its
+// `reset-password:<token>` verification identifier), and ?token= / ?callbackURL= query values.
+const PATH_TOKEN = /(\/(?:pozvanka|reset-password)\/)[^/?#\s"']+/g;
+const ID_TOKEN = /(reset-password:)[^\s"'&?#/]+/g;
+const QUERY_TOKEN = /([?&](?:token|callbackURL)=)[^&#\s"']*/gi;
 
 function clean(text: string): string {
-  return text.replace(EMAIL, "[e-mail]").replace(PATH_TOKEN, "$1[token]");
+  return text
+    .replace(EMAIL, "[e-mail]")
+    .replace(PATH_TOKEN, "$1[token]")
+    .replace(ID_TOKEN, "$1[token]")
+    .replace(QUERY_TOKEN, "$1[token]");
 }
 
 function cleanUrl(raw: string): string {
@@ -30,13 +37,13 @@ type Frame = NonNullable<
 
 function cleanFrames(frames: Frame) {
   return frames?.map(({ filename, function: fn, module, lineno, colno, in_app, abs_path }) => ({
-    filename,
+    filename: filename && clean(filename),
     function: fn,
     module,
     lineno,
     colno,
     in_app,
-    abs_path,
+    abs_path: abs_path && clean(abs_path),
   }));
 }
 

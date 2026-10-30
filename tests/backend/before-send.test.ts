@@ -142,4 +142,40 @@ describe("monitoring", () => {
     await setMonitoringUser("u2", undefined, idle);
     expect(idle).not.toHaveBeenCalled();
   });
+
+  test("[MON-004] tokeny obnovy hesla a query hodnoty se skryjí všude", () => {
+    const t = "RESETtok123";
+    const out = scrubEvent({
+      message: `GET https://f.cz/api/auth/reset-password/${t}?callbackURL=%2Freset-hesla`,
+      transaction: `/api/auth/reset-password/${t}`,
+      exception: {
+        values: [
+          {
+            type: "Error",
+            value: `neplatný reset-password:${t} na /reset-hesla?token=${t}&x=1`,
+            stacktrace: {
+              frames: [
+                {
+                  filename: `https://f.cz/reset-hesla?token=${t}`,
+                  abs_path: `/x/reset-password/${t}`,
+                },
+              ],
+            },
+          },
+        ],
+      },
+      request: { url: `https://f.cz/reset-hesla?token=${t}` },
+    } as Event);
+    expect(JSON.stringify(out)).not.toContain(t);
+    expect(JSON.stringify(out)).not.toContain("callbackURL=%2F");
+    expect(out.exception?.values?.[0].value).toContain("x=1");
+  });
+
+  test("[MON-004] token= a callbackURL= ve zprávě i v pozvánce", () => {
+    const out = scrubEvent({
+      message: "fail ?a=1&token=SECRETX&callbackURL=/x u /pozvanka/INVT",
+    } as Event);
+    expect(out.message).not.toMatch(/SECRETX|INVT|\/x /);
+    expect(out.message).toContain("a=1");
+  });
 });
