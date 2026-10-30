@@ -1,5 +1,20 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1793353957764,
+      "tag": "0000_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793353958411,
+      "tag": "0001_audit_triggers",
+      "breakpoints": true
+    }
+  ]
 }

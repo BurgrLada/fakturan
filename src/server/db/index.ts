@@ -5,6 +5,7 @@ import { env } from "../env";
 import * as schema from "./schema";
 
 export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export function createDb(path: string): Db {
   const sqlite = new Database(path);
@@ -25,3 +26,7 @@ export const db: Db = new Proxy({} as Db, {
     return typeof value === "function" ? value.bind(cached) : value;
   },
 });
+
+export function setDbForTests(instance: Db | null): void {
+  cached = instance ?? undefined;
+}
