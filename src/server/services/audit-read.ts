@@ -1,10 +1,8 @@
 import "server-only";
 import { and, desc, eq, gte, isNull, lt, ne, or, type SQL } from "drizzle-orm";
-import { cacheLife, cacheTag } from "next/cache";
 import { z } from "zod";
 import { auditActionLabel } from "@/lib/audit-labels";
 import type { Actor } from "../audit/context";
-import { accountTag } from "../account-cache";
 import { db, type Tx } from "../db";
 import { auditLog } from "../db/schema";
 import { scoped } from "../db/scoped";
@@ -100,6 +98,12 @@ function conditions(ownerId: string, filter: AuditFilter): SQL {
   );
 }
 
+// Another user's address and browser (e.g. an administrator acting on this account) are theirs, not the owner's.
+function maskForeignActor(row: AuditRow, ownerId: string): AuditRow {
+  if (row.actorId === null || row.actorId === ownerId) return row;
+  return { ...row, ip: null, userAgent: null };
+}
+
 export function listAudit(actor: Actor, filter: AuditFilter = {}): Page<AuditRow> {
   const ownerId = ownerOf(actor);
   const page = Math.max(1, Math.floor(filter.page ?? 1));
@@ -112,7 +116,12 @@ export function listAudit(actor: Actor, filter: AuditFilter = {}): Page<AuditRow
     .limit(pageSize + 1)
     .offset((page - 1) * pageSize)
     .all();
-  return { rows: rows.slice(0, pageSize), page, pageSize, hasNext: rows.length > pageSize };
+  return {
+    rows: rows.slice(0, pageSize).map((row) => maskForeignActor(row, ownerId)),
+    page,
+    pageSize,
+    hasNext: rows.length > pageSize,
+  };
 }
 
 export function listAuditFacets(actor: Actor): { actions: string[]; entities: string[] } {
@@ -133,15 +142,11 @@ export function listAuditFacets(actor: Actor): { actions: string[]; entities: st
   return { actions: actions.sort(), entities: entities.sort() };
 }
 
-// userId is a cache key by being an argument; the tag lets a mutation drop that account's entries.
 export async function entityHistory(
   userId: string,
   entity: string,
   entityId: string,
 ): Promise<AuditRow[]> {
-  "use cache";
-  cacheTag(accountTag(userId));
-  cacheLife("seconds");
   return db
     .select()
     .from(auditLog)
@@ -150,7 +155,8 @@ export async function entityHistory(
     )
     .orderBy(desc(auditLog.at), desc(auditLog.id))
     .limit(HISTORY_LIMIT)
-    .all();
+    .all()
+    .map((row) => maskForeignActor(row, userId));
 }
 
 // A leading apostrophe makes spreadsheets read the cell as text (EXP-008).
@@ -191,7 +197,8 @@ function csvRows(tx: Pick<Tx, "select">, ownerId: string, filter: AuditFilter): 
     .where(conditions(ownerId, filter))
     .orderBy(desc(auditLog.at), desc(auditLog.id))
     .limit(EXPORT_LIMIT)
-    .all();
+    .all()
+    .map((row) => maskForeignActor(row, ownerId));
   const lines = rows.map((row) =>
     [
       row.at.toISOString(),

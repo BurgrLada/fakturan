@@ -84,7 +84,7 @@ test("[ADM-005] deaktivace odhlásí otevřenou záložku a zablokuje přihláš
   await expect(guest).toHaveURL(/\/prihlaseni$/);
 
   await guest.getByLabel("E-mail").fill("host@example.cz");
-  await guest.getByLabel("Heslo").fill(PASSWORD);
+  await guest.getByLabel("Heslo", { exact: true }).fill(PASSWORD);
   await guest.getByRole("button", { name: "Přihlásit se" }).click();
   await expect(guest.getByText("Tento účet je deaktivovaný.")).toBeVisible();
 });
@@ -124,11 +124,11 @@ test("[ADM-009] uživatel smaže vlastní účet po zadání hesla", async ({
   const guest = await invitedUser(browser, url, "Host", "host@example.cz");
 
   await guest.goto(`${freshApp.baseURL}/nastaveni/ucet`);
-  await guest.getByLabel("Heslo").fill("spatne-heslo-spatne");
+  await guest.getByLabel("Heslo", { exact: true }).fill("spatne-heslo-spatne");
   await guest.getByRole("button", { name: "Smazat můj účet" }).click();
   await expect(guest.getByText("Nesprávné heslo")).toBeVisible();
 
-  await guest.getByLabel("Heslo").fill(PASSWORD);
+  await guest.getByLabel("Heslo", { exact: true }).fill(PASSWORD);
   await guest.getByRole("button", { name: "Smazat můj účet" }).click();
   await expect(guest).toHaveURL(/\/prihlaseni$/);
 });

@@ -1,11 +1,21 @@
 import type { NextRequest } from "next/server";
+import { env } from "@/server/env";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
-import { ServiceError } from "@/server/services/access";
+import { RateLimitError } from "@/server/services/access";
 import { exportAuditCsv, parseAuditFilter } from "@/server/services/audit-read";
 
-export async function GET(request: NextRequest) {
+// POST with an origin check: the export is logged and rate limited, so a cross-site page must not trigger it.
+export async function POST(request: NextRequest) {
+  const origin = request.headers.get("origin");
+  if (origin !== new URL(env.BETTER_AUTH_URL).origin) return new Response(null, { status: 403 });
   if (!(await getCurrentSession())) return new Response(null, { status: 401 });
-  const filter = parseAuditFilter(Object.fromEntries(request.nextUrl.searchParams));
+  const form = await request.formData().catch(() => new FormData());
+  const filter = parseAuditFilter(
+    Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === "string")) as Record<
+      string,
+      string
+    >,
+  );
   try {
     const csv = exportAuditCsv(await actorFromRequest(), filter);
     const day = new Date().toISOString().slice(0, 10);
@@ -17,7 +27,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    if (error instanceof ServiceError) return new Response(error.message, { status: 429 });
+    if (error instanceof RateLimitError) return new Response(error.message, { status: 429 });
     throw error;
   }
 }

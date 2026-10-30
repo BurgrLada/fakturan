@@ -119,7 +119,7 @@ test("[AUTH-006] [AUD-009] účet ukazuje způsoby přihlášení a vlastní his
     page
       .getByRole("listitem")
       .filter({ hasText: "Heslo" })
-      .getByRole("button", { name: "Odebrat" }),
+      .getByRole("button", { name: "Odebrat Heslo" }),
   ).toBeDisabled();
   await expect(page.getByText("Poslední způsob přihlášení nejde odebrat.")).toBeVisible();
   const history = page.getByRole("heading", { name: "Historie účtu" }).locator("..");
@@ -148,7 +148,7 @@ test("[AUD-007] [EXP-004] historie se filtruje a exportuje do CSV", async ({ pag
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("link", { name: "Exportovat CSV" }).click(),
+    page.getByRole("button", { name: "Exportovat CSV" }).click(),
   ]);
   const csv = await readFile((await download.path())!, "utf8");
   expect(csv).toContain("První administrátor");
@@ -156,4 +156,87 @@ test("[AUD-007] [EXP-004] historie se filtruje a exportuje do CSV", async ({ pag
 
   await page.goto(`${freshApp.baseURL}/nastaveni/historie`);
   await expect(page.getByRole("row").filter({ hasText: "Export historie" })).toHaveCount(1);
+});
+
+test("[AUTH-011] seznam relací označí aktuální a umí ukončit jednu i ostatní", async ({
+  page,
+  browser,
+  freshApp,
+}) => {
+  await registerAdmin(page, freshApp.baseURL);
+  const login = async () => {
+    const other = await browser.newContext();
+    const tab = await other.newPage();
+    await tab.goto(`${freshApp.baseURL}/prihlaseni`);
+    await tab.getByLabel("E-mail").fill("admin@example.cz");
+    await tab.getByLabel("Heslo", { exact: true }).fill(PASSWORD);
+    await tab.getByRole("button", { name: "Přihlásit se" }).click();
+    await expect(tab.getByRole("heading", { name: "Přehled" })).toBeVisible();
+    return tab;
+  };
+  const second = await login();
+  const third = await login();
+
+  await page.goto(`${freshApp.baseURL}/nastaveni/ucet`);
+  const items = page
+    .getByRole("region")
+    .or(page.locator("section"))
+    .filter({ has: page.getByRole("heading", { name: "Aktivní relace" }) })
+    .getByRole("listitem");
+  await expect(items).toHaveCount(3);
+  await expect(items.filter({ hasText: "Tato relace" })).toHaveCount(1);
+  await expect(items.filter({ hasText: "Tato relace" }).getByRole("button")).toHaveCount(0);
+
+  await items
+    .filter({ hasNotText: "Tato relace" })
+    .first()
+    .getByRole("button", { name: /^Ukončit/ })
+    .click();
+  await expect(items).toHaveCount(2);
+  await second.reload();
+  await expect(second).toHaveURL(/\/prihlaseni$/);
+  await third.reload();
+  await expect(third.getByRole("heading", { name: "Přehled" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Ukončit ostatní" }).click();
+  await expect(items).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Ukončit ostatní" })).toBeDisabled();
+  await third.reload();
+  await expect(third).toHaveURL(/\/prihlaseni$/);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Aktivní relace" })).toBeVisible();
+});
+
+test("[UI-005] motiv se nastaví ještě před hydratací, bez záblesku světlého", async ({
+  page,
+  freshApp,
+}) => {
+  await page.route("**/_next/static/**", (route) => route.abort());
+  const html = () => page.evaluate(() => document.documentElement.classList.contains("dark"));
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.addInitScript(() => localStorage.setItem("fakturan-theme", "dark"));
+  await page.goto(`${freshApp.baseURL}/prihlaseni`, { waitUntil: "domcontentloaded" });
+  expect(await html()).toBe(true);
+
+  await page.evaluate(() => localStorage.setItem("fakturan-theme", "light"));
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.addInitScript(() => localStorage.setItem("fakturan-theme", "light"));
+  await page.goto(`${freshApp.baseURL}/prihlaseni`, { waitUntil: "domcontentloaded" });
+  expect(await html()).toBe(false);
+
+  await page.addInitScript(() => localStorage.removeItem("fakturan-theme"));
+  await page.goto(`${freshApp.baseURL}/prihlaseni`, { waitUntil: "domcontentloaded" });
+  expect(await html()).toBe(true);
+});
+
+test("[EXP-004] export se spouští jen POSTem ze stejného původu", async ({ page, freshApp }) => {
+  await registerAdmin(page, freshApp.baseURL);
+  const url = `${freshApp.baseURL}/nastaveni/historie/export`;
+  expect((await page.request.get(url)).status()).toBe(405);
+  const foreign = await page.request.post(url, { headers: { origin: "https://evil.example" } });
+  expect(foreign.status()).toBe(403);
+  const same = await page.request.post(url, { headers: { origin: freshApp.baseURL } });
+  expect(same.status()).toBe(200);
+  expect(same.headers()["content-type"]).toContain("text/csv");
 });

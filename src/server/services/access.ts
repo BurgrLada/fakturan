@@ -11,6 +11,8 @@ export type Reader = Pick<Db | Tx, "select">;
 // The message is shown to the user as is.
 export class ServiceError extends Error {}
 
+export class RateLimitError extends ServiceError {}
+
 export function assertAdmin(q: Reader, actor: Actor): void {
   const row = actor.userId
     ? q
@@ -36,5 +38,5 @@ export function enforceRateLimit(actor: Actor, rule: RateRule): void {
       }),
     );
   }
-  throw new ServiceError("Příliš mnoho pokusů, zkuste to později");
+  throw new RateLimitError("Příliš mnoho pokusů, zkuste to později");
 }

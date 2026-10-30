@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { refreshAccountData } from "@/app/(app)/nastaveni/ucet/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { authClient, authErrorMessage } from "@/lib/auth-client";
@@ -38,7 +37,6 @@ export function LinkedAccounts({
         setMessage({ ok: false, text: authErrorMessage(error.code) });
         return;
       }
-      await refreshAccountData();
       setMessage({ ok: true, text: TEXTS.linked.removed });
       router.refresh();
     });
@@ -66,13 +64,13 @@ export function LinkedAccounts({
       <ul className="flex flex-col divide-y rounded-md border">
         {accounts.map((account) => (
           <li key={account.id} className="flex items-center justify-between gap-2 p-2 text-sm">
-            <span id={`login-${account.id}`}>{providerLabel(account.providerId)}</span>
+            <span>{providerLabel(account.providerId)}</span>
             <Button
               type="button"
               variant="outline"
               size="sm"
               disabled={pending || !unlinkable}
-              aria-describedby={`login-${account.id}`}
+              aria-label={`${TEXTS.linked.remove} ${providerLabel(account.providerId)}`}
               onClick={() => remove(account)}
             >
               {TEXTS.linked.remove}

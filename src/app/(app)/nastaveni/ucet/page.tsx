@@ -3,9 +3,11 @@ import { headers } from "next/headers";
 import { Suspense } from "react";
 import { PageLoading } from "@/components/page-loading";
 import { DeleteAccountForm } from "@/components/account/delete-account-form";
+import { SessionList } from "@/components/account/session-list";
 import { LinkedAccounts } from "@/components/account/linked-accounts";
 import { EntityHistory } from "@/components/audit/entity-history";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { formatDateTime } from "@/lib/format";
 import { TEXTS } from "@/lib/texts";
 import { auth } from "@/server/auth";
 import { enabledProviders } from "@/server/auth/providers";
@@ -18,9 +20,18 @@ export const metadata: Metadata = { title: `${TEXTS.account.title} | ${TEXTS.app
 async function AccountContent({
   searchParams,
 }: Pick<PageProps<"/nastaveni/ucet">, "searchParams">) {
-  const { user } = await requireSession();
+  const { user, session } = await requireSession();
   const { chyba } = await searchParams;
-  const accounts = await auth.api.listUserAccounts({ headers: await headers() });
+  const requestHeaders = await headers();
+  const accounts = await auth.api.listUserAccounts({ headers: requestHeaders });
+  const sessions = (await auth.api.listSessions({ headers: requestHeaders })).map((row) => ({
+    id: row.id,
+    current: row.id === session.id,
+    device: row.userAgent || TEXTS.sessions.unknownDevice,
+    ip: row.ipAddress ?? null,
+    createdAt: formatDateTime(row.createdAt),
+    expiresAt: formatDateTime(row.expiresAt),
+  }));
   return (
     <>
       {chyba === "propojeni" && (
@@ -41,6 +52,10 @@ async function AccountContent({
           accounts={accounts.map(({ id, providerId }) => ({ id, providerId }))}
           available={enabledProviders(env)}
         />
+      </section>
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg">{TEXTS.sessions.title}</h2>
+        <SessionList sessions={sessions} />
       </section>
       <section className="flex flex-col gap-2">
         <h2 className="text-lg">{TEXTS.account.history}</h2>

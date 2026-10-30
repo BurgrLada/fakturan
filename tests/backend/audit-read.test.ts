@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import type { Actor } from "@/server/audit/context";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, rateLimit } from "@/server/db/schema";
@@ -15,8 +15,6 @@ import {
 } from "@/server/services/audit-read";
 import { mutate } from "@/server/services/mutation";
 import { createTestDb } from "../helpers/db";
-
-vi.mock("next/cache", () => ({ cacheTag: vi.fn(), cacheLife: vi.fn() }));
 
 const db = createTestDb();
 const A: Actor = { userId: "user-a", source: "web" };
@@ -119,20 +117,19 @@ describe("entityHistory", () => {
     expect(rows.every((row) => row.ownerId === "user-a")).toBe(true);
   });
 
-  test("[ARC-005] cache nepřekročí hranici účtu", async () => {
+  test("historie entity jiného účtu se nevrátí ani pro stejné ID entity", async () => {
     write(A, "secret.create", { entity: "secret", entityId: "same" });
     const forB = await entityHistory("user-b", "secret", "same");
     expect(forB).toEqual([]);
     expect(await entityHistory("user-a", "secret", "same")).toHaveLength(1);
   });
 
-  test("[ARC-005] každá položka use cache nese userId v argumentech i v tagu", () => {
+  test("každá budoucí položka use cache nese userId v argumentech i v tagu", () => {
     const root = join(process.cwd(), "src");
     const files = readdirSync(root, { recursive: true, encoding: "utf8" }).filter((f) =>
       /\.tsx?$/.test(f),
     );
     const cached = files.filter((f) => readFileSync(join(root, f), "utf8").includes('"use cache"'));
-    expect(cached.length).toBeGreaterThan(0);
     for (const file of cached) {
       const source = readFileSync(join(root, file), "utf8");
       const blocks = source
@@ -156,8 +153,44 @@ describe("exportAuditCsv", () => {
     },
   );
 
-  test("[EXP-008] běžné hodnoty zůstanou a uvozovky se zdvojí", () => {
+  test("[EXP-008] běžné hodnoty zůstanou beze změny", () => {
     expect(neutralizeCsvCell("Faktura 1")).toBe("Faktura 1");
+  });
+
+  test("[EXP-004] uvozovky v buňce se zdvojí a buňka se uzavře do uvozovek", () => {
+    write(A, "invoice.create", { entityId: 'a"b' });
+    const csv = exportAuditCsv(A, { entity: "invoice" });
+    expect(csv).toContain('"a""b"');
+  });
+
+  test("[AUD-007] IP a prohlížeč cizího aktéra se v seznamu, historii ani CSV nezobrazí", async () => {
+    const admin: Actor = {
+      userId: "admin-x",
+      source: "web",
+      ip: "203.0.113.9",
+      userAgent: "AdminBrowser/1",
+    };
+    const own: Actor = { userId: "user-m", source: "web", ip: "198.51.100.4", userAgent: "Mine/1" };
+    const system: Actor = { userId: null, source: "system", ip: "192.0.2.7", userAgent: "Sys/1" };
+    for (const actor of [admin, own, system]) {
+      setClockForTests({ now: () => new Date("2026-03-10T10:00:00Z") });
+      mutate(actor, "user.update", (_tx, audit) =>
+        audit({ entity: "user", entityId: "user-m", ownerId: "user-m", scope: "user" }),
+      );
+    }
+    setClockForTests(null);
+
+    const rows = listAudit({ userId: "user-m", source: "web" }, {}).rows;
+    const byActor = (id: string | null) => rows.find((row) => row.actorId === id)!;
+    expect(byActor("admin-x")).toMatchObject({ ip: null, userAgent: null });
+    expect(byActor("user-m")).toMatchObject({ ip: "198.51.100.4", userAgent: "Mine/1" });
+    expect(byActor(null)).toMatchObject({ ip: "192.0.2.7", userAgent: "Sys/1" });
+    const history = await entityHistory("user-m", "user", "user-m");
+    expect(history.find((row) => row.actorId === "admin-x")?.ip).toBeNull();
+    const csv = exportAuditCsv({ userId: "user-m", source: "web" }, {});
+    expect(csv).not.toContain("203.0.113.9");
+    expect(csv).not.toContain("AdminBrowser");
+    expect(csv).toContain("198.51.100.4");
   });
 
   test("[EXP-004] export obsahuje jen vlastní záznamy a zapíše se do auditu", () => {

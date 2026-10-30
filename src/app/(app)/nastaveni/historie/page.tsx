@@ -38,15 +38,14 @@ async function HistoryContent({
   return (
     <>
       <AuditFilters filter={filter} facets={listAuditFacets(actor)} />
-      <div>
-        <a
-          href={`/nastaveni/historie/export${query(exportFilter)}`}
-          download
-          className={buttonVariants({ variant: "outline" })}
-        >
+      <form method="post" action="/nastaveni/historie/export">
+        {Object.entries(exportFilter).map(([name, value]) =>
+          value === undefined ? null : <input key={name} type="hidden" name={name} value={value} />,
+        )}
+        <button type="submit" className={buttonVariants({ variant: "outline" })}>
           {TEXTS.history.export}
-        </a>
-      </div>
+        </button>
+      </form>
       {result.rows.length === 0 ? (
         <EmptyState
           icon={History}

@@ -50,10 +50,20 @@ export const TEXTS = {
     title: "Účet",
     profile: "Profil",
     name: "Jméno",
-    email: "E-mail",
     loginMethods: "Způsoby přihlášení",
     history: "Historie účtu",
     deleteTitle: "Smazání účtu",
+  },
+  sessions: {
+    title: "Aktivní relace",
+    current: "Tato relace",
+    revoke: "Ukončit",
+    revokeOthers: "Ukončit ostatní",
+    unknownDevice: "Neznámé zařízení",
+    started: "Přihlášeno",
+    expires: "Platí do",
+    revoked: "Relace byla ukončena.",
+    failed: "Relaci se nepodařilo ukončit, zkuste to prosím znovu.",
   },
   linked: {
     password: "Heslo",
@@ -64,11 +74,9 @@ export const TEXTS = {
     add: "Propojit",
     remove: "Odebrat",
     lastMethod: "Poslední způsob přihlášení nejde odebrat.",
-    none: "Zatím nemáte žádný propojený účet poskytovatele.",
     linkFailed:
       "Účet poskytovatele se nepodařilo propojit. Použijte účet se stejným ověřeným e-mailem, jako má tento účet.",
     removed: "Způsob přihlášení byl odebrán.",
-    failed: "Změna se nepovedla, zkuste to prosím znovu.",
   },
   history: {
     title: "Historie",
