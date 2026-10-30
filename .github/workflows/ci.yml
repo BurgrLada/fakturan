@@ -31,3 +31,4 @@ jobs:
       - run: npm run test:coverage-spec
       - run: npm run build
       - run: npm audit --audit-level=high
+      - run: docker build -t fakturan-ci .
