@@ -9,6 +9,7 @@ import {
   defaultAccountFor,
   deleteBankAccount,
   hideBankAccount,
+  unhideBankAccount,
   isAccountUsed,
   listBankAccounts,
   saveBankAccount,
@@ -120,6 +121,31 @@ describe("bankovní účty", () => {
     ]);
   });
 
+  test("[SET-020] úprava čísla účtu přepočítá IBAN a zastaralý IBAN se ignoruje", () => {
+    seed("b7");
+    const id = saveBankAccount(actor("b7"), czk());
+    const stale = listBankAccounts("b7")[0]!.iban;
+
+    saveBankAccount(actor("b7"), {
+      ...czk({ number: "2000145399", bankCode: "0800" }),
+      id,
+      iban: stale,
+    });
+
+    expect(listBankAccounts("b7")[0]?.iban).toBe("CZ7908000000002000145399");
+  });
+
+  test("[SET-020] skrytý účet jde znovu zobrazit", () => {
+    seed("b8");
+    const id = saveBankAccount(actor("b8"), czk());
+    hideBankAccount(actor("b8"), id);
+
+    unhideBankAccount(actor("b8"), id);
+
+    expect(listBankAccounts("b8")[0]?.hidden).toBe(false);
+    expect(() => unhideBankAccount(actor("b7"), id)).toThrow("neexistuje");
+  });
+
   test("[SET-020] izolace účtů", async () => {
     await assertIsolated<string>({
       create: (ownerId) => {
@@ -203,7 +229,8 @@ describe("výchozí účet na měnu", () => {
     expect(defaultAccountFor("d4", "CZK")?.id).toBe(czkId);
     expect(defaultAccountFor("d4", "EUR")?.id).toBe(eurId);
     expect(defaultAccountFor("d4", "USD")).toBeNull();
-    expect(defaultAccountFor("b1", "EUR")).toBeNull();
+    seed("d4-other");
+    expect(defaultAccountFor("d4-other", "EUR")).toBeNull();
   });
 
   test("[SET-021] změna měny výchozího účtu ho z výchozích vyřadí", () => {

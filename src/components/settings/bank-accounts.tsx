@@ -6,6 +6,7 @@ import {
   hideBankAccountAction,
   saveBankAccountAction,
   setDefaultAccountAction,
+  unhideBankAccountAction,
 } from "@/app/(app)/nastaveni/ucty/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -211,6 +212,17 @@ export function BankAccounts({ accounts }: { accounts: AccountRow[] }) {
                         onClick={() => perform(() => hideBankAccountAction({ id: row.id }))}
                       >
                         {TEXTS.bankAccounts.hide}
+                        <span className="sr-only"> {row.name}</span>
+                      </Button>
+                    )}
+                    {row.hidden && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => perform(() => unhideBankAccountAction({ id: row.id }))}
+                      >
+                        {TEXTS.bankAccounts.unhide}
                         <span className="sr-only"> {row.name}</span>
                       </Button>
                     )}

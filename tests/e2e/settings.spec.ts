@@ -118,6 +118,11 @@ test("[SET-021] výchozí účet jde přepnout a neplatný IBAN ukáže chybu", 
     page.getByRole("row", { name: /Jedna/ }).getByText("Výchozí", { exact: true }),
   ).toBeHidden();
 
+  await page.getByRole("button", { name: "Skrýt Jedna" }).click();
+  await expect(page.getByRole("row", { name: /Jedna/ }).getByText("Skrytý")).toBeVisible();
+  await page.getByRole("button", { name: "Zobrazit Jedna" }).click();
+  await expect(page.getByRole("row", { name: /Jedna/ }).getByText("Skrytý")).toBeHidden();
+
   await page.getByLabel("Název účtu").fill("Špatný");
   await page.getByLabel("IBAN").fill("CZ0000000000000000000000");
   await page.getByRole("button", { name: "Uložit účet" }).click();

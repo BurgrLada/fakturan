@@ -21,7 +21,9 @@ export function isValidIban(value: string): boolean {
 }
 
 export function czechAccountToIban(number: string, bankCode: string, prefix = ""): string {
-  const [dashPrefix, dashNumber] = number.includes("-") ? number.split("-") : ["", number];
+  const parts = number.split("-");
+  if (parts.length > 2) throw new Error("Číslo účtu může mít jen jednu pomlčku");
+  const [dashPrefix, dashNumber] = parts.length === 2 ? parts : ["", number];
   const accountPrefix = (prefix || dashPrefix).trim();
   const accountNumber = dashNumber.trim();
   const code = bankCode.trim();

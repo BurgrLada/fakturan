@@ -24,6 +24,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "bank_account.hide": "Skrytí bankovního účtu",
   "bank_account.save": "Uložení bankovního účtu",
   "bank_account.set_default": "Nastavení výchozího účtu",
+  "bank_account.unhide": "Zobrazení bankovního účtu",
   "file.create": "Nahrání souboru",
   "file.delete": "Smazání souboru",
   "invitation.accept": "Přijetí pozvánky",

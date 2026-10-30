@@ -17,6 +17,7 @@ describe("IBAN", () => {
 
   test("[SET-020] neplatné české číslo účtu se odmítne", () => {
     expect(() => czechAccountToIban("12ab", "2010")).toThrow();
+    expect(() => czechAccountToIban("1-2-3456789", "2010")).toThrow();
     expect(() => czechAccountToIban("1234567890", "20")).toThrow();
     expect(() => czechAccountToIban("12345678901", "2010")).toThrow();
     expect(() => czechAccountToIban("1234567890", "2010", "1234567")).toThrow();

@@ -11,6 +11,7 @@ import {
   hideBankAccount,
   saveBankAccount,
   setDefaultForCurrency,
+  unhideBankAccount,
 } from "@/server/services/bank-accounts";
 
 type Failure = { ok: false; error: string };
@@ -60,5 +61,11 @@ export async function hideBankAccountAction(raw: unknown) {
 export async function deleteBankAccountAction(raw: unknown) {
   return run(idInput, raw, ({ id }, actor) => {
     deleteBankAccount(actor, id);
+  });
+}
+
+export async function unhideBankAccountAction(raw: unknown) {
+  return run(idInput, raw, ({ id }, actor) => {
+    unhideBankAccount(actor, id);
   });
 }

@@ -140,6 +140,7 @@ export const TEXTS = {
     edit: "Upravit",
     makeDefault: "Nastavit jako výchozí",
     hide: "Skrýt",
+    unhide: "Zobrazit",
     remove: "Smazat",
     default: "Výchozí",
     hidden: "Skrytý",

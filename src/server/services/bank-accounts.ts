@@ -34,12 +34,9 @@ export const bankAccountInputSchema = z
     if (value.swift && !/^[A-Za-z]{6}[A-Za-z0-9]{2}([A-Za-z0-9]{3})?$/.test(value.swift)) {
       issue("swift", "SWIFT/BIC není platný");
     }
-    if (value.iban) {
-      if (!isValidIban(value.iban)) issue("iban", "IBAN není platný");
-      return;
-    }
     if (!value.number || !value.bankCode) {
-      issue("iban", "Vyplňte číslo účtu s kódem banky, nebo IBAN");
+      if (!value.iban) issue("iban", "Vyplňte číslo účtu s kódem banky, nebo IBAN");
+      else if (!isValidIban(value.iban)) issue("iban", "IBAN není platný");
       return;
     }
     try {
@@ -122,9 +119,11 @@ export function saveBankAccount(actor: Actor, raw: BankAccountInput): string {
   const parsed = bankAccountInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? "Neplatné údaje");
   const { id: existingId, ...values } = parsed.data;
-  const iban = values.iban
-    ? normalizeIban(values.iban)
-    : czechAccountToIban(values.number, values.bankCode);
+  // A Czech number always wins: an IBAN left in the form from before an edit would be stale.
+  const iban =
+    values.number && values.bankCode
+      ? czechAccountToIban(values.number, values.bankCode)
+      : normalizeIban(values.iban);
   const columns = { ...values, iban, swift: values.swift.toUpperCase() };
 
   return mutate(actor, "bank_account.save", (tx, audit) => {
@@ -179,6 +178,25 @@ export function setDefaultForCurrency(actor: Actor, currency: Currency, accountI
       scope: "user",
       before: { isDefault: account.isDefault },
       after: { isDefault: true, currency },
+    });
+  });
+}
+
+export function unhideBankAccount(actor: Actor, id: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "bank_account.unhide", (tx, audit) => {
+    const account = findOwned(tx, userId, id);
+    tx.update(bankAccount)
+      .set({ hidden: false, updatedAt: clock.now() })
+      .where(and(eq(bankAccount.id, id), eq(bankAccount.userId, userId)))
+      .run();
+    audit({
+      entity: "bank_account",
+      entityId: id,
+      ownerId: userId,
+      scope: "user",
+      before: { hidden: account.hidden },
+      after: { hidden: false },
     });
   });
 }
