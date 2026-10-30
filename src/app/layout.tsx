@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono, Source_Sans_3, Roboto_Slab } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { spaceGrotesk } from "@/lib/fonts";
 
 const robotoSlabHeading = Roboto_Slab({ subsets: ["latin"], variable: "--font-roboto-slab" });
 
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         "h-full",
         "antialiased",
         geistMono.variable,
+        spaceGrotesk.variable,
         "font-sans",
         sourceSans3.variable,
         robotoSlabHeading.variable,
