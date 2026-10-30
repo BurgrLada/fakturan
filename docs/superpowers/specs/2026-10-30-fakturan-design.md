@@ -141,7 +141,7 @@ Vše z tohoto seznamu se předvyplní do nové faktury a jde změnit u konkrétn
 - **SET-032** Výchozí text před položkami a za nimi, výchozí poznámka.
 - **SET-033** Datum vystavení: dnešek, nebo poslední den minulého měsíce.
 - **SET-034** Výchozí formát data a formát variabilního symbolu.
-- **SET-035** Vzhled aplikace: světlý, tmavý, podle systému.
+- **SET-035** Vzhled aplikace: světlý, tmavý, podle systému. Volba se ukládá v účtu.
 
 ### 5.4 Automatizace
 

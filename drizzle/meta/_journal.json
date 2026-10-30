@@ -43,6 +43,13 @@
       "when": 1793357550300,
       "tag": "0005_invitation_accepted_user",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793362455819,
+      "tag": "0006_user_theme",
+      "breakpoints": true
     }
   ]
 }

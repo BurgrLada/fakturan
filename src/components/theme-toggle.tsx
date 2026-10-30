@@ -4,21 +4,14 @@ import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
-import { parseTheme, THEME_EVENT, THEME_STORAGE_KEY, type ThemeChoice } from "@/lib/theme";
+import { setThemeAction } from "@/app/actions";
+import { readStoredTheme, saveTheme, THEME_EVENT, type ThemeChoice } from "@/lib/theme";
 
 const OPTIONS: { value: ThemeChoice; label: string; icon: LucideIcon }[] = [
   { value: "light", label: TEXTS.theme.light, icon: Sun },
   { value: "dark", label: TEXTS.theme.dark, icon: Moon },
   { value: "system", label: TEXTS.theme.system, icon: Monitor },
 ];
-
-function readStored(): ThemeChoice {
-  try {
-    return parseTheme(localStorage.getItem(THEME_STORAGE_KEY));
-  } catch {
-    return "system";
-  }
-}
 
 function apply(choice: ThemeChoice) {
   const dark =
@@ -37,7 +30,7 @@ function subscribe(onChange: () => void) {
 }
 
 export function ThemeToggle() {
-  const choice = useSyncExternalStore(subscribe, readStored, () => "system" as ThemeChoice);
+  const choice = useSyncExternalStore(subscribe, readStoredTheme, () => "system" as ThemeChoice);
 
   useEffect(() => {
     apply(choice);
@@ -49,13 +42,9 @@ export function ThemeToggle() {
   }, [choice]);
 
   function select(next: ThemeChoice) {
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      // Storage can be blocked; the choice then lasts until reload.
-    }
-    window.dispatchEvent(new Event(THEME_EVENT));
+    saveTheme(next, true);
     apply(next);
+    setThemeAction({ theme: next }).catch(() => {});
   }
 
   return (

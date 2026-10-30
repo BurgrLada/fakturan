@@ -70,6 +70,28 @@ test("[UI-005] [SET-035] přepínač motivu a volba podle systému přetrvá", a
   await expect.poll(() => isDark(page)).toBe(false);
 });
 
+test("[SET-035] volba motivu se uloží v účtu a platí v jiném prohlížeči", async ({
+  page,
+  browser,
+  freshApp,
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await registerAdmin(page, freshApp.baseURL);
+  await page.getByRole("button", { name: "Tmavý" }).click();
+  expect(await isDark(page)).toBe(true);
+
+  const other = await browser.newContext({ colorScheme: "light" });
+  const tab = await other.newPage();
+  await tab.goto(`${freshApp.baseURL}/prihlaseni`);
+  await tab.getByLabel("E-mail").fill("admin@example.cz");
+  await tab.getByLabel("Heslo", { exact: true }).fill(PASSWORD);
+  await tab.getByRole("button", { name: "Přihlásit se" }).click();
+  await expect(tab.getByRole("heading", { name: "Přehled" })).toBeVisible();
+  await expect.poll(() => isDark(tab)).toBe(true);
+  await expect(tab.getByRole("button", { name: "Tmavý" })).toHaveAttribute("aria-pressed", "true");
+  await other.close();
+});
+
 test("[UI-007] navigace funguje na šířce 390 px bez vodorovného posunu", async ({
   page,
   freshApp,

@@ -184,7 +184,12 @@ export function createAuth(env: Env) {
     plugins: [admin({ defaultRole: "user", adminRoles: ["admin"] })],
     account: { encryptOAuthTokens: true },
     session: { expiresIn: 30 * DAY_SECONDS, updateAge: DAY_SECONDS },
-    user: { changeEmail: { enabled: mailEnabled } },
+    user: {
+      changeEmail: { enabled: mailEnabled },
+      additionalFields: {
+        theme: { type: "string", required: false, defaultValue: "system", input: false },
+      },
+    },
     emailAndPassword: {
       enabled: true,
       minPasswordLength: MIN_PASSWORD_LENGTH,

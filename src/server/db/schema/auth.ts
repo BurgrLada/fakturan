@@ -15,6 +15,7 @@ export const user = sqliteTable("user", {
   banned: integer({ mode: "boolean" }).default(false),
   banReason: text("ban_reason"),
   banExpires: timestamp("ban_expires"),
+  theme: text().notNull().default("system"),
 });
 
 export const session = sqliteTable(

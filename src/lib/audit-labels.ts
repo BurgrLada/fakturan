@@ -32,6 +32,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "user.delete_failed": "Neúspěšné smazání účtu",
   "user.reactivate": "Reaktivace účtu",
   "user.role_change": "Změna role",
+  "user.theme_change": "Změna vzhledu",
   "user.update": "Úprava účtu",
 };
 
