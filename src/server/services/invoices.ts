@@ -322,7 +322,73 @@ function matches<T extends object>(row: object, wanted: T): boolean {
   return isDeepStrictEqual(current, wanted);
 }
 
-// Line bodies stay out on purpose: autosave would copy up to 500 of them per keystroke pause.
+type LineRow = ReturnType<typeof lineRows>[number];
+
+function lineBody(line: LineRow) {
+  return {
+    position: line.position,
+    catalogItemId: line.catalogItemId,
+    name: line.name,
+    description: line.description,
+    quantityMilli: line.quantityMilli,
+    unit: line.unit,
+    unitPriceMinor: line.unitPriceMinor,
+    discountKind: line.discountKind,
+    discountValue: line.discountValue,
+    netMinor: line.netMinor,
+  };
+}
+
+function contentKey(line: LineRow): string {
+  return JSON.stringify({ ...lineBody(line), position: 0 });
+}
+
+type LineChanges = {
+  before: { changed: LineRow[]; removed: LineRow[]; moved: { name: string; position: number }[] };
+  after: { changed: LineRow[]; added: LineRow[]; moved: { name: string; position: number }[] };
+};
+
+// Lines are replaced on every save, so ids cannot pair them: identical content pairs first (a
+// move), then what is left at the same position (an edit). Only the difference goes to the audit,
+// because autosave would otherwise copy up to 500 lines per pause in typing.
+function diffLines(before: LineRow[], after: LineRow[]): LineChanges | null {
+  const unchanged = (line: LineRow, i: number, other: LineRow[]) =>
+    other[i] !== undefined && contentKey(other[i]) === contentKey(line);
+  const left = before.filter((line, i) => !unchanged(line, i, after));
+  const right = after.filter((line, i) => !unchanged(line, i, before));
+  if (left.length === 0 && right.length === 0) return null;
+
+  const waiting = new Map<string, LineRow[]>();
+  for (const line of left) {
+    waiting.set(contentKey(line), [...(waiting.get(contentKey(line)) ?? []), line]);
+  }
+  const moves: { from: LineRow; to: LineRow }[] = [];
+  const unpairedRight = right.filter((to) => {
+    const from = waiting.get(contentKey(to))?.shift();
+    if (from) moves.push({ from, to });
+    return !from;
+  });
+  const unpairedLeft = [...waiting.values()].flat().sort((a, b) => a.position - b.position);
+
+  const atPosition = new Map(unpairedRight.map((line) => [line.position, line]));
+  const edited = unpairedLeft.filter((line) => atPosition.has(line.position));
+  const editedPositions = new Set(edited.map((line) => line.position));
+  const moved = (side: "from" | "to") =>
+    moves.map((move) => ({ name: move[side].name, position: move[side].position }));
+  return {
+    before: {
+      changed: edited.map(lineBody),
+      removed: unpairedLeft.filter((l) => !editedPositions.has(l.position)).map(lineBody),
+      moved: moved("from"),
+    },
+    after: {
+      changed: unpairedRight.filter((l) => editedPositions.has(l.position)).map(lineBody),
+      added: unpairedRight.filter((l) => !editedPositions.has(l.position)).map(lineBody),
+      moved: moved("to"),
+    },
+  };
+}
+
 function snapshot(row: Invoice, lineCount: number) {
   const { userId: _u, createdAt: _c, updatedAt: _t, searchText: _s, ...rest } = row;
   return { ...rest, lineCount };
@@ -389,13 +455,20 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
           .run();
       }
       insertLines(tx, userId, id, rows);
+      const changes = diffLines(beforeLines, rows);
       audit({
         entity: "invoice",
         entityId: id,
         ownerId: userId,
         scope: "user",
-        before: before && snapshot(before, beforeLines.length),
-        after: snapshot(findOwned(tx, userId, id), rows.length),
+        before: before && {
+          ...snapshot(before, beforeLines.length),
+          ...(changes && { lines: changes.before }),
+        },
+        after: {
+          ...snapshot(findOwned(tx, userId, id), rows.length),
+          ...(changes && { lines: changes.after }),
+        },
       });
       return { id, revision: nextRevision, totals };
     });
@@ -410,7 +483,7 @@ export function deleteDraft(actor: Actor, id: string): void {
   mutate(actor, "invoice.delete", (tx, audit) => {
     const row = findOwned(tx, userId, id);
     if (row.status !== "draft") throw new ServiceError(V.notDraft);
-    const lineCount = linesOf(tx, userId, id).length;
+    const lines = linesOf(tx, userId, id);
     tx.delete(invoice)
       .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
       .run();
@@ -419,7 +492,7 @@ export function deleteDraft(actor: Actor, id: string): void {
       entityId: id,
       ownerId: userId,
       scope: "user",
-      before: snapshot(row, lineCount),
+      before: { ...snapshot(row, lines.length), lines: lines.map(lineBody) },
     });
   });
 }
@@ -498,7 +571,11 @@ export function duplicateInvoice(actor: Actor, id: string): { id: string } {
       entityId: copyId,
       ownerId: userId,
       scope: "user",
-      after: { duplicatedFrom: id, ...snapshot(findOwned(tx, userId, copyId), lines.length) },
+      after: {
+        duplicatedFrom: id,
+        ...snapshot(findOwned(tx, userId, copyId), lines.length),
+        lines: lines.map(lineBody),
+      },
     });
     return { id: copyId };
   });

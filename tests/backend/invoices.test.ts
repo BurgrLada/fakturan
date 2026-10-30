@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { count, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { diffAudit } from "@/lib/audit-diff";
 import { MAX_DOCUMENT_MINOR } from "@/lib/invoice-totals";
 import { INVOICE_STATUSES, INVOICE_TYPES, isOverdue } from "@/lib/invoice";
 import { DOCUMENT_TYPES } from "@/lib/number-format";
@@ -300,6 +301,8 @@ describe("koncept", () => {
 
     expect(() => savePreferences(actor("i2"), { pdfFileName: "../x.pdf" })).toThrow("název");
     expect(() => savePreferences(actor("i2"), { pdfFileName: "" })).toThrow("název");
+    for (const pdfFileName of ["a\nb.pdf", "a\rb.pdf", "a\u0000b.pdf", "a\u2028b.pdf"])
+      expect(() => savePreferences(actor("i2"), { pdfFileName })).toThrow("název");
     expect(() => savePreferences(actor("i2"), { surfaceColor: "red" })).toThrow("#rrggbb");
     expect(() => savePreferences(actor("i2"), { logoPosition: "top" as "left" })).toThrow("loga");
     expect(() => savePreferences(actor("i2"), { rounding: "cent" as "none" })).toThrow(
@@ -525,6 +528,94 @@ describe("automatické ukládání", () => {
   });
 });
 
+describe("audit položek", () => {
+  const lastAudit = (id: string) => {
+    const entry = invoiceAudits(id).at(-1)!;
+    return {
+      entry,
+      before: (entry.before as { lines?: Record<string, unknown[]> } | null)?.lines,
+      after: (entry.after as { lines?: Record<string, unknown[]> } | null)?.lines,
+    };
+  };
+
+  test("[AUD-009] přejmenování položky je v auditu vidět a nezměněné řádky tam nejsou", () => {
+    const body = draft("i1", { lines: [line({ name: "Stará" }), line({ name: "Beze změny" })] });
+    const first = saveDraft(actor("i1"), body);
+
+    saveDraft(actor("i1"), {
+      ...body,
+      id: first.id,
+      revision: first.revision,
+      lines: [line({ name: "Nová" }), line({ name: "Beze změny" })],
+    });
+
+    const { entry, before, after } = lastAudit(first.id);
+    expect(before).toMatchObject({ changed: [{ name: "Stará", position: 0 }], removed: [] });
+    expect(after).toMatchObject({ changed: [{ name: "Nová", position: 0 }], added: [] });
+    expect(after?.changed).toHaveLength(1);
+    expect(diffAudit(entry.before, entry.after).map((c) => c.field)).toContain("lines");
+  });
+
+  test("[AUD-009] přidání, odebrání a prohození položek audit rozliší", () => {
+    const body = draft("i1", { lines: [line({ name: "A" }), line({ name: "B" })] });
+    const first = saveDraft(actor("i1"), body);
+
+    const second = saveDraft(actor("i1"), {
+      ...body,
+      id: first.id,
+      revision: first.revision,
+      lines: [line({ name: "B" }), line({ name: "A" }), line({ name: "C" })],
+    });
+    const added = lastAudit(first.id);
+    expect(added.before).toMatchObject({
+      moved: [
+        { name: "B", position: 1 },
+        { name: "A", position: 0 },
+      ],
+      changed: [],
+      removed: [],
+    });
+    expect(added.after).toMatchObject({
+      moved: [
+        { name: "B", position: 0 },
+        { name: "A", position: 1 },
+      ],
+      changed: [],
+      added: [{ name: "C", position: 2 }],
+    });
+
+    saveDraft(actor("i1"), {
+      ...body,
+      id: first.id,
+      revision: second.revision,
+      lines: [line({ name: "B" })],
+    });
+    const removed = lastAudit(first.id);
+    expect(removed.before?.removed).toMatchObject([{ name: "A" }, { name: "C" }]);
+    expect(removed.after).toMatchObject({ added: [], changed: [], moved: [] });
+  });
+
+  test("[AUD-009] změna jen hlavičky nepřidá do auditu rozdíl řádků", () => {
+    const first = save("i1");
+
+    save("i1", { id: first.id, revision: first.revision, note: "x" });
+
+    expect(lastAudit(first.id)).toMatchObject({ before: undefined, after: undefined });
+  });
+
+  test("[AUD-009] smazání konceptu v auditu uchová celé řádky", () => {
+    const { id } = save("i1", { lines: [line({ name: "A", description: "popis" })] });
+
+    deleteDraft(actor("i1"), id);
+
+    const { entry } = lastAudit(id);
+    expect(entry.action).toBe("invoice.delete");
+    expect((entry.before as { lines: unknown[] }).lines).toMatchObject([
+      { name: "A", description: "popis", quantityMilli: 2000, unitPriceMinor: 150_000 },
+    ]);
+  });
+});
+
 describe("duplikace", () => {
   test("[INV-018] duplikát je koncept s dnešními daty, bez čísla a se stejnými položkami", () => {
     const customerId = newCustomer("i1");
@@ -616,6 +707,27 @@ describe("štítky", () => {
     expect(listTags("i1").map((t) => t.name)).toEqual(["Osobní", "Práce"]);
     expect(getInvoice("i1", first.id)?.tags.map((t) => t.name)).toEqual(["Práce"]);
     expect(getInvoice("i1", second.id)?.tags.map((t) => t.name)).toEqual(["Osobní", "Práce"]);
+  });
+
+  test("[INV-026] z duplicit vyhraje první varianta názvu", () => {
+    const { id } = save("i1");
+
+    setInvoiceTags(actor("i1"), id, ["Práce", "prace"]);
+
+    expect(listTags("i1").map((t) => t.name)).toEqual(["Práce"]);
+  });
+
+  test("[INV-026] založení štítku má vlastní auditní záznam, opakované použití ne", () => {
+    const first = save("i1");
+    const second = save("i1");
+
+    setInvoiceTags(actor("i1"), first.id, ["Práce"]);
+    setInvoiceTags(actor("i1"), second.id, ["práce"]);
+
+    const [work] = listTags("i1");
+    expect(invoiceAudits(work!.id)).toMatchObject([
+      { action: "tag.create", entity: "tag", ownerId: "i1", after: { name: "Práce" } },
+    ]);
   });
 
   test("[INV-026] štítky jdou měnit i na vystaveném dokladu a nemění revizi", () => {

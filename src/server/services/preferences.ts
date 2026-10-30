@@ -61,7 +61,7 @@ export const preferencesSchema = z.object({
     .string(V.pdfFileName)
     .trim()
     .max(100, V.tooLong)
-    .regex(/^[^/\\]+$/, V.pdfFileName),
+    .regex(/^[^/\\\p{Cc}\p{Zl}\p{Zp}]+$/u, V.pdfFileName),
   fxBasis: z.enum(FX_BASES, V.fxBasis),
 });
 

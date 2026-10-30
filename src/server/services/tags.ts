@@ -21,7 +21,14 @@ export type Tag = { id: string; name: string };
 
 const tagNamesSchema = z
   .array(z.string(V.invalid).trim().min(1, T.name).max(40, T.tooLong), V.invalid)
-  .transform((names) => [...new Map(names.map((name) => [foldText(name), name])).entries()])
+  .transform((names) => {
+    const unique = new Map<string, string>();
+    for (const name of names) {
+      const key = foldText(name);
+      if (!unique.has(key)) unique.set(key, name);
+    }
+    return [...unique.entries()];
+  })
   .refine((entries) => entries.length <= MAX_TAGS, T.tooMany);
 
 function ownerOf(actor: Actor): string {
@@ -86,6 +93,14 @@ export function setInvoiceTags(actor: Actor, id: string, names: string[]): void 
         const tagId = randomUUID();
         tx.insert(tag).values({ id: tagId, userId, name, nameKey }).run();
         idByKey.set(nameKey, tagId);
+        audit({
+          action: "tag.create",
+          entity: "tag",
+          entityId: tagId,
+          ownerId: userId,
+          scope: "user",
+          after: { name },
+        });
       }
 
       tx.delete(invoiceTag)

@@ -55,6 +55,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "supplier.image_clear": "Odebrání obrázku dodavatele",
   "supplier.image_set": "Nahrání obrázku dodavatele",
   "supplier.save": "Uložení profilu dodavatele",
+  "tag.create": "Založení štítku",
   "tag.delete": "Smazání štítku",
   "unit.delete": "Smazání jednotky",
   "unit.save": "Přidání jednotky",
