@@ -32,3 +32,10 @@ export function formatMoneyInput(cents: number): string {
   const fraction = String(abs % 100).padStart(2, "0");
   return `${cents < 0 ? "-" : ""}${whole},${fraction}`;
 }
+
+export class AmountOutOfRangeError extends Error {
+  constructor(message = "Amount is outside the supported range") {
+    super(message);
+    this.name = "AmountOutOfRangeError";
+  }
+}
