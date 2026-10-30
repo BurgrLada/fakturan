@@ -11,6 +11,14 @@ npm run dev
 
 Kontroly: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run build`.
 
+## Provoz za reverzní proxy
+
+Za reverzní proxy (Coolify, Traefik, nginx) je nutné nastavit `TRUST_PROXY=1`. Bez něj aplikace
+nezná IP klienta, všichni klienti sdílejí jeden bucket rate limitu (20 přihlášení za minutu a
+5 registrací za hodinu na celou instanci) a audit IP neeviduje. Proxy musí `X-Forwarded-For`
+přepisovat nebo k němu přidávat, nikdy ho nepředávat od klienta beze změny. V produkci bez
+`TRUST_PROXY` aplikace při startu zapíše varování.
+
 ## Licence
 
 MIT

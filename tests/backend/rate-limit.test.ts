@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, like } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createAuth } from "@/server/auth";
 import { setClockForTests } from "@/server/clock";
@@ -67,9 +67,18 @@ describe("checkRateLimit", () => {
   const rule = { name: "test", limit: 2, windowSeconds: 60 };
 
   test("[SEC-001] po vyčerpání limitu odmítne a řekne, za jak dlouho to jde znovu", () => {
-    expect(checkRateLimit("k", rule)).toEqual({ allowed: true, retryAfterSeconds: 0 });
+    expect(checkRateLimit("k", rule)).toEqual({
+      allowed: true,
+      retryAfterSeconds: 0,
+      firstDenial: false,
+    });
     expect(checkRateLimit("k", rule).allowed).toBe(true);
-    expect(checkRateLimit("k", rule)).toEqual({ allowed: false, retryAfterSeconds: 60 });
+    expect(checkRateLimit("k", rule)).toEqual({
+      allowed: false,
+      retryAfterSeconds: 60,
+      firstDenial: true,
+    });
+    expect(checkRateLimit("k", rule).firstDenial).toBe(false);
   });
 
   test("[SEC-001] okno se po uplynutí obnoví a klíče jsou nezávislé", () => {
@@ -80,7 +89,7 @@ describe("checkRateLimit", () => {
     expect(checkRateLimit("b", rule).allowed).toBe(true);
 
     now = new Date("2026-11-02T10:00:30.000Z");
-    expect(checkRateLimit("a", rule)).toEqual({ allowed: false, retryAfterSeconds: 30 });
+    expect(checkRateLimit("a", rule)).toMatchObject({ allowed: false, retryAfterSeconds: 30 });
     now = new Date("2026-11-02T10:01:00.000Z");
     expect(checkRateLimit("a", rule).allowed).toBe(true);
   });
@@ -107,10 +116,11 @@ describe("checkRateLimit", () => {
     }
   });
 
-  test("[SEC-001] pravidla odpovídají specifikaci", () => {
+  test("[SEC-001] pravidla odpovídají hodnotám z plánu", () => {
     expect(RATE_RULES.loginIpEmail).toMatchObject({ limit: 5, windowSeconds: 60 });
     expect(RATE_RULES.loginIp).toMatchObject({ limit: 20, windowSeconds: 60 });
-    expect(RATE_RULES.resetPasswordEmail).toMatchObject({ limit: 3, windowSeconds: 3600 });
+    expect(RATE_RULES.loginEmail).toMatchObject({ limit: 50, windowSeconds: 3600 });
+    expect(RATE_RULES.resetPasswordIpEmail).toMatchObject({ limit: 3, windowSeconds: 3600 });
     expect(RATE_RULES.signupIp).toMatchObject({ limit: 5, windowSeconds: 3600 });
     expect(RATE_RULES.invitationsUser).toMatchObject({ limit: 20, windowSeconds: 3600 });
     for (const name of ["sendUser", "importUser", "exportUser"] as const) {
@@ -185,6 +195,62 @@ describe("rate limiting přihlášení", () => {
       await signIn(proxied, "jan@example.cz", { "x-forwarded-for": "7.7.7.7" });
     }
     expect(auditRows("rate_limit.exceeded")[0]?.ip).toBe("7.7.7.7");
+
+    db.delete(rateLimit).run();
+    for (let i = 0; i < 6; i++) {
+      await signIn(auth, "jan@example.cz", { "x-forwarded-for": "8.8.8.8" });
+    }
+    expect(auditRows("rate_limit.exceeded")[0]?.ip).toBeNull();
+  });
+
+  test("[SEC-001] deset odmítnutí v jednom okně zapíše jediný audit", async () => {
+    const before = auditRows("rate_limit.exceeded").length;
+    for (let i = 0; i < 15; i++) await signIn(auth, "jan@example.cz");
+    expect(auditRows("rate_limit.exceeded")).toHaveLength(before + 1);
+
+    setClockForTests({ now: () => new Date("2026-11-02T10:01:00.000Z") });
+    for (let i = 0; i < 6; i++) await signIn(auth, "jan@example.cz");
+    expect(auditRows("rate_limit.exceeded")).toHaveLength(before + 2);
+  });
+
+  test("[SEC-001] zablokovaná IP nezakládá záznamy pro jednotlivé e-maily", async () => {
+    for (let i = 0; i < 20; i++) await signIn(auth, `u${i}@example.cz`);
+    const rows = () => db.select().from(rateLimit).all().length;
+    const before = rows();
+    await signIn(auth, "novy@example.cz");
+    expect(rows()).toBe(before);
+  });
+
+  test("[SEC-001] IPv6 adresy ze stejné /64 sdílejí bucket, IPv4-mapped je IPv4", async () => {
+    for (let i = 0; i < 20; i++) {
+      await signIn(proxied, `u${i}@example.cz`, {
+        "x-forwarded-for": `2001:db8:1:2:${i}::${i + 1}`,
+      });
+    }
+    const sameSubnet = await signIn(proxied, "a@example.cz", {
+      "x-forwarded-for": "2001:db8:1:2:ffff::1",
+    });
+    const otherSubnet = await signIn(proxied, "b@example.cz", {
+      "x-forwarded-for": "2001:db8:1:3::1",
+    });
+    expect(sameSubnet.status).toBe(429);
+    expect(otherSubnet.status).toBe(401);
+
+    for (let i = 0; i < 20; i++) {
+      await signIn(proxied, `v${i}@example.cz`, { "x-forwarded-for": "::ffff:192.0.2.5" });
+    }
+    const plain = await signIn(proxied, "c@example.cz", { "x-forwarded-for": "192.0.2.5" });
+    expect(plain.status).toBe(429);
+  });
+
+  test("[SEC-001] hádání jednoho účtu je omezené bez ohledu na IP", async () => {
+    for (let i = 0; i < 50; i++) {
+      const ip = `10.${i >> 8}.${i % 256}.1`;
+      await signIn(proxied, "obet@example.cz", { "x-forwarded-for": ip });
+      db.delete(rateLimit).where(like(rateLimit.key, "login%Ip%")).run();
+    }
+    const res = await signIn(proxied, "obet@example.cz", { "x-forwarded-for": "10.9.9.9" });
+    expect(res.status).toBe(429);
   });
 });
 
@@ -196,6 +262,29 @@ describe("rate limiting reset hesla a registrace", () => {
     const res = await reset();
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("3600");
+  });
+
+  test("[SEC-001] cizí klient nezablokuje obnovu hesla oběti, jen vlastní IP", async () => {
+    const reset = (ip: string) =>
+      post(
+        proxied,
+        "/request-password-reset",
+        { email: "obet@example.cz", redirectTo: "/reset" },
+        { "x-forwarded-for": ip },
+      );
+    for (let i = 0; i < 4; i++) await reset("1.1.1.1");
+    expect((await reset("1.1.1.1")).status).toBe(429);
+    expect((await reset("2.2.2.2")).status).not.toBe(429);
+  });
+
+  test("[SEC-001] ověřovací e-maily a sociální přihlášení mají limit na IP", async () => {
+    const verify = () => post(auth, "/send-verification-email", { email: "a@example.cz" });
+    for (let i = 0; i < 10; i++) expect((await verify()).status).not.toBe(429);
+    expect((await verify()).status).toBe(429);
+
+    const social = () => post(auth, "/sign-in/social", { provider: "github" });
+    for (let i = 0; i < 30; i++) expect((await social()).status).not.toBe(429);
+    expect((await social()).status).toBe(429);
   });
 
   test("[SEC-001] šestá registrace za hodinu z jedné IP vrátí 429", async () => {

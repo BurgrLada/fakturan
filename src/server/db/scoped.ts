@@ -8,7 +8,7 @@ function ownerColumn(table: Owned): AnyColumn {
   return "userId" in table ? table.userId : table.ownerId;
 }
 
-// Services reach account data only through this condition, so a query cannot omit the owner.
+// Convention, not enforcement: services are expected to build account-data queries from this condition.
 export function scoped(ownerId: string) {
   if (typeof ownerId !== "string" || ownerId === "") {
     throw new Error("scoped() vyžaduje ID vlastníka");

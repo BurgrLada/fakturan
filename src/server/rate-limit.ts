@@ -16,9 +16,13 @@ const rule = (name: string, limit: number, windowSeconds: number): RateRule => (
 });
 
 export const RATE_RULES = {
-  loginIpEmail: rule("loginIpEmail", 5, 60),
   loginIp: rule("loginIp", 20, 60),
-  resetPasswordEmail: rule("resetPasswordEmail", 3, 3600),
+  loginIpEmail: rule("loginIpEmail", 5, 60),
+  loginEmail: rule("loginEmail", 50, 3600),
+  resetPasswordIp: rule("resetPasswordIp", 10, 3600),
+  resetPasswordIpEmail: rule("resetPasswordIpEmail", 3, 3600),
+  verificationMailIp: rule("verificationMailIp", 10, 3600),
+  socialLoginIp: rule("socialLoginIp", 30, 60),
   signupIp: rule("signupIp", 5, 3600),
   invitationsUser: rule("invitationsUser", 20, 3600),
   sendUser: rule("sendUser", 60, 60),
@@ -30,7 +34,7 @@ export const RATE_RULES = {
 export function checkRateLimit(
   key: string,
   rateRule: RateRule,
-): { allowed: boolean; retryAfterSeconds: number } {
+): { allowed: boolean; retryAfterSeconds: number; firstDenial: boolean } {
   const id = `${rateRule.name}:${key}`;
   const now = clock.now();
   const windowMs = rateRule.windowSeconds * 1000;
@@ -41,22 +45,32 @@ export function checkRateLimit(
       if (!row || row.windowStart.getTime() + windowMs <= now.getTime()) {
         tx.insert(rateLimit)
           .values({ key: id, windowStart: now, count: 1 })
-          .onConflictDoUpdate({ target: rateLimit.key, set: { windowStart: now, count: 1 } })
+          .onConflictDoUpdate({
+            target: rateLimit.key,
+            set: { windowStart: now, count: 1, denied: false },
+          })
           .run();
         tx.delete(rateLimit)
           .where(lt(rateLimit.windowStart, new Date(now.getTime() - STALE_AFTER_MS)))
           .run();
-        return { allowed: true, retryAfterSeconds: 0 };
+        return { allowed: true, retryAfterSeconds: 0, firstDenial: false };
       }
       if (row.count >= rateRule.limit) {
         const remainingMs = row.windowStart.getTime() + windowMs - now.getTime();
-        return { allowed: false, retryAfterSeconds: Math.ceil(remainingMs / 1000) };
+        if (!row.denied) {
+          tx.update(rateLimit).set({ denied: true }).where(eq(rateLimit.key, id)).run();
+        }
+        return {
+          allowed: false,
+          retryAfterSeconds: Math.ceil(remainingMs / 1000),
+          firstDenial: !row.denied,
+        };
       }
       tx.update(rateLimit)
         .set({ count: row.count + 1 })
         .where(eq(rateLimit.key, id))
         .run();
-      return { allowed: true, retryAfterSeconds: 0 };
+      return { allowed: true, retryAfterSeconds: 0, firstDenial: false };
     },
     { behavior: "immediate" },
   );
