@@ -283,3 +283,15 @@ Expected: vše projde.
 git add -A
 git commit -m "feat(catalog): add price list and units"
 ```
+
+---
+
+## Přenos do plánu 3
+
+- Unikátní index na fakturu `(uživatel, číslo)`, `isNumberTaken`, přeskočení ručně obsazených čísel v `allocateNumber`, volba řady u faktury (NUM-003) a ruční přepis VS (NUM-007).
+- `isAccountUsed` musí číst faktury (SET-022), `deleteCustomer` odmítne zákazníka s doklady (CUS-007), `designId` se ověří proti seznamu designů, CAT-003 a CUS-006, CUS-008.
+- SET-002: blokace vystavení při chybějících údajích dodavatele.
+- Celkové částky: `MAX_PRICE_MINOR × množství` může přesáhnout `MAX_SAFE_INTEGER`, omezit nebo použít BigInt.
+- `defaultAccountFor` může vrátit `null`, vystavení na to musí upozornit (FOR-005).
+- Výchozí jednotky se ukládají až s prvním zápisem.
+- Plán 3 začíná zavedením nástrojů TST-012 až TST-020.
