@@ -1,9 +1,7 @@
 import { z } from "zod";
-import { contentDisposition } from "@/lib/content-disposition";
-import { actorFromRequest } from "@/server/auth/session";
 import { RATE_RULES } from "@/server/rate-limit";
-import { enforceRateLimit, RateLimitError } from "@/server/services/access";
 import { designPreviewPdf, type PreviewAppearance } from "@/server/services/design-preview";
+import { InvalidPreviewQuery, servePdf } from "@/server/services/pdf-http";
 import {
   colorSchema,
   getPreferences,
@@ -20,17 +18,11 @@ const querySchema = z.object({
   logo: logoPositionSchema.optional(),
 });
 
-const empty = (status: number) =>
-  new Response(null, { status, headers: { "Cache-Control": "no-store" } });
-
 export async function GET(request: Request) {
-  const actor = await actorFromRequest();
-  if (!actor.userId) return empty(404);
   const query = querySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams));
-  if (!query.success) return empty(400);
-  try {
-    enforceRateLimit(actor, RATE_RULES.pdfUser);
-    const prefs = getPreferences(actor.userId);
+  return servePdf("inline", RATE_RULES.pdfPreviewUser, async (_actor, userId) => {
+    if (!query.success) throw new InvalidPreviewQuery();
+    const prefs = getPreferences(userId);
     const { design, accent, surface, text, line, logo } = query.data;
     const appearance: PreviewAppearance = {
       designId: design ?? prefs.designId,
@@ -42,18 +34,6 @@ export async function GET(request: Request) {
       },
       logoPosition: logo ?? prefs.logoPosition,
     };
-    const data = await designPreviewPdf(actor.userId, appearance);
-    return new Response(new Uint8Array(data), {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Length": String(data.length),
-        "Content-Disposition": contentDisposition("inline", "nahled.pdf"),
-        "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "private, no-store",
-      },
-    });
-  } catch (error) {
-    if (error instanceof RateLimitError) return empty(429);
-    throw error;
-  }
+    return { data: await designPreviewPdf(userId, appearance), fileName: "nahled.pdf" };
+  });
 }

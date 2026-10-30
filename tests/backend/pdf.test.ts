@@ -862,7 +862,7 @@ describe("bezpečnost", () => {
     expect(await textOf(Buffer.from(await res.arrayBuffer()))).toContain("Stornováno");
   });
 
-  test("[SEC-001] rate limit pdfUser vrátí 429", async () => {
+  test("[SEC-001] vyčerpaný limit stahování vrátí 429 a náhled dál funguje", async () => {
     const { owner, customerId } = newOwner();
     const { id } = draft(owner, customerId);
     session.actor = actor(owner);
@@ -870,7 +870,8 @@ describe("bezpečnost", () => {
 
     for (let i = 0; i < RATE_RULES.pdfUser.limit; i++) checkRateLimit(owner, RATE_RULES.pdfUser);
 
-    expect((await previewRoute(request("/x"), params(id))).status).toBe(429);
+    expect((await pdfRoute(request("/x"), params(id))).status).toBe(429);
+    expect((await previewRoute(request("/x"), params(id))).status).toBe(200);
   });
 
   test("[PDF-009] název souboru bere šablonu z předvoleb", async () => {

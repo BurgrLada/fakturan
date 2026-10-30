@@ -1,8 +1,10 @@
 import { Text, View } from "@react-pdf/renderer";
 import { readableOn } from "@/lib/contrast";
-import { Details, FullBleed, InvoiceBody, InvoicePage, Logo, Parties } from "../parts";
+import { Details, FullBleed, InvoiceBody, InvoicePage, LogoPlate, Parties } from "../parts";
 import type { InvoiceView } from "../view";
 import type { DesignTokens, InvoiceDesign } from "./types";
+
+const LOGO_PLATE = "#ffffff";
 
 const tokens: DesignTokens = {
   colors: { accent: "#0a0a0a", surface: "#fde047", text: "#0a0a0a", line: "#0a0a0a" },
@@ -32,7 +34,7 @@ function KontrastPage({ view }: { view: InvoiceView }) {
               gap: spacing.section,
             }}
           >
-            <Logo view={view} />
+            <LogoPlate view={view} color={LOGO_PLATE} />
             {view.number ? (
               <Text style={{ fontSize: sizes.heading, fontFamily: fonts.mono }}>{view.number}</Text>
             ) : null}

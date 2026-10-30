@@ -1,35 +1,12 @@
-import { contentDisposition } from "@/lib/content-disposition";
-import { actorFromRequest } from "@/server/auth/session";
 import { RATE_RULES } from "@/server/rate-limit";
-import { enforceRateLimit, RateLimitError } from "@/server/services/access";
-import {
-  invoicePdf,
-  InvoicePdfNotFoundError,
-  recordPdfDownload,
-} from "@/server/services/invoice-pdf";
+import { invoicePdf, recordPdfDownload } from "@/server/services/invoice-pdf";
+import { servePdf } from "@/server/services/pdf-http";
 
-const empty = (status: number) =>
-  new Response(null, { status, headers: { "Cache-Control": "no-store" } });
-
-export async function pdfResponse(id: string, type: "inline" | "attachment"): Promise<Response> {
-  const actor = await actorFromRequest();
-  if (!actor.userId) return empty(404);
-  try {
-    enforceRateLimit(actor, RATE_RULES.pdfUser);
-    const { data, fileName } = await invoicePdf(actor.userId, id);
-    if (type === "attachment") recordPdfDownload(actor, actor.userId, id);
-    return new Response(new Uint8Array(data), {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Length": String(data.length),
-        "Content-Disposition": contentDisposition(type, fileName),
-        "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "private, no-store",
-      },
-    });
-  } catch (error) {
-    if (error instanceof InvoicePdfNotFoundError) return empty(404);
-    if (error instanceof RateLimitError) return empty(429);
-    throw error;
-  }
+export function pdfResponse(id: string, type: "inline" | "attachment"): Promise<Response> {
+  const rule = type === "inline" ? RATE_RULES.pdfPreviewUser : RATE_RULES.pdfUser;
+  return servePdf(type, rule, async (actor, userId) => {
+    const pdf = await invoicePdf(userId, id);
+    if (type === "attachment") recordPdfDownload(actor, userId, id);
+    return pdf;
+  });
 }

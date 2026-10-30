@@ -9,6 +9,8 @@ type PartProps = { view: InvoiceView; tokens: DesignTokens };
 const QR_SIZE = 96;
 const LOGO_MAX_WIDTH = 150;
 const LOGO_MAX_HEIGHT = 56;
+const LOGO_PLATE_PADDING = 5;
+const LOGO_PLATE_RADIUS = 4;
 const SIGNATURE_MAX_WIDTH = 140;
 const SIGNATURE_MAX_HEIGHT = 56;
 const A4_WIDTH = 595.28;
@@ -51,6 +53,22 @@ function Png({ data, maxWidth, maxHeight }: { data: Buffer; maxWidth: number; ma
 export function Logo({ view }: { view: InvoiceView }) {
   if (!view.images.logo) return null;
   return <Png data={view.images.logo} maxWidth={LOGO_MAX_WIDTH} maxHeight={LOGO_MAX_HEIGHT} />;
+}
+
+// On a filled area a dark or transparent logo would vanish, so it gets its own light backing.
+export function LogoPlate({ view, color }: { view: InvoiceView; color: string }) {
+  if (!view.images.logo) return null;
+  return (
+    <View
+      style={{
+        padding: LOGO_PLATE_PADDING,
+        borderRadius: LOGO_PLATE_RADIUS,
+        backgroundColor: color,
+      }}
+    >
+      <Logo view={view} />
+    </View>
+  );
 }
 
 export function Party({

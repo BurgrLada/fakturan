@@ -86,6 +86,8 @@ function merged(row: ReturnType<typeof readRow>): Preferences {
   for (const key of Object.keys(DEFAULT_PREFERENCES) as (keyof Preferences)[]) {
     (result as Record<string, unknown>)[key] = row[key];
   }
+  // A design removed from the registry must not make every later save fail validation.
+  if (!isDesignId(result.designId)) result.designId = DEFAULT_PREFERENCES.designId;
   return result;
 }
 

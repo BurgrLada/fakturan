@@ -1,8 +1,10 @@
 import { Text, View } from "@react-pdf/renderer";
 import { readableOn } from "@/lib/contrast";
-import { FullBleed, InvoiceBody, InvoicePage, Logo, Muted, Parties } from "../parts";
+import { FullBleed, InvoiceBody, InvoicePage, LogoPlate, Muted, Parties } from "../parts";
 import type { InvoiceView } from "../view";
 import type { DesignTokens, InvoiceDesign } from "./types";
+
+const LOGO_PLATE = "#ffffff";
 
 const tokens: DesignTokens = {
   colors: { accent: "#0f766e", surface: "#e6f4f1", text: "#10201e", line: "#c5dcd7" },
@@ -33,7 +35,7 @@ function BarevnyPasPage({ view }: { view: InvoiceView }) {
             color: onAccent,
           }}
         >
-          <Logo view={view} />
+          <LogoPlate view={view} color={LOGO_PLATE} />
           <View style={{ flex: 1, alignItems: logoLeft ? "flex-end" : "flex-start" }}>
             <Text
               style={{

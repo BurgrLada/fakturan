@@ -102,6 +102,17 @@ describe("výchozí hodnoty", () => {
     expect(rows("p4")).toEqual([]);
   });
 
+  test("[SET-030] neznámý uložený design nezablokuje jiné uložení a nahradí se výchozím", () => {
+    seed("p9");
+    savePreferences(actor("p9"), { designId: "mono" });
+    db.update(preferences).set({ designId: "odebrany" }).where(eq(preferences.userId, "p9")).run();
+
+    expect(getPreferences("p9").designId).toBe("cisty");
+    savePreferences(actor("p9"), { dueDays: 21 });
+
+    expect(rows("p9")[0]).toMatchObject({ dueDays: 21, designId: "cisty" });
+  });
+
   test("[SET-031] přepínače zobrazení se uloží", () => {
     seed("p5");
 

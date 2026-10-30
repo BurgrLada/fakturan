@@ -353,6 +353,10 @@ export const TEXTS = {
       remove: "Odebrat",
     },
   },
+  pdf: {
+    previewBusy: "Náhledů je teď příliš mnoho. Počkejte chvíli a změňte výběr znovu.",
+    previewFailed: "Náhled se nepodařilo vytvořit. Zkuste to prosím znovu.",
+  },
   designs: {
     title: "Designy faktur",
     intro:

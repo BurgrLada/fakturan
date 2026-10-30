@@ -12,13 +12,16 @@ import { renderInvoicePdf } from "@/server/pdf/render";
 import { buildInvoiceView } from "@/server/pdf/view";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { samplePreviewDocument } from "@/server/services/design-preview";
-import { issueInvoice } from "@/server/services/invoice-lifecycle";
+import { cancelInvoice, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { newDraftDefaults, saveDraft } from "@/server/services/invoices";
 import { ensureDefaultSeries } from "@/server/services/number-series";
 import { getPreferences, savePreferences } from "@/server/services/preferences";
 import { saveSupplier, setSupplierImage } from "@/server/services/supplier";
 import { saveCustomer } from "@/server/services/customers";
+import { servePdf } from "@/server/services/pdf-http";
+import { checkRateLimit, RATE_RULES } from "@/server/rate-limit";
+import { TEXTS } from "@/lib/texts";
 import {
   FIXTURE_LOGO_ID,
   FIXTURE_LOGO_SVG,
@@ -37,6 +40,7 @@ const session = vi.hoisted(() => ({ actor: { userId: null as string | null, sour
 vi.mock("@/server/auth/session", () => ({ actorFromRequest: async () => session.actor }));
 
 const { GET: previewRoute } = await import("@/app/(app)/nastaveni/designy/nahled/route");
+const { GET: invoiceDownload } = await import("@/app/(app)/faktury/[id]/pdf/route");
 
 // Rendering is CPU bound and competes with the other test workers.
 vi.setConfig({ testTimeout: 60_000 });
@@ -68,18 +72,29 @@ const render = async (doc: InvoiceDocument) =>
     await buildInvoiceView(doc, { today: TODAY, draft: false, readImage: readLogo }),
   );
 
+const DARK_LOGO_ID = "dark-logo";
+const DARK_LOGO_RGB = [0x2a, 0x10, 0x40] as const;
+const DARK_LOGO_SVG = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80" viewBox="0 0 240 80">' +
+    '<circle cx="40" cy="40" r="30" fill="#2a1040"/></svg>',
+);
+
 function pixelBox(png: Buffer, rgb: readonly [number, number, number]) {
   const { data, width, height } = PNG.sync.read(png);
   let left = width;
   let right = -1;
+  let top = height;
+  let bottom = -1;
   for (let i = 0; i < data.length; i += 4) {
     if (data[i] === rgb[0] && data[i + 1] === rgb[1] && data[i + 2] === rgb[2]) {
       const x = (i / 4) % width;
       left = Math.min(left, x);
       right = Math.max(right, x);
+      top = Math.min(top, Math.floor(i / 4 / width));
+      bottom = Math.max(bottom, Math.floor(i / 4 / width));
     }
   }
-  return { left, right, width, height };
+  return { left, right, top, bottom, width, height };
 }
 
 const squeeze = (text: string) => text.replace(/\s+/g, "").toLowerCase();
@@ -277,6 +292,32 @@ describe.each(designIds)("design %s", (designId) => {
     expect(pixelBox(none, LOGO_RGB).right).toBe(-1);
     expect(pixelBox(none, ACCENT_RGB).right).toBeGreaterThan(0);
     expect(decodeQr(left)).toContain("X-VS:2026001");
+  });
+
+  test("[PDF-003] tmavé průhledné logo zůstane vidět i na tmavém akcentu", async () => {
+    const accent = { accent: "#1a1a1a", surface: "", text: "", line: "" };
+    const doc = withDesign(
+      { ...F.short, images: { ...F.short.images, logoFileId: DARK_LOGO_ID } },
+      designId,
+      { colors: accent },
+    );
+    const pdf = await renderInvoicePdf(
+      await buildInvoiceView(doc, {
+        today: TODAY,
+        draft: false,
+        readImage: (id) => (id === DARK_LOGO_ID ? DARK_LOGO_SVG : null),
+      }),
+    );
+
+    const png = await pdfPagePng(pdf, 1);
+    const box = pixelBox(png, DARK_LOGO_RGB);
+    const { data, width } = PNG.sync.read(png);
+    const at = (box.top + box.bottom) >> 1;
+    const offset = (at * width + box.left - 4) * 4;
+    const hex = (i: number) => data[offset + i]!.toString(16).padStart(2, "0");
+
+    expect(box.right).toBeGreaterThan(0);
+    expect(contrastRatio(`#${hex(0)}${hex(1)}${hex(2)}`, "#2a1040")).toBeGreaterThanOrEqual(3);
   });
 
   test("[TST-015] QR v PDF se dekóduje", async () => {
@@ -482,6 +523,58 @@ describe("náhled designu", () => {
 
     expect(text).toContain("Novější s.r.o.");
     expect(getPreferences(owner)).toEqual(before);
+  });
+
+  test("[PDF-004] stornovaný doklad se v náhledu nepoužije", async () => {
+    const owner = newOwner();
+    withSupplier(owner);
+    issueOne(owner, "Platný s.r.o.");
+    setClockForTests({ now: () => new Date("2026-03-11T10:00:00Z") });
+    cancelInvoice(actor(owner), issueOne(owner, "Stornovaný s.r.o."));
+    session.actor = actor(owner);
+
+    const text = await textOfResponse(await previewPdf());
+
+    expect(text).toContain("Platný s.r.o.");
+    expect(text).not.toContain("Stornovaný s.r.o.");
+  });
+
+  test("[SEC-001] vyčerpaný limit náhledu ukáže hlášku a stažení dál funguje", async () => {
+    const owner = newOwner();
+    withSupplier(owner);
+    const id = issueOne(owner, "Alfa s.r.o.");
+    session.actor = actor(owner);
+    expect(RATE_RULES.pdfPreviewUser).toEqual({
+      name: "pdfPreviewUser",
+      limit: 600,
+      windowSeconds: 60,
+    });
+    for (let i = 0; i < RATE_RULES.pdfPreviewUser.limit; i++) {
+      checkRateLimit(owner, RATE_RULES.pdfPreviewUser);
+    }
+
+    const blocked = await previewPdf();
+    const download = await invoiceDownload(new Request("http://localhost:3000/x"), {
+      params: Promise.resolve({ id }),
+    });
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("content-type")).toContain("text/html");
+    expect(await blocked.text()).toContain(TEXTS.pdf.previewBusy);
+    expect(download.status).toBe(200);
+  });
+
+  test("[PDF-004] selhání náhledu ukáže hlášku, selhání stažení zůstane chybou", async () => {
+    session.actor = actor(newOwner());
+    const fail = async (): Promise<never> => {
+      throw new Error("render selhal");
+    };
+
+    const preview = await servePdf("inline", RATE_RULES.pdfPreviewUser, fail);
+
+    expect(preview.status).toBe(500);
+    expect(await preview.text()).toContain(TEXTS.pdf.previewFailed);
+    await expect(servePdf("attachment", RATE_RULES.pdfUser, fail)).rejects.toThrow("render selhal");
   });
 
   test("[PDF-004] cizí doklad se v náhledu neobjeví", async () => {

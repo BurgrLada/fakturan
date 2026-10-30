@@ -15,7 +15,9 @@ import { currentParties, loadInvoiceDocument } from "./invoice-document";
 import { ownerImageReader } from "./invoice-pdf";
 import { getPreferences } from "./preferences";
 
-const ISSUED_STATUSES = INVOICE_STATUSES.filter((status) => status !== "draft");
+const PREVIEW_STATUSES = INVOICE_STATUSES.filter(
+  (status) => status !== "draft" && status !== "cancelled" && status !== "credited",
+);
 const SAMPLE_NUMBER = "2026-001";
 const SAMPLE_VARIABLE_SYMBOL = "2026001";
 
@@ -114,7 +116,7 @@ function lastIssuedDocument(ownerId: string): InvoiceDocument | null {
   const row = db
     .select({ id: invoice.id })
     .from(invoice)
-    .where(scoped(ownerId).where(invoice, (t) => inArray(t.status, ISSUED_STATUSES)))
+    .where(scoped(ownerId).where(invoice, (t) => inArray(t.status, PREVIEW_STATUSES)))
     .orderBy(desc(invoice.issuedAt))
     .get();
   return row ? loadInvoiceDocument(ownerId, row.id) : null;
