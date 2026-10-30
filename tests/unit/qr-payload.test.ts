@@ -76,7 +76,8 @@ describe("planQr SPAYD", () => {
       (planQr({ ...czk, message }) as { payload: string }).payload.split("*MSG:")[1];
     expect(long("a".repeat(70))).toBe("a".repeat(60));
     expect(long("a".repeat(60))).toBe("a".repeat(60));
-    expect(long("a".repeat(59) + "😀😀")).toBe("a".repeat(59) + "😀");
+    expect(long("a".repeat(59) + "😀😀")).toBe("a".repeat(59));
+    expect(long("a".repeat(59) + " b")).toBe("a".repeat(59));
     expect(long("ř".repeat(61))).toBe("r".repeat(60));
     expect(long("*".repeat(70))).toBe("%2A".repeat(60));
   });
@@ -94,9 +95,28 @@ describe("planQr SPAYD", () => {
     });
   });
 
-  test("[QR-001] variabilní symbol má nejvýš deset číslic", () => {
-    const plan = planQr({ ...czk, variableSymbol: "123456789012" }) as { payload: string };
-    expect(plan.payload).toContain("*X-VS:1234567890*");
+  test("[QR-001] variabilní symbol delší než deset číslic se vynechá, ne zkrátí", () => {
+    const plan = planQr({ ...czk, variableSymbol: "12345678901" }) as { payload: string };
+    expect(plan.payload).not.toContain("X-VS");
+    const ten = planQr({ ...czk, variableSymbol: "1234567890" }) as { payload: string };
+    expect(ten.payload).toContain("*X-VS:1234567890*");
+    const epc = planQr({ ...eur, variableSymbol: "12345678901" }) as { payload: string };
+    expect(epc.payload.split("\n")[10]).toBe("Faktura 2026001");
+  });
+
+  test("[QR-001] text je tisknutelné ASCII: transliterace, řídicí znaky a řádky", () => {
+    const msg = (message: string) =>
+      (planQr({ ...czk, variableSymbol: "", message }) as { payload: string }).payload.split(
+        "*MSG:",
+      )[1];
+    expect(msg("Łódź ß Øre Ærø Œuvre Đ")).toBe("Lodz ss Ore AEro OEuvre D");
+    expect(msg("a\r\nb\tc\u0000d\u2028e")).toBe("a b c d e");
+    expect(msg("  a    b  ")).toBe("a b");
+    expect(msg("a😀b€c")).toBe("abc");
+    expect(planQr({ ...czk, message: "😀" })).toEqual({
+      kind: "spayd",
+      payload: "SPD*1.0*ACC:CZ6508000000192000145399*AM:1234.50*CC:CZK*X-VS:2026001",
+    });
   });
 
   test("[QR-001] CZK na cizí účet nedá QR", () => {
@@ -140,27 +160,87 @@ describe("planQr EPC", () => {
     expect(lines({ ...eur, variableSymbol: "", message: "" })).toBe("");
   });
 
-  test("[QR-002] EPC zpráva je bez diakritiky a má nejvýš 140 znaků, příjemce 70", () => {
+  test("[QR-002] EPC text je ASCII, zpráva má nejvýš 140 znaků, příjemce 70", () => {
     const plan = planQr({
       ...eur,
       recipient: "Ř".repeat(80),
       message: "ž".repeat(200),
     }) as { payload: string };
     const lines = plan.payload.split("\n");
-    expect(lines[5]).toBe("Ř".repeat(70));
+    expect(lines[5]).toBe("R".repeat(70));
     expect(lines[10]).toBe(`VS2026001 ${"z".repeat(130)}`);
     expect(lines[10]).toHaveLength(140);
   });
 
-  test("[QR-002] ořez EPC zprávy zachová celý znak", () => {
+  test("[QR-002] emoji se z EPC odstraní, ořez nenechá koncovou mezeru", () => {
     const plan = planQr({
       ...eur,
       variableSymbol: "",
       message: "a".repeat(139) + "😀😀",
     }) as { payload: string };
-    expect(plan.payload.split("\n")[10]).toBe("a".repeat(139) + "😀");
-    const name = planQr({ ...eur, recipient: "a".repeat(69) + "😀😀" }) as { payload: string };
-    expect(name.payload.split("\n")[5]).toBe("a".repeat(69) + "😀");
+    expect(plan.payload.split("\n")[10]).toBe("a".repeat(139));
+    const name = planQr({ ...eur, recipient: "a".repeat(69) + " b" }) as { payload: string };
+    expect(name.payload.split("\n")[5]).toBe("a".repeat(69));
+  });
+
+  test("[QR-002] nejhorší EPC se vejde do 331 bajtů", () => {
+    const plan = planQr({
+      ...eur,
+      dueMinor: 99_999_999_999,
+      recipient: "Ř😀".repeat(50),
+      message: "Ž😀".repeat(100),
+    }) as { payload: string };
+    expect(plan.payload).toMatch(/^[\x20-\x7e\n]+$/);
+    expect(Buffer.byteLength(plan.payload)).toBeLessThanOrEqual(331);
+    expect(plan.payload.split("\n")).toHaveLength(11);
+  });
+
+  test("[QR-002] EPC přes 331 bajtů vyhodí chybu", () => {
+    const fill = (length: number) => ({
+      ...eur,
+      dueMinor: 99_999_999_999,
+      recipient: "R".repeat(70),
+      message: "m".repeat(200),
+      iban: "D".repeat(length),
+    });
+    const ok = planQr(fill(75)) as { payload: string };
+    expect(Buffer.byteLength(ok.payload)).toBe(331);
+    expect(() => planQr(fill(76))).toThrow("331");
+  });
+
+  test("[QR-002] transliterace pokrývá všechna speciální písmena", () => {
+    const plan = planQr({
+      ...eur,
+      variableSymbol: "",
+      message: "ŁłßØøÆæŒœĐđÐðÞþı",
+    }) as { payload: string };
+    expect(plan.payload.split("\n")[10]).toBe("LlssOoAEaeOEoeDdDdThthi");
+  });
+
+  test("[QR-002] příjemce s novým řádkem drží pole na svých řádcích", () => {
+    const plan = planQr({ ...eur, recipient: "Acme\ns.r.o.", message: "a\nb" }) as {
+      payload: string;
+    };
+    const lines = plan.payload.split("\n");
+    expect(lines).toHaveLength(11);
+    expect(lines[5]).toBe("Acme s.r.o.");
+    expect(lines[10]).toBe("VS2026001 a b");
+  });
+
+  test("[QR-001] SPAYD s CRLF ve zprávě je zploštěný", () => {
+    const plan = planQr({ ...czk, message: "a\r\nb" }) as { payload: string };
+    expect(plan.payload).not.toMatch(/[\r\n]/);
+    expect(plan.payload).toContain("*MSG:a b");
+  });
+
+  test("[QR-002] EPC s prázdným příjemcem po vyčištění nedá QR", () => {
+    for (const recipient of ["", "  ", "😀", "\n"]) {
+      expect(planQr({ ...eur, recipient })).toEqual({
+        kind: "none",
+        reason: "missing_recipient",
+      });
+    }
+    expect(planQr({ ...czk, recipient: "" }).kind).toBe("spayd");
   });
 
   test("[QR-002] EPC normalizuje IBAN i BIC", () => {
@@ -210,6 +290,27 @@ describe("planQr důvody", () => {
     expect(planQr({ ...all, paid: true })).toEqual({ kind: "none", reason: "paid" });
     expect(planQr(all)).toEqual({ kind: "none", reason: "zero" });
     expect(planQr({ ...all, dueMinor: 1 })).toEqual({ kind: "none", reason: "currency" });
+  });
+
+  test("[QR-006] nekonečná, desetinná a nebezpečná částka nedá QR", () => {
+    for (const dueMinor of [NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(planQr({ ...czk, dueMinor })).toEqual({ kind: "none", reason: "zero" });
+    }
+  });
+
+  test("[QR-006] částka nad 999999999.99 nedá QR, na hranici ano", () => {
+    expect(planQr({ ...czk, dueMinor: 100_000_000_000 })).toEqual({
+      kind: "none",
+      reason: "amount_too_large",
+    });
+    expect(planQr({ ...eur, dueMinor: 100_000_000_000 })).toEqual({
+      kind: "none",
+      reason: "amount_too_large",
+    });
+    const edge = planQr({ ...czk, dueMinor: 99_999_999_999 }) as { payload: string };
+    expect(edge.payload).toContain("*AM:999999999.99*");
+    const epc = planQr({ ...eur, dueMinor: 99_999_999_999 }) as { payload: string };
+    expect(epc.payload.split("\n")[7]).toBe("EUR999999999.99");
   });
 
   test("[QR-006] nulová nebo záporná částka nedá QR", () => {

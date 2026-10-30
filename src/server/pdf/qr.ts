@@ -7,8 +7,14 @@ const MARGIN_MODULES = 4;
 const LOGO_MAX_SHARE = 0.2;
 const LOGO_PADDING = 6;
 
-export async function qrPng(payload: string, logo: Buffer | null): Promise<Buffer> {
-  const options = { errorCorrectionLevel: "H", margin: MARGIN_MODULES } as const;
+export async function qrPng(
+  payload: string,
+  logo: Buffer | null,
+  kind: "spayd" | "epc" = "spayd",
+): Promise<Buffer> {
+  // EPC standard asks for level M; the logo needs H's redundancy.
+  const level = kind === "epc" && !logo ? "M" : "H";
+  const options = { errorCorrectionLevel: level, margin: MARGIN_MODULES } as const;
   const code = await QRCode.toBuffer(payload, { ...options, width: SIZE });
   if (!logo) return code;
   const modules = QRCode.create(payload, options).modules.size;

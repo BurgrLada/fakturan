@@ -6,7 +6,9 @@ export type QrReason =
   | "zero"
   | "currency"
   | "not_czech_account"
-  | "missing_iban_bic";
+  | "missing_iban_bic"
+  | "missing_recipient"
+  | "amount_too_large";
 
 export type QrPlan =
   | { kind: "spayd" | "epc"; payload: string }
@@ -28,6 +30,27 @@ const SPAYD_MESSAGE_MAX = 60;
 const EPC_MESSAGE_MAX = 140;
 const EPC_RECIPIENT_MAX = 70;
 const VARIABLE_SYMBOL_MAX = 10;
+const MAX_DUE_MINOR = 99_999_999_999;
+const EPC_MAX_BYTES = 331;
+
+const TRANSLITERATIONS: Record<string, string> = {
+  Ł: "L",
+  ł: "l",
+  ß: "ss",
+  Ø: "O",
+  ø: "o",
+  Æ: "AE",
+  æ: "ae",
+  Œ: "OE",
+  œ: "oe",
+  Đ: "D",
+  đ: "d",
+  Ð: "D",
+  ð: "d",
+  Þ: "Th",
+  þ: "th",
+  ı: "i",
+};
 
 export function amountDue(row: { totalMinor: number; paidMinor: number }): number {
   return row.totalMinor - row.paidMinor;
@@ -37,25 +60,29 @@ function formatAmount(minor: number): string {
   return `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, "0")}`;
 }
 
-// Cuts by code point so a surrogate pair is never split.
-function truncate(value: string, max: number): string {
-  return [...value].slice(0, max).join("");
+// Output is printable ASCII only, so character limits equal byte limits.
+function toAscii(value: string | null): string {
+  return (value ?? "")
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ")
+    .replace(/[ŁłßØøÆæŒœĐđÐðÞþı]/g, (char) => TRANSLITERATIONS[char])
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^\x20-\x7e]/g, "")
+    .replace(/ +/g, " ")
+    .trim();
 }
 
-function stripDiacritics(value: string): string {
-  return value.normalize("NFD").replace(/\p{M}/gu, "");
-}
-
-function cleanMessage(value: string | null): string {
-  return stripDiacritics(value ?? "").trim();
+function limit(value: string, max: number): string {
+  return value.slice(0, max).trimEnd();
 }
 
 function digits(value: string | null): string {
-  return (value ?? "").replace(/\D/g, "").slice(0, VARIABLE_SYMBOL_MAX);
+  const only = (value ?? "").replace(/\D/g, "");
+  return only.length > VARIABLE_SYMBOL_MAX ? "" : only;
 }
 
 function spayd(input: QrInput, iban: string): QrPlan {
-  const message = truncate(cleanMessage(input.message), SPAYD_MESSAGE_MAX);
+  const message = limit(toAscii(input.message), SPAYD_MESSAGE_MAX);
   const vs = digits(input.variableSymbol);
   const parts = ["SPD", "1.0", `ACC:${iban}`, `AM:${formatAmount(input.dueMinor)}`, "CC:CZK"];
   if (vs) parts.push(`X-VS:${vs}`);
@@ -63,33 +90,34 @@ function spayd(input: QrInput, iban: string): QrPlan {
   return { kind: "spayd", payload: parts.join("*") };
 }
 
-function epc(input: QrInput, iban: string, bic: string): QrPlan {
+function epc(input: QrInput, iban: string, bic: string, recipient: string): QrPlan {
   const vs = digits(input.variableSymbol);
-  const message = cleanMessage(input.message);
-  const remittance = truncate(
-    [vs && `VS${vs}`, message].filter(Boolean).join(" "),
-    EPC_MESSAGE_MAX,
-  );
+  const message = toAscii(input.message);
+  const remittance = limit([vs && `VS${vs}`, message].filter(Boolean).join(" "), EPC_MESSAGE_MAX);
   const payload = [
     "BCD",
     "002",
     "1",
     "SCT",
     bic,
-    truncate(input.recipient, EPC_RECIPIENT_MAX),
+    recipient,
     iban,
     `EUR${formatAmount(input.dueMinor)}`,
     "",
     "",
     remittance,
   ].join("\n");
+  if (payload.length > EPC_MAX_BYTES) throw new Error("EPC payload exceeds 331 bytes");
   return { kind: "epc", payload };
 }
 
 export function planQr(input: QrInput): QrPlan {
   if (!input.enabled) return { kind: "none", reason: "disabled" };
   if (input.paid) return { kind: "none", reason: "paid" };
-  if (input.dueMinor <= 0) return { kind: "none", reason: "zero" };
+  if (!Number.isSafeInteger(input.dueMinor) || input.dueMinor <= 0) {
+    return { kind: "none", reason: "zero" };
+  }
+  if (input.dueMinor > MAX_DUE_MINOR) return { kind: "none", reason: "amount_too_large" };
   const iban = normalizeIban(input.iban ?? "");
   const bic = (input.bic ?? "").trim().toUpperCase();
   if (input.currency === "CZK") {
@@ -99,7 +127,9 @@ export function planQr(input: QrInput): QrPlan {
   }
   if (input.currency === "EUR") {
     if (!iban || !bic) return { kind: "none", reason: "missing_iban_bic" };
-    return epc(input, iban, bic);
+    const recipient = limit(toAscii(input.recipient), EPC_RECIPIENT_MAX);
+    if (!recipient) return { kind: "none", reason: "missing_recipient" };
+    return epc(input, iban, bic, recipient);
   }
   return { kind: "none", reason: "currency" };
 }

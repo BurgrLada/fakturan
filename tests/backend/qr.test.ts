@@ -1,3 +1,4 @@
+import QRCode from "qrcode";
 import sharp from "sharp";
 import { describe, expect, test } from "vitest";
 import { amountDue, planQr } from "@/lib/qr-payload";
@@ -41,11 +42,27 @@ const worstEpc = {
   currency: "EUR",
   iban: "DE89370400440532013000",
   bic: "COBADEFFXXX",
-  recipient: "W".repeat(70),
-  message: "M".repeat(200),
+  recipient: "Ř😀".repeat(50),
+  message: "Ž😀".repeat(100),
+  dueMinor: 99_999_999_999,
 };
 
 describe("qrPng", () => {
+  test("[QR-004] EPC bez loga má úroveň M, SPAYD i EPC s logem H, vše se dekóduje", async () => {
+    const epc = planQr(worstEpc);
+    const spayd = planQr(base);
+    if (epc.kind === "none" || spayd.kind === "none") throw new Error("plan");
+    const level = (payload: string, errorCorrectionLevel: "M" | "H") =>
+      QRCode.toBuffer(payload, { errorCorrectionLevel, margin: 4, width: 1024 });
+    const epcPlain = await qrPng(epc.payload, null, "epc");
+    expect(epcPlain.equals(await level(epc.payload, "M"))).toBe(true);
+    expect(decodeQr(epcPlain)).toBe(epc.payload);
+    const spaydPlain = await qrPng(spayd.payload, null, "spayd");
+    expect(spaydPlain.equals(await level(spayd.payload, "H"))).toBe(true);
+    expect(decodeQr(spaydPlain)).toBe(spayd.payload);
+    expect(decodeQr(await qrPng(epc.payload, await logo(300, 300), "epc"))).toBe(epc.payload);
+  });
+
   test("[QR-004] kód bez loga se dekóduje na stejný obsah a má 1024 px", async () => {
     const plan = planQr(base);
     if (plan.kind === "none") throw new Error("plan");
@@ -68,7 +85,7 @@ describe("qrPng", () => {
       for (const input of [worstSpayd, worstEpc]) {
         const plan = planQr(input);
         if (plan.kind === "none") throw new Error("plan");
-        const png = await qrPng(plan.payload, await logo(w, h));
+        const png = await qrPng(plan.payload, await logo(w, h), plan.kind);
         expect(decodeQr(png)).toBe(plan.payload);
       }
     },
@@ -101,8 +118,12 @@ describe("qrPng", () => {
     }
     const side = maxX - minX + 1;
     expect(side).toBe(maxY - minY + 1);
-    expect(side).toBeLessThanOrEqual(0.2 * 1024);
-    expect(side).toBeGreaterThan(0.1 * 1024);
+    const modules = QRCode.create(plan.payload, { errorCorrectionLevel: "H" }).modules.size;
+    const codeSide = (1024 * modules) / (modules + 8);
+    // The logo is fitted inside the box minus 6 px white padding on each side.
+    const box = side + 12;
+    expect(box).toBeLessThanOrEqual(0.2 * codeSide);
+    expect(box).toBeGreaterThan(0.18 * codeSide);
     expect(Math.abs(minX + maxX + 1 - 1024)).toBeLessThanOrEqual(1);
     expect(Math.abs(minY + maxY + 1 - 1024)).toBeLessThanOrEqual(1);
   });
