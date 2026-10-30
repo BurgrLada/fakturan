@@ -125,7 +125,7 @@ Datový model:
 | `invoice_line` | `id`, `invoice_id` (cascade), `user_id`, `position`, `catalog_item_id` (set null), `name`, `description`, `quantity_milli`, `unit`, `unit_price_minor`, `discount_kind`, `discount_value`, `net_minor` |
 | `tag`, `invoice_tag` | `tag(id, user_id, name, name_key)` s unikátním `(user_id, name_key)`, `invoice_tag(invoice_id, tag_id, user_id)` |
 
-Indexy: unikátní částečný `(user_id, number) WHERE number IS NOT NULL`, `(user_id, status)`, `(user_id, issue_date)`, `(user_id, customer_id)`. `customer_id` a `bank_account_id` bez kaskády, `series_id` a `related_invoice_id` bez kaskády u vydaných dokladů řeší pořadí v `USER_OWNED_TABLES`, `series_id` je `set null`, protože řadu s přiděleným číslem chrání počítadlo. Sloupce `paid_minor`, `external` a `related_invoice_id` zatím jen nesou výchozí hodnotu pro plány 5, 6 a 8.
+Indexy: unikátní částečný `(user_id, number) WHERE number IS NOT NULL`, `(user_id, status)`, `(user_id, issue_date)`, `(user_id, customer_id)`. `customer_id`, `bank_account_id` a `related_invoice_id` jsou bez kaskády a `invoice` je v `USER_OWNED_TABLES` před tabulkami, na které odkazuje. `series_id` je `set null`, protože řadu s přiděleným číslem chrání počítadlo a koncept si řadu při vystavení dosadí znovu. Sloupce `paid_minor`, `external` a `related_invoice_id` zatím jen nesou výchozí hodnotu pro plány 5, 6 a 8.
 
 Pravidla:
 - Koncept je shovívavý: smí mít prázdné položky i bez zákazníka. Přísná kontrola je až při vystavení. Součty přepočítá vždy server.
@@ -317,7 +317,7 @@ Pravidla:
 - Řádek tabulky má `wrap={false}` jen do 600 znaků popisu, delší se smí zalomit. Záhlaví tabulky a „Strana X z Y“ jsou `fixed`.
 - Render běží v pořadí za sebou přes frontu v `render.ts`, aby souběžné náhledy neblokovaly server.
 - `view.ts` čte vystavený doklad ze snapshotů a logo z `logo_file_id`, koncept z aktuálních dat. Koncept nese vodoznak „Koncept“, číslo prázdné. Popisky jsou v `labels.ts` pro cs a en, nejsou v `TEXTS`, protože patří dokumentu, ne rozhraní.
-- Nad řádky v PDF nejde nic z uživatelského vstupu jako kód, text je vždy obsah elementu `<Text>`.
+- Uživatelský vstup je v PDF vždy jen obsah elementu `<Text>`, nikdy se neinterpretuje.
 - Route vrací `Content-Disposition` s `filename*`, `nosniff`, kontrolu vlastníka přes `readOwned` vzor, cizí 404, rate limit `pdfUser`. Stažení vystaveného dokladu zapíše audit `invoice.pdf_download`. V globální CSP se změní `frame-ancestors 'none'` na `'self'`, aby šel náhled v iframe.
 - Fixture dokumenty pro testy: krátká, dlouhá (300 položek), EUR, angličtina, bez loga, dlouhé názvy.
 
@@ -337,7 +337,7 @@ test('[SEC-001] cizí uživatel dostane na PDF i náhled 404', ...)
 test('[PDF-001] standalone obraz vyrenderuje PDF s logem SVG', ...) // docker-pdf.spec.ts
 ```
 
-`tests/e2e/docker-pdf.spec.ts` běží jen s `E2E_DOCKER_IMAGE`: založí účet přes UI, vyplní dodavatele, vystaví doklad přes službu UI nebo přes API testu a stáhne PDF z kontejneru. CI nastaví proměnnou po `docker build`.
+`tests/e2e/docker-pdf.spec.ts` běží jen s `E2E_DOCKER_IMAGE`: založí účet přes UI, vyplní dodavatele, nahraje logo SVG, vystaví doklad přes formulář a stáhne PDF z kontejneru. Běží až po Task 9, do té doby ji Step 5 ověřuje skriptem, který v kontejneru zavolá `renderInvoicePdf` nad fixture. CI nastaví proměnnou po `docker build`.
 
 - [ ] **Step 2: Ověř selhání:** `npx vitest run tests/backend/pdf.test.ts`, FAIL.
 - [ ] **Step 3: Implementuj render a `cisty`** podle rozhraní. Zkus nejdřív jeden dokument s českým textem, teprve pak tabulku.
