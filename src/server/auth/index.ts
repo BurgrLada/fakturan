@@ -19,6 +19,7 @@ import {
 } from "./audit-hooks";
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "./passwords";
 import { enabledProviders, socialProviders } from "./providers";
+import { enforceAuthRateLimit } from "./rate-limits";
 import { webActor } from "./request-actor";
 import { canRegister, INVITE_COOKIE, isSignupOpen } from "./signup-guard";
 
@@ -158,6 +159,13 @@ export function createAuth(env: Env) {
     database: drizzleAdapter(db, { provider: "sqlite", schema }),
     telemetry: { enabled: false },
     disabledPaths: ADMIN_PATHS,
+    rateLimit: { enabled: false },
+    advanced: {
+      useSecureCookies: env.BETTER_AUTH_URL.startsWith("https://"),
+      ipAddress: env.TRUST_PROXY
+        ? { ipAddressHeaders: ["x-forwarded-for"] }
+        : { disableIpTracking: true },
+    },
     trustedOrigins: enabledProviders(env).includes("apple") ? ["https://appleid.apple.com"] : [],
     onAPIError: { errorURL: "/prihlaseni" },
     socialProviders: socialProviders(env),
@@ -251,6 +259,7 @@ export function createAuth(env: Env) {
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         const body = (ctx.body ?? {}) as Record<string, unknown>;
+        enforceAuthRateLimit(ctx, env);
         if (ctx.path === "/sign-up/email") {
           if (!isSignupOpen(db, ctx.getCookie(INVITE_COOKIE) ?? undefined)) {
             recordAuthEvent(ctx, env, {

@@ -13,6 +13,7 @@ import {
   auditLog,
   instanceMeta,
   invitation,
+  rateLimit,
   session,
   user,
   verification,
@@ -159,6 +160,7 @@ async function createAdmin(auth: Auth, email = "admin@example.cz") {
 const plainAuth = createAuth(testEnv());
 
 beforeEach(() => {
+  db.delete(rateLimit).run();
   db.delete(user).run();
   db.delete(verification).run();
   db.delete(invitation).run();

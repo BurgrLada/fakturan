@@ -1,0 +1,242 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { desc, eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { createAuth } from "@/server/auth";
+import { setClockForTests } from "@/server/clock";
+import { createDb, setDbForTests } from "@/server/db";
+import { auditLog, instanceMeta, rateLimit, user } from "@/server/db/schema";
+import { parseEnv, type Env } from "@/server/env";
+import { checkRateLimit, RATE_RULES } from "@/server/rate-limit";
+import { createTestDb } from "../helpers/db";
+
+const db = createTestDb();
+
+const BASE = "http://localhost:3000";
+const PASSWORD = "správné-kůň-baterie-sponka";
+const dataDir = mkdtempSync(join(tmpdir(), "fakturan-rl-"));
+
+function testEnv(extra: Record<string, string> = {}): Env {
+  return parseEnv({
+    DATA_DIR: dataDir,
+    BETTER_AUTH_URL: BASE,
+    BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
+    ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    ...extra,
+  });
+}
+
+type Auth = ReturnType<typeof createAuth>;
+
+function post(auth: Auth, path: string, body: unknown, headers: Record<string, string> = {}) {
+  return auth.handler(
+    new Request(`${BASE}/api/auth${path}`, {
+      method: "POST",
+      headers: { origin: BASE, "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+const signIn = (auth: Auth, email: string, headers?: Record<string, string>) =>
+  post(auth, "/sign-in/email", { email, password: "špatné-heslo-špatné" }, headers);
+
+function auditRows(action: string) {
+  return db
+    .select()
+    .from(auditLog)
+    .where(eq(auditLog.action, action))
+    .orderBy(desc(auditLog.id))
+    .all();
+}
+
+const auth = createAuth(testEnv());
+const proxied = createAuth(testEnv({ TRUST_PROXY: "1" }));
+
+beforeEach(() => {
+  db.delete(rateLimit).run();
+  db.delete(user).run();
+  db.delete(instanceMeta).run();
+  setClockForTests({ now: () => new Date("2026-11-02T10:00:00.000Z") });
+});
+
+afterEach(() => setClockForTests(null));
+
+describe("checkRateLimit", () => {
+  const rule = { name: "test", limit: 2, windowSeconds: 60 };
+
+  test("[SEC-001] po vyčerpání limitu odmítne a řekne, za jak dlouho to jde znovu", () => {
+    expect(checkRateLimit("k", rule)).toEqual({ allowed: true, retryAfterSeconds: 0 });
+    expect(checkRateLimit("k", rule).allowed).toBe(true);
+    expect(checkRateLimit("k", rule)).toEqual({ allowed: false, retryAfterSeconds: 60 });
+  });
+
+  test("[SEC-001] okno se po uplynutí obnoví a klíče jsou nezávislé", () => {
+    let now = new Date("2026-11-02T10:00:00.000Z");
+    setClockForTests({ now: () => now });
+    checkRateLimit("a", rule);
+    checkRateLimit("a", rule);
+    expect(checkRateLimit("b", rule).allowed).toBe(true);
+
+    now = new Date("2026-11-02T10:00:30.000Z");
+    expect(checkRateLimit("a", rule)).toEqual({ allowed: false, retryAfterSeconds: 30 });
+    now = new Date("2026-11-02T10:01:00.000Z");
+    expect(checkRateLimit("a", rule).allowed).toBe(true);
+  });
+
+  test("[SEC-001] odmítnutý pokus počítadlo dál nezvyšuje", () => {
+    let now = new Date("2026-11-02T10:00:00.000Z");
+    setClockForTests({ now: () => now });
+    for (let i = 0; i < 50; i++) checkRateLimit("k", rule);
+    now = new Date("2026-11-02T10:01:00.000Z");
+    expect(checkRateLimit("k", rule).allowed).toBe(true);
+  });
+
+  test("[SEC-001] limit přežije restart procesu", () => {
+    checkRateLimit("k", rule);
+    checkRateLimit("k", rule);
+
+    const reopened = createDb(db.$client.name);
+    setDbForTests(reopened);
+    try {
+      expect(checkRateLimit("k", rule).allowed).toBe(false);
+    } finally {
+      setDbForTests(db);
+      reopened.$client.close();
+    }
+  });
+
+  test("[SEC-001] pravidla odpovídají specifikaci", () => {
+    expect(RATE_RULES.loginIpEmail).toMatchObject({ limit: 5, windowSeconds: 60 });
+    expect(RATE_RULES.loginIp).toMatchObject({ limit: 20, windowSeconds: 60 });
+    expect(RATE_RULES.resetPasswordEmail).toMatchObject({ limit: 3, windowSeconds: 3600 });
+    expect(RATE_RULES.signupIp).toMatchObject({ limit: 5, windowSeconds: 3600 });
+    expect(RATE_RULES.invitationsUser).toMatchObject({ limit: 20, windowSeconds: 3600 });
+    for (const name of ["sendUser", "importUser", "exportUser"] as const) {
+      expect(RATE_RULES[name]).toMatchObject({ limit: 60, windowSeconds: 60 });
+    }
+  });
+});
+
+describe("rate limiting přihlášení", () => {
+  test("[SEC-001] [AUD-002] šesté přihlášení za minutu vrátí 429 a zapíše audit", async () => {
+    const before = auditRows("rate_limit.exceeded").length;
+    for (let i = 0; i < 5; i++) expect((await signIn(auth, "jan@example.cz")).status).toBe(401);
+
+    const res = await signIn(auth, "jan@example.cz");
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("60");
+    const rows = auditRows("rate_limit.exceeded");
+    expect(rows).toHaveLength(before + 1);
+    expect(rows[0]).toMatchObject({ scope: "instance", source: "web" });
+    expect(rows[0].after).toMatchObject({ rule: "loginIpEmail", retryAfterSeconds: 60 });
+  });
+
+  test("[SEC-001] po uplynutí minuty jde přihlášení znovu", async () => {
+    for (let i = 0; i < 6; i++) await signIn(auth, "jan@example.cz");
+    setClockForTests({ now: () => new Date("2026-11-02T10:01:00.000Z") });
+    expect((await signIn(auth, "jan@example.cz")).status).toBe(401);
+  });
+
+  test("[SEC-001] odmítnutí nezapíše navíc záznam o neúspěšném přihlášení", async () => {
+    const before = auditRows("auth.login_failed").length;
+    for (let i = 0; i < 7; i++) await signIn(auth, "jan@example.cz");
+    expect(auditRows("auth.login_failed")).toHaveLength(before + 5);
+  });
+
+  test("[SEC-001] limit na IP platí napříč e-maily", async () => {
+    for (let i = 0; i < 20; i++) {
+      expect((await signIn(auth, `u${i}@example.cz`)).status).toBe(401);
+    }
+    expect((await signIn(auth, "dalsi@example.cz")).status).toBe(429);
+  });
+
+  test("[SEC-001] velikost písmen v e-mailu limit neobejde", async () => {
+    for (let i = 0; i < 5; i++) await signIn(auth, "Jan@Example.cz");
+    expect((await signIn(auth, "jan@example.cz")).status).toBe(429);
+  });
+
+  test("[SEC-001] bez TRUST_PROXY podvržené X-Forwarded-For limit neobejde", async () => {
+    for (let i = 0; i < 20; i++) {
+      await signIn(auth, `u${i}@example.cz`, { "x-forwarded-for": `203.0.113.${i}` });
+    }
+    const res = await signIn(auth, "dalsi@example.cz", { "x-forwarded-for": "198.51.100.9" });
+    expect(res.status).toBe(429);
+  });
+
+  test("[SEC-001] s TRUST_PROXY se bucket řídí posledním záznamem X-Forwarded-For", async () => {
+    for (let i = 0; i < 20; i++) {
+      await signIn(proxied, `u${i}@example.cz`, { "x-forwarded-for": `1.2.3.${i}, 10.0.0.1` });
+    }
+    const spoofedFirst = await signIn(proxied, "a@example.cz", {
+      "x-forwarded-for": "9.9.9.9, 10.0.0.1",
+    });
+    const otherClient = await signIn(proxied, "b@example.cz", {
+      "x-forwarded-for": "9.9.9.9, 10.0.0.2",
+    });
+    expect(spoofedFirst.status).toBe(429);
+    expect(otherClient.status).toBe(401);
+  });
+
+  test("[SEC-001] odmítnutí přiřadí k auditu IP jen při TRUST_PROXY", async () => {
+    for (let i = 0; i < 6; i++) {
+      await signIn(proxied, "jan@example.cz", { "x-forwarded-for": "7.7.7.7" });
+    }
+    expect(auditRows("rate_limit.exceeded")[0]?.ip).toBe("7.7.7.7");
+  });
+});
+
+describe("rate limiting reset hesla a registrace", () => {
+  test("[SEC-001] čtvrtá žádost o obnovu hesla za hodinu vrátí 429 i pro neexistující účet", async () => {
+    const reset = () =>
+      post(auth, "/request-password-reset", { email: "nikdo@example.cz", redirectTo: "/reset" });
+    for (let i = 0; i < 3; i++) expect((await reset()).status).not.toBe(429);
+    const res = await reset();
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("3600");
+  });
+
+  test("[SEC-001] šestá registrace za hodinu z jedné IP vrátí 429", async () => {
+    const signUp = (i: number) =>
+      post(auth, "/sign-up/email", { name: "Jan", email: `s${i}@example.cz`, password: PASSWORD });
+    for (let i = 0; i < 5; i++) expect((await signUp(i)).status).not.toBe(429);
+    expect((await signUp(5)).status).toBe(429);
+  });
+});
+
+describe("chyby přihlášení", () => {
+  test("[SEC-008] neexistující účet a špatné heslo vrátí stejnou chybu", async () => {
+    await post(auth, "/sign-up/email", {
+      name: "Jan",
+      email: "jan@example.cz",
+      password: PASSWORD,
+    });
+
+    const wrongPassword = await signIn(auth, "jan@example.cz");
+    const unknown = await signIn(auth, "nikdo@example.cz");
+
+    expect(unknown.status).toBe(wrongPassword.status);
+    expect(await unknown.json()).toEqual(await wrongPassword.json());
+  });
+});
+
+describe("cookies relace", () => {
+  test("[SEC-010] cookie relace je HttpOnly, Secure a SameSite=Lax", async () => {
+    const secureBase = "https://fakturan.example.cz";
+    const secure = createAuth(testEnv({ BETTER_AUTH_URL: secureBase }));
+    const res = await secure.handler(
+      new Request(`${secureBase}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { origin: secureBase, "content-type": "application/json" },
+        body: JSON.stringify({ name: "Jan", email: "jan@example.cz", password: PASSWORD }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const line = res.headers.getSetCookie().find((c) => c.includes("session_token"));
+    expect(line).toMatch(/HttpOnly/i);
+    expect(line).toMatch(/Secure/i);
+    expect(line).toMatch(/SameSite=Lax/i);
+  });
+});
