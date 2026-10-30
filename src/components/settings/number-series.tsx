@@ -251,14 +251,11 @@ export function NumberSeries({ series, today }: { series: SeriesListRow[]; today
           <NativeSelect
             id="series-preset"
             value={presetValue}
+            disabled={editing?.used}
             onChange={(event) => {
               const preset = NUMBER_PRESETS.find((item) => item.template === event.target.value);
               if (!preset) return;
-              setValues({
-                ...values,
-                template: preset.template,
-                reset: editing?.used ? values.reset : preset.reset,
-              });
+              setValues({ ...values, template: preset.template, reset: preset.reset });
             }}
           >
             {NUMBER_PRESETS.map((preset) => (
@@ -275,12 +272,13 @@ export function NumberSeries({ series, today }: { series: SeriesListRow[]; today
             id="series-template"
             className="font-mono"
             value={values.template}
+            disabled={editing?.used}
             aria-describedby="series-tokens"
             aria-invalid={!!problem}
             onChange={(event) => setValues({ ...values, template: event.target.value })}
           />
           <p id="series-tokens" className="text-xs text-muted-foreground">
-            {T.tokensHelp}
+            {editing?.used ? T.usedFormatHelp : T.tokensHelp}
           </p>
         </div>
         <div className="flex flex-col gap-2">

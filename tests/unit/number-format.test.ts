@@ -46,7 +46,7 @@ describe("šablona čísla", () => {
   test("[NUM-001] nesmyslné datum dokladu se odmítne", () => {
     expect(() => formatNumber("{N}", "2026-13-01", 1)).toThrow();
     expect(() => formatNumber("{N}", "2026-02-30", 1)).toThrow();
-    expect(() => formatNumber("{N}", "30.10.2026", 1)).toThrow();
+    expect(() => formatNumber("{N}", "30.10.2026", 1)).toThrow("Neplatné datum dokladu");
   });
 
   test("[NUM-008] každá předvolba dá očekávaný příklad", () => {

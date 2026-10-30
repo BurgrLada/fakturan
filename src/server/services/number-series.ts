@@ -13,6 +13,7 @@ import {
   validateTemplate,
   type CalendarDate,
   type DocumentType,
+  type ResetPeriod,
 } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -38,9 +39,9 @@ const DEFAULTS: Record<DocumentType, { name: string; template: string }> = {
 export const seriesInputSchema = z
   .object({
     id: z.string().optional(),
-    name: z.string().trim().min(1, ERRORS.name).max(100),
+    name: z.string().trim().min(1, ERRORS.name).max(100, ERRORS.nameTooLong),
     documentType: z.enum(DOCUMENT_TYPES),
-    template: z.string().trim().min(1, ERRORS.oneSequence).max(50),
+    template: z.string().trim().min(1, ERRORS.oneSequence).max(50, ERRORS.templateTooLong),
     reset: z.enum(RESET_PERIODS),
   })
   .superRefine((value, ctx) => {
@@ -54,7 +55,7 @@ export type SeriesInput = z.input<typeof seriesInputSchema>;
 export const nextNumberInputSchema = z.object({
   id: z.string().min(1),
   next: z.number().int(ERRORS.nextRange).min(1, ERRORS.nextRange).max(MAX_NEXT, ERRORS.nextRange),
-  date: z.string().refine(isCalendarDate).optional(),
+  date: z.string().refine(isCalendarDate, ERRORS.invalidDate).optional(),
 });
 
 function ownerOf(actor: Actor): string {
@@ -88,6 +89,32 @@ function isUsed(tx: Tx, userId: string, seriesId: string): boolean {
 // counter has not reached yet, and setNextNumber must refuse to aim at it.
 export function isNumberTaken(_tx: Tx, _ownerId: string, _number: string): boolean {
   return false;
+}
+
+// Period keys change format with the reset, so a next number set for the running period would
+// otherwise be orphaned. Other periods are dropped: the series is unused, so no number is lost.
+function rekeyUnusedCounters(
+  tx: Tx,
+  userId: string,
+  series: NumberSeries,
+  reset: ResetPeriod,
+): number | null {
+  const today = calendarDateInPrague(clock.now());
+  const key = periodKey(series.reset, today);
+  const current = countersOf(tx, userId, series.id).find((row) => row.periodKey === key);
+  tx.delete(numberSeriesCounter)
+    .where(scoped(userId).where(numberSeriesCounter, (t, { eq }) => eq(t.seriesId, series.id)))
+    .run();
+  if (!current) return null;
+  tx.insert(numberSeriesCounter)
+    .values({
+      seriesId: series.id,
+      periodKey: periodKey(reset, today),
+      userId,
+      next: current.next,
+    })
+    .run();
+  return current.next;
 }
 
 function sequenceWidthFree(template: string): string {
@@ -203,8 +230,11 @@ export function saveSeries(actor: Actor, raw: SeriesInput): string {
     if (before && before.documentType !== columns.documentType) {
       throw new ServiceError(ERRORS.typeLocked);
     }
-    if (before && before.reset !== columns.reset && isUsed(tx, userId, before.id)) {
-      throw new ServiceError(ERRORS.resetLocked);
+    const resetChanges = !!before && before.reset !== columns.reset;
+    if (before && isUsed(tx, userId, before.id)) {
+      if (resetChanges) throw new ServiceError(ERRORS.resetLocked);
+      // Freeing a used template would let a new series, starting at 1, repeat its numbers.
+      if (before.template !== columns.template) throw new ServiceError(ERRORS.templateLocked);
     }
     // Same template means same numbers, whichever document type or width the other series has.
     const clash = tx
@@ -221,6 +251,9 @@ export function saveSeries(actor: Actor, raw: SeriesInput): string {
 
     const id = before?.id ?? randomUUID();
     const now = clock.now();
+    const carriedNext = resetChanges
+      ? rekeyUnusedCounters(tx, userId, before, columns.reset)
+      : null;
     if (before) {
       tx.update(numberSeries)
         .set({ ...columns, updatedAt: now })
@@ -237,7 +270,7 @@ export function saveSeries(actor: Actor, raw: SeriesInput): string {
       ownerId: userId,
       scope: "user",
       before,
-      after: columns,
+      after: carriedNext === null ? columns : { ...columns, carriedNext },
     });
     return id;
   });

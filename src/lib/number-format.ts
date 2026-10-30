@@ -28,7 +28,7 @@ function parseDate(date: CalendarDate) {
   const [year, month, day] = (match ?? []).slice(1).map(Number);
   const probe = match ? new Date(Date.UTC(year!, month! - 1, day!)) : null;
   if (!probe || probe.getUTCMonth() !== month! - 1 || probe.getUTCDate() !== day!) {
-    throw new Error(`Neplatné datum dokladu: ${date}`);
+    throw new Error(`${TEXTS.numberSeries.errors.invalidDate}: ${date}`);
   }
   return { year: match![1]!, month: match![2]!, day: match![3]!, quarter: Math.ceil(month! / 3) };
 }

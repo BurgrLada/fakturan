@@ -165,6 +165,100 @@ describe("kolize mezi řadami", () => {
   });
 });
 
+describe("změna použité řady", () => {
+  test("[NUM-004] použité řadě nejde změnit šablonu, ani jen šířku pořadí", () => {
+    const id = newSeries("t1");
+    allocate("t1", id, "2026-02-01");
+
+    expect(() =>
+      saveSeries(actor("t1"), { ...input({ template: "NEW-{RRRR}-{NNN}" }), id }),
+    ).toThrow("šablonu");
+    expect(() =>
+      saveSeries(actor("t1"), { ...input({ template: "VF-{RRRR}-{NNNN}" }), id }),
+    ).toThrow("šablonu");
+    expect(saveSeries(actor("t1"), { ...input({ name: "Přejmenovaná" }), id })).toBe(id);
+  });
+
+  test("[NUM-004] nová řada nezopakuje čísla použité řady přes uvolněnou šablonu", () => {
+    const a = newSeries("t2");
+    const first = allocate("t2", a, "2026-02-01").number;
+
+    expect(() =>
+      saveSeries(actor("t2"), { ...input({ template: "A2-{RRRR}-{NNN}" }), id: a }),
+    ).toThrow();
+    expect(() => saveSeries(actor("t2"), input({ name: "B" }))).toThrow("šablonu");
+
+    expect(listSeries("t2", "2026-02-01").find((row) => row.id === a)?.template).toBe(
+      "VF-{RRRR}-{NNN}",
+    );
+    expect(allocate("t2", a, "2026-02-02").number).not.toBe(first);
+  });
+
+  test("[NUM-004] nepoužité řadě jde šablona změnit a další číslo zůstane", () => {
+    const id = newSeries("t3");
+    setNextNumber(actor("t3"), id, 40, "2026-02-01");
+
+    saveSeries(actor("t3"), { ...input({ template: "NEW-{RRRR}-{NNN}" }), id });
+
+    expect(allocate("t3", id, "2026-02-02").number).toBe("NEW-2026-040");
+  });
+});
+
+describe("změna resetu nepoužité řady", () => {
+  const monthlyReady = { template: "{RRRR}{MM}{NNN}" };
+
+  test("[NUM-004] nastavené další číslo se přenese do nového období", () => {
+    setClockForTests({ now: () => new Date("2026-05-10T10:00:00Z") });
+    const id = newSeries("c1", monthlyReady);
+    setNextNumber(actor("c1"), id, 40);
+
+    saveSeries(actor("c1"), { ...input({ ...monthlyReady, reset: "monthly" }), id });
+
+    expect(listSeries("c1").find((row) => row.id === id)?.next).toBe(40);
+    expect(
+      db.select().from(numberSeriesCounter).where(eq(numberSeriesCounter.seriesId, id)).all(),
+    ).toEqual([expect.objectContaining({ periodKey: "2026-05", next: 40, highest: 0 })]);
+    expect(allocate("c1", id, "2026-05-11").number).toBe("202605040");
+  });
+
+  test("[NUM-004] přenos funguje i z měsíčního resetu na nikdy", () => {
+    setClockForTests({ now: () => new Date("2026-05-10T10:00:00Z") });
+    const id = newSeries("c2", { ...monthlyReady, reset: "monthly" });
+    setNextNumber(actor("c2"), id, 7);
+
+    saveSeries(actor("c2"), { ...input({ ...monthlyReady, reset: "never" }), id });
+
+    expect(allocate("c2", id, "2031-01-01").n).toBe(7);
+  });
+
+  test("[NUM-004] číslo nastavené pro minulé období se do dneška nepřenese", () => {
+    setClockForTests({ now: () => new Date("2026-05-10T10:00:00Z") });
+    const id = newSeries("c3", monthlyReady);
+    setNextNumber(actor("c3"), id, 40, "2025-05-01");
+
+    saveSeries(actor("c3"), { ...input({ ...monthlyReady, reset: "monthly" }), id });
+
+    expect(listSeries("c3").find((row) => row.id === id)?.next).toBe(1);
+  });
+
+  test("[NUM-004] přenos je v auditu", () => {
+    setClockForTests({ now: () => new Date("2026-05-10T10:00:00Z") });
+    const id = newSeries("c4", monthlyReady);
+    setNextNumber(actor("c4"), id, 40);
+
+    saveSeries(actor("c4"), { ...input({ ...monthlyReady, reset: "monthly" }), id });
+
+    const last = db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.ownerId, "c4"))
+      .all()
+      .filter((row) => row.action === "number_series.save")
+      .at(-1);
+    expect(JSON.stringify(last)).toContain("carriedNext");
+  });
+});
+
 describe("reset počítadla", () => {
   test("[NUM-002] čtvrtletní reset začne v dubnu od 1", () => {
     const id = newSeries("r1", { template: "{RRRR}Q{Q}-{NNN}", reset: "quarterly" });
@@ -310,26 +404,37 @@ describe("přidělení čísla", () => {
           },
         }),
     );
-    const ready: Promise<void>[] = [];
-    const results = workers.map(
-      (worker, index) =>
-        new Promise<{ number: string; n: number }[]>((resolve, reject) => {
-          ready[index] = new Promise((markReady) => {
-            worker.on("message", (message) => {
-              if (message.ready) markReady();
-              if (message.allocated) resolve(message.allocated);
-            });
+    const failure = (worker: Worker) =>
+      new Promise<never>((_, reject) => {
+        worker.once("error", reject);
+        worker.once("exit", (code) => reject(new Error(`Worker skončil s kódem ${code}`)));
+      });
+    const message = <T>(worker: Worker, key: string) =>
+      Promise.race([
+        new Promise<T>((resolve) => {
+          worker.on("message", (received) => {
+            if (key in received) resolve(received[key]);
           });
-          worker.once("error", reject);
         }),
+        failure(worker),
+      ]);
+    const ready = workers.map((worker) => message<boolean>(worker, "ready"));
+    const results = workers.map((worker) =>
+      message<{ number: string; n: number }[]>(worker, "allocated"),
     );
-    await Promise.all(ready);
-    const signal = new Int32Array(gate);
-    Atomics.store(signal, 0, 1);
-    Atomics.notify(signal, 0);
+    // A rejection before the gate opens must surface through `ready`, not as an unhandled one.
+    void Promise.allSettled(results);
 
-    const perWorker = await Promise.all(results);
-    await Promise.all(workers.map((worker) => worker.terminate()));
+    let perWorker: { number: string; n: number }[][];
+    try {
+      await Promise.all(ready);
+      const signal = new Int32Array(gate);
+      Atomics.store(signal, 0, 1);
+      Atomics.notify(signal, 0);
+      perWorker = await Promise.all(results);
+    } finally {
+      await Promise.all(workers.map((worker) => worker.terminate()));
+    }
     const all = perWorker.flat();
 
     expect(new Set(all.map((row) => row.number)).size).toBe(50);
@@ -348,6 +453,21 @@ describe("správa řad", () => {
 
     expect(() => saveSeries(actor("s1"), input({ template: "{RRRR}" }))).toThrow();
     expect(() => saveSeries(actor("s1"), input({ template: "{NNN}" }))).toThrow("rok");
+  });
+
+  test("[NUM-001] příliš dlouhý název a šablona mají český důvod", () => {
+    seed("s7");
+
+    expect(() => saveSeries(actor("s7"), input({ name: "x".repeat(101) }))).toThrow("Název");
+    expect(() =>
+      saveSeries(actor("s7"), input({ template: `${"x".repeat(50)}{RRRR}{N}` })),
+    ).toThrow("Šablona");
+  });
+
+  test("[NUM-004] neplatné datum dalšího čísla má český důvod", () => {
+    const id = newSeries("s8");
+
+    expect(() => setNextNumber(actor("s8"), id, 2, "2026-02-30")).toThrow("datum");
   });
 
   test("[NUM-001] uložení se audituje pod vlastníkem", () => {
