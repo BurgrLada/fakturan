@@ -66,3 +66,60 @@ test("[SET-014] [SET-013] logo a podpis se nahrají a jdou odebrat", async ({ pa
   await page.getByRole("button", { name: "Odebrat" }).first().click();
   await expect(page.getByRole("img", { name: "Logo na fakturu" })).toBeHidden();
 });
+
+test("[SET-020] účet s českým číslem a zahraniční účet se přidají a první v měně je výchozí", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/ucty`);
+  await page.waitForLoadState("networkidle");
+
+  await page.getByLabel("Název účtu").fill("Provozní");
+  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("1234567890");
+  await page.getByLabel("Kód banky").fill("2010");
+  await page.getByRole("button", { name: "Uložit účet" }).click();
+  await expect(page.getByText("Účet je uložený.")).toBeVisible();
+  await expect(page.getByText("CZ2120100000001234567890")).toBeVisible();
+
+  await page.getByLabel("Název účtu").fill("Euro");
+  await page.getByLabel("Měna").selectOption("EUR");
+  await page.getByLabel("IBAN").fill("DE89 3704 0044 0532 0130 00");
+  await page.getByRole("button", { name: "Uložit účet" }).click();
+  await expect(page.getByText("DE89370400440532013000")).toBeVisible();
+  await expect(page.getByText("Výchozí", { exact: true })).toHaveCount(2);
+});
+
+test("[SET-021] výchozí účet jde přepnout a neplatný IBAN ukáže chybu", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/ucty`);
+  await page.waitForLoadState("networkidle");
+
+  await page.getByLabel("Název účtu").fill("Jedna");
+  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("1234567890");
+  await page.getByLabel("Kód banky").fill("2010");
+  await page.getByRole("button", { name: "Uložit účet" }).click();
+  await expect(page.getByText("Účet je uložený.")).toBeVisible();
+
+  await page.getByLabel("Název účtu").fill("Dvě");
+  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("2000145399");
+  await page.getByLabel("Kód banky").fill("0800");
+  await page.getByRole("button", { name: "Uložit účet" }).click();
+  await expect(page.getByRole("row", { name: /Dvě/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "Nastavit jako výchozí Dvě" }).click();
+  await expect(
+    page.getByRole("row", { name: /Dvě/ }).getByText("Výchozí", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: /Jedna/ }).getByText("Výchozí", { exact: true }),
+  ).toBeHidden();
+
+  await page.getByLabel("Název účtu").fill("Špatný");
+  await page.getByLabel("IBAN").fill("CZ0000000000000000000000");
+  await page.getByRole("button", { name: "Uložit účet" }).click();
+  await expect(page.getByText("IBAN není platný")).toBeVisible();
+});

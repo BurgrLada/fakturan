@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/nastaveni/ucet", label: TEXTS.settings.account },
   { href: "/nastaveni/dodavatel", label: TEXTS.settings.supplier },
+  { href: "/nastaveni/ucty", label: TEXTS.settings.bankAccounts },
   { href: "/nastaveni/historie", label: TEXTS.settings.history },
 ];
 

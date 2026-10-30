@@ -64,6 +64,13 @@
       "when": 1793363427034,
       "tag": "0008_supplier",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793363997633,
+      "tag": "0009_bank_account",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   account,
   auditLog,
   auditPurge,
+  bankAccount,
   file,
   invitation,
   rateLimit,
@@ -27,7 +28,7 @@ export type Role = "admin" | "user";
 
 // Every table with account data, enforced by a schema test in users.test.ts (ADM-006). Deleted in
 // this order, so a table with a non-cascading foreign key must precede the table it references.
-export const USER_OWNED_TABLES = [session, account, supplier, file];
+export const USER_OWNED_TABLES = [session, account, supplier, bankAccount, file];
 
 const REAUTH_WINDOW_MS = 15 * 60_000;
 
