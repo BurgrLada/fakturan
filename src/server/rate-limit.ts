@@ -34,6 +34,7 @@ export const RATE_RULES = {
   aresLookup: rule("aresLookup", 30, 60),
   viesLookup: rule("viesLookup", 30, 60),
   monitoringIp: rule("monitoringIp", 120, 60),
+  pdfUser: rule("pdfUser", 120, 60),
 } as const satisfies Record<string, RateRule>;
 
 // Fixed window. Denied attempts are not counted, so hammering a blocked key does not extend it.

@@ -18,7 +18,7 @@ const csp = [
   "base-uri 'self'",
   "form-action 'self'",
   "object-src 'none'",
-  "frame-ancestors 'none'",
+  "frame-ancestors 'self'",
 ].join("; ");
 
 // Sent unconditionally: headers() is frozen at build time, when BETTER_AUTH_URL may be unset, and
@@ -37,10 +37,14 @@ const nextConfig: NextConfig = {
   output: "standalone",
   // Above MAX_FILE_BYTES (src/lib/file-limits.ts) plus multipart overhead; Next defaults to 1 MB.
   experimental: { serverActions: { bodySizeLimit: "3mb" } },
-  serverExternalPackages: ["better-sqlite3"],
-  // Both are read from process.cwd() at runtime, which tracing cannot see.
+  serverExternalPackages: ["better-sqlite3", "@react-pdf/renderer"],
+  // All are read from process.cwd() at runtime, which tracing cannot see.
   outputFileTracingIncludes: {
-    "/*": ["./drizzle/**/*", "./src/server/auth/common-passwords.txt"],
+    "/*": [
+      "./drizzle/**/*",
+      "./src/server/auth/common-passwords.txt",
+      "./src/server/pdf/fonts/**/*",
+    ],
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

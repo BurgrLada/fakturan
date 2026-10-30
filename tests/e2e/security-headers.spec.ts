@@ -5,7 +5,7 @@ test("[SEC-004] odpověď má bezpečnostní hlavičky", async ({ freshApp }) =>
     const res = await fetch(`${freshApp.baseURL}${path}`);
     const csp = res.headers.get("content-security-policy") ?? "";
 
-    expect(csp, path).toContain("frame-ancestors 'none'");
+    expect(csp, path).toContain("frame-ancestors 'self'");
     expect(csp, path).toContain("object-src 'none'");
     expect(csp, path).toContain("script-src 'self' 'unsafe-inline'");
     expect(res.headers.get("strict-transport-security"), path).toMatch(/max-age=\d+/);

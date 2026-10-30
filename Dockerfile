@@ -12,6 +12,12 @@ FROM deps AS build
 COPY . .
 # The build needs valid-looking values only to evaluate config; they are not baked into the image at runtime.
 RUN BETTER_AUTH_URL=http://localhost BETTER_AUTH_SECRET=build-only-build-only-build-only-00 pnpm run build
+# The smoke script resolves react-pdf, sharp and the fonts from the runner image, so it proves output tracing.
+RUN pnpm exec esbuild scripts/pdf-smoke-entry.ts --bundle --platform=node --format=esm \
+      --alias:server-only=./tests/helpers/server-only.ts \
+      --external:sharp --external:@react-pdf/renderer \
+      "--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" \
+      --outfile=/smoke/pdf-smoke-bundle.mjs
 
 FROM node:24-bookworm-slim AS runner
 ENV NODE_ENV=production \
@@ -26,6 +32,7 @@ COPY --from=build /app/public ./public
 # Tracing keeps only some of the platform prebuilds; the whole package guarantees the native binding.
 COPY --from=deps /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 COPY --from=deps /sharp/ ./node_modules/
+COPY --from=build /smoke/pdf-smoke-bundle.mjs /app/scripts/pdf-smoke.mjs ./scripts/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /data && chown node:node /data
 USER node

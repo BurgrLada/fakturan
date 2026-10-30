@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
@@ -37,6 +37,19 @@ async function waitForReady(url: string, child: ChildProcess) {
     await new Promise((r) => setTimeout(r, 200));
   }
   throw new Error(`Aplikace nenaběhla na ${url}`);
+}
+
+async function waitForContainer(url: string) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const ready = await fetch(url).then(
+      (res) => res.ok,
+      () => false,
+    );
+    if (ready) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`Kontejner nenaběhl na ${url}`);
 }
 
 const ARES_REPLY = {
@@ -78,7 +91,39 @@ function assertDataDirConsistent(dataDir: string) {
   }
 }
 
-export const test = base.extend<{ freshApp: App }>({
+export const test = base.extend<{ freshApp: App; dockerApp: { baseURL: string } }>({
+  // oxlint-disable-next-line no-empty-pattern
+  dockerApp: async ({}, use) => {
+    const image = process.env.E2E_DOCKER_IMAGE;
+    if (!image) throw new Error("Chybí E2E_DOCKER_IMAGE");
+    const port = await freePort();
+    const baseURL = `http://127.0.0.1:${port}`;
+    const container = execFileSync(
+      "docker",
+      [
+        "run",
+        "--detach",
+        "--rm",
+        "--publish",
+        `127.0.0.1:${port}:3000`,
+        "--env",
+        `BETTER_AUTH_URL=${baseURL}`,
+        "--env",
+        "BETTER_AUTH_SECRET=e2e-secret-e2e-secret-e2e-secret-00",
+        "--env",
+        `ENCRYPTION_KEY=${Buffer.alloc(32, 7).toString("base64")}`,
+        image,
+      ],
+      { encoding: "utf8" },
+    ).trim();
+    try {
+      await waitForContainer(`${baseURL}/api/health`);
+      await use({ baseURL });
+    } finally {
+      execFileSync("docker", ["stop", container], { stdio: "ignore" });
+    }
+  },
+
   // oxlint-disable-next-line no-empty-pattern
   freshApp: async ({}, use) => {
     const ares = await startAresStub();

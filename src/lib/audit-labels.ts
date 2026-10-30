@@ -40,6 +40,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "invoice.duplicate": "Duplikace faktury",
   "invoice.issue": "Vystavení faktury",
   "invoice.mark_sent": "Označení faktury jako odeslané",
+  "invoice.pdf_download": "Stažení PDF faktury",
   "invoice.refresh_customer": "Obnovení údajů zákazníka na faktuře",
   "invoice.restore": "Vrácení storna faktury",
   "invoice.restore_version": "Obnovení verze faktury",

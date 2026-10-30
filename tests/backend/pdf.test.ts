@@ -1,0 +1,751 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Document, Page, Text, renderToBuffer } from "@react-pdf/renderer";
+import { eq } from "drizzle-orm";
+import { createElement } from "react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { InvoiceDocument } from "@/lib/invoice-document";
+import { setClockForTests } from "@/server/clock";
+import { auditLog, user } from "@/server/db/schema";
+import { FONT_FAMILIES, registerFonts } from "@/server/pdf/fonts";
+import { DESIGNS, getDesign, isDesignId } from "@/server/pdf/designs";
+import { renderInvoicePdf, serializeRender } from "@/server/pdf/render";
+import { buildInvoiceView } from "@/server/pdf/view";
+import { checkRateLimit, RATE_RULES } from "@/server/rate-limit";
+import { saveBankAccount } from "@/server/services/bank-accounts";
+import { saveCustomer } from "@/server/services/customers";
+import { loadInvoiceDocument } from "@/server/services/invoice-document";
+import { fileNameFor, invoicePdf } from "@/server/services/invoice-pdf";
+import { cancelInvoice, issueInvoice } from "@/server/services/invoice-lifecycle";
+import { newDraftDefaults, saveDraft, type DraftInput } from "@/server/services/invoices";
+import { ensureDefaultSeries } from "@/server/services/number-series";
+import { savePreferences } from "@/server/services/preferences";
+import { saveSupplier, setSupplierImage, type SupplierInput } from "@/server/services/supplier";
+import {
+  FIXTURE_LOGO_ID,
+  FIXTURE_LOGO_SVG,
+  INVOICE_FIXTURES,
+  fixtureLine,
+} from "../fixtures/invoices";
+import { createTestDb } from "../helpers/db";
+import { decodeQr, pdfPagePng, pdfText } from "../helpers/pdf";
+
+vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
+vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
+vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+vi.stubEnv("DATA_DIR", mkdtempSync(join(tmpdir(), "fakturan-pdf-")));
+
+const session = vi.hoisted(() => ({ actor: { userId: null as string | null, source: "web" } }));
+vi.mock("@/server/auth/session", () => ({ actorFromRequest: async () => session.actor }));
+
+const { GET: pdfRoute } = await import("@/app/(app)/faktury/[id]/pdf/route");
+const { GET: previewRoute } = await import("@/app/(app)/faktury/[id]/nahled/route");
+
+const db = createTestDb();
+const actor = (userId: string) => ({ userId, source: "web" as const });
+const NOW = new Date("2026-03-10T10:00:00Z");
+const TODAY = "2026-03-10";
+const F = INVOICE_FIXTURES;
+
+let ownerCounter = 0;
+
+const supplierInput: SupplierInput = {
+  name: "Jan Novák",
+  street: "Dlouhá 1",
+  city: "Praha",
+  zip: "110 00",
+  country: "Česká republika",
+  ico: "27082440",
+  dic: "",
+  email: "",
+  phone: "",
+  web: "",
+  registryNote: "",
+  contactPerson: "",
+  vatIdentified: false,
+  footerText: "",
+  notVatPayerCs: "Nejsem plátce DPH.",
+  notVatPayerEn: "I am not a VAT payer.",
+};
+
+function newOwner() {
+  const owner = `pdf${(ownerCounter += 1)}`;
+  const now = new Date();
+  db.insert(user)
+    .values({
+      id: owner,
+      name: owner,
+      email: `${owner}@example.cz`,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  ensureDefaultSeries(actor(owner));
+  saveSupplier(actor(owner), supplierInput);
+  const customerId = saveCustomer(actor(owner), {
+    name: "Alfa s.r.o.",
+    street: "Krátká 2",
+    city: "Brno",
+    zip: "602 00",
+    country: "Česká republika",
+    ico: "",
+    dic: "",
+    email: "",
+    extraEmails: [],
+    phone: "",
+    note: "",
+    dueDays: null,
+    language: null,
+    currency: null,
+    designId: null,
+    remindersEnabled: null,
+  }).id;
+  const accountId = saveBankAccount(actor(owner), {
+    name: "Účet",
+    currency: "CZK",
+    number: "19-2000145399",
+    bankCode: "0800",
+    iban: "",
+    swift: "",
+  });
+  return { owner, customerId, accountId };
+}
+
+function draft(owner: string, customerId: string, over: Partial<DraftInput> = {}) {
+  return saveDraft(actor(owner), {
+    ...newDraftDefaults(owner, customerId),
+    lines: [
+      {
+        catalogItemId: null,
+        name: "Konzultace",
+        description: "",
+        quantityMilli: 2000,
+        unit: "hod.",
+        unitPriceMinor: 150_000,
+        discountKind: "none",
+        discountValue: 0,
+      },
+    ],
+    ...over,
+  });
+}
+
+function issued(owner: string, customerId: string, over: Partial<DraftInput> = {}) {
+  const { id, revision } = draft(owner, customerId, over);
+  issueInvoice(actor(owner), id, { revision });
+  return id;
+}
+
+const readLogo = (id: string) => (id === FIXTURE_LOGO_ID ? FIXTURE_LOGO_SVG : null);
+
+const viewOf = (doc: InvoiceDocument, draftFlag = false) =>
+  buildInvoiceView(doc, { today: TODAY, draft: draftFlag, readImage: readLogo });
+
+const render = async (doc: InvoiceDocument, draftFlag = false) =>
+  renderInvoicePdf(await viewOf(doc, draftFlag));
+
+const textOf = async (pdf: Buffer) => (await pdfText(pdf)).join("\n");
+const squeeze = (text: string) => text.replace(/\s+/g, "");
+
+const request = (path: string) => new Request(`http://localhost:3000${path}`);
+const params = (id: string) => ({ params: Promise.resolve({ id }) });
+
+beforeEach(() => {
+  setClockForTests({ now: () => NOW });
+  session.actor = { userId: null, source: "web" };
+});
+afterEach(() => setClockForTests(null));
+
+describe("vykreslení PDF", () => {
+  test("[PDF-001] náhled a stažení dají stejný text", async () => {
+    const { owner, customerId } = newOwner();
+    const id = issued(owner, customerId);
+    session.actor = actor(owner);
+
+    const download = await pdfRoute(request(`/faktury/${id}/pdf`), params(id));
+    const preview = await previewRoute(request(`/faktury/${id}/nahled`), params(id));
+
+    expect(download.status).toBe(200);
+    expect(preview.status).toBe(200);
+    expect(download.headers.get("content-type")).toBe("application/pdf");
+    expect(download.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(download.headers.get("content-disposition")).toMatch(
+      /^attachment; .*filename\*=UTF-8''/,
+    );
+    expect(preview.headers.get("content-disposition")).toMatch(/^inline; /);
+    const [a, b] = await Promise.all([download.arrayBuffer(), preview.arrayBuffer()]);
+    expect(await pdfText(Buffer.from(a))).toEqual(await pdfText(Buffer.from(b)));
+  });
+
+  test("[PDF-001] rendery běží za sebou a chyba jednoho neblokuje další", async () => {
+    const order: string[] = [];
+    let release = () => {};
+    const blocker = new Promise<void>((resolve) => (release = resolve));
+    const first = serializeRender(async () => {
+      order.push("první start");
+      await blocker;
+      order.push("první konec");
+      throw new Error("selhání renderu");
+    });
+    const second = serializeRender(async () => {
+      order.push("druhý");
+      return "hotovo";
+    });
+
+    release();
+
+    await expect(first).rejects.toThrow("selhání renderu");
+    await expect(second).resolves.toBe("hotovo");
+    expect(order).toEqual(["první start", "první konec", "druhý"]);
+  });
+
+  test("[PDF-001] vadný pohled shodí jen svůj render", async () => {
+    const good = await viewOf(F.short);
+    const broken = renderInvoicePdf({ ...good, lines: null as never });
+    const next = renderInvoicePdf(good);
+
+    await expect(broken).rejects.toThrow();
+    expect(await textOf(await next)).toContain("2026-001");
+  });
+
+  test("[PDF-005] 300 položek: všechny řádky jsou v PDF, záhlaví na každé straně, Strana X z Y", async () => {
+    const pages = await pdfText(await render(F.long));
+
+    expect(pages.length).toBeGreaterThan(5);
+    const all = pages.join("\n");
+    for (let i = 1; i <= 300; i++) {
+      expect(all).toContain(`Položka ${String(i).padStart(3, "0")}`);
+    }
+    pages.forEach((page, index) => {
+      if (page.includes("Položka")) expect(page).toContain("Množství");
+      expect(page).toContain(`Strana ${index + 1} z ${pages.length}`);
+    });
+  });
+
+  test("[PDF-005] popis 2000 znaků a slovo 200 znaků bez mezer: text je celý v PDF", async () => {
+    const description = `${"Dlouhý popis s háčky a čárkami. ".repeat(63)}Konec.`.slice(-2000);
+    const word = "ž".repeat(200);
+    const doc = {
+      ...F.short,
+      lines: [
+        fixtureLine({ name: "První", description }),
+        fixtureLine({ name: word, description: word }),
+      ],
+    };
+
+    const text = squeeze(await textOf(await render(doc)))
+      .replace(/PopisMnožstvíCenazajednotkuCelkem/g, "")
+      .replace(/Strana\dz\d/g, "")
+      .replace(/2hod\.1500,00Kč3000,00Kč/g, "");
+
+    expect(description.length).toBe(2000);
+    expect(text).toContain(squeeze(description));
+    expect(text.split(word).length).toBe(3);
+  });
+
+  test("[PDF-005] popis s mnoha řádky se zalomí přes stranu a nic se neztratí", async () => {
+    const rows = Array.from({ length: 90 }, (_, i) => `řádek ${i + 1}`);
+    const doc = { ...F.short, lines: [fixtureLine({ description: rows.join("\n") })] };
+
+    const pages = await pdfText(await render(doc));
+
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.join("\n")).toContain("řádek 90");
+  });
+
+  test("[PDF-006] české znaky i zł a € přežijí extrakcí textu", async () => {
+    const sample = "Příliš žluťoučký kůň úpěl ďábelské ódy ŘŮĚ Łódź 5 £ 7 € 9 zł";
+    const pln = await render({
+      ...F.short,
+      currency: "PLN",
+      lines: [fixtureLine({ name: sample })],
+    });
+    const eur = await render(F.eur);
+
+    const text = await textOf(pln);
+    expect(squeeze(text)).toContain(squeeze(sample));
+    expect(text).toMatch(/3\s000,00\sPLN/);
+    expect(await textOf(eur)).toMatch(/3\s000,00\s€/);
+  });
+
+  test("[PDF-006] písmena složených znaků přežijí i další render v procesu", async () => {
+    const accented = fixtureLine({ name: "ý Č", description: "ý Č" });
+    const plain = fixtureLine({ name: "yC", description: "yC" });
+
+    await render({ ...F.short, lines: [accented] });
+    const text = await textOf(await render({ ...F.short, lines: [plain] }));
+
+    expect(text.split("yC").length).toBe(3);
+    expect(text).toContain("CZ12345678");
+  });
+
+  test.each(FONT_FAMILIES)("[PDF-006] písmo %s je vložené v obou řezech", async (family) => {
+    registerFonts();
+    const sample = "ř ů ě ł £ € zł";
+    for (const fontWeight of [400, 700]) {
+      const pdf = await renderToBuffer(
+        createElement(
+          Document,
+          null,
+          createElement(
+            Page,
+            { size: "A4" },
+            createElement(Text, { style: { fontFamily: family, fontWeight } }, sample),
+          ),
+        ),
+      );
+      expect(await textOf(pdf)).toContain(sample);
+    }
+  });
+
+  test("[PDF-006] úzká nezlomitelná mezera nevypadne ani z neproporcionálního písma", async () => {
+    const view = await viewOf({
+      ...F.short,
+      lines: [fixtureLine({ name: "10 000 kusů" })],
+    });
+
+    expect(view.lines[0]!.name).toBe("10 000 kusů");
+  });
+
+  test("[PDF-006] znak mimo písmo render neshodí", async () => {
+    const pdf = await render({ ...F.short, lines: [fixtureLine({ name: "Dort 🎂 漢字" })] });
+
+    expect(await textOf(pdf)).toContain("Dort");
+  });
+
+  test("[PDF-001] v angličtině jsou popisky, částka i datum anglicky", async () => {
+    const text = await textOf(await render(F.english));
+
+    expect(text).toContain("Invoice");
+    expect(text).toContain("Due date");
+    expect(text).toContain("2026-03-24");
+    expect(text).toContain("I am not a VAT payer.");
+    expect(text).toMatch(/CZK\s3,000\.00/);
+    expect(text).not.toContain("Splatnost");
+  });
+
+  test("[PDF-001] datum se řídí formátem dokladu", async () => {
+    const text = await textOf(await render({ ...F.short, dateFormat: "dd.MM.yyyy" }));
+
+    expect(text).toContain("24.03.2026");
+  });
+
+  test("[PDF-001] neznámý design spadne na cisty", async () => {
+    expect(isDesignId("cisty")).toBe(true);
+    expect(isDesignId("neexistuje")).toBe(false);
+    expect(getDesign("neexistuje").id).toBe("cisty");
+    expect(DESIGNS.map((design) => design.id)).toContain("cisty");
+    const doc = {
+      ...F.short,
+      appearance: { ...F.short.appearance, designId: "neexistuje" },
+    };
+    expect(await textOf(await render(doc))).toContain("2026-001");
+  });
+
+  test("[PDF-001] prázdná barva vezme token designu, vlastní barva se použije", async () => {
+    const custom = await viewOf({
+      ...F.short,
+      appearance: {
+        ...F.short.appearance,
+        colors: { accent: "#ff0000", surface: "", text: "", line: "" },
+      },
+    });
+
+    expect(custom.colors.accent).toBe("#ff0000");
+    expect(custom.colors.text).toBe(getDesign("cisty").tokens.colors.text);
+  });
+
+  test("[PDF-001] koncept má vodoznak a prázdné číslo, koncept bez dat vezme dnešek", async () => {
+    const pdf = await render(
+      { ...F.short, status: "draft", number: null, variableSymbol: null, issueDate: null },
+      true,
+    );
+
+    const text = await textOf(pdf);
+    expect(text).toContain("Koncept");
+    expect(text).toContain("10. 3. 2026");
+    expect(text).not.toContain("2026-001");
+  });
+
+  test("[PDF-001] stornovaný doklad je označený a nemá QR", async () => {
+    const view = await viewOf({ ...F.short, status: "cancelled" });
+
+    expect(view.watermark).toBe("Stornováno");
+    expect(view.payment.qr).toBeNull();
+  });
+});
+
+describe("QR na dokladu", () => {
+  test("[QR-006] QR nese zbývající částku a dekóduje se", async () => {
+    const view = await viewOf({
+      ...F.short,
+      status: "partially_paid",
+      totals: { ...F.short.totals, paidMinor: 100_000 },
+    });
+
+    const payload = decodeQr(view.payment.qr!);
+    expect(payload).toContain("AM:2000.00");
+    expect(payload).toContain("X-VS:2026001");
+  });
+
+  test("[QR-002] EUR doklad má EPC", async () => {
+    const view = await viewOf(F.eur);
+
+    expect(decodeQr(view.payment.qr!)).toMatch(/^BCD\n002/);
+  });
+
+  test("[QR-005] QR chybí, když je vypnuté, uhrazené nebo platba není převodem", async () => {
+    const off = { ...F.short.appearance, showQr: false };
+    const views = await Promise.all([
+      viewOf({ ...F.short, appearance: off }),
+      viewOf({ ...F.short, status: "paid" }),
+      viewOf({ ...F.short, paymentMethod: "cash" }),
+    ]);
+
+    for (const view of views) expect(view.payment.qr).toBeNull();
+  });
+
+  test("[QR-001] převod bez účtu se vykreslí bez QR", async () => {
+    const doc = { ...F.short, snapshot: { ...F.short.snapshot, account: null } };
+
+    const view = await viewOf(doc);
+
+    expect(view.payment.qr).toBeNull();
+    expect(await textOf(await renderInvoicePdf(view))).toContain("2026-001");
+  });
+
+  test("[QR-004] logo v QR se použije jen se zapnutým přepínačem", async () => {
+    const appearance = { ...F.short.appearance, showQrLogo: true };
+    const images = { ...F.short.images, qrLogoFileId: FIXTURE_LOGO_ID };
+    const plain = await viewOf({ ...F.short, images });
+    const logo = await viewOf({ ...F.short, images, appearance });
+
+    expect(plain.payment.qr!.equals(logo.payment.qr!)).toBe(false);
+    expect(decodeQr(logo.payment.qr!)).toBe(decodeQr(plain.payment.qr!));
+  });
+});
+
+describe("obrázky", () => {
+  test("[SET-014] SVG i WebP se převedou na PNG nejvýš 800 px široké", async () => {
+    const sharp = (await import("sharp")).default;
+    const webp = await sharp({
+      create: { width: 1600, height: 400, channels: 3, background: { r: 200, g: 10, b: 10 } },
+    })
+      .webp()
+      .toBuffer();
+    const { imageToPng } = await import("@/server/pdf/assets");
+
+    for (const source of [FIXTURE_LOGO_SVG, webp]) {
+      const png = await imageToPng(source);
+      const meta = await sharp(png!).metadata();
+      expect(meta.format).toBe("png");
+      expect(meta.width).toBeLessThanOrEqual(800);
+    }
+  });
+
+  test("[SET-014] nečitelný nebo chybějící obrázek render neshodí", async () => {
+    const doc = { ...F.short };
+    const view = await buildInvoiceView(doc, {
+      today: TODAY,
+      draft: false,
+      readImage: () => Buffer.from("to není obrázek"),
+    });
+    const missing = await buildInvoiceView(doc, {
+      today: TODAY,
+      draft: false,
+      readImage: () => null,
+    });
+
+    expect(view.images.logo).toBeNull();
+    expect(missing.images.logo).toBeNull();
+    expect(await textOf(await renderInvoicePdf(view))).toContain("2026-001");
+  });
+
+  test("[INV-041] logo se vynechá při showLogo false i pozici none", async () => {
+    const hidden = await viewOf({
+      ...F.short,
+      appearance: { ...F.short.appearance, showLogo: false },
+    });
+    const none = await viewOf({
+      ...F.short,
+      appearance: { ...F.short.appearance, logoPosition: "none" },
+    });
+
+    expect(hidden.images.logo).toBeNull();
+    expect(none.images.logo).toBeNull();
+  });
+});
+
+describe("název souboru", () => {
+  test("[PDF-009] šablona {cislo}-{zakaznik}.pdf s lomítkem a uvozovkou dá bezpečný název", () => {
+    const name = fileNameFor("{cislo}-{zakaznik}.pdf", {
+      ...F.short,
+      number: "2026/001",
+      customerName: 'A"B\\C\r\nD/E s.r.o.',
+    });
+
+    expect(name).toBe("2026_001-A_B_C__D_E s.r.o.pdf");
+  });
+
+  test("[PDF-009] výchozí šablona, náhradní jméno konceptu, přípona a délka", () => {
+    expect(fileNameFor("{cislo}.pdf", F.short)).toBe("2026-001.pdf");
+    expect(fileNameFor("{cislo}.pdf", { ...F.short, number: null })).toBe("koncept.pdf");
+    expect(fileNameFor("{cislo}", F.short)).toBe("2026-001.pdf");
+    expect(fileNameFor("{zakaznik}.pdf", { ...F.short, customerName: "$& ..‮" })).toBe("$& .._.pdf");
+    expect(fileNameFor("...", F.short)).toBe("faktura.pdf");
+    expect(
+      fileNameFor("{zakaznik}.pdf", { ...F.short, customerName: "x".repeat(500) }).length,
+    ).toBeLessThanOrEqual(124);
+  });
+});
+
+describe("povinné údaje", () => {
+  test("[INV-040] vystavený doklad obsahuje všechny povinné údaje", async () => {
+    const text = await textOf(await render(F.short));
+
+    for (const expected of [
+      "Faktura",
+      "2026-001",
+      "Jan Novák",
+      "Dlouhá 1",
+      "110 00 Praha",
+      "27082440",
+      "Příliš žluťoučký kůň s.r.o.",
+      "Krátká 2",
+      "602 00 Brno",
+      "10. 3. 2026",
+      "24. 3. 2026",
+      "Konzultace",
+      "Převodem",
+      "2026001",
+      "19-2000145399/0800",
+      "CZ65 0800 0000 1920 0014 5399",
+      "Nejsem plátce DPH.",
+    ]) {
+      expect(text).toContain(expected);
+    }
+    expect(text).toMatch(/Celkem[\s\S]*3\s000,00\sKč/);
+  });
+
+  test("[INV-041] volitelné údaje se vytisknou, jen když jsou vyplněné", async () => {
+    const full = await textOf(await render(F.short));
+    for (const expected of [
+      "9. 3. 2026",
+      "OBJ-77",
+      "Zakázka Vltava",
+      "Poznámka k dokladu",
+      "Fakturujeme Vám",
+      "Děkujeme za spolupráci",
+      "Zapsán v živnostenském rejstříku v Praze",
+      "jan@example.cz",
+      "+420 777 123 456",
+    ]) {
+      expect(full).toContain(expected);
+    }
+
+    const bare = await textOf(
+      await render({
+        ...F.short,
+        appearance: { ...F.short.appearance, showDuzp: false },
+        orderRef: "",
+        reference: "",
+        note: "",
+      }),
+    );
+    expect(bare).not.toContain("9. 3. 2026");
+    expect(bare).not.toContain("Objednávka");
+    expect(bare).not.toContain("Reference");
+    expect(bare).not.toContain("Poznámka");
+  });
+
+  test("[INV-041] podpis se vloží jen se zapnutým přepínačem", async () => {
+    const images = { ...F.short.images, signatureFileId: FIXTURE_LOGO_ID };
+    const off = await viewOf({ ...F.short, images });
+    const on = await viewOf({
+      ...F.short,
+      images,
+      appearance: { ...F.short.appearance, showSignature: true },
+    });
+
+    expect(off.images.signature).toBeNull();
+    expect(on.images.signature).not.toBeNull();
+    await renderInvoicePdf(on);
+  });
+
+  test("[INV-041] slevy a zaokrouhlení jsou v součtech, sleva položky v tabulce", async () => {
+    const text = await textOf(
+      await render({
+        ...F.short,
+        lines: [fixtureLine({ discountKind: "percent", discountValue: 1250 })],
+        totals: {
+          subtotalMinor: 300_000,
+          discountMinor: 10_000,
+          roundingMinor: 33,
+          totalMinor: 290_033,
+          paidMinor: 90_033,
+        },
+      }),
+    );
+
+    expect(text).toMatch(/12,5\s%/);
+    expect(text).toMatch(/Sleva[\s\S]*100,00\sKč/);
+    expect(text).toMatch(/Zaokrouhlení[\s\S]*0,33\sKč/);
+    expect(text).toMatch(/Uhrazeno[\s\S]*900,33\sKč/);
+    expect(text).toMatch(/Zbývá uhradit[\s\S]*2\s000,00\sKč/);
+  });
+
+  test("[INV-042] patička nemá značku aplikace", async () => {
+    const pdf = await render({
+      ...F.short,
+      snapshot: {
+        ...F.short.snapshot,
+        supplier: { ...F.short.snapshot.supplier!, footerText: "Vlastní patička dodavatele" },
+      },
+    });
+
+    const text = await textOf(pdf);
+    expect(text).toContain("Vlastní patička dodavatele");
+    expect(text.toLowerCase()).not.toContain("fakturan");
+    expect(pdf.toString("latin1").toLowerCase()).not.toContain("fakturan");
+    expect(pdf.toString("latin1").toLowerCase()).not.toContain("react-pdf");
+  });
+});
+
+describe("bezpečnost", () => {
+  test("[SEC-011] název <b>{{rok}}</b> je v PDF doslova", async () => {
+    const hostile = "<b>{{rok}}</b>";
+    const doc: InvoiceDocument = {
+      ...F.short,
+      customerName: hostile,
+      textBefore: hostile,
+      lines: [fixtureLine({ name: hostile, description: hostile })],
+      snapshot: {
+        ...F.short.snapshot,
+        customer: { ...F.short.snapshot.customer!, name: hostile },
+      },
+    };
+
+    const text = await textOf(await render(doc));
+
+    expect(text.split(hostile).length).toBeGreaterThanOrEqual(5);
+  });
+
+  test("[CUS-008] změna adresy dodavatele a výměna loga nezmění PDF vystaveného dokladu", async () => {
+    const { owner, customerId } = newOwner();
+    setSupplierImage(actor(owner), "logo", FIXTURE_LOGO_SVG, "logo.svg");
+    const id = issued(owner, customerId);
+    const before = (await invoicePdf(owner, id)).data;
+
+    saveSupplier(actor(owner), { ...supplierInput, street: "Nová 99", city: "Ostrava" });
+    setSupplierImage(
+      actor(owner),
+      "logo",
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#ff0000"/></svg>',
+      ),
+      "nove.svg",
+    );
+
+    const after = (await invoicePdf(owner, id)).data;
+    expect(await pdfText(after)).toEqual(await pdfText(before));
+    expect(await textOf(after)).not.toContain("Nová 99");
+    expect((await pdfPagePng(after, 1)).equals(await pdfPagePng(before, 1))).toBe(true);
+  });
+
+  test("[CUS-008] koncept ukazuje aktuální dodavatele", async () => {
+    const { owner, customerId } = newOwner();
+    const { id } = draft(owner, customerId);
+    saveSupplier(actor(owner), { ...supplierInput, street: "Nová 99" });
+
+    const { data, fileName } = await invoicePdf(owner, id);
+
+    const text = await textOf(data);
+    expect(text).toContain("Nová 99");
+    expect(text).toContain("Koncept");
+    expect(fileName).toBe("koncept.pdf");
+  });
+
+  test("[PDF-001] smazaný účet u konceptu render neshodí", async () => {
+    const { owner, customerId, accountId } = newOwner();
+    const { id } = draft(owner, customerId, { bankAccountId: accountId });
+    const doc = loadInvoiceDocument(owner, id)!;
+
+    const view = await buildInvoiceView(
+      { ...doc, snapshot: { ...doc.snapshot, account: null } },
+      { today: TODAY, draft: true, readImage: () => null },
+    );
+
+    expect(view.payment.qr).toBeNull();
+  });
+
+  test("[SEC-001] cizí uživatel dostane na PDF i náhled 404", async () => {
+    const { owner, customerId } = newOwner();
+    const { owner: stranger } = newOwner();
+    const id = issued(owner, customerId);
+
+    for (const route of [pdfRoute, previewRoute]) {
+      session.actor = actor(stranger);
+      expect((await route(request("/x"), params(id))).status).toBe(404);
+      session.actor = { userId: null, source: "web" };
+      expect((await route(request("/x"), params(id))).status).toBe(404);
+      session.actor = actor(owner);
+      expect((await route(request("/x"), params("neexistuje"))).status).toBe(404);
+    }
+    await expect(invoicePdf(stranger, id)).rejects.toThrow();
+  });
+
+  test("[AUD-002] stažení vystaveného dokladu se zaznamená, náhled a koncept ne", async () => {
+    const { owner, customerId } = newOwner();
+    const id = issued(owner, customerId);
+    const { id: draftId } = draft(owner, customerId);
+    session.actor = actor(owner);
+    const downloads = () =>
+      db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, "invoice.pdf_download"))
+        .all()
+        .filter((row) => row.ownerId === owner);
+
+    await previewRoute(request("/x"), params(id));
+    await pdfRoute(request("/x"), params(draftId));
+    expect(downloads()).toHaveLength(0);
+
+    await pdfRoute(request("/x"), params(id));
+    expect(downloads().map((row) => row.entityId)).toEqual([id]);
+  });
+
+  test("[AUD-002] storno nebrání stažení a záznamu", async () => {
+    const { owner, customerId } = newOwner();
+    const id = issued(owner, customerId);
+    cancelInvoice(actor(owner), id);
+    session.actor = actor(owner);
+
+    const res = await pdfRoute(request("/x"), params(id));
+
+    expect(res.status).toBe(200);
+    expect(await textOf(Buffer.from(await res.arrayBuffer()))).toContain("Stornováno");
+  });
+
+  test("[SEC-001] rate limit pdfUser vrátí 429", async () => {
+    const { owner, customerId } = newOwner();
+    const { id } = draft(owner, customerId);
+    session.actor = actor(owner);
+    expect(RATE_RULES.pdfUser).toEqual({ name: "pdfUser", limit: 120, windowSeconds: 60 });
+
+    for (let i = 0; i < RATE_RULES.pdfUser.limit; i++) checkRateLimit(owner, RATE_RULES.pdfUser);
+
+    expect((await previewRoute(request("/x"), params(id))).status).toBe(429);
+  });
+
+  test("[PDF-009] název souboru bere šablonu z předvoleb", async () => {
+    const { owner, customerId } = newOwner();
+    savePreferences(actor(owner), { pdfFileName: "FA {cislo}.pdf" });
+    const id = issued(owner, customerId);
+
+    const { fileName } = await invoicePdf(owner, id);
+
+    expect(fileName).toMatch(/^FA .+\.pdf$/);
+  });
+});

@@ -33,3 +33,4 @@ jobs:
       - run: pnpm run build
       - run: pnpm audit --audit-level=high
       - run: docker build -t fakturan-ci .
+      - run: docker run --rm fakturan-ci node scripts/pdf-smoke.mjs
