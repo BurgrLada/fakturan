@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import type { InvoiceStatus } from "@/lib/invoice";
 import { diffLines } from "@/lib/invoice-diff";
-import { variableSymbolFrom } from "@/lib/number-format";
+import { calendarDateInPrague, variableSymbolFrom } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
@@ -201,6 +201,30 @@ export function checkIssuable(ownerId: string, id: string): IssueProblem[] {
       ? peekNumber(db, ownerId, picked.series, row.issueDate)
       : "";
   return [...found, ...textProblems(issuedTexts(db, ownerId, row, lines, number))];
+}
+
+export type IssuePreview = {
+  problems: IssueProblem[];
+  number: string | null;
+  variableSymbol: string | null;
+  issueDate: string | null;
+  today: string;
+};
+
+export function previewIssue(ownerId: string, id: string): IssuePreview {
+  const row = findOwned(db, ownerId, id);
+  const picked = pickSeries(db, ownerId, row, row.seriesId);
+  const number =
+    "series" in picked && row.issueDate
+      ? peekNumber(db, ownerId, picked.series, row.issueDate)
+      : null;
+  return {
+    problems: checkIssuable(ownerId, id),
+    number,
+    variableSymbol: number && automaticSymbol(ownerId, number),
+    issueDate: row.issueDate,
+    today: calendarDateInPrague(clock.now()),
+  };
 }
 
 // Variables can outgrow the limits saveDraft enforced, and editing an issued document validates

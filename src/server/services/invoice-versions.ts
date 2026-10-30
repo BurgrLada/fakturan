@@ -46,7 +46,7 @@ import { isNumberTaken } from "./number-series";
 const V = TEXTS.invoices.validation;
 
 // A credited document is settled by its credit notes, so it stays out as well.
-const EDITABLE_STATUSES: ReadonlySet<InvoiceStatus> = new Set([
+export const EDITABLE_STATUSES: ReadonlySet<InvoiceStatus> = new Set([
   "issued",
   "sent",
   "partially_paid",

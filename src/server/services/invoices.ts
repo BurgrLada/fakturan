@@ -149,6 +149,8 @@ const documentFields = {
 export const draftInputSchema = z
   .object({
     id: z.string(V.invalid).min(1, V.invalid).optional(),
+    // Chosen by the form, so a repeated first write finds the draft instead of creating another.
+    clientId: z.uuid(V.invalid).optional(),
     revision: z.number(V.invalid).int(V.invalid).optional(),
     type: z.enum(INVOICE_TYPES, V.type),
     customerId: reference,
@@ -300,6 +302,14 @@ export function assertReferencesOwned(
   if (found.length !== itemIds.length) throw new ServiceError(V.catalogItemNotFound);
 }
 
+function draftWithClientId(tx: Tx, ownerId: string, clientId: string): Invoice | null {
+  const own = readOwned(tx, ownerId, clientId);
+  if (own) return own;
+  const taken = tx.select({ id: invoice.id }).from(invoice).where(eq(invoice.id, clientId)).get();
+  if (taken) throw new ServiceError(V.notFound);
+  return null;
+}
+
 function customerNameOf(tx: Tx, ownerId: string, customerId: string | null): string {
   if (!customerId) return "";
   return (
@@ -382,16 +392,18 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
   const userId = ownerOf(actor);
   const parsed = draftInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
-  const { id: existingId, revision, lines, ...fields } = parsed.data;
+  const { id: existingId, clientId, revision, lines, ...fields } = parsed.data;
   const totals = totalsOf(lines, fields);
   const rows = lineRows(lines, totals);
 
   return unlessUnchanged(() =>
     mutate(actor, "invoice.save", (tx, audit) => {
-      const before = existingId ? findOwned(tx, userId, existingId) : null;
-      if (before && (before.status !== "draft" || before.revision !== revision)) {
-        throw new ServiceError(TEXTS.invoices.stale);
-      }
+      const before = existingId
+        ? findOwned(tx, userId, existingId)
+        : clientId
+          ? draftWithClientId(tx, userId, clientId)
+          : null;
+      if (before && before.status !== "draft") throw new ServiceError(TEXTS.invoices.stale);
       assertReferencesOwned(tx, userId, parsed.data);
 
       const customerName = customerNameOf(tx, userId, fields.customerId);
@@ -409,8 +421,10 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
           totals,
         });
       }
+      // Checked after the comparison: a retry of a write whose reply got lost changes nothing.
+      if (before && before.revision !== revision) throw new ServiceError(TEXTS.invoices.stale);
 
-      const id = before?.id ?? randomUUID();
+      const id = before?.id ?? clientId ?? randomUUID();
       const nextRevision = (before?.revision ?? 0) + 1;
       const searchText = searchTextOf({ customerName, lines: rows });
       const now = clock.now();

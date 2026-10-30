@@ -13,6 +13,7 @@ import { CURRENCIES } from "@/lib/currency";
 import { DOMESTIC_COUNTRY } from "@/lib/customers";
 import { LANGUAGES, type DesignChoice } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
+import { useRouteShown } from "@/lib/use-route-shown";
 
 const T = TEXTS.customers;
 
@@ -116,7 +117,7 @@ function Choice({
   );
 }
 
-function toPayload(values: CustomerValues) {
+export function toPayload(values: CustomerValues) {
   const { dueDays, language, currency, designId, remindersEnabled, extraEmails, ...rest } = values;
   return {
     ...rest,
@@ -140,6 +141,7 @@ export function CustomerForm({
   designs: DesignChoice[];
 }) {
   const router = useRouter();
+  const shown = useRouteShown();
   const [values, setValues] = useState<CustomerValues>(initial ?? EMPTY_CUSTOMER);
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -186,6 +188,8 @@ export function CustomerForm({
   }
 
   const fieldProps = { onChange: change };
+
+  if (!shown) return null;
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-8 sm:max-w-xl">

@@ -11,6 +11,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { CURRENCIES, type Currency } from "@/lib/currency";
 import { parseMoney } from "@/lib/money";
 import { TEXTS } from "@/lib/texts";
+import { useRouteShown } from "@/lib/use-route-shown";
 
 const T = TEXTS.catalog;
 
@@ -35,6 +36,7 @@ export function CatalogForm({
   defaultCurrency: Currency;
 }) {
   const router = useRouter();
+  const shown = useRouteShown();
   const [values, setValues] = useState<CatalogValues>(
     initial ?? {
       name: "",
@@ -82,6 +84,8 @@ export function CatalogForm({
       router.refresh();
     });
   }
+
+  if (!shown) return null;
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4 sm:max-w-xl">

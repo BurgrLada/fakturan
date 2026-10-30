@@ -31,6 +31,11 @@ const tagNamesSchema = z
   })
   .refine((entries) => entries.length <= MAX_TAGS, T.tooMany);
 
+export function assertTagNames(names: string[]): void {
+  const parsed = tagNamesSchema.safeParse(names);
+  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
+}
+
 function ownerOf(actor: Actor): string {
   if (!actor.userId) throw new ServiceError(V.forbidden);
   return actor.userId;

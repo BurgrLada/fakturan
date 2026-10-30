@@ -21,7 +21,9 @@ function loadPdfJs(): Promise<PdfJs> {
 
 async function open(pdf: Buffer): Promise<PdfTask> {
   const lib = await loadPdfJs();
-  const root = dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"));
+  const root = dirname(
+    createRequire(join(process.cwd(), "package.json")).resolve("pdfjs-dist/package.json"),
+  );
   const url = (dir: string) => `${pathToFileURL(join(root, dir)).href}/`;
   // pdf.js takes ownership of the buffer it is given, so it gets a copy.
   return lib.getDocument({

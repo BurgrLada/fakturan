@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,6 +121,9 @@ const newAccount = (owner: string, currency: "CZK" | "EUR" = "CZK") =>
 
 const invoiceAudits = (id: string) =>
   db.select().from(auditLog).where(eq(auditLog.entityId, id)).all();
+
+const listOwnDrafts = (owner: string) =>
+  db.select({ total: count() }).from(invoice).where(eq(invoice.userId, owner)).get()!.total;
 
 const setStatus = (id: string, status: (typeof INVOICE_STATUSES)[number], number?: string) =>
   db
@@ -504,6 +508,55 @@ describe("automatické ukládání", () => {
     );
     expect(() => save("i1", { id: first.id, note: "bez revize" })).toThrow("změnil");
     expect(getInvoice("i1", first.id)).toMatchObject({ note: "druhá", revision: 2 });
+  });
+
+  test("[INV-017] po ztracené odpovědi stejný obsah vrátí aktuální revizi místo odmítnutí", () => {
+    const first = save("i1", { note: "první" });
+    const body = draft("i1", { note: "druhá" });
+    const saved = saveDraft(actor("i1"), { ...body, id: first.id, revision: first.revision });
+    const audits = invoiceAudits(first.id).length;
+
+    const retried = saveDraft(actor("i1"), { ...body, id: first.id, revision: first.revision });
+
+    expect(retried).toEqual(saved);
+    expect(invoiceAudits(first.id)).toHaveLength(audits);
+  });
+
+  test("[INV-017] opakovaný první zápis se stejným clientId nezaloží druhý koncept", () => {
+    const clientId = randomUUID();
+    const body = draft("i1", { clientId, note: "jednou" });
+    const count = listOwnDrafts("i1");
+
+    const first = saveDraft(actor("i1"), body);
+    const retried = saveDraft(actor("i1"), body);
+
+    expect(first.id).toBe(clientId);
+    expect(retried).toEqual(first);
+    expect(listOwnDrafts("i1")).toBe(count + 1);
+  });
+
+  test("[INV-017] jiný obsah se starým clientId je odmítnutý a data zůstanou", () => {
+    const clientId = randomUUID();
+    saveDraft(actor("i1"), draft("i1", { clientId, note: "první" }));
+
+    expect(() => saveDraft(actor("i1"), draft("i1", { clientId, note: "jiná karta" }))).toThrow(
+      "změnil",
+    );
+    expect(getInvoice("i1", clientId)).toMatchObject({ note: "první", revision: 1 });
+  });
+
+  test("[SEC-002] clientId cizího konceptu je odmítnuté bez úniku a beze změny", () => {
+    const clientId = randomUUID();
+    saveDraft(actor("i1"), draft("i1", { clientId, note: "moje" }));
+
+    expect(() => saveDraft(actor("i2"), draft("i2", { clientId, note: "cizí" }))).toThrow(
+      "Doklad neexistuje",
+    );
+    expect(getInvoice("i1", clientId)).toMatchObject({ note: "moje" });
+  });
+
+  test("[SEC-006] clientId musí být uuid", () => {
+    expect(() => save("i1", { clientId: "x" })).toThrow("Neplatné údaje");
   });
 
   test("[INV-017] uložení nad vystaveným dokladem je odmítnuté", () => {
