@@ -1,5 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
+import { CURRENCIES } from "@/lib/currency";
 import { formatMoney, formatMoneyInput, parseMoney } from "@/lib/money";
 
 describe("peníze", () => {
@@ -53,6 +54,39 @@ describe("peníze", () => {
         const grouped = whole.replace(/\B(?=(\d{3})+$)/g, " ");
         expect(parseMoney(`${grouped},${fraction}`)).toBe(cents);
       }),
+    );
+  });
+
+  test("[CAT-001] mínus nula je nula, ne záporná nula", () => {
+    expect(Object.is(parseMoney("-0"), 0)).toBe(true);
+    expect(Object.is(parseMoney("-0,00"), 0)).toBe(true);
+  });
+
+  test("[CAT-001] úzká nezlomitelná mezera seskupuje tisíce", () => {
+    expect(parseMoney("1\u202F234,50")).toBe(123450);
+    expect(parseMoney("1\u00A0234,50")).toBe(123450);
+  });
+
+  test("[CAT-001] každá podporovaná měna má dvě desetinná místa", () => {
+    for (const currency of CURRENCIES) {
+      const { minimumFractionDigits, maximumFractionDigits } = new Intl.NumberFormat("cs-CZ", {
+        style: "currency",
+        currency,
+      }).resolvedOptions();
+      expect([currency, minimumFractionDigits, maximumFractionDigits]).toEqual([currency, 2, 2]);
+    }
+  });
+
+  test("[CAT-001] vlastnost: výstup formatMoney se přečte zpět na původní částku", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...CURRENCIES),
+        fc.integer({ min: -1_000_000_000_000, max: 1_000_000_000_000 }),
+        (currency, cents) => {
+          const text = formatMoney(cents, currency).replace(/[^\d\s\u00A0\u202F,.\-−]/gu, "");
+          expect(parseMoney(text.replace("−", "-")), text).toBe(cents);
+        },
+      ),
     );
   });
 });

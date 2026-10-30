@@ -1,6 +1,7 @@
 import "server-only";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { czechSortKey } from "@/lib/czech-sort";
 import { env } from "../env";
 import * as schema from "./schema";
 
@@ -12,6 +13,9 @@ export function createDb(path: string): Db {
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   sqlite.pragma("busy_timeout = 5000");
+  sqlite.function("czech_key", { deterministic: true }, (text) =>
+    typeof text === "string" ? czechSortKey(text) : null,
+  );
   return drizzle(sqlite, { schema });
 }
 

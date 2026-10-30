@@ -259,7 +259,7 @@ describe("smazání účtu", () => {
     seed("x1");
     const id = saveBankAccount(actor("x1"), czk());
 
-    expect(isAccountUsed("x1", id)).toBe(false);
+    expect(db.transaction((tx) => isAccountUsed(tx, "x1", id))).toBe(false);
     deleteBankAccount(actor("x1"), id);
 
     expect(listBankAccounts("x1")).toEqual([]);

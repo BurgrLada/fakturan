@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition, type FormEvent } from "react";
+import { ensureSeriesAction } from "@/app/(app)/nastaveni/vychozi/actions";
 import {
   deleteSeriesAction,
   saveSeriesAction,
@@ -109,7 +111,20 @@ function RemoveDialog({
   );
 }
 
-export function NumberSeries({ series, today }: { series: SeriesListRow[]; today: CalendarDate }) {
+export function NumberSeries({
+  series,
+  today,
+  needsDefaults,
+}: {
+  series: SeriesListRow[];
+  today: CalendarDate;
+  needsDefaults: boolean;
+}) {
+  const router = useRouter();
+  useEffect(() => {
+    if (!needsDefaults) return;
+    void ensureSeriesAction().then(() => router.refresh());
+  }, [needsDefaults, router]);
   const [values, setValues] = useState<Values>(EMPTY);
   const [next, setNext] = useState("1");
   const [pending, startTransition] = useTransition();

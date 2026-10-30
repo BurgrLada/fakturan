@@ -110,7 +110,7 @@ export function defaultAccountFor(ownerId: string, currency: Currency): BankAcco
 }
 
 // Invoices do not exist yet; plan 3 replaces this with a lookup so SET-022 can refuse deletion.
-export function isAccountUsed(_ownerId: string, _accountId: string): boolean {
+export function isAccountUsed(_tx: Tx, _ownerId: string, _accountId: string): boolean {
   return false;
 }
 
@@ -224,7 +224,7 @@ export function deleteBankAccount(actor: Actor, id: string): void {
   const userId = ownerOf(actor);
   mutate(actor, "bank_account.delete", (tx, audit) => {
     const account = findOwned(tx, userId, id);
-    if (isAccountUsed(userId, id)) {
+    if (isAccountUsed(tx, userId, id)) {
       throw new ServiceError("Účet je použitý na faktuře, nejde smazat, jen skrýt");
     }
     tx.delete(bankAccount)

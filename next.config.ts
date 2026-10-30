@@ -35,6 +35,8 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   output: "standalone",
+  // Above MAX_FILE_BYTES (src/lib/file-limits.ts) plus multipart overhead; Next defaults to 1 MB.
+  experimental: { serverActions: { bodySizeLimit: "3mb" } },
   serverExternalPackages: ["better-sqlite3"],
   // Both are read from process.cwd() at runtime, which tracing cannot see.
   outputFileTracingIncludes: {

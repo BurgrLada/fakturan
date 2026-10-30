@@ -169,3 +169,25 @@ test("[NUM-004] další číslo se nastaví a promítne do náhledu", async ({ p
   await expect(page.getByText("Další číslo je nastavené.")).toBeVisible();
   await expect(page.getByRole("row", { name: /Faktura/ }).first()).toContainText("-040");
 });
+
+function pngOfSize(bytes: number): string {
+  const file = join(tmpdir(), `fakturan-velky-${bytes}-${Date.now()}.png`);
+  writeFileSync(file, Buffer.concat([PNG, Buffer.alloc(bytes - PNG.length)]));
+  return file;
+}
+
+test("[SET-014] [SEC-005] logo 1,5 MB projde a soubor nad 2 MB ukáže českou hlášku", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/dodavatel`);
+  await page.waitForLoadState("networkidle");
+
+  await page.getByLabel("Logo na fakturu").setInputFiles(pngOfSize(1.5 * 1024 * 1024));
+  await expect(page.getByRole("img", { name: "Logo na fakturu" })).toBeVisible();
+
+  await page.getByLabel("Podpis nebo razítko").setInputFiles(pngOfSize(2 * 1024 * 1024 + 1024));
+  await expect(page.getByText("Soubor je větší než 2 MB")).toBeVisible();
+  await expect(page.getByRole("img", { name: "Podpis nebo razítko" })).toBeHidden();
+});

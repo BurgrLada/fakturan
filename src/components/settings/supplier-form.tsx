@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MAX_FILE_BYTES } from "@/lib/file-limits";
 import { DEFAULT_NOT_VAT_PAYER_CS, DEFAULT_NOT_VAT_PAYER_EN } from "@/lib/supplier-defaults";
 import { TEXTS } from "@/lib/texts";
 
@@ -93,6 +94,10 @@ export function ImageSlot({ kind, fileId }: { kind: ImageKind; fileId: string | 
 
   function upload(file: File | undefined) {
     if (!file) return;
+    if (file.size > MAX_FILE_BYTES) {
+      setError(TEXTS.supplier.images.tooBig);
+      return;
+    }
     const data = new FormData();
     data.set("kind", kind);
     data.set("file", file);

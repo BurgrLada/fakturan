@@ -8,6 +8,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
+import { czech } from "../db/collation";
 import { catalogItem, unit } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
@@ -131,8 +132,8 @@ function conditions(ownerId: string, filter: CatalogFilter): SQL {
   );
 }
 
-const byUsage = [desc(catalogItem.useCount), asc(catalogItem.name), asc(catalogItem.id)];
-const byName = [asc(catalogItem.name), asc(catalogItem.id)];
+const byUsage = [desc(catalogItem.useCount), asc(czech(catalogItem.name)), asc(catalogItem.id)];
+const byName = [asc(czech(catalogItem.name)), asc(catalogItem.id)];
 
 export function listCatalog(ownerId: string, filter: CatalogFilter): Page<CatalogItem> {
   const page = Math.max(1, Math.floor(filter.page ?? 1));
@@ -169,7 +170,7 @@ export function listCategories(ownerId: string): string[] {
     .selectDistinct({ category: catalogItem.category })
     .from(catalogItem)
     .where(scoped(ownerId).where(catalogItem, (t, { and }) => and(sql`${t.category} <> ''`)))
-    .orderBy(asc(catalogItem.category))
+    .orderBy(asc(czech(catalogItem.category)))
     .all()
     .map((row) => row.category);
 }

@@ -1,8 +1,7 @@
 import "server-only";
 import DOMPurify from "dompurify";
 import { JSDOM } from "jsdom";
-
-export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+import { MAX_FILE_BYTES } from "@/lib/file-limits";
 
 export type ImageMime = "image/png" | "image/jpeg" | "image/webp" | "image/svg+xml";
 

@@ -279,6 +279,7 @@ export const TEXTS = {
       qr_logo: "Logo do QR kódu",
       signature: "Podpis nebo razítko",
       hint: "PNG, JPEG, WebP nebo SVG, nejvýše 2 MB.",
+      tooBig: "Soubor je větší než 2 MB",
       none: "Nenahráno",
       remove: "Odebrat",
     },

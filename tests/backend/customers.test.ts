@@ -91,6 +91,21 @@ afterEach(() => {
 });
 
 describe("seznam zákazníků", () => {
+  test("[CUS-001] jména se řadí podle české abecedy, takže Č následuje za C", () => {
+    seed("c9");
+    for (const name of ["Zeman", "Čech", "Novák", "Cibulka", "Šimek", "alfa"])
+      saveCustomer(actor("c9"), input({ name, ico: "", dic: "" }));
+
+    expect(listCustomers("c9", {}).rows.map((c) => c.name)).toEqual([
+      "alfa",
+      "Cibulka",
+      "Čech",
+      "Novák",
+      "Šimek",
+      "Zeman",
+    ]);
+  });
+
   test("[CUS-001] seznam stránkuje, hledá a filtruje", () => {
     saveCustomer(actor("c1"), input({ name: "Alfa s.r.o.", ico: "", dic: "", email: "a@alfa.cz" }));
     saveCustomer(actor("c1"), input({ name: "Beta s.r.o.", ico: "", dic: "" }));

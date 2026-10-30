@@ -106,3 +106,17 @@ test("[CUS-007] archivovaný zákazník zmizí ze seznamu a jde obnovit", async 
   await page.goto(`${freshApp.baseURL}/zakaznici?stav=archivovani`);
   await expect(page.getByRole("link", { name: "Gama a.s." })).toBeVisible();
 });
+
+test("[SEC-002] neznámý zákazník a neznámá položka ceníku vrátí skutečný stav 404", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+
+  const customer = await page.goto(`${freshApp.baseURL}/zakaznici/neexistuje`);
+  expect(customer?.status()).toBe(404);
+  const item = await page.goto(`${freshApp.baseURL}/cenik/neexistuje`);
+  expect(item?.status()).toBe(404);
+  const create = await page.goto(`${freshApp.baseURL}/zakaznici/novy`);
+  expect(create?.status()).toBe(200);
+});

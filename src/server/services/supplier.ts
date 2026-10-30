@@ -132,7 +132,7 @@ export function setSupplierImage(
         entityId: userId,
         ownerId: userId,
         scope: "user",
-        after: { image: kind },
+        after: { image: kind, fileId: id, previousFileId: old },
       });
       return old;
     });

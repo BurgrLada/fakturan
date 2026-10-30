@@ -209,6 +209,18 @@ describe("logo a podpis", () => {
     const second = getSupplier("f1");
     expect(second?.logoFileId).not.toBe(first?.logoFileId);
     expect(db.select().from(file).where(eq(file.id, first!.logoFileId!)).all()).toEqual([]);
+    const entry = db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.ownerId, "f1"))
+      .all()
+      .filter((row) => row.action === "supplier.image_set")
+      .at(-1);
+    expect(entry!.after).toMatchObject({
+      image: "logo",
+      fileId: second?.logoFileId,
+      previousFileId: first?.logoFileId,
+    });
   });
 
   test("[SET-013] podpis se nahraje a odebere", () => {

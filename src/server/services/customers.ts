@@ -16,6 +16,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
+import { czech } from "../db/collation";
 import { customer } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { lookupVies, splitVatId, type ViesState } from "../external/vies";
@@ -159,7 +160,7 @@ export function listCustomers(ownerId: string, filter: CustomerFilter): Page<Cus
     .select()
     .from(customer)
     .where(conditions(ownerId, filter))
-    .orderBy(asc(customer.name), asc(customer.id))
+    .orderBy(asc(czech(customer.name)), asc(customer.id))
     .limit(pageSize + 1)
     .offset((page - 1) * pageSize)
     .all();
@@ -176,7 +177,7 @@ export function searchCustomers(ownerId: string, q: string, limit: number): Cust
     .select()
     .from(customer)
     .where(conditions(ownerId, { q: term || undefined }))
-    .orderBy(asc(customer.name), asc(customer.id))
+    .orderBy(asc(czech(customer.name)), asc(customer.id))
     .limit(Math.min(MAX_PAGE_SIZE, Math.max(1, limit)))
     .all();
 }

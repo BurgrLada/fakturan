@@ -151,6 +151,10 @@ function insertDefaults(tx: Tx, userId: string, types: DocumentType[]): void {
   }
 }
 
+export function hasMissingDefaults(ownerId: string): boolean {
+  return missingDefaults(db, ownerId).length > 0;
+}
+
 // Reads first so an ordinary page view does not take the write lock.
 export function ensureDefaultSeries(actor: Actor): void {
   const userId = ownerOf(actor);

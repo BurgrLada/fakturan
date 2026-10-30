@@ -148,6 +148,21 @@ describe("ceník", () => {
     expect(listCatalog("k1", { category: "Zboží" }).rows.map((r) => r.name)).toEqual(["B"]);
   });
 
+  test("[CAT-002] názvy se řadí podle české abecedy, takže Č následuje za C", () => {
+    seed("k9");
+    for (const name of ["Zeta", "Čaj", "Cukr", "šrouby", "Alfa", "Dort"])
+      saveCatalogItem(actor("k9"), input({ name }));
+
+    expect(listCatalog("k9", {}).rows.map((r) => r.name)).toEqual([
+      "Alfa",
+      "Cukr",
+      "Čaj",
+      "Dort",
+      "šrouby",
+      "Zeta",
+    ]);
+  });
+
   test("[CAT-002] řazení podle použití je sestupně, jinak podle názvu", () => {
     const a = saveCatalogItem(actor("k1"), input({ name: "A" })).id;
     const b = saveCatalogItem(actor("k1"), input({ name: "B" })).id;
