@@ -2,6 +2,7 @@ import "server-only";
 import type { GenericEndpointContext } from "better-auth";
 import { isAPIError } from "better-auth/api";
 import { z } from "zod";
+import { emailHash } from "../audit/email-hash";
 import type { AuditAction } from "../audit/record";
 import type { Env } from "../env";
 import { mutate } from "../services/mutation";
@@ -70,6 +71,12 @@ function oauthError(ctx: Ctx, env: Env): { location: string; reason: string } | 
   return reason ? { location, reason } : null;
 }
 
+// An ownerless row outlives account deletion, so it must not hold the plain address (AUD-010).
+function emailFields(email: string | null, ownerId: string | null, env: Env) {
+  if (ownerId || !email) return { email };
+  return { emailHash: emailHash(email, env) };
+}
+
 function failure(ctx: Ctx): { code: string | undefined } | null {
   const { returned } = ctx.context as { returned?: unknown };
   if (!isAPIError(returned) || returned.statusCode < 400) return null;
@@ -106,20 +113,22 @@ export async function auditAuthEndpoint(ctx: Ctx, env: Env): Promise<void> {
 
   if (ctx.path === "/sign-in/email" && failed) {
     const email = validEmail(body.email);
+    const ownerId = await ownerOfEmail(ctx, email);
     recordAuthEvent(ctx, env, {
       action: "auth.login_failed",
-      ownerId: await ownerOfEmail(ctx, email),
-      after: { email, reason: failed.code },
+      ownerId,
+      after: { ...emailFields(email, ownerId, env), reason: failed.code },
     });
     return;
   }
 
   if (ctx.path === "/request-password-reset" && !failed) {
     const email = validEmail(body.email);
+    const ownerId = await ownerOfEmail(ctx, email);
     recordAuthEvent(ctx, env, {
       action: "auth.password_reset_request",
-      ownerId: await ownerOfEmail(ctx, email),
-      after: { email },
+      ownerId,
+      after: emailFields(email, ownerId, env),
     });
     return;
   }

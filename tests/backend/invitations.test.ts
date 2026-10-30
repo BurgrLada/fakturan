@@ -1,8 +1,9 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { emailHash } from "@/server/audit/email-hash";
 import { createAuth } from "@/server/auth";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, instanceMeta, invitation, rateLimit, user } from "@/server/db/schema";
@@ -15,6 +16,7 @@ import {
   resendInvitation,
   revokeInvitation,
 } from "@/server/services/invitations";
+import { deleteUser } from "@/server/services/users";
 import { Browser, BASE, fakeGithub, githubLogin, PASSWORD } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
 
@@ -117,7 +119,7 @@ describe("pozvánky", () => {
     expect(auditRows("invitation.create").at(-1)).toMatchObject({
       actorId: ADMIN_ID,
       scope: "instance",
-      after: { email: "host@example.cz", role: "user" },
+      after: { emailHash: emailHash("host@example.cz", parseEnv(envValues)), role: "user" },
     });
   });
 
@@ -194,6 +196,20 @@ describe("pozvánky", () => {
     await expect(createInvitation(admin, "admin@example.cz")).rejects.toThrow("už existuje");
   });
 
+  test("[ADM-003] opětovné odeslání neobejde člena ani jinou platnou pozvánku", async () => {
+    await createInvitation(admin, "host@example.cz");
+    const { id: staleId } = row("host@example.cz");
+    const later = new Date(Date.now() + 8 * DAY_MS);
+    setClockForTests({ now: () => later });
+    await createInvitation(admin, "HOST@example.cz");
+
+    await expect(resendInvitation(admin, staleId)).rejects.toThrow("už má");
+
+    db.delete(invitation).where(ne(invitation.id, staleId)).run();
+    seedUser("user-2", "host@example.cz");
+    await expect(resendInvitation(admin, staleId)).rejects.toThrow("už existuje");
+  });
+
   test("[ADM-003] přehled ukáže čekající pozvánky bez otisku tokenu", async () => {
     await createInvitation(admin, "host@example.cz");
 
@@ -241,5 +257,35 @@ describe("pozvánky", () => {
       role: "user",
     });
     expect(inspectInvitation(token)).toEqual({ status: "used" });
+  });
+
+  test("[AUTH-007] pozvánka zná přijatý účet a smaže se i při jiném e-mailu", async () => {
+    await createInvitation(admin, "skutecny@example.cz");
+    const token = tokenOf((await resendInvitation(admin, row("skutecny@example.cz").id)).url);
+    fakeGithub("relay@privaterelay.appleid.com");
+    const browser = new Browser(socialAuth);
+    browser.cookies.set("fakturan_invite", token);
+    await githubLogin(browser);
+    const created = (await browser.sessionUser())!;
+
+    expect(row("skutecny@example.cz").acceptedUserId).toBe(created.id);
+    expect(auditRows("invitation.accept").at(-1)).toMatchObject({ ownerId: created.id });
+
+    deleteUser(admin, created.id, "relay@privaterelay.appleid.com");
+
+    expect(db.select().from(invitation).all()).toEqual([]);
+  });
+
+  test("[AUD-010] audit pozvánek drží klíčovaný otisk místo e-mailu", async () => {
+    const { url } = await createInvitation(admin, "host@example.cz");
+    await signUpWith(tokenOf(url), "host@example.cz");
+
+    for (const action of ["invitation.create", "invitation.accept"]) {
+      const last = auditRows(action).at(-1)!;
+      expect(last.after).toMatchObject({
+        emailHash: emailHash("host@example.cz", parseEnv(envValues)),
+      });
+      expect(JSON.stringify(last.after)).not.toContain("host@example.cz");
+    }
   });
 });

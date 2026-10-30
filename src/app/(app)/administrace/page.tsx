@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
+import { z } from "zod";
 import { InvitationsPanel } from "@/components/admin/invitations-panel";
 import { UsersTable } from "@/components/admin/users-table";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -11,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { auditActionLabel } from "@/lib/audit-labels";
 import { formatDateTime } from "@/lib/format";
 import { actorFromRequest, requireAdmin } from "@/server/auth/session";
 import { listInstanceAudit } from "@/server/services/instance-audit";
@@ -19,48 +23,60 @@ import { listUsers } from "@/server/services/users";
 
 export const metadata: Metadata = { title: "Administrace | Fakturan" };
 
-const ACTION_LABELS: Record<string, string> = {
-  "access.denied": "Odmítnutý přístup",
-  "auth.login": "Přihlášení",
-  "auth.login_failed": "Neúspěšné přihlášení",
-  "auth.logout": "Odhlášení",
-  "invitation.accept": "Přijetí pozvánky",
-  "invitation.create": "Nová pozvánka",
-  "invitation.resend": "Nové odeslání pozvánky",
-  "invitation.revoke": "Zrušení pozvánky",
-  "rate_limit.exceeded": "Překročený limit",
-  "user.create": "Nový účet",
-  "user.deactivate": "Deaktivace účtu",
-  "user.delete": "Smazání účtu",
-  "user.reactivate": "Reaktivace účtu",
-  "user.role_change": "Změna role",
-};
+const pageParam = z.coerce.number().int().min(1).catch(1);
 
-function InstanceEvents({ rows }: { rows: ReturnType<typeof listInstanceAudit> }) {
+function eventsPage(page: number): string {
+  return `/administrace?strana=${page}`;
+}
+
+function InstanceEvents({ events }: { events: ReturnType<typeof listInstanceAudit> }) {
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Čas</TableHead>
-          <TableHead>Událost</TableHead>
-          <TableHead>Kdo</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.id}>
-            <TableCell>{formatDateTime(row.at)}</TableCell>
-            <TableCell>{ACTION_LABELS[row.action] ?? row.action}</TableCell>
-            <TableCell>{row.actorEmail ?? "–"}</TableCell>
+    <div className="flex flex-col gap-4">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Čas</TableHead>
+            <TableHead>Událost</TableHead>
+            <TableHead>Kdo</TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {events.rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell>{formatDateTime(row.at)}</TableCell>
+              <TableCell>{auditActionLabel(row.action)}</TableCell>
+              <TableCell>{row.actorEmail ?? "–"}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <div className="flex gap-2">
+        {events.page > 1 && (
+          <Button
+            variant="outline"
+            render={<Link href={eventsPage(events.page - 1)} />}
+            nativeButton={false}
+          >
+            Novější
+          </Button>
+        )}
+        {events.hasNext && (
+          <Button
+            variant="outline"
+            render={<Link href={eventsPage(events.page + 1)} />}
+            nativeButton={false}
+          >
+            Starší
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
-async function AdminContent() {
+async function AdminContent({ searchParams }: Pick<PageProps<"/administrace">, "searchParams">) {
   const session = await requireAdmin();
+  const { strana } = await searchParams;
   const actor = await actorFromRequest();
   const users = listUsers(actor).map((row) => ({
     ...row,
@@ -74,7 +90,7 @@ async function AdminContent() {
     expiresAt: formatDateTime(row.expiresAt),
   }));
   return (
-    <Tabs defaultValue="uzivatele">
+    <Tabs defaultValue={strana === undefined ? "uzivatele" : "udalosti"}>
       <TabsList>
         <TabsTrigger value="uzivatele">Uživatelé</TabsTrigger>
         <TabsTrigger value="pozvanky">Pozvánky</TabsTrigger>
@@ -87,18 +103,18 @@ async function AdminContent() {
         <InvitationsPanel invitations={invitations} />
       </TabsContent>
       <TabsContent value="udalosti">
-        <InstanceEvents rows={listInstanceAudit(actor)} />
+        <InstanceEvents events={listInstanceAudit(actor, { page: pageParam.parse(strana) })} />
       </TabsContent>
     </Tabs>
   );
 }
 
-export default function AdminPage() {
+export default function AdminPage({ searchParams }: PageProps<"/administrace">) {
   return (
     <>
       <h1 className="font-brand text-2xl">Administrace</h1>
       <Suspense>
-        <AdminContent />
+        <AdminContent searchParams={searchParams} />
       </Suspense>
     </>
   );

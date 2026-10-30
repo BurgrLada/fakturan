@@ -12,6 +12,8 @@ export const invitation = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }),
+    // No foreign key: it is written before Better Auth inserts the user.
+    acceptedUserId: text("accepted_user_id"),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
   },
   (t) => [index("invitation_email_idx").on(t.email)],

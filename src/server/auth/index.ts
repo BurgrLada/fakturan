@@ -1,8 +1,10 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { betterAuth, type GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { admin } from "better-auth/plugins";
+import { emailHash } from "../audit/email-hash";
 import type { AuditAction } from "../audit/record";
 import { db } from "../db";
 import * as schema from "../db/schema";
@@ -110,12 +112,20 @@ async function resetTokenOwner(
   return verification ? internalAdapter.findUserById(verification.value) : null;
 }
 
+function rejectedSignupDetails(email: unknown, env: Env) {
+  const valid = validEmail(email);
+  return { emailHash: valid && emailHash(valid, env) };
+}
+
 function guardSignup(
   ctx: GenericEndpointContext | null,
   env: Env,
   newUser: { email: string; emailVerified: boolean },
 ) {
   const isSocial = ctx?.path === "/callback/:id";
+  // Chosen here so the invitation and its audit row can name the user before Better Auth inserts it.
+  const userId = randomUUID();
+  const hashed = { emailHash: emailHash(newUser.email, env) };
   const decision = mutate(
     webActor(ctx?.headers, null, env),
     "auth.signup_rejected",
@@ -123,25 +133,27 @@ function guardSignup(
       const result = canRegister(tx, newUser.email, ctx?.getCookie(INVITE_COOKIE) ?? undefined, {
         social: isSocial,
         verifiedEmail: newUser.emailVerified,
+        userId,
       });
       const base = { entity: "user", entityId: null, ownerId: null, scope: "instance" } as const;
       if (!result.allowed) {
-        audit({ ...base, after: { email: newUser.email } });
+        audit({ ...base, after: hashed });
       } else if (result.invitationId) {
         audit({
           ...base,
           action: "invitation.accept",
           entity: "invitation",
           entityId: result.invitationId,
-          after: { email: newUser.email, role: result.role },
+          ownerId: userId,
+          after: { ...hashed, role: result.role },
         });
       } else {
-        audit({ ...base, action: "auth.first_admin", after: { email: newUser.email } });
+        audit({ ...base, action: "auth.first_admin", ownerId: userId, after: hashed });
       }
       return result;
     },
   );
-  if (decision.allowed) return { data: { role: decision.role } };
+  if (decision.allowed) return { data: { id: userId, role: decision.role } };
   if (isSocial) throw ctx.redirect(new URL(SOCIAL_REJECTED_PATH, env.BETTER_AUTH_URL).href);
   throw inviteRequired();
 }
@@ -265,7 +277,7 @@ export function createAuth(env: Env) {
             recordAuthEvent(ctx, env, {
               action: "auth.signup_rejected",
               ownerId: null,
-              after: { email: validEmail(body.email) },
+              after: rejectedSignupDetails(body.email, env),
             });
             throw inviteRequired();
           }

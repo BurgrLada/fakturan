@@ -275,11 +275,15 @@ describe("append-only", () => {
     expect(rowsOf("aud6f")).toMatchObject([{ action: "probe.seed" }]);
   });
 
-  test("[AUD-006] povolení v audit_purge neotevře záznamy instance", () => {
-    const id = seed("aud6e", "instance");
+  test("[AUD-010] povolení v audit_purge pokryje záznamy účtu v každém rozsahu, jiné ne", () => {
+    const owned = seed("aud6e", "instance");
+    const foreign = seed("aud6g", "instance");
     db.$client.prepare("INSERT INTO audit_purge (owner_id) VALUES ('aud6e')").run();
 
-    expect(() => db.$client.prepare("DELETE FROM audit_log WHERE id = ?").run(id)).toThrow(
+    db.$client.prepare("DELETE FROM audit_log WHERE id = ?").run(owned);
+
+    expect(rowsOf("aud6e")).toEqual([]);
+    expect(() => db.$client.prepare("DELETE FROM audit_log WHERE id = ?").run(foreign)).toThrow(
       /append-only/,
     );
   });

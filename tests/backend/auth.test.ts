@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { decodeJwt, decodeProtectedHeader, exportPKCS8, generateKeyPair } from "jose";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { emailHash } from "@/server/audit/email-hash";
 import { createAuth } from "@/server/auth";
 import { appleClientSecret, enabledProviders } from "@/server/auth/providers";
 import { canRegister, isSignupOpen } from "@/server/auth/signup-guard";
@@ -183,7 +184,7 @@ describe("první účet a uzavřená registrace", () => {
     expect(userCount()).toBe(1);
     expect(auditRows("auth.signup_rejected").at(-1)).toMatchObject({
       scope: "instance",
-      after: { email: "cizi@example.cz" },
+      after: { emailHash: emailHash("cizi@example.cz", testEnv()) },
     });
   });
 
@@ -292,7 +293,7 @@ describe("přihlášení", () => {
       expect(res.headers.get("location")).toBe(`${BASE}/prihlaseni?chyba=pozvanka`);
       expect(roleOf("cizi@example.cz")).toBeUndefined();
       expect(auditRows("auth.signup_rejected").at(-1)).toMatchObject({
-        after: { email: "cizi@example.cz" },
+        after: { emailHash: emailHash("cizi@example.cz", testEnv()) },
       });
     });
 
@@ -743,7 +744,11 @@ describe("audit přihlašování", () => {
       userAgent: "UA/ok",
       after: { email: "admin@example.cz" },
     });
-    expect(failed[1]).toMatchObject({ ownerId: null, after: { email: "neznamy@example.cz" } });
+    expect(failed[1]).toMatchObject({
+      ownerId: null,
+      after: { emailHash: emailHash("neznamy@example.cz", testEnv()) },
+    });
+    expect(JSON.stringify(failed[1])).not.toContain("neznamy@example.cz");
     expect(auditRows("auth.login").at(-1)).toMatchObject({
       actorId: admin.id,
       ownerId: admin.id,

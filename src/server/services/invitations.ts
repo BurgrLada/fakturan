@@ -1,7 +1,8 @@
 import "server-only";
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import type { Actor } from "../audit/context";
+import { emailHash } from "../audit/email-hash";
 import { hashToken } from "../auth/signup-guard";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
@@ -39,7 +40,7 @@ function auditEntry(id: string, email: string) {
     entityId: id,
     ownerId: null,
     scope: "instance",
-    after: { email, role: "user" },
+    after: { emailHash: emailHash(email, env), role: "user" },
   } as const;
 }
 
@@ -66,13 +67,14 @@ function assertNotMember(tx: Tx, email: string): void {
   if (member.get()) throw new ServiceError("Účet s tímto e-mailem už existuje");
 }
 
-function assertNoPendingInvite(tx: Tx, email: string): void {
+function assertNoPendingInvite(tx: Tx, email: string, ignoredId = ""): void {
   const pending = tx
     .select({ id: invitation.id })
     .from(invitation)
     .where(
       and(
         eq(sql`lower(${invitation.email})`, email),
+        ne(invitation.id, ignoredId),
         isNull(invitation.acceptedAt),
         isNull(invitation.revokedAt),
         gt(invitation.expiresAt, clock.now()),
@@ -131,6 +133,8 @@ export async function resendInvitation(actor: Actor, id: string): Promise<Invita
   const email = mutate(actor, "invitation.resend", (tx, audit) => {
     assertAdmin(tx, actor);
     const row = openInvitation(tx, id);
+    assertNotMember(tx, row.email.toLowerCase());
+    assertNoPendingInvite(tx, row.email.toLowerCase(), id);
     tx.update(invitation).set({ tokenHash, expiresAt }).where(eq(invitation.id, id)).run();
     audit(auditEntry(id, row.email));
     return row.email;

@@ -43,17 +43,19 @@ export type UserRow = {
 
 type Outcome = { ok: true } | { ok: false; error: string };
 
-function DeleteUserDialog({
-  row,
-  pending,
-  onConfirm,
-}: {
-  row: UserRow;
-  pending: boolean;
-  onConfirm: (confirmEmail: string) => void;
-}) {
+function DeleteUserDialog({ row }: { row: UserRow }) {
+  const [pending, startTransition] = useTransition();
   const [typed, setTyped] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const inputId = `confirm-${row.id}`;
+
+  function confirm() {
+    startTransition(async () => {
+      const result = await deleteUserAction({ userId: row.id, confirmEmail: typed });
+      setError(result.ok ? null : result.error);
+    });
+  }
+
   return (
     <AlertDialog>
       <AlertDialogTrigger render={<Button variant="destructive" size="sm" />}>
@@ -67,6 +69,11 @@ function DeleteUserDialog({
             Deaktivovaný se nepřihlásí, proto ho na export můžete dočasně reaktivovat.
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         <div className="flex flex-col gap-2">
           <Label htmlFor={inputId}>Pro potvrzení opište e-mail</Label>
           <Input id={inputId} value={typed} onChange={(event) => setTyped(event.target.value)} />
@@ -76,7 +83,7 @@ function DeleteUserDialog({
           <Button
             variant="destructive"
             disabled={pending || typed.trim().toLowerCase() !== row.email.toLowerCase()}
-            onClick={() => onConfirm(typed)}
+            onClick={confirm}
           >
             Smazat natrvalo
           </Button>
@@ -161,15 +168,7 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                       Reaktivovat
                     </Button>
                   )}
-                  {!self && (
-                    <DeleteUserDialog
-                      row={row}
-                      pending={pending}
-                      onConfirm={(confirmEmail) =>
-                        perform(() => deleteUserAction({ userId: row.id, confirmEmail }))
-                      }
-                    />
-                  )}
+                  {!self && <DeleteUserDialog row={row} />}
                 </TableCell>
               </TableRow>
             );

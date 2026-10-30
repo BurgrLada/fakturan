@@ -78,7 +78,11 @@ export function canRegister(
   tx: Tx,
   email: string,
   inviteToken?: string,
-  { social = false, verifiedEmail = false }: { social?: boolean; verifiedEmail?: boolean } = {},
+  {
+    social = false,
+    verifiedEmail = false,
+    userId = null,
+  }: { social?: boolean; verifiedEmail?: boolean; userId?: string | null } = {},
 ): SignupDecision {
   if (hasNoUsers(tx) && claimFirstAdmin(tx)) {
     return { allowed: true, role: "admin", invitationId: null };
@@ -93,6 +97,9 @@ export function canRegister(
       ? byToken
       : undefined;
   if (!invite) return { allowed: false };
-  tx.update(invitation).set({ acceptedAt: clock.now() }).where(eq(invitation.id, invite.id)).run();
+  tx.update(invitation)
+    .set({ acceptedAt: clock.now(), acceptedUserId: userId })
+    .where(eq(invitation.id, invite.id))
+    .run();
   return { allowed: true, role: invite.role, invitationId: invite.id };
 }

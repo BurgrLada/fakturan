@@ -36,6 +36,13 @@
       "when": 1793356375361,
       "tag": "0004_rate_limit_denied",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793357550300,
+      "tag": "0005_invitation_accepted_user",
+      "breakpoints": true
     }
   ]
 }

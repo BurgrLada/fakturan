@@ -1,0 +1,38 @@
+export const ACTION_LABELS: Record<string, string> = {
+  "access.denied": "Odmítnutý přístup",
+  "account.link": "Propojení účtu poskytovatele",
+  "auth.account_unlink": "Odpojení účtu poskytovatele",
+  "auth.account_unlink_failed": "Neúspěšné odpojení účtu poskytovatele",
+  "auth.email_change_request": "Žádost o změnu e-mailu",
+  "auth.email_change_request_failed": "Neúspěšná žádost o změnu e-mailu",
+  "auth.first_admin": "První administrátor",
+  "auth.login": "Přihlášení",
+  "auth.login_failed": "Neúspěšné přihlášení",
+  "auth.logout": "Odhlášení",
+  "auth.password_change": "Změna hesla",
+  "auth.password_change_failed": "Neúspěšná změna hesla",
+  "auth.password_reset": "Obnova hesla",
+  "auth.password_reset_failed": "Neúspěšná obnova hesla",
+  "auth.password_reset_request": "Žádost o obnovu hesla",
+  "auth.profile_update": "Úprava profilu",
+  "auth.profile_update_failed": "Neúspěšná úprava profilu",
+  "auth.session_revoke": "Ukončení relace",
+  "auth.signup_rejected": "Odmítnutá registrace",
+  "invitation.accept": "Přijetí pozvánky",
+  "invitation.create": "Nová pozvánka",
+  "invitation.mail_failed": "Neodeslaný e-mail s pozvánkou",
+  "invitation.resend": "Nové odeslání pozvánky",
+  "invitation.revoke": "Zrušení pozvánky",
+  "rate_limit.exceeded": "Překročený limit",
+  "user.create": "Nový účet",
+  "user.deactivate": "Deaktivace účtu",
+  "user.delete": "Smazání účtu",
+  "user.delete_failed": "Neúspěšné smazání účtu",
+  "user.reactivate": "Reaktivace účtu",
+  "user.role_change": "Změna role",
+  "user.update": "Úprava účtu",
+};
+
+export function auditActionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? "Jiná událost";
+}

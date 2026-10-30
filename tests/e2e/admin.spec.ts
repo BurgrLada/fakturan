@@ -132,3 +132,28 @@ test("[ADM-009] uživatel smaže vlastní účet po zadání hesla", async ({
   await guest.getByRole("button", { name: "Smazat můj účet" }).click();
   await expect(guest).toHaveURL(/\/prihlaseni$/);
 });
+
+test("[ADM-006] chyba smazání se ukáže přímo v dialogu", async ({ page, browser, freshApp }) => {
+  await createAdmin(page, freshApp.baseURL);
+  const url = await invite(page, "host@example.cz");
+  await invitedUser(browser, url, "Host", "host@example.cz");
+  await page.reload();
+  await page
+    .getByRole("row", { name: /host@example\.cz/ })
+    .getByRole("button", { name: "Smazat" })
+    .click();
+  await page.getByLabel("Pro potvrzení opište e-mail").fill("host@example.cz");
+
+  const other = await page.context().newPage();
+  await other.goto(`${freshApp.baseURL}/administrace`);
+  await other
+    .getByRole("row", { name: /host@example\.cz/ })
+    .getByRole("button", { name: "Smazat" })
+    .click();
+  await other.getByLabel("Pro potvrzení opište e-mail").fill("host@example.cz");
+  await other.getByRole("button", { name: "Smazat natrvalo" }).click();
+  await expect(other.getByRole("row", { name: /host@example\.cz/ })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Smazat natrvalo" }).click();
+  await expect(page.getByRole("alertdialog").getByText("Uživatel neexistuje")).toBeVisible();
+});

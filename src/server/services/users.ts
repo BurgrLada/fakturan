@@ -1,10 +1,19 @@
 import "server-only";
-import { and, asc, count, eq, max, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, max, ne, or, sql } from "drizzle-orm";
 import type { Actor } from "../audit/context";
 import { auth } from "../auth";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { account, auditLog, auditPurge, invitation, session, user } from "../db/schema";
+import {
+  account,
+  auditLog,
+  auditPurge,
+  invitation,
+  rateLimit,
+  session,
+  user,
+  verification,
+} from "../db/schema";
 import { scoped } from "../db/scoped";
 import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
@@ -77,6 +86,9 @@ export function listUsers(actor: Actor) {
 }
 
 export function setRole(actor: Actor, userId: string, role: Role): void {
+  assertAdmin(db, actor);
+  const current = db.select({ role: user.role }).from(user).where(eq(user.id, userId)).get();
+  if (current?.role === role) return;
   mutate(actor, "user.role_change", (tx, audit) => {
     assertAdmin(tx, actor);
     const target = targetUser(tx, userId);
@@ -129,25 +141,34 @@ export function reactivateUser(actor: Actor, userId: string): void {
   });
 }
 
-// The closing row is the instance's record of the deletion (AUD-010), so it has no owner and only the id.
+// Removes everything naming the account. The closing row is the instance's record of the deletion
+// (AUD-010): ownerless, and only the now meaningless account id remains.
 function purgeAccount(
   tx: Tx,
   target: Target,
   audit: Parameters<Parameters<typeof mutate>[2]>[1],
   self: boolean,
 ): void {
+  const email = target.email.toLowerCase();
   for (const table of USER_OWNED_TABLES) {
     tx.delete(table).where(scoped(target.id).where(table)).run();
   }
   tx.delete(invitation)
-    .where(eq(sql`lower(${invitation.email})`, target.email.toLowerCase()))
+    .where(or(eq(invitation.acceptedUserId, target.id), eq(sql`lower(${invitation.email})`, email)))
+    .run();
+  tx.delete(verification).where(eq(verification.value, target.id)).run();
+  tx.delete(rateLimit)
+    .where(
+      or(
+        sql`instr(${rateLimit.key}, ${email}) > 0`,
+        sql`instr(${rateLimit.key}, ${target.id}) > 0`,
+      ),
+    )
     .run();
   tx.delete(user).where(eq(user.id, target.id)).run();
 
   tx.insert(auditPurge).values({ ownerId: target.id }).onConflictDoNothing().run();
-  tx.delete(auditLog)
-    .where(and(eq(auditLog.ownerId, target.id), eq(auditLog.scope, "user")))
-    .run();
+  tx.delete(auditLog).where(eq(auditLog.ownerId, target.id)).run();
   tx.delete(auditPurge).where(eq(auditPurge.ownerId, target.id)).run();
 
   audit({
@@ -215,7 +236,9 @@ export async function deleteOwnAccount(
   if (!userId) throw new ServiceError("Na tuto akci nemáte oprávnění");
   enforceRateLimit(actor, RATE_RULES.accountDeleteUser);
   await assertReauthenticated(actor, userId, current, password);
-  mutate(actor, "user.delete", (tx, audit) => {
+  // The closing row outlives the account, so it must not carry the leaver's id, IP or user agent.
+  const anonymous = { userId: null, source: actor.source, requestId: actor.requestId };
+  mutate(anonymous, "user.delete", (tx, audit) => {
     const target = targetUser(tx, userId);
     const others = tx.select({ n: count() }).from(user).where(ne(user.id, userId)).get();
     if (isOnlyActiveAdmin(tx, target) && (others?.n ?? 0) > 0) {

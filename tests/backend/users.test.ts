@@ -1,8 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { ACTION_LABELS, auditActionLabel } from "@/lib/audit-labels";
 import { auth } from "@/server/auth";
 import { requireAdmin, requireSession } from "@/server/auth/session";
 import { setClockForTests } from "@/server/clock";
@@ -15,6 +16,7 @@ import {
   rateLimit,
   session,
   user,
+  verification,
 } from "@/server/db/schema";
 import { mutate } from "@/server/services/mutation";
 import { listInstanceAudit } from "@/server/services/instance-audit";
@@ -73,16 +75,27 @@ function seedSession(userId: string, id = `s-${userId}`) {
     .run();
 }
 
+function productionAuditActions(): string[] {
+  const dir = join(process.cwd(), "src/server");
+  const files = readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((f) =>
+    f.endsWith(".ts"),
+  );
+  const literals = files.flatMap((file) => [
+    ...readFileSync(join(dir, file), "utf8").matchAll(
+      /["'`]((?:access|account|auth|invitation|rate_limit|user)\.[a-z_]+)["'`]/g,
+    ),
+  ]);
+  const actions = literals.map((match) => match[1]);
+  const failed = ["password_change", "email_change_request", "profile_update", "account_unlink"];
+  return [...new Set([...actions, ...failed.map((a) => `auth.${a}_failed`)])];
+}
+
 function roleOf(id: string) {
   return db.select().from(user).where(eq(user.id, id)).get()?.role;
 }
 
 function find(id: string) {
   return db.select().from(user).where(eq(user.id, id)).get();
-}
-
-function userRows(ownerId: string) {
-  return db.select().from(auditLog).where(eq(auditLog.ownerId, ownerId)).all();
 }
 
 function auditRows(action: string) {
@@ -188,18 +201,26 @@ describe("role a poslední administrátor", () => {
     });
   });
 
-  test("[ADM-004] poslední admin nejde degradovat, deaktivovat ani smazat", () => {
+  test("[ADM-004] poslední admin nejde degradovat, deaktivovat ani smazat", async () => {
     seedUser("u1", "u1@example.cz");
-    const other = { userId: "a2", source: "web" } as const;
     seedUser("a2", "a2@example.cz", "admin", true);
 
     expect(() => setRole(admin, ADMIN_ID, "user")).toThrow("Poslední administrátor");
-    expect(roleOf(ADMIN_ID)).toBe("admin");
-    db.update(user).set({ banned: false }).where(eq(user.id, "a2")).run();
-    setRole(other, ADMIN_ID, "user");
-    expect(() => deactivateUser(other, "a2")).toThrow();
-    expect(() => setRole(other, "a2", "user")).toThrow("Poslední administrátor");
-    expect(roleOf("a2")).toBe("admin");
+    expect(() => deactivateUser(admin, ADMIN_ID)).toThrow("Vlastní účet");
+    expect(() => deleteUser(admin, ADMIN_ID, "admin@example.cz")).toThrow("Vlastní účet");
+    await expect(deleteOwnAccount(admin, { createdAt: new Date() }, undefined)).rejects.toThrow(
+      "Poslední administrátor",
+    );
+    expect(find(ADMIN_ID)).toMatchObject({ role: "admin", banned: false });
+  });
+
+  test("[ADM-004] změna role na stejnou nic nezapíše", () => {
+    seedUser("u1", "u1@example.cz");
+    const before = auditRows("user.role_change").length;
+
+    setRole(admin, "u1", "user");
+
+    expect(auditRows("user.role_change")).toHaveLength(before);
   });
 
   test("[ADM-004] deaktivovaný kolega se jako náhradní administrátor nepočítá", () => {
@@ -298,26 +319,97 @@ describe("smazání účtu", () => {
     expect(USER_OWNED_TABLES).toEqual(expect.arrayContaining([session, account]));
   });
 
-  test("[AUD-010] smazání odstraní audit účtu a nechá jediný záznam bez e-mailu", () => {
-    seedUser("purged-1", "smazany@example.cz");
-    writeUserAudit("purged-1");
-    writeUserAudit("purged-1", "invoice.update");
-    writeUserAudit(ADMIN_ID);
+  async function auditTrailAfterDeletion(
+    email: string,
+    remove: (id: string, browser: Browser) => Promise<void> | void,
+  ) {
+    const name = `Zdenka ${email.split("@")[0]}`;
+    const browser = new Browser(auth as unknown as Auth);
+    await browser.signIn(email);
+    const { url } = await createInvitation(admin, email);
+    browser.cookies.set("fakturan_invite", url.split("/").at(-1)!);
+    await browser.request("/sign-up/email", { body: { name, email, password: PASSWORD } });
+    const { id } = (await browser.sessionUser())!;
+    await browser.signIn(email, "spatne-heslo-spatne");
+    await browser.signIn(email);
+    expect(listUsers(admin).find((u) => u.id === id)?.lastLoginAt).toBeInstanceOf(Date);
+    writeUserAudit(id);
 
-    deleteUser(admin, "purged-1", "smazany@example.cz");
+    await remove(id, browser);
 
-    expect(userRows("purged-1").filter((r) => r.scope === "user")).toEqual([]);
-    expect(userRows(ADMIN_ID).filter((r) => r.scope === "user")).toHaveLength(1);
+    const rows = db.select().from(auditLog).all();
+    const closing = rows.filter((r) => r.action === "user.delete" && r.entityId === id);
+    const others = rows.filter((r) => !closing.includes(r));
+    const text = JSON.stringify(others);
+    expect(text).not.toContain(email);
+    expect(text).not.toContain(name);
+    expect(text).not.toContain(id);
     expect(db.select().from(auditPurge).all()).toEqual([]);
-    const rows = auditRows("user.delete").filter((r) => r.entityId === "purged-1");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      scope: "instance",
-      entityId: "purged-1",
+    expect(closing).toHaveLength(1);
+    expect(JSON.stringify(closing)).not.toContain(email);
+    expect(JSON.stringify(closing)).not.toContain(name);
+    return { id, closing: closing[0] };
+  }
+
+  test("[AUD-010] smazání adminem nenechá v auditu nic o účtu kromě ID v závěrečném záznamu", async () => {
+    const { closing } = await auditTrailAfterDeletion("purge-admin@example.cz", (id) =>
+      deleteUser(admin, id, "purge-admin@example.cz"),
+    );
+
+    expect(closing).toMatchObject({ scope: "instance", ownerId: null, actorId: ADMIN_ID });
+  });
+
+  test("[AUD-010] vlastní smazání nenechá v závěrečném záznamu aktéra, IP ani prohlížeč", async () => {
+    const { id, closing } = await auditTrailAfterDeletion("purge-self@example.cz", (userId) =>
+      deleteOwnAccount(
+        { userId, source: "web", ip: "1.2.3.4", userAgent: "UA/x" },
+        {
+          createdAt: new Date(),
+        },
+        PASSWORD,
+      ),
+    );
+
+    expect(closing).toMatchObject({
+      entityId: id,
       ownerId: null,
-      actorId: ADMIN_ID,
+      actorId: null,
+      ip: null,
+      userAgent: null,
     });
-    expect(JSON.stringify(rows[0])).not.toContain("smazany@example.cz");
+  });
+
+  test("[AUD-010] smazání odstraní i limity a ověření s e-mailem nebo ID účtu", () => {
+    seedUser("purged-3", "limit@example.cz");
+    const now = new Date();
+    db.insert(rateLimit)
+      .values([
+        { key: "loginEmail:limit@example.cz", windowStart: now, count: 1 },
+        { key: "accountDeleteUser:purged-3", windowStart: now, count: 1 },
+        { key: "loginEmail:jiny@example.cz", windowStart: now, count: 1 },
+      ])
+      .run();
+    db.insert(verification)
+      .values({
+        id: "v1",
+        identifier: "reset-password:x",
+        value: "purged-3",
+        expiresAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+
+    deleteUser(admin, "purged-3", "limit@example.cz");
+
+    expect(
+      db
+        .select()
+        .from(rateLimit)
+        .all()
+        .map((r) => r.key),
+    ).toEqual(["loginEmail:jiny@example.cz"]);
+    expect(db.select().from(verification).all()).toEqual([]);
   });
 
   test("[AUD-010] po smazání zůstane audit dál chráněný proti mazání", () => {
@@ -345,7 +437,7 @@ describe("smazání vlastního účtu", () => {
 
     await deleteOwnAccount(self, current, PASSWORD);
     expect(find(me.id)).toBeUndefined();
-    expect(auditRows("user.delete").at(-1)).toMatchObject({ actorId: me.id, ownerId: null });
+    expect(auditRows("user.delete").at(-1)).toMatchObject({ actorId: null, ownerId: null });
 
     seedUser("u2", "u2@example.cz");
     await expect(deleteOwnAccount(admin, current, undefined)).rejects.toThrow(
@@ -378,11 +470,32 @@ describe("oddělení administrátora od dat uživatelů", () => {
     writeUserAudit("u1");
     setRole(admin, "u1", "admin");
 
-    const rows = listInstanceAudit(admin);
+    const { rows } = listInstanceAudit(admin);
 
     expect(rows.some((r) => r.action === "user.role_change")).toBe(true);
     expect(rows.some((r) => r.action === "invoice.create")).toBe(false);
     expect(() => listInstanceAudit({ userId: "nikdo", source: "web" })).toThrow("oprávnění");
+  });
+
+  test("[AUD-008] události instance se stránkují", () => {
+    seedUser("u1", "u1@example.cz");
+    setRole(admin, "u1", "admin");
+    setRole(admin, "u1", "user");
+    setRole(admin, "u1", "admin");
+
+    const first = listInstanceAudit(admin, { page: 1, pageSize: 2 });
+    const second = listInstanceAudit(admin, { page: 2, pageSize: 2 });
+
+    expect(first.rows).toHaveLength(2);
+    expect(first.hasNext).toBe(true);
+    expect(second.rows[0].id).toBeLessThan(first.rows[1].id);
+  });
+
+  test("[AUD-008] každá akce ze serveru má český popisek a neznámá obecný", () => {
+    const missing = productionAuditActions().filter((action) => !(action in ACTION_LABELS));
+
+    expect(missing).toEqual([]);
+    expect(auditActionLabel("nova.akce")).toBe("Jiná událost");
   });
 
   test("[ADM-007] admin nemá přístup k datům jiného uživatele", async () => {
@@ -390,7 +503,7 @@ describe("oddělení administrátora od dat uživatelů", () => {
     writeUserAudit("u1");
     setRole(admin, "u1", "user");
 
-    const [row] = listInstanceAudit(admin);
+    const [row] = listInstanceAudit(admin).rows;
 
     expect(Object.keys(row).sort()).toEqual([
       "action",
