@@ -1,10 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test as base, expect } from "@playwright/test";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "@/server/db/schema";
+import type { Db } from "@/server/db";
+import { assertConsistent } from "../helpers/consistency";
 
 type App = { baseURL: string; dataDir: string };
 
@@ -59,6 +64,20 @@ async function startAresStub() {
   return { url: `http://127.0.0.1:${port}`, close: () => server.close() };
 }
 
+function assertDataDirConsistent(dataDir: string) {
+  const path = join(dataDir, "fakturan.db");
+  if (!existsSync(path)) return;
+  const sqlite = new Database(path, { readonly: true });
+  try {
+    const db = drizzle(sqlite, { schema }) as unknown as Db;
+    const ids = sqlite.prepare("SELECT id FROM user").pluck().all() as string[];
+    for (const id of ids) assertConsistent(db, id);
+    if (ids.length === 0) assertConsistent(db, "");
+  } finally {
+    sqlite.close();
+  }
+}
+
 export const test = base.extend<{ freshApp: App }>({
   // oxlint-disable-next-line no-empty-pattern
   freshApp: async ({}, use) => {
@@ -81,6 +100,7 @@ export const test = base.extend<{ freshApp: App }>({
     try {
       await waitForReady(baseURL, child);
       await use({ baseURL, dataDir });
+      assertDataDirConsistent(dataDir);
     } finally {
       process.kill(-child.pid!, "SIGTERM");
       ares.close();

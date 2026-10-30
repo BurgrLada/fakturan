@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "mutate": [
+    "src/lib/money.ts",
+    "src/lib/number-format.ts",
+    "src/lib/invoice-totals.ts",
+    "src/lib/qr-payload.ts"
+  ],
+  "vitest": { "configFile": "vitest.config.ts" },
+  "coverageAnalysis": "perTest",
+  "reporters": ["clear-text", "progress"],
+  "thresholds": { "high": 95, "low": 90, "break": 90 },
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": true
+}
