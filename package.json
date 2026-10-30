@@ -46,6 +46,7 @@
     "@types/react-dom": "^19",
     "@types/smtp-server": "^3.5.13",
     "drizzle-kit": "^0.31.11",
+    "fast-check": "^4.10.2",
     "oxfmt": "^0.75.0",
     "oxlint": "^1.90.0",
     "smtp-server": "^3.21.3",

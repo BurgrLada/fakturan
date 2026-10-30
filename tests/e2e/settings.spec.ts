@@ -128,3 +128,44 @@ test("[SET-021] výchozí účet jde přepnout a neplatný IBAN ukáže chybu", 
   await page.getByRole("button", { name: "Uložit účet" }).click();
   await expect(page.getByText("IBAN není platný")).toBeVisible();
 });
+
+test("[NUM-008] [NUM-006] předvolba a vlastní šablona se ukážou v náhledu a řada se uloží", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/rady`);
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("cell", { name: "{RRRR}-{NNN}", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Z{RRRR}-{NNN}" })).toBeVisible();
+
+  await page.getByLabel("Název řady").fill("Exporty");
+  await page.getByLabel("Formát").selectOption({ label: "FV-2026-040" });
+  await expect(page.getByLabel("Šablona")).toHaveValue("FV-{RRRR}-{NNN}");
+  await expect(page.getByTestId("series-preview")).toHaveText(/^FV-\d{4}-001$/);
+
+  await page.getByLabel("Šablona").fill("EX{RR}-{NN}");
+  await expect(page.getByLabel("Formát")).toHaveValue("custom");
+  await expect(page.getByTestId("series-preview")).toHaveText(/^EX\d{2}-01$/);
+
+  await page.getByLabel("Šablona").fill("EX{RR}");
+  await expect(page.getByText("právě jedno pořadí")).toBeVisible();
+
+  await page.getByLabel("Šablona").fill("EX{RR}-{NN}");
+  await page.getByRole("button", { name: "Uložit řadu" }).click();
+  await expect(page.getByText("Řada je uložená.")).toBeVisible();
+  await expect(page.getByRole("row", { name: /Exporty/ })).toBeVisible();
+});
+
+test("[NUM-004] další číslo se nastaví a promítne do náhledu", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/rady`);
+  await page.waitForLoadState("networkidle");
+
+  await page.getByRole("button", { name: "Upravit Faktura" }).click();
+  await page.getByLabel("Další číslo").fill("40");
+  await expect(page.getByTestId("series-preview")).toHaveText(/^\d{4}-040$/);
+  await page.getByRole("button", { name: "Nastavit další číslo" }).click();
+  await expect(page.getByText("Další číslo je nastavené.")).toBeVisible();
+  await expect(page.getByRole("row", { name: /Faktura/ }).first()).toContainText("-040");
+});

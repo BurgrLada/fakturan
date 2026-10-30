@@ -71,6 +71,13 @@
       "when": 1793363997633,
       "tag": "0009_bank_account",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793364772364,
+      "tag": "0010_number_series",
+      "breakpoints": true
     }
   ]
 }
