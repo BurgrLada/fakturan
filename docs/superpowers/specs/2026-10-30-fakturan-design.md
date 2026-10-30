@@ -574,6 +574,7 @@ Pravidla:
 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | ne | Microsoft |
 | `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` | ne | Apple |
 | `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` | ne | Monitoring |
+| `ARES_BASE_URL` | ne | Adresa registru ARES, výchozí veřejné API; mění se jen kvůli testům |
 | `ALLOW_PRIVATE_MAIL_HOSTS` | ne | Výjimka ze SEC-007 |
 | `TRUST_PROXY` | ne | Čtení IP z hlavičky reverzní proxy pro rate limiting a audit |
 

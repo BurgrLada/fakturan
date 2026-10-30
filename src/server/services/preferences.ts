@@ -1,0 +1,131 @@
+import "server-only";
+import { z } from "zod";
+import { CURRENCIES } from "@/lib/currency";
+import {
+  DATE_FORMATS,
+  DEFAULT_PREFERENCES,
+  ISSUE_DATE_MODES,
+  LANGUAGES,
+  PAYMENT_METHODS,
+  VARIABLE_SYMBOL_FORMATS,
+  type Preferences,
+} from "@/lib/preferences";
+import { TEXTS } from "@/lib/texts";
+import type { Actor } from "../audit/context";
+import { clock } from "../clock";
+import { db } from "../db";
+import { preferences } from "../db/schema";
+import { scoped } from "../db/scoped";
+import { ServiceError } from "./access";
+import { mutate } from "./mutation";
+
+const V = TEXTS.preferences.validation;
+const text = (max: number) => z.string().trim().max(max, V.tooLong);
+
+export const preferencesSchema = z.object({
+  dueDays: z.number(V.dueDays).int(V.dueDays).min(0, V.dueDays).max(365, V.dueDays),
+  language: z.enum(LANGUAGES, V.language),
+  currency: z.enum(CURRENCIES, V.currency),
+  designId: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9-]{1,40}$/, V.designId),
+  accentColor: z.union([z.literal(""), z.string().regex(/^#[0-9a-fA-F]{6}$/, V.accentColor)]),
+  paymentMethod: z.enum(PAYMENT_METHODS, V.paymentMethod),
+  unit: text(20).min(1, V.unit),
+  showLogo: z.boolean(),
+  showQr: z.boolean(),
+  showQrLogo: z.boolean(),
+  showSignature: z.boolean(),
+  showDuzp: z.boolean(),
+  textBefore: text(2000),
+  textAfter: text(2000),
+  note: text(2000),
+  issueDateMode: z.enum(ISSUE_DATE_MODES, V.issueDateMode),
+  dateFormat: z.enum(DATE_FORMATS, V.dateFormat),
+  variableSymbolFormat: z.enum(VARIABLE_SYMBOL_FORMATS, V.variableSymbolFormat),
+});
+
+export const preferencesPatchSchema = preferencesSchema.partial();
+
+export type PreferencesPatch = z.input<typeof preferencesPatchSchema>;
+
+function ownerOf(actor: Actor): string {
+  if (!actor.userId) throw new ServiceError(TEXTS.preferences.forbidden);
+  return actor.userId;
+}
+
+function readRow(ownerId: string) {
+  return db.select().from(preferences).where(scoped(ownerId).where(preferences)).get();
+}
+
+function merged(row: ReturnType<typeof readRow>): Preferences {
+  if (!row) return { ...DEFAULT_PREFERENCES };
+  const result = { ...DEFAULT_PREFERENCES };
+  for (const key of Object.keys(DEFAULT_PREFERENCES) as (keyof Preferences)[]) {
+    (result as Record<string, unknown>)[key] = row[key];
+  }
+  return result;
+}
+
+export function getPreferences(ownerId: string): Preferences {
+  return merged(readRow(ownerId));
+}
+
+export function isOnboarded(ownerId: string): boolean {
+  return readRow(ownerId)?.onboardingCompletedAt != null;
+}
+
+export function savePreferences(actor: Actor, raw: PreferencesPatch): void {
+  const userId = ownerOf(actor);
+  const patch = preferencesPatchSchema.safeParse(raw);
+  if (!patch.success) {
+    throw new ServiceError(patch.error.issues[0]?.message ?? TEXTS.preferences.validation.invalid);
+  }
+  mutate(actor, "preferences.save", (tx, audit) => {
+    const row = tx.select().from(preferences).where(scoped(userId).where(preferences)).get();
+    const before = merged(row);
+    const parsed = preferencesSchema.safeParse({ ...before, ...patch.data });
+    if (!parsed.success) {
+      throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
+    }
+    const values = parsed.data;
+    tx.insert(preferences)
+      .values({ userId, ...values, updatedAt: clock.now() })
+      .onConflictDoUpdate({
+        target: preferences.userId,
+        set: { ...values, updatedAt: clock.now() },
+      })
+      .run();
+    audit({
+      entity: "preferences",
+      entityId: userId,
+      ownerId: userId,
+      scope: "user",
+      before,
+      after: values,
+    });
+  });
+}
+
+export function completeOnboarding(actor: Actor): void {
+  const userId = ownerOf(actor);
+  if (isOnboarded(userId)) return;
+  mutate(actor, "preferences.onboarding_complete", (tx, audit) => {
+    const at = clock.now();
+    tx.insert(preferences)
+      .values({ userId, updatedAt: at, onboardingCompletedAt: at })
+      .onConflictDoUpdate({
+        target: preferences.userId,
+        set: { onboardingCompletedAt: at, updatedAt: at },
+      })
+      .run();
+    audit({
+      entity: "preferences",
+      entityId: userId,
+      ownerId: userId,
+      scope: "user",
+      after: { onboardingCompletedAt: at.toISOString() },
+    });
+  });
+}

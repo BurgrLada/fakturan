@@ -37,6 +37,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "number_series.save": "Uložení číselné řady",
   "number_series.set_default": "Nastavení výchozí číselné řady",
   "number_series.set_next": "Nastavení dalšího čísla",
+  "preferences.onboarding_complete": "Dokončení průvodce",
+  "preferences.save": "Uložení výchozích hodnot",
   "rate_limit.exceeded": "Překročený limit",
   "supplier.image_clear": "Odebrání obrázku dodavatele",
   "supplier.image_set": "Nahrání obrázku dodavatele",

@@ -6,23 +6,38 @@ import { PageLoading } from "@/components/page-loading";
 import { EmptyState } from "@/components/empty-state";
 import { buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireSession } from "@/server/auth/session";
+import { isOnboarded } from "@/server/services/preferences";
 
 export const metadata: Metadata = { title: `${TEXTS.overview.title} | ${TEXTS.appName}` };
 
 async function OverviewContent() {
-  await requireSession();
+  const { user } = await requireSession();
   return (
-    <EmptyState
-      icon={LayoutDashboard}
-      title={TEXTS.overview.emptyTitle}
-      description={TEXTS.overview.emptyBody}
-      action={
-        <Link href="/nastaveni/ucet" className={buttonVariants()}>
-          {TEXTS.overview.action}
-        </Link>
-      }
-    />
+    <>
+      {!isOnboarded(user.id) && (
+        <Alert>
+          <AlertTitle>{TEXTS.overview.onboardingTitle}</AlertTitle>
+          <AlertDescription>
+            <p>{TEXTS.overview.onboardingBody}</p>
+            <Link href="/pruvodce" className={buttonVariants({ size: "sm" })}>
+              {TEXTS.overview.onboardingAction}
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
+      <EmptyState
+        icon={LayoutDashboard}
+        title={TEXTS.overview.emptyTitle}
+        description={TEXTS.overview.emptyBody}
+        action={
+          <Link href="/nastaveni/ucet" className={buttonVariants()}>
+            {TEXTS.overview.action}
+          </Link>
+        }
+      />
+    </>
   );
 }
 

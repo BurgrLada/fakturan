@@ -10,13 +10,14 @@ const TABS = [
   { href: "/nastaveni/dodavatel", label: TEXTS.settings.supplier },
   { href: "/nastaveni/ucty", label: TEXTS.settings.bankAccounts },
   { href: "/nastaveni/rady", label: TEXTS.settings.numberSeries },
+  { href: "/nastaveni/vychozi", label: TEXTS.settings.defaults },
   { href: "/nastaveni/historie", label: TEXTS.settings.history },
 ];
 
 export function SettingsTabs() {
   const pathname = usePathname();
   return (
-    <nav aria-label={TEXTS.settings.nav} className="flex gap-1 border-b">
+    <nav aria-label={TEXTS.settings.nav} className="flex gap-1 overflow-x-auto border-b">
       {TABS.map((tab) => {
         const active = pathname.startsWith(tab.href);
         return (
@@ -25,7 +26,7 @@ export function SettingsTabs() {
             href={tab.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground",
+              "-mb-px shrink-0 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:text-foreground",
               active && "border-primary font-medium text-foreground",
             )}
           >

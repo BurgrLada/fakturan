@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { DEFAULT_NOT_VAT_PAYER_CS, DEFAULT_NOT_VAT_PAYER_EN } from "@/lib/supplier-defaults";
 import { TEXTS } from "@/lib/texts";
 
-type Values = {
+export type SupplierValues = {
   name: string;
   street: string;
   city: string;
@@ -35,7 +35,7 @@ type Values = {
 
 type ImageKind = "logo" | "qr_logo" | "signature";
 
-const EMPTY: Values = {
+export const EMPTY_SUPPLIER: SupplierValues = {
   name: "",
   street: "",
   city: "",
@@ -56,7 +56,7 @@ const EMPTY: Values = {
 
 const IMAGE_KINDS: ImageKind[] = ["logo", "qr_logo", "signature"];
 
-type TextField = Exclude<keyof Values, "vatIdentified">;
+type TextField = Exclude<keyof SupplierValues, "vatIdentified">;
 
 function Field({
   name,
@@ -86,7 +86,7 @@ function Field({
   );
 }
 
-function ImageSlot({ kind, fileId }: { kind: ImageKind; fileId: string | null }) {
+export function ImageSlot({ kind, fileId }: { kind: ImageKind; fileId: string | null }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const label = TEXTS.supplier.images[kind];
@@ -150,10 +150,10 @@ export function SupplierForm({
   initial,
   images,
 }: {
-  initial: Values | null;
+  initial: SupplierValues | null;
   images: Record<ImageKind, string | null>;
 }) {
-  const [values, setValues] = useState<Values>(initial ?? EMPTY);
+  const [values, setValues] = useState<SupplierValues>(initial ?? EMPTY_SUPPLIER);
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 

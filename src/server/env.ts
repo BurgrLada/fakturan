@@ -37,6 +37,10 @@ const schema = z.object({
   SENTRY_DSN: optional,
   SENTRY_ENVIRONMENT: optional,
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
+  ARES_BASE_URL: z
+    .url()
+    .default("https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty")
+    .transform((v) => v.replace(/\/+$/, "")),
   ALLOW_PRIVATE_MAIL_HOSTS: flag,
   TRUST_PROXY: flag,
 });

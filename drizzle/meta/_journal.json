@@ -78,6 +78,13 @@
       "when": 1793364772364,
       "tag": "0010_number_series",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793365619209,
+      "tag": "0011_preferences",
+      "breakpoints": true
     }
   ]
 }

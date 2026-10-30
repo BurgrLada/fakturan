@@ -50,6 +50,16 @@ describe("env", () => {
     expect(env.TRUST_PROXY).toBe(true);
     expect(env.ALLOW_PRIVATE_MAIL_HOSTS).toBe(false);
   });
+
+  test("[OPS-003] ARES_BASE_URL má veřejné API jako výchozí a lomítko na konci se ořízne", () => {
+    expect(parseEnv(base).ARES_BASE_URL).toBe(
+      "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty",
+    );
+    expect(parseEnv({ ...base, ARES_BASE_URL: "http://127.0.0.1:9/ares/" }).ARES_BASE_URL).toBe(
+      "http://127.0.0.1:9/ares",
+    );
+    expect(() => parseEnv({ ...base, ARES_BASE_URL: "ares" })).toThrow(/ARES_BASE_URL/);
+  });
 });
 
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));

@@ -1,5 +1,6 @@
 import "server-only";
 import { isValidIco } from "@/lib/ico";
+import { env } from "../env";
 
 export type AresResult = {
   ico: string;
@@ -13,7 +14,6 @@ export type AresResult = {
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
-const BASE = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
 const TIMEOUT_MS = 5_000;
 
 type Sidlo = {
@@ -52,7 +52,7 @@ export async function lookupAres(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const response = await fetcher(`${BASE}/${ico}`, {
+    const response = await fetcher(`${env.ARES_BASE_URL}/${ico}`, {
       signal: controller.signal,
       headers: { Accept: "application/json" },
     });

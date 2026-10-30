@@ -13,6 +13,7 @@ import {
   invitation,
   numberSeries,
   numberSeriesCounter,
+  preferences,
   rateLimit,
   session,
   supplier,
@@ -37,6 +38,7 @@ export const USER_OWNED_TABLES = [
   bankAccount,
   numberSeriesCounter,
   numberSeries,
+  preferences,
   file,
 ];
 
