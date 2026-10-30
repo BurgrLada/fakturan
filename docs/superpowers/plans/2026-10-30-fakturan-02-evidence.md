@@ -177,13 +177,17 @@ git commit -m "feat(settings): add preferences and onboarding"
   - `allocateNumber(tx, ownerId, seriesId, date: CalendarDate): { number: string; n: number }`, volá se uvnitř `mutate` v plánu 3
   - `listSeries`, `saveSeries`, `setNextNumber`, `ensureDefaultSeries(actor)`
 
-Spec: NUM-001 až NUM-007. Tokeny `{RRRR}`, `{RR}`, `{MM}`, `{N}`, `{NN}`, `{NNN}`, `{NNNN}`, šablona musí obsahovat právě jedno `{N…}`. Reset ročně, měsíčně, nikdy. Počítadlo je v tabulce `(seriesId, periodKey, next)`, `periodKey` se odvodí z data dokladu. `document_type`: `invoice`, `advance`, `credit_note`. Výchozí řada na typ se založí poprvé při čtení: `{RRRR}-{NNN}`, záloha `Z{RRRR}-{NNN}`, oprava `D{RRRR}-{NNN}`, reset ročně. VS odstraní nečíslice a vezme posledních 10 číslic.
+Spec: NUM-001 až NUM-008. Tokeny `{RRRR}`, `{RR}`, `{MM}`, `{DD}`, `{Q}`, `{N}` až `{NNNNNN}`, šablona musí obsahovat právě jedno `{N…}`. Reset ročně, čtvrtletně, měsíčně, nikdy. Formulář nabízí předvolby z NUM-008. Počítadlo je v tabulce `(seriesId, periodKey, next)`, `periodKey` se odvodí z data dokladu. `document_type`: `invoice`, `advance`, `credit_note`. Výchozí řada na typ se založí poprvé při čtení: `{RRRR}-{NNN}`, záloha `Z{RRRR}-{NNN}`, oprava `D{RRRR}-{NNN}`, reset ročně. VS odstraní nečíslice a vezme posledních 10 číslic.
 
 - [ ] **Step 1: Napiš testy**
 
 ```ts
 test('[NUM-001] {RRRR}-{NNN} pro 40. fakturu 2026 je 2026-040', ...)
 test('[NUM-001] šablona bez {N} nebo se dvěma je neplatná', ...)
+test('[NUM-001] {NN} po 99 dá 100, nezkrátí se', ...)
+test('[NUM-001] {Q} dá čtvrtletí a {DD} den z data dokladu', ...)
+test('[NUM-008] každá předvolba dá očekávaný příklad', ...)
+test('[NUM-002] čtvrtletní reset začne v dubnu od 1', ...)
 test('[NUM-002] roční reset začne v novém roce od 1 podle data dokladu', ...)
 test('[NUM-002] řada s resetem nikdy nepřeteče přes konec roku', ...)
 test('[NUM-004] další číslo pod již použitým je odmítnuto', ...)

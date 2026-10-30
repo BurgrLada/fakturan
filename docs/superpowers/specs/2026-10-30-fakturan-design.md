@@ -219,8 +219,9 @@ Stavy: `koncept` → `vystavená` → `odeslaná` → `částečně uhrazená` �
 
 ### 7.5 Číselné řady (NUM)
 
-- **NUM-001** Formát je plně nastavitelný šablonou s tokeny `{RRRR}`, `{RR}`, `{MM}`, `{N}`, `{NN}`, `{NNN}`, `{NNNN}` a libovolným textem. Příklad: `{RRRR}-{NNN}` → `2026-040`.
-- **NUM-002** Reset počítadla: ročně, měsíčně, nikdy.
+- **NUM-001** Formát je plně nastavitelný šablonou s tokeny `{RRRR}`, `{RR}`, `{MM}`, `{DD}`, `{Q}`, pořadím `{N}` až `{NNNNNN}` (1 až 6 míst) a libovolným textem. Příklad: `{RRRR}-{NNN}` → `2026-040`. Pořadí se při překročení šířky nezkracuje: `{NN}` dá po 99 číslo 100.
+- **NUM-008** Výběr z předpřipravených formátů: `2026-040`, `2026-0040`, `2026040`, `26040`, `2026/040`, `FV-2026-040`, `40/2026`, `202610040`, s možností napsat vlastní.
+- **NUM-002** Reset počítadla: ročně, čtvrtletně, měsíčně, nikdy.
 - **NUM-003** Každý typ dokladu může mít vlastní řadu. Uživatel může mít řad víc a jednu zvolit u faktury.
 - **NUM-004** Nastavitelné další číslo, s kontrolou kolize.
 - **NUM-005** Přidělení čísla je transakční. Dvě souběžná vystavení nedostanou stejné číslo.
