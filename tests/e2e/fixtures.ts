@@ -85,7 +85,7 @@ export const test = base.extend<{ freshApp: App }>({
     const dataDir = mkdtempSync(join(tmpdir(), "fakturan-e2e-"));
     const port = await freePort();
     const baseURL = `http://127.0.0.1:${port}`;
-    const child = spawn("npx", ["next", "start", "-p", String(port), "-H", "127.0.0.1"], {
+    const child = spawn("pnpm", ["exec", "next", "start", "-p", String(port), "-H", "127.0.0.1"], {
       stdio: "ignore",
       detached: true,
       env: {

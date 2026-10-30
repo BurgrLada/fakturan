@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 
 // One production build shared by every worker's `next start`.
 export default function globalSetup() {
-  execFileSync("npx", ["next", "build"], {
+  execFileSync("pnpm", ["exec", "next", "build"], {
     stdio: "inherit",
     env: {
       ...process.env,

@@ -12,6 +12,7 @@
 
 ## Global Constraints
 
+- Příkazy `npm`/`npx` v tomto plánu znamenají `pnpm`/`pnpm exec`.
 - Práce probíhá na `main`. Nic se nepushuje. Nic se v tomto plánu neposílá klientovi, odeslání e-mailem je plán 4.
 - Commity: Conventional Commits, jen předmět, bez těla a trailerů. Agent staguje jen své soubory.
 - Komentáře jen pro neočividné invarianty, UI texty česky a v `src/lib/texts.ts`, jen tokeny barev.

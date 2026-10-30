@@ -5,16 +5,17 @@ Jednoduchá fakturace pro české OSVČ. Next.js, shadcn/ui, SQLite.
 ## Vývoj
 
 ```bash
-npm install
-npm run dev
+corepack enable
+pnpm install
+pnpm dev
 ```
 
 Před prvním spuštěním zkopírujte `.env.example` do `.env` a vyplňte `BETTER_AUTH_SECRET` a
 `ENCRYPTION_KEY` (obojí `openssl rand -base64 32`). Bez nich aplikace nenastartuje.
 
-Kontroly: `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm test`,
-`npm run test:e2e` (potřebuje `npx playwright install chromium`), `npm run test:coverage-spec`,
-`npm run build`.
+Kontroly: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`,
+`pnpm test:e2e` (potřebuje `pnpm exec playwright install chromium`), `pnpm test:coverage-spec`,
+`pnpm build`.
 
 ## Konfigurace
 

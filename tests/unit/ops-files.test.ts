@@ -17,13 +17,13 @@ describe("provozní soubory", () => {
     const ci = read(".github/workflows/ci.yml");
     for (const step of [
       "format:check",
-      "npm run lint",
-      "npm run typecheck",
-      "npm test",
+      "pnpm run lint",
+      "pnpm run typecheck",
+      "pnpm test",
       "playwright install",
       "test:e2e",
       "test:coverage-spec",
-      "npm run build",
+      "pnpm run build",
     ]) {
       expect(ci).toContain(step);
     }
@@ -31,6 +31,6 @@ describe("provozní soubory", () => {
   });
 
   test("[SEC-009] CI hlídá závislosti s vysokou závažností", () => {
-    expect(read(".github/workflows/ci.yml")).toContain("npm audit --audit-level=high");
+    expect(read(".github/workflows/ci.yml")).toContain("pnpm audit --audit-level=high");
   });
 });
