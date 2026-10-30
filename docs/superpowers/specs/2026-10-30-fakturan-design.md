@@ -246,8 +246,8 @@ Stavy: `koncept` → `vystavená` → `odeslaná` → `částečně uhrazená` �
 - **FOR-006** U identifikované osoby a služby pro firmu z EU se na fakturu doplní doložka o přenesení daňové povinnosti a VAT ID obou stran, bez výpočtu DPH. Doložka je předvyplněná a upravitelná. Přesné znění ověří daňový poradce před vydáním (viz 24).
 - **FOR-007** Doložky jsou v jazyce faktury.
 - **FOR-008** Přehledy přepočítávají cizí měny do CZK kurzem faktury, viz REP-009.
-- **FOR-009** **[návrh]** Rozhodný den je v nastavení: datum vystavení (výchozí), nebo DUZP, pokud je na faktuře vyplněný.
-- **FOR-010** **[návrh]** Pro každou měnu jde v nastavení zapnout vlastní pevný kurz. Použije se místo ČNB a ve formuláři je u něj vidět, že jde o pevný kurz. Pevný kurz ani ruční přepsání se od ČNB nesmí odchýlit o víc než 5 % bez upozornění.
+- **FOR-009** Rozhodný den je v nastavení: datum vystavení (výchozí), nebo DUZP, pokud je na faktuře vyplněný.
+- **FOR-010** Pro každou měnu jde v nastavení zapnout vlastní pevný kurz. Použije se místo ČNB a ve formuláři je u něj vidět, že jde o pevný kurz. Pevný kurz ani ruční přepsání se od ČNB nesmí odchýlit o víc než 5 % bez upozornění.
 
 ### 7.7 Povinné a volitelné údaje na dokladu
 
