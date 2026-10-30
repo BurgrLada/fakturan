@@ -8,7 +8,7 @@ import { recordAudit } from "@/server/audit/record";
 import { redact } from "@/server/audit/redact";
 import type { Actor } from "@/server/audit/context";
 import { setClockForTests } from "@/server/clock";
-import { auditLog } from "@/server/db/schema";
+import { auditLog, auditPurge } from "@/server/db/schema";
 import { mutate } from "@/server/services/mutation";
 import { expectAudited, findWritesOutsideMutate } from "../helpers/audit-guard";
 import { createTestDb } from "../helpers/db";
@@ -161,6 +161,7 @@ describe("mutate", () => {
 
   test("[AUD-005] asynchronní funkce se odmítne a změna se vrátí, protože by opustila transakci", () => {
     expect(() =>
+      // @ts-expect-error async callbacks are excluded at compile time
       mutate(actor, "probe.create", async (tx, audit) => {
         tx.run(sql`INSERT INTO probe VALUES ('b3', 'x')`);
         audit(entry("aud5d"));
@@ -169,6 +170,19 @@ describe("mutate", () => {
 
     expect(probeCount("b3")).toBe(0);
     expect(rowsOf("aud5d")).toEqual([]);
+  });
+
+  test("[AUD-005] nespuštěný dotaz Drizzle jako výsledek se odmítne a nezanechá záznam", () => {
+    expect(() =>
+      // @ts-expect-error query builders are thenable and excluded at compile time
+      mutate(actor, "probe.create", (tx, audit) => {
+        audit(entry("aud5f"));
+        return tx.insert(auditPurge).values({ ownerId: "aud5f" });
+      }),
+    ).toThrow(/asynchron/i);
+
+    expect(rowsOf("aud5f")).toEqual([]);
+    expect(db.select().from(auditPurge).all()).toEqual([]);
   });
 
   test("[AUD-005] audit po skončení transakce selže místo zápisu mimo ni", () => {
@@ -237,19 +251,28 @@ describe("append-only", () => {
     expect(rowsOf("aud6b")).toMatchObject([{ id, action: "probe.seed" }]);
   });
 
-  test("[AUD-006] trigger respektuje povolení v audit_purge jen pro daný účet", () => {
+  test("[AUD-006] DELETE respektuje povolení v audit_purge jen pro daný účet", () => {
     const permitted = seed("aud6c");
     const foreign = seed("aud6d");
     db.$client.prepare("INSERT INTO audit_purge (owner_id) VALUES ('aud6c')").run();
 
-    db.$client.prepare("UPDATE audit_log SET action = 'x.y' WHERE id = ?").run(permitted);
-    expect(rowsOf("aud6c")).toMatchObject([{ action: "x.y" }]);
     db.$client.prepare("DELETE FROM audit_log WHERE id = ?").run(permitted);
     expect(rowsOf("aud6c")).toEqual([]);
 
     expect(() => db.$client.prepare("DELETE FROM audit_log WHERE id = ?").run(foreign)).toThrow(
       /append-only/,
     );
+  });
+
+  test("[AUD-006] UPDATE selže i s povolením v audit_purge", () => {
+    const id = seed("aud6f");
+    db.$client.prepare("INSERT INTO audit_purge (owner_id) VALUES ('aud6f')").run();
+
+    expect(() =>
+      db.$client.prepare("UPDATE audit_log SET action = 'x.y' WHERE id = ?").run(id),
+    ).toThrow(/append-only/);
+
+    expect(rowsOf("aud6f")).toMatchObject([{ action: "probe.seed" }]);
   });
 
   test("[AUD-006] povolení v audit_purge neotevře záznamy instance", () => {
@@ -286,6 +309,17 @@ describe("redact", () => {
     "privateKey",
     "APPLE_PRIVATE_KEY",
     "PASSWORD",
+    "pass",
+    "smtpPass",
+    "pwd",
+    "cookie",
+    "sessionCookie",
+    "authorization",
+    "Authorization",
+    "heslo",
+    "noveHeslo",
+    "totp",
+    "totpUri",
   ])("[AUD-004] klíč %s se skryje v úložišti", (key) => {
     const ownerId = `aud4-${key}`;
     mutate(actor, "probe.update", (_tx, audit) =>
@@ -313,11 +347,71 @@ describe("redact", () => {
     expect(redact(undefined)).toBe(undefined);
   });
 
-  test("[AUD-004] instance třídy se nevyhne redakci přes toJSON", () => {
+  test("[AUD-004] instance třídy se projde jako objekt", () => {
     class Credentials {
       password = "x";
+      name = "n";
     }
-    expect(redact({ creds: new Credentials() })).toEqual({ creds: { password: "[skryto]" } });
+    expect(redact({ creds: new Credentials() })).toEqual({
+      creds: { password: "[skryto]", name: "n" },
+    });
+  });
+
+  test("[AUD-004] toJSON na prototypu nevyhne redakci a výstup se maskuje", () => {
+    class Credentials {
+      #password = "x";
+      toJSON() {
+        return { password: this.#password, name: "n" };
+      }
+    }
+    expect(redact({ creds: new Credentials() })).toEqual({
+      creds: { password: "[skryto]", name: "n" },
+    });
+  });
+
+  test("[AUD-004] vlastní toJSON nevyhne redakci ani po serializaci záznamu", () => {
+    const leaky = {
+      password: "tajne-a",
+      toJSON: () => ({ password: "tajne-b", name: "n" }),
+    };
+    const ownerId = "aud4-tojson";
+
+    expect(redact(leaky)).toEqual({ password: "[skryto]", name: "n" });
+
+    mutate(actor, "probe.update", (_tx, audit) => audit({ ...entry(ownerId), after: leaky }));
+    const [row] = rowsOf(ownerId);
+    expect(row.after).toEqual({ password: "[skryto]", name: "n" });
+    expect(JSON.stringify(row)).not.toContain("tajne");
+  });
+
+  test("[AUD-004] funkce se do záznamu nedostanou", () => {
+    expect(redact({ a: 1, fn: () => "tajne" })).toEqual({ a: 1 });
+  });
+
+  test("[AUD-004] Map a Set neztratí data a jejich obsah se maskuje", () => {
+    const value = {
+      map: new Map<unknown, unknown>([
+        ["smtpPassword", "x"],
+        ["name", "n"],
+        [1, { token: "y" }],
+      ]),
+      set: new Set([{ secret: "z" }, "a"]),
+    };
+
+    expect(redact(value)).toEqual({
+      map: { smtpPassword: "[skryto]", name: "n", "1": { token: "[skryto]" } },
+      set: [{ secret: "[skryto]" }, "a"],
+    });
+  });
+
+  test("[AUD-004] Buffer a Uint8Array se nerozepíšou", () => {
+    expect(
+      redact({
+        buffer: Buffer.from("abc"),
+        bytes: new Uint8Array([1, 2]),
+        raw: new ArrayBuffer(2),
+      }),
+    ).toEqual({ buffer: "[binární data]", bytes: "[binární data]", raw: "[binární data]" });
   });
 });
 

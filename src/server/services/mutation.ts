@@ -5,10 +5,16 @@ import { db, type Tx } from "../db";
 
 type MutationEntry = Omit<AuditEntry, "action"> & { action?: AuditAction };
 
+type NotThenable<T> = T extends PromiseLike<unknown> ? never : unknown;
+
+function isThenable(value: unknown): boolean {
+  return typeof (value as { then?: unknown } | null | undefined)?.then === "function";
+}
+
 export function mutate<T>(
   actor: Actor,
   action: AuditAction,
-  fn: (tx: Tx, audit: (entry: MutationEntry) => void) => T,
+  fn: (tx: Tx, audit: (entry: MutationEntry) => void) => T & NotThenable<T>,
 ): T {
   return runWithActor(actor, () =>
     db.transaction(
@@ -22,10 +28,8 @@ export function mutate<T>(
             recorded += 1;
           });
           // A better-sqlite3 transaction commits when fn returns, so anything after an await would
-          // run outside it.
-          if (result instanceof Promise) {
-            throw new Error(`Mutace ${action} nesmí být asynchronní`);
-          }
+          // run outside it, and a Drizzle query builder is thenable but never executes here.
+          if (isThenable(result)) throw new Error(`Mutace ${action} nesmí být asynchronní`);
           if (recorded === 0) throw new Error(`Mutace ${action} nevytvořila auditní záznam`);
           return result;
         } finally {
