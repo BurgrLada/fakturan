@@ -46,7 +46,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   item("overview", "/", LayoutDashboard),
   item("invoices", "/faktury", FileText, { planned: true }),
   item("recurring", "/pravidelne", Repeat, { planned: true }),
-  item("customers", "/zakaznici", Users, { planned: true }),
+  item("customers", "/zakaznici", Users),
   item("catalog", "/cenik", Tag, { planned: true }),
   item("payments", "/platby", CreditCard, { planned: true }),
   item("reports", "/prehledy", PieChart, { planned: true }),

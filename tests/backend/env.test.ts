@@ -60,6 +60,16 @@ describe("env", () => {
     );
     expect(() => parseEnv({ ...base, ARES_BASE_URL: "ares" })).toThrow(/ARES_BASE_URL/);
   });
+
+  test("[OPS-003] VIES_BASE_URL má veřejné API jako výchozí a lomítko na konci se ořízne", () => {
+    expect(parseEnv(base).VIES_BASE_URL).toBe(
+      "https://ec.europa.eu/taxation_customs/vies/rest-api",
+    );
+    expect(parseEnv({ ...base, VIES_BASE_URL: "http://127.0.0.1:9/vies/" }).VIES_BASE_URL).toBe(
+      "http://127.0.0.1:9/vies",
+    );
+    expect(() => parseEnv({ ...base, VIES_BASE_URL: "vies" })).toThrow(/VIES_BASE_URL/);
+  });
 });
 
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));

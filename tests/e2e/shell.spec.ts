@@ -109,7 +109,7 @@ test("[UI-007] navigace funguje na šířce 390 px bez vodorovného posunu", asy
 
   await page.getByRole("button", { name: "Otevřít nabídku" }).click();
   await expect(nav).toBeVisible();
-  await nav.getByRole("link", { name: "Zákazníci" }).click();
+  await nav.getByRole("link", { name: "Faktury" }).click();
   await expect(page.getByRole("heading", { name: "Připravujeme" })).toBeVisible();
   await expect(nav).toBeHidden();
 

@@ -41,6 +41,10 @@ const schema = z.object({
     .url()
     .default("https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty")
     .transform((v) => v.replace(/\/+$/, "")),
+  VIES_BASE_URL: z
+    .url()
+    .default("https://ec.europa.eu/taxation_customs/vies/rest-api")
+    .transform((v) => v.replace(/\/+$/, "")),
   ALLOW_PRIVATE_MAIL_HOSTS: flag,
   TRUST_PROXY: flag,
 });
