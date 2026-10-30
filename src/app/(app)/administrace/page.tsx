@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { auditActionLabel } from "@/lib/audit-labels";
-import { formatDateTime } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { actorFromRequest, requireAdmin } from "@/server/auth/session";
+import { getInstanceStatus } from "@/server/services/instance-status";
 import { listInstanceAudit } from "@/server/services/instance-audit";
 import { listInvitations } from "@/server/services/invitations";
 import { listUsers } from "@/server/services/users";
@@ -75,6 +76,29 @@ function InstanceEvents({ events }: { events: ReturnType<typeof listInstanceAudi
   );
 }
 
+function InstanceStatus({ status }: { status: ReturnType<typeof getInstanceStatus> }) {
+  const rows: [string, string][] = [
+    ["Verze", status.version],
+    ["Velikost databáze", formatBytes(status.databaseBytes)],
+    ["Plánovač", status.scheduler === "not_started" ? "není spuštěn" : "běží"],
+    ["Poslední záloha", status.lastBackupAt ? formatDateTime(status.lastBackupAt) : "žádná"],
+    ["SMTP", status.smtpConfigured ? "nastaveno" : "nenastaveno"],
+    ["Monitoring chyb", status.monitoringConfigured ? "nastaveno" : "nenastaveno"],
+  ];
+  return (
+    <Table>
+      <TableBody>
+        {rows.map(([label, value]) => (
+          <TableRow key={label}>
+            <TableHead scope="row">{label}</TableHead>
+            <TableCell>{value}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 async function AdminContent({ searchParams }: Pick<PageProps<"/administrace">, "searchParams">) {
   const session = await requireAdmin();
   const { strana } = await searchParams;
@@ -96,6 +120,7 @@ async function AdminContent({ searchParams }: Pick<PageProps<"/administrace">, "
         <TabsTrigger value="uzivatele">Uživatelé</TabsTrigger>
         <TabsTrigger value="pozvanky">Pozvánky</TabsTrigger>
         <TabsTrigger value="udalosti">Události instance</TabsTrigger>
+        <TabsTrigger value="stav">Stav instance</TabsTrigger>
       </TabsList>
       <TabsContent value="uzivatele">
         <UsersTable users={users} currentUserId={session.user.id} />
@@ -105,6 +130,9 @@ async function AdminContent({ searchParams }: Pick<PageProps<"/administrace">, "
       </TabsContent>
       <TabsContent value="udalosti">
         <InstanceEvents events={listInstanceAudit(actor, { page: pageParam.parse(strana) })} />
+      </TabsContent>
+      <TabsContent value="stav">
+        <InstanceStatus status={getInstanceStatus(actor)} />
       </TabsContent>
     </Tabs>
   );

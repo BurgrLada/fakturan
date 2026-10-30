@@ -34,7 +34,12 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
+  output: "standalone",
   serverExternalPackages: ["better-sqlite3"],
+  // Both are read from process.cwd() at runtime, which tracing cannot see.
+  outputFileTracingIncludes: {
+    "/*": ["./drizzle/**/*", "./src/server/auth/common-passwords.txt"],
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
