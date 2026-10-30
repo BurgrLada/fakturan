@@ -1,0 +1,20 @@
+:root {
+  --color-bg: #F7F4EE;
+  --color-text: #1E1A1C;
+  --color-action: #652335;
+  --color-on-action: #F7F4EE;
+  --color-soft: #E7C469;
+  --color-on-soft: #1E1A1C;
+  --color-brand-tile: #C6EC3E;
+  --color-on-brand-tile: #1E1A1C;
+  --font-brand: "Space Grotesk", sans-serif;
+}
+
+[data-theme="dark"] {
+  --color-bg: #1E1A1C;
+  --color-text: #F7F4EE;
+  --color-action: #C9708A;
+  --color-on-action: #1E1A1C;
+  --color-soft: #4D4026;
+  --color-on-soft: #F7F4EE;
+}

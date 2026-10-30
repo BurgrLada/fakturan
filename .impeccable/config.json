@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/2982928-1793350851/content/designy-faktur.html"
+        ],
+        "createdAt": "2026-10-30T09:01:34.787Z",
+        "reason": "Claude triage: scaled-down A4 invoice miniature in a throwaway brainstorm mockup, not UI"
+      },
+      {
+        "rule": "tiny-text",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/2982928-1793350851/content/designy-faktur.html"
+        ],
+        "createdAt": "2026-10-30T09:01:34.793Z",
+        "reason": "Claude triage: scaled-down A4 invoice miniature in a throwaway brainstorm mockup, not UI"
+      }
+    ]
+  }
+}
