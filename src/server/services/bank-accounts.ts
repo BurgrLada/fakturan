@@ -7,7 +7,7 @@ import { czechAccountToIban, isValidIban, normalizeIban } from "@/lib/iban";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { bankAccount } from "../db/schema";
+import { bankAccount, invoice } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
@@ -109,9 +109,12 @@ export function defaultAccountFor(ownerId: string, currency: Currency): BankAcco
   );
 }
 
-// Invoices do not exist yet; plan 3 replaces this with a lookup so SET-022 can refuse deletion.
-export function isAccountUsed(_tx: Tx, _ownerId: string, _accountId: string): boolean {
-  return false;
+export function isAccountUsed(tx: Tx, ownerId: string, accountId: string): boolean {
+  return !!tx
+    .select({ id: invoice.id })
+    .from(invoice)
+    .where(scoped(ownerId).where(invoice, (t, { eq }) => eq(t.bankAccountId, accountId)))
+    .get();
 }
 
 export function saveBankAccount(actor: Actor, raw: BankAccountInput): string {

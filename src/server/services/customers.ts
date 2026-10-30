@@ -17,7 +17,7 @@ import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
 import { czech } from "../db/collation";
-import { customer } from "../db/schema";
+import { customer, invoice } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { lookupVies, splitVatId, type ViesState } from "../external/vies";
 import { RATE_RULES } from "../rate-limit";
@@ -267,11 +267,16 @@ export function restoreCustomer(actor: Actor, id: string): void {
   setArchived(actor, id, false);
 }
 
-// Plan 3 adds the check for issued documents (CUS-007); until then every customer is deletable.
 export function deleteCustomer(actor: Actor, id: string): void {
   const userId = ownerOf(actor);
   mutate(actor, "customer.delete", (tx, audit) => {
     const row = findOwned(tx, userId, id);
+    const used = tx
+      .select({ id: invoice.id })
+      .from(invoice)
+      .where(scoped(userId).where(invoice, (t, { eq }) => eq(t.customerId, id)))
+      .get();
+    if (used) throw new ServiceError(V.hasDocuments);
     tx.delete(customer)
       .where(and(eq(customer.id, id), eq(customer.userId, userId)))
       .run();

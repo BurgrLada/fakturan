@@ -1,17 +1,22 @@
 import { calendarDateInPrague, type CalendarDate } from "./number-format";
 import type { Currency } from "./currency";
+import type { RoundingMode } from "./invoice-totals";
 
 export const LANGUAGES = ["cs", "en"] as const;
 export const PAYMENT_METHODS = ["transfer", "cash", "card"] as const;
 export const ISSUE_DATE_MODES = ["today", "last_day_previous_month"] as const;
 export const DATE_FORMATS = ["d. M. yyyy", "dd.MM.yyyy", "yyyy-MM-dd"] as const;
 export const VARIABLE_SYMBOL_FORMATS = ["digits", "empty"] as const;
+export const LOGO_POSITIONS = ["left", "right", "none"] as const;
+export const FX_BASES = ["issue_date", "taxable_date"] as const;
 
 export type Language = (typeof LANGUAGES)[number];
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type IssueDateMode = (typeof ISSUE_DATE_MODES)[number];
 export type DateFormat = (typeof DATE_FORMATS)[number];
 export type VariableSymbolFormat = (typeof VARIABLE_SYMBOL_FORMATS)[number];
+export type LogoPosition = (typeof LOGO_POSITIONS)[number];
+export type FxBasis = (typeof FX_BASES)[number];
 
 export type Preferences = {
   dueDays: number;
@@ -19,6 +24,10 @@ export type Preferences = {
   currency: Currency;
   designId: string;
   accentColor: string;
+  surfaceColor: string;
+  textColor: string;
+  lineColor: string;
+  logoPosition: LogoPosition;
   paymentMethod: PaymentMethod;
   unit: string;
   showLogo: boolean;
@@ -32,6 +41,9 @@ export type Preferences = {
   issueDateMode: IssueDateMode;
   dateFormat: DateFormat;
   variableSymbolFormat: VariableSymbolFormat;
+  rounding: RoundingMode;
+  pdfFileName: string;
+  fxBasis: FxBasis;
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -40,6 +52,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   currency: "CZK",
   designId: "cisty",
   accentColor: "",
+  surfaceColor: "",
+  textColor: "",
+  lineColor: "",
+  logoPosition: "left",
   paymentMethod: "transfer",
   unit: "ks",
   showLogo: true,
@@ -53,6 +69,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   issueDateMode: "today",
   dateFormat: "d. M. yyyy",
   variableSymbolFormat: "digits",
+  rounding: "none",
+  pdfFileName: "{cislo}.pdf",
+  fxBasis: "issue_date",
 };
 
 export function defaultIssueDate(mode: IssueDateMode, now: Date): CalendarDate {

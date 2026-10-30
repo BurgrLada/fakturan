@@ -24,7 +24,7 @@ export type CatalogSort = "name" | "usage";
 
 export const DEFAULT_UNITS = ["hod.", "ks", "den", "měsíc", "projekt"] as const;
 
-const MAX_PRICE_MINOR = 99_999_999_999_99;
+export const MAX_PRICE_MINOR = 99_999_999_999_99;
 
 const text = (max: number) => z.string(V.invalid).trim().max(max, V.tooLong);
 

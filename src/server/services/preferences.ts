@@ -2,11 +2,14 @@ import "server-only";
 import { isNull } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
+import { ROUNDING_MODES } from "@/lib/invoice-totals";
 import {
   DATE_FORMATS,
   DEFAULT_PREFERENCES,
+  FX_BASES,
   ISSUE_DATE_MODES,
   LANGUAGES,
+  LOGO_POSITIONS,
   PAYMENT_METHODS,
   VARIABLE_SYMBOL_FORMATS,
   type Preferences,
@@ -23,15 +26,23 @@ import { mutate } from "./mutation";
 const V = TEXTS.preferences.validation;
 const text = (max: number) => z.string().trim().max(max, V.tooLong);
 
+export const colorSchema = z.string(V.accentColor).regex(/^(#[0-9a-fA-F]{6})?$/, V.accentColor);
+export const designIdSchema = z
+  .string(V.designId)
+  .trim()
+  .regex(/^[a-z0-9-]{1,40}$/, V.designId);
+export const logoPositionSchema = z.enum(LOGO_POSITIONS, V.logoPosition);
+
 export const preferencesSchema = z.object({
   dueDays: z.number(V.dueDays).int(V.dueDays).min(0, V.dueDays).max(365, V.dueDays),
   language: z.enum(LANGUAGES, V.language),
   currency: z.enum(CURRENCIES, V.currency),
-  designId: z
-    .string()
-    .trim()
-    .regex(/^[a-z0-9-]{1,40}$/, V.designId),
-  accentColor: z.union([z.literal(""), z.string().regex(/^#[0-9a-fA-F]{6}$/, V.accentColor)]),
+  designId: designIdSchema,
+  accentColor: colorSchema,
+  surfaceColor: colorSchema,
+  textColor: colorSchema,
+  lineColor: colorSchema,
+  logoPosition: logoPositionSchema,
   paymentMethod: z.enum(PAYMENT_METHODS, V.paymentMethod),
   unit: text(20).min(1, V.unit),
   showLogo: z.boolean(),
@@ -45,6 +56,13 @@ export const preferencesSchema = z.object({
   issueDateMode: z.enum(ISSUE_DATE_MODES, V.issueDateMode),
   dateFormat: z.enum(DATE_FORMATS, V.dateFormat),
   variableSymbolFormat: z.enum(VARIABLE_SYMBOL_FORMATS, V.variableSymbolFormat),
+  rounding: z.enum(ROUNDING_MODES, V.rounding),
+  pdfFileName: z
+    .string(V.pdfFileName)
+    .trim()
+    .max(100, V.tooLong)
+    .regex(/^[^/\\]+$/, V.pdfFileName),
+  fxBasis: z.enum(FX_BASES, V.fxBasis),
 });
 
 export const preferencesPatchSchema = preferencesSchema.partial();

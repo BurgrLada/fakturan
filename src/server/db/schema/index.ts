@@ -9,3 +9,4 @@ export * from "./number-series";
 export * from "./settings";
 export * from "./customer";
 export * from "./catalog";
+export * from "./invoice";

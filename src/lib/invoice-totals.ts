@@ -1,5 +1,8 @@
 import { AmountOutOfRangeError } from "./money";
 
+export const DISCOUNT_KINDS = ["none", "percent", "amount"] as const;
+export type DiscountKind = (typeof DISCOUNT_KINDS)[number];
+
 export type Discount =
   | { kind: "none" }
   | { kind: "percent"; basisPoints: number }
@@ -7,7 +10,8 @@ export type Discount =
 
 export type TotalsLine = { quantityMilli: number; unitPriceMinor: number; discount: Discount };
 
-export type RoundingMode = "none" | "whole";
+export const ROUNDING_MODES = ["none", "whole"] as const;
+export type RoundingMode = (typeof ROUNDING_MODES)[number];
 
 export type Totals = {
   lines: { grossMinor: number; discountMinor: number; netMinor: number }[];

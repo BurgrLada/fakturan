@@ -19,7 +19,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Db, type Tx } from "../db";
-import { numberSeries, numberSeriesCounter } from "../db/schema";
+import { invoice, numberSeries, numberSeriesCounter } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
@@ -85,10 +85,13 @@ function isUsed(tx: Tx, userId: string, seriesId: string): boolean {
   return countersOf(tx, userId, seriesId).some((counter) => counter.highest > 0);
 }
 
-// Plan 3 looks up invoices here: a manually renumbered invoice (INV-022) can hold a number the
-// counter has not reached yet, and setNextNumber must refuse to aim at it.
-export function isNumberTaken(_tx: Tx, _ownerId: string, _number: string): boolean {
-  return false;
+// A manually renumbered invoice (INV-022) can hold a number the counter has not reached yet.
+export function isNumberTaken(tx: Tx, ownerId: string, number: string): boolean {
+  return !!tx
+    .select({ id: invoice.id })
+    .from(invoice)
+    .where(scoped(ownerId).where(invoice, (t, { eq }) => eq(t.number, number)))
+    .get();
 }
 
 // Period keys change format with the reset, so a next number set for the running period would
