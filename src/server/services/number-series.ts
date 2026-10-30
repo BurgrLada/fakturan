@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   calendarDateInPrague,
@@ -86,11 +86,20 @@ function isUsed(tx: Tx, userId: string, seriesId: string): boolean {
 }
 
 // A manually renumbered invoice (INV-022) can hold a number the counter has not reached yet.
-export function isNumberTaken(tx: Tx, ownerId: string, number: string): boolean {
+export function isNumberTaken(
+  tx: Tx,
+  ownerId: string,
+  number: string,
+  exceptInvoiceId?: string,
+): boolean {
   return !!tx
     .select({ id: invoice.id })
     .from(invoice)
-    .where(scoped(ownerId).where(invoice, (t, { eq }) => eq(t.number, number)))
+    .where(
+      scoped(ownerId).where(invoice, (t, { eq, and }) =>
+        and(eq(t.number, number), exceptInvoiceId ? ne(t.id, exceptInvoiceId) : undefined),
+      ),
+    )
     .get();
 }
 

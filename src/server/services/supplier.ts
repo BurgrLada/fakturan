@@ -1,12 +1,12 @@
 import "server-only";
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { isValidIco } from "@/lib/ico";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { invoice, supplier } from "../db/schema";
+import { invoice, invoiceVersion, supplier } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { logger } from "../logger";
 import { ServiceError } from "./access";
@@ -170,8 +170,25 @@ export function clearSupplierImage(actor: Actor, kind: SupplierImageKind): void 
   discardFile(actor, previous);
 }
 
-function isUsedByInvoice(ownerId: string, id: string): boolean {
+// A version can be restored at any time, so the files it names must outlive the profile's use.
+function isUsedByVersion(ownerId: string, id: string): boolean {
   return !!db
+    .select({ id: invoiceVersion.id })
+    .from(invoiceVersion)
+    .where(
+      scoped(ownerId).where(invoiceVersion, (t) =>
+        or(
+          ...Object.values(IMAGE_COLUMN).map(
+            (key) => sql`json_extract(${t.document}, ${`$.images.${key}`}) = ${id}`,
+          ),
+        ),
+      ),
+    )
+    .get();
+}
+
+function isUsedByInvoice(ownerId: string, id: string): boolean {
+  const onInvoice = db
     .select({ id: invoice.id })
     .from(invoice)
     .where(
@@ -180,6 +197,7 @@ function isUsedByInvoice(ownerId: string, id: string): boolean {
       ),
     )
     .get();
+  return !!onInvoice || isUsedByVersion(ownerId, id);
 }
 
 // The swap is already committed, so a leftover file must not turn it into a failure. Checking after

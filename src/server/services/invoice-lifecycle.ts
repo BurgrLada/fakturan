@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import type { InvoiceStatus } from "@/lib/invoice";
+import { diffLines } from "@/lib/invoice-diff";
 import { variableSymbolFrom } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -14,7 +15,6 @@ import { recordCatalogUse } from "./catalog";
 import { currentParties, renderDocumentTexts, variablesFor } from "./invoice-document";
 import {
   auditSnapshot,
-  diffLines,
   findOwned,
   linesOf,
   MAX_DOCUMENT_TEXT,
@@ -52,7 +52,9 @@ function pickSeries(
   row: Invoice,
   chosenId: string | null,
 ): { series: NumberSeries } | { problem: IssueProblem } {
-  const problem = (message: string) => ({ problem: { field: "seriesId", message } });
+  const problem = (message: string) => ({
+    problem: { field: "seriesId", message },
+  });
   if (!chosenId) {
     const series = defaultSeriesFor(ownerId, row.type);
     return series ? { series } : problem(T.noSeries);
@@ -73,7 +75,12 @@ function supplierProblems(ownerId: string): IssueProblem[] {
   }));
 }
 
-function lineProblems(lines: InvoiceLine[]): IssueProblem[] {
+type CheckedLine = Pick<
+  InvoiceLine,
+  "name" | "quantityMilli" | "unitPriceMinor" | "discountKind" | "discountValue"
+>;
+
+function lineProblems(lines: CheckedLine[]): IssueProblem[] {
   if (lines.length === 0) return [{ field: "lines", message: T.noLines }];
   return lines.flatMap((line, i) => {
     const position = i + 1;
@@ -82,16 +89,22 @@ function lineProblems(lines: InvoiceLine[]): IssueProblem[] {
       found.push({ field: `lines.${i}.name`, message: T.lineName(position) });
     }
     if (line.quantityMilli <= 0) {
-      found.push({ field: `lines.${i}.quantityMilli`, message: T.lineQuantity(position) });
+      found.push({
+        field: `lines.${i}.quantityMilli`,
+        message: T.lineQuantity(position),
+      });
     }
     if (line.unitPriceMinor < 0) {
-      found.push({ field: `lines.${i}.unitPriceMinor`, message: T.linePrice(position) });
+      found.push({
+        field: `lines.${i}.unitPriceMinor`,
+        message: T.linePrice(position),
+      });
     }
     return found;
   });
 }
 
-function amountProblems(row: Invoice, lines: InvoiceLine[]): IssueProblem[] {
+function amountProblems(row: Invoice, lines: CheckedLine[]): IssueProblem[] {
   try {
     totalsOf(lines, row);
     return [];
@@ -112,7 +125,13 @@ function dateProblems(row: Invoice): IssueProblem[] {
 }
 
 // A set account prints on the document whatever the payment method, so it is checked always.
-function accountProblems(q: Reader, ownerId: string, row: Invoice): IssueProblem[] {
+// keptAccountId is already on the document, so hiding it later does not block other edits.
+function accountProblems(
+  q: Reader,
+  ownerId: string,
+  row: Invoice,
+  keptAccountId: string | null,
+): IssueProblem[] {
   const problem = (message: string) => [{ field: "bankAccountId", message }];
   const { bankAccountId } = row;
   if (!bankAccountId) {
@@ -124,24 +143,37 @@ function accountProblems(q: Reader, ownerId: string, row: Invoice): IssueProblem
     .where(scoped(ownerId).where(bankAccount, (t, { eq }) => eq(t.id, bankAccountId)))
     .get();
   if (!account) return problem(V.accountNotFound);
-  if (account.hidden) return problem(T.accountHidden);
+  if (account.hidden && bankAccountId !== keptAccountId) return problem(T.accountHidden);
   return account.currency === row.currency ? [] : problem(T.accountCurrency(row.currency));
 }
 
-function draftProblems(q: Reader, ownerId: string, row: Invoice, lines: InvoiceLine[]) {
+// The supplier is frozen in the snapshot of an issued document, so only issuing checks it.
+export function documentProblems(
+  q: Reader,
+  ownerId: string,
+  row: Invoice,
+  lines: CheckedLine[],
+  keptAccountId: string | null = null,
+): IssueProblem[] {
   const ofLines = lineProblems(lines);
   const found = [
-    ...supplierProblems(ownerId),
     ...(row.customerId ? [] : [{ field: "customerId", message: T.customer }]),
     ...ofLines,
     ...(ofLines.length === 0 ? amountProblems(row, lines) : []),
     ...dateProblems(row),
-    ...accountProblems(q, ownerId, row),
+    ...accountProblems(q, ownerId, row, keptAccountId),
   ];
   if (row.currency !== "CZK" && !row.exchangeRateMicros) {
-    found.push({ field: "exchangeRateMicros", message: T.exchangeRate(row.currency) });
+    found.push({
+      field: "exchangeRateMicros",
+      message: T.exchangeRate(row.currency),
+    });
   }
   return found;
+}
+
+function draftProblems(q: Reader, ownerId: string, row: Invoice, lines: InvoiceLine[]) {
+  return [...supplierProblems(ownerId), ...documentProblems(q, ownerId, row, lines)];
 }
 
 export function checkIssuable(ownerId: string, id: string): IssueProblem[] {
@@ -175,7 +207,10 @@ function textProblems(texts: {
       found.push({ field: `lines.${i}.name`, message: T.lineNameLong(i + 1) });
     }
     if (line.description.length > MAX_DOCUMENT_TEXT) {
-      found.push({ field: `lines.${i}.description`, message: T.lineDescriptionLong(i + 1) });
+      found.push({
+        field: `lines.${i}.description`,
+        message: T.lineDescriptionLong(i + 1),
+      });
     }
   });
   return found;
@@ -205,6 +240,11 @@ function storeLines(tx: Tx, before: InvoiceLine[], after: InvoiceLine[]): void {
       .where(eq(invoiceLine.id, line.id))
       .run();
   });
+}
+
+export function automaticSymbol(ownerId: string, number: string): string | null {
+  const format = getPreferences(ownerId).variableSymbolFormat;
+  return (format === "digits" && variableSymbolFrom(number)) || null;
 }
 
 export function issueInvoice(
@@ -238,8 +278,6 @@ export function issueInvoice(
       ...line,
       netMinor: totals.lines[i]!.netMinor,
     }));
-    const automaticSymbol =
-      getPreferences(userId).variableSymbolFormat === "digits" ? variableSymbolFrom(number) : "";
     const now = clock.now();
 
     storeLines(tx, lines, issuedLines);
@@ -252,7 +290,7 @@ export function issueInvoice(
         ...texts.images,
         status: "issued",
         number,
-        variableSymbol: manualSymbol ?? (automaticSymbol || null),
+        variableSymbol: manualSymbol ?? automaticSymbol(userId, number),
         variableSymbolManual: manualSymbol !== undefined,
         seriesId: picked.series.id,
         customerName: texts.customerName,

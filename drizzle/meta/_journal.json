@@ -120,6 +120,13 @@
       "when": 1793387538263,
       "tag": "0016_invoice_date_format",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1793388092808,
+      "tag": "0017_invoice_version",
+      "breakpoints": true
     }
   ]
 }

@@ -229,6 +229,10 @@ export const TEXTS = {
       notCancelled: "Vrátit storno jde jen u stornovaného dokladu",
       notMarkable: "Jako odeslanou jde označit jen vystavenou fakturu",
       variableSymbol: "Variabilní symbol smí mít jen číslice, nejvýš 10",
+      notEditable: "Upravit jde jen vystavený, odeslaný nebo uhrazený doklad",
+      number: "Vyplňte platné číslo dokladu",
+      numberTaken: "Toto číslo už má jiný doklad",
+      versionNotFound: "Verze dokladu neexistuje",
     },
     issue: {
       alreadyIssued: "Doklad už je vystavený",

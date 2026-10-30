@@ -6,6 +6,7 @@ import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
 import { addDays, appearanceFrom, daysBetween, INVOICE_TYPES, toDiscount } from "@/lib/invoice";
+import { diffLines, lineBody } from "@/lib/invoice-diff";
 import {
   computeTotals,
   DISCOUNT_KINDS,
@@ -43,6 +44,7 @@ import { linkTags, tagsOf, type Tag } from "./tags";
 const V = TEXTS.invoices.validation;
 const MAX_LINES = 500;
 const MAX_EXCHANGE_RATE_MICROS = 1_000_000_000_000;
+const MAX_NUMBER = 100;
 export const MAX_LINE_NAME = 200;
 export const MAX_DOCUMENT_TEXT = 2000;
 
@@ -70,7 +72,11 @@ function checkDiscount(
   ctx: z.RefinementCtx,
 ): void {
   if (value.discountValue > DISCOUNT_LIMIT[value.discountKind]) {
-    ctx.addIssue({ code: "custom", path: ["discountValue"], message: V.discount });
+    ctx.addIssue({
+      code: "custom",
+      path: ["discountValue"],
+      message: V.discount,
+    });
   }
 }
 
@@ -114,6 +120,31 @@ const appearanceSchema = z.object({
   showDuzp: z.boolean(V.invalid),
 });
 
+const documentFields = {
+  bankAccountId: reference,
+  issueDate: date,
+  dueDate: date,
+  taxableDate: date,
+  language: z.enum(LANGUAGES, V.language),
+  currency: z.enum(CURRENCIES, V.currency),
+  exchangeRateMicros: z
+    .number(V.exchangeRate)
+    .int(V.exchangeRate)
+    .positive(V.exchangeRate)
+    .max(MAX_EXCHANGE_RATE_MICROS, V.exchangeRate)
+    .nullable(),
+  paymentMethod: z.enum(PAYMENT_METHODS, V.paymentMethod),
+  orderRef: text(200),
+  reference: text(200),
+  textBefore: text(MAX_DOCUMENT_TEXT),
+  textAfter: text(MAX_DOCUMENT_TEXT),
+  note: text(MAX_DOCUMENT_TEXT),
+  ...discountFields,
+  rounding: z.enum(ROUNDING_MODES, V.rounding),
+  appearance: appearanceSchema,
+  lines: z.array(lineSchema, V.invalid).max(MAX_LINES, V.tooManyLines),
+};
+
 // Deliberately lenient beyond ranges and references: strict checks wait for issuing.
 export const draftInputSchema = z
   .object({
@@ -121,34 +152,25 @@ export const draftInputSchema = z
     revision: z.number(V.invalid).int(V.invalid).optional(),
     type: z.enum(INVOICE_TYPES, V.type),
     customerId: reference,
-    bankAccountId: reference,
     seriesId: reference,
-    issueDate: date,
-    dueDate: date,
-    taxableDate: date,
-    language: z.enum(LANGUAGES, V.language),
-    currency: z.enum(CURRENCIES, V.currency),
-    exchangeRateMicros: z
-      .number(V.exchangeRate)
-      .int(V.exchangeRate)
-      .positive(V.exchangeRate)
-      .max(MAX_EXCHANGE_RATE_MICROS, V.exchangeRate)
-      .nullable(),
-    paymentMethod: z.enum(PAYMENT_METHODS, V.paymentMethod),
-    orderRef: text(200),
-    reference: text(200),
-    textBefore: text(MAX_DOCUMENT_TEXT),
-    textAfter: text(MAX_DOCUMENT_TEXT),
-    note: text(MAX_DOCUMENT_TEXT),
-    ...discountFields,
-    rounding: z.enum(ROUNDING_MODES, V.rounding),
-    appearance: appearanceSchema,
-    lines: z.array(lineSchema, V.invalid).max(MAX_LINES, V.tooManyLines),
+    ...documentFields,
+  })
+  .superRefine(checkDiscount)
+  .transform(withoutStrayDiscount);
+
+// Type, customer and series are absent on purpose: the customer changes only through
+// refreshCustomerSnapshot (CUS-008). A missing revision is reported as stale by the service.
+export const issuedInputSchema = z
+  .object({
+    revision: z.number(V.invalid).int(V.invalid).nullish(),
+    number: z.string(V.number).trim().min(1, V.number).max(MAX_NUMBER, V.number),
+    ...documentFields,
   })
   .superRefine(checkDiscount)
   .transform(withoutStrayDiscount);
 
 export type DraftInput = z.input<typeof draftInputSchema>;
+export type IssuedInput = z.input<typeof issuedInputSchema>;
 type Draft = z.output<typeof draftInputSchema>;
 type DraftLine = Draft["lines"][number];
 
@@ -187,7 +209,11 @@ export function linesOf(q: Reader, ownerId: string, invoiceId: string): InvoiceL
 export function getInvoice(ownerId: string, id: string): InvoiceDetail | null {
   const row = readOwned(db, ownerId, id);
   if (!row) return null;
-  return { ...row, lines: linesOf(db, ownerId, id), tags: tagsOf(db, ownerId, id) };
+  return {
+    ...row,
+    lines: linesOf(db, ownerId, id),
+    tags: tagsOf(db, ownerId, id),
+  };
 }
 
 export function newDraftDefaults(ownerId: string, customerId: string | null): DraftInput {
@@ -256,7 +282,11 @@ function assertOwned(
 }
 
 // The foreign keys only prove a row exists, not that it belongs to this account.
-function assertReferencesOwned(tx: Tx, ownerId: string, draft: Draft): void {
+export function assertReferencesOwned(
+  tx: Tx,
+  ownerId: string,
+  draft: Pick<Draft, "customerId" | "bankAccountId" | "seriesId" | "lines">,
+): void {
   assertOwned(tx, ownerId, customer, draft.customerId, V.customerNotFound);
   assertOwned(tx, ownerId, bankAccount, draft.bankAccountId, V.accountNotFound);
   assertOwned(tx, ownerId, numberSeries, draft.seriesId, V.seriesNotFound);
@@ -296,7 +326,7 @@ export function sumsOf(totals: Totals) {
   return { subtotalMinor, discountMinor, roundingMinor, totalMinor };
 }
 
-function lineRows(lines: DraftLine[], totals: Totals) {
+export function lineRows(lines: DraftLine[], totals: Totals) {
   return lines.map((line, position) => ({
     ...line,
     position,
@@ -304,7 +334,7 @@ function lineRows(lines: DraftLine[], totals: Totals) {
   }));
 }
 
-function insertLines(
+export function insertLines(
   tx: Tx,
   ownerId: string,
   invoiceId: string,
@@ -317,78 +347,11 @@ function insertLines(
   }
 }
 
-function matches<T extends object>(row: object, wanted: T): boolean {
+export function matches<T extends object>(row: object, wanted: T): boolean {
   const current = Object.fromEntries(
     Object.keys(wanted).map((key) => [key, (row as Record<string, unknown>)[key]]),
   );
   return isDeepStrictEqual(current, wanted);
-}
-
-type LineRow = ReturnType<typeof lineRows>[number];
-
-function lineBody(line: LineRow) {
-  return {
-    position: line.position,
-    catalogItemId: line.catalogItemId,
-    name: line.name,
-    description: line.description,
-    quantityMilli: line.quantityMilli,
-    unit: line.unit,
-    unitPriceMinor: line.unitPriceMinor,
-    discountKind: line.discountKind,
-    discountValue: line.discountValue,
-    netMinor: line.netMinor,
-  };
-}
-
-function contentKey(line: LineRow): string {
-  return JSON.stringify({ ...lineBody(line), position: 0 });
-}
-
-type LineChanges = {
-  before: { changed: LineRow[]; removed: LineRow[]; moved: { name: string; position: number }[] };
-  after: { changed: LineRow[]; added: LineRow[]; moved: { name: string; position: number }[] };
-};
-
-// Lines are replaced on every save, so ids cannot pair them: identical content pairs first (a
-// move), then what is left at the same position (an edit). Only the difference goes to the audit,
-// because autosave would otherwise copy up to 500 lines per pause in typing.
-export function diffLines(before: LineRow[], after: LineRow[]): LineChanges | null {
-  const unchanged = (line: LineRow, i: number, other: LineRow[]) =>
-    other[i] !== undefined && contentKey(other[i]) === contentKey(line);
-  const left = before.filter((line, i) => !unchanged(line, i, after));
-  const right = after.filter((line, i) => !unchanged(line, i, before));
-  if (left.length === 0 && right.length === 0) return null;
-
-  const waiting = new Map<string, LineRow[]>();
-  for (const line of left) {
-    waiting.set(contentKey(line), [...(waiting.get(contentKey(line)) ?? []), line]);
-  }
-  const moves: { from: LineRow; to: LineRow }[] = [];
-  const unpairedRight = right.filter((to) => {
-    const from = waiting.get(contentKey(to))?.shift();
-    if (from) moves.push({ from, to });
-    return !from;
-  });
-  const unpairedLeft = [...waiting.values()].flat().sort((a, b) => a.position - b.position);
-
-  const atPosition = new Map(unpairedRight.map((line) => [line.position, line]));
-  const edited = unpairedLeft.filter((line) => atPosition.has(line.position));
-  const editedPositions = new Set(edited.map((line) => line.position));
-  const moved = (side: "from" | "to") =>
-    moves.map((move) => ({ name: move[side].name, position: move[side].position }));
-  return {
-    before: {
-      changed: edited.map(lineBody),
-      removed: unpairedLeft.filter((l) => !editedPositions.has(l.position)).map(lineBody),
-      moved: moved("from"),
-    },
-    after: {
-      changed: unpairedRight.filter((l) => editedPositions.has(l.position)).map(lineBody),
-      added: unpairedRight.filter((l) => !editedPositions.has(l.position)).map(lineBody),
-      moved: moved("to"),
-    },
-  };
 }
 
 export function auditSnapshot(row: Invoice, lineCount: number) {
@@ -396,12 +359,22 @@ export function auditSnapshot(row: Invoice, lineCount: number) {
   return { ...rest, lineCount };
 }
 
-class Unchanged extends Error {
-  readonly saved: SavedDraft;
+// Thrown to roll back: mutate refuses a transaction without an audit entry.
+export class Unchanged<T> extends Error {
+  readonly result: T;
 
-  constructor(saved: SavedDraft) {
+  constructor(result: T) {
     super();
-    this.saved = saved;
+    this.result = result;
+  }
+}
+
+export function unlessUnchanged<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof Unchanged) return error.result as T;
+    throw error;
   }
 }
 
@@ -413,8 +386,8 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
   const totals = totalsOf(lines, fields);
   const rows = lineRows(lines, totals);
 
-  try {
-    return mutate(actor, "invoice.save", (tx, audit) => {
+  return unlessUnchanged(() =>
+    mutate(actor, "invoice.save", (tx, audit) => {
       const before = existingId ? findOwned(tx, userId, existingId) : null;
       if (before && (before.status !== "draft" || before.revision !== revision)) {
         throw new ServiceError(TEXTS.invoices.stale);
@@ -424,14 +397,17 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
       const customerName = customerNameOf(tx, userId, fields.customerId);
       const values = { ...fields, ...sumsOf(totals), customerName };
       const beforeLines = before ? linesOf(tx, userId, before.id) : [];
-      // Thrown to roll back: mutate refuses a transaction without an audit entry.
       if (
         before &&
         matches(before, values) &&
         beforeLines.length === rows.length &&
         rows.every((row, i) => matches(beforeLines[i]!, row))
       ) {
-        throw new Unchanged({ id: before.id, revision: before.revision, totals });
+        throw new Unchanged({
+          id: before.id,
+          revision: before.revision,
+          totals,
+        });
       }
 
       const id = before?.id ?? randomUUID();
@@ -440,7 +416,12 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
       const now = clock.now();
       if (before) {
         tx.update(invoice)
-          .set({ ...values, searchText, revision: nextRevision, updatedAt: now })
+          .set({
+            ...values,
+            searchText,
+            revision: nextRevision,
+            updatedAt: now,
+          })
           .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
           .run();
         tx.delete(invoiceLine)
@@ -476,11 +457,8 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
         },
       });
       return { id, revision: nextRevision, totals };
-    });
-  } catch (error) {
-    if (error instanceof Unchanged) return error.saved;
-    throw error;
-  }
+    }),
+  );
 }
 
 export function deleteDraft(actor: Actor, id: string): void {
@@ -497,7 +475,10 @@ export function deleteDraft(actor: Actor, id: string): void {
       entityId: id,
       ownerId: userId,
       scope: "user",
-      before: { ...auditSnapshot(row, lines.length), lines: lines.map(lineBody) },
+      before: {
+        ...auditSnapshot(row, lines.length),
+        lines: lines.map(lineBody),
+      },
     });
   });
 }
