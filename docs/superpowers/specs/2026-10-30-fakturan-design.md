@@ -47,6 +47,12 @@ Hlavní zásady:
 - evidence nákladů a přijatých dokladů,
 - plátci DPH, výpočet DPH, kontrolní hlášení, přiznání k DPH,
 - příjmový pokladní doklad a dodací list,
+- objednávky, výzvy k platbě (doklad před fakturou, zálohovou fakturu nenahrazuje),
+- exporty pro účetní programy (Pohoda, Money S3),
+- přílohy k faktuře,
+- dodací adresa zákazníka,
+- sklad a prodejky,
+- hybridní pošta (tisk a odeslání dopisem přes externí službu),
 - podání přímo na daňový portál,
 - platební brány a online platba z odkazu,
 - veřejný odkaz na fakturu pro klienta,
@@ -62,6 +68,9 @@ Není součástí první verze, ale architektura s ním počítá:
 - **2FA (TOTP) a passkeys** přes pluginy Better Auth.
 - **Widget s vlastním kódem** v izolovaném sandboxu: iframe bez přístupu k session, síti a stejnému originu, data dostane jen přes `postMessage`.
 - **Editor rozložení faktur** v aplikaci.
+- **Cenové nabídky.**
+- **Přístup pro účetní** jen ke čtení. Výjimka z izolace účtů, proto vyžaduje vlastní návrh.
+- **Webhooky** spolu s API tokeny.
 - **Další banky** přes nové parsery avíz. **Fio API.** Univerzální open banking.
 - **Souhrnné hlášení** pro identifikované osoby.
 - **Další jazyky faktur**, rozhraní s i18n.
@@ -196,7 +205,7 @@ Stavy: `koncept` → `vystavená` → `odeslaná` → `částečně uhrazená` �
 
 - **INV-010** Nová faktura je předvyplněná ze SET-030 až 034 a výjimek zákazníka. Běžný případ: vyberu zákazníka, položku z ceníku, vystavím.
 - **INV-011** Výběr zákazníka našeptávačem s možností založit nového přímo ve formuláři.
-- **INV-012** Položky: název, popis, množství, jednotka, cena za jednotku, sleva v procentech nebo částkou. Řazení přetažením.
+- **INV-012** Položky: název, popis, množství, jednotka, cena za jednotku, sleva v procentech nebo částkou. Cena za jednotku má nejvýš dvě desetinná místa. Řazení přetažením.
 - **INV-013** Našeptávač položek z ceníku. Po výběru se doplní název, jednotka, cena. Řádek jde uložit do ceníku.
 - **INV-014** Sleva na celou fakturu, procentem nebo částkou.
 - **INV-015** Zaokrouhlení celkové částky: nezaokrouhlovat, na koruny, nastavitelné výchozí.
@@ -210,10 +219,11 @@ Stavy: `koncept` → `vystavená` → `odeslaná` → `částečně uhrazená` �
 - **INV-023** Úprava uhrazené faktury, při které nová částka nesouhlasí s platbami, vrátí fakturu do stavu `částečně uhrazená` nebo označí přeplatek a uživatele upozorní.
 - **INV-024** Hromadné akce v seznamu: odeslat, označit jako uhrazené, stáhnout PDF, exportovat.
 - **INV-025** Přechod mezi poli a odeslání formuláře funguje klávesnicí.
+- **INV-026** Faktuře jde volitelně přidat štítky. Štítky si uživatel zakládá sám přímo ve formuláři, bez štítků se formulář nijak nemění.
 
 ### 7.4 Seznam
 
-- **INV-030** Filtrování podle stavu, zákazníka, období, měny, typu, štítku „vytvořeno jinde“. Hledání podle čísla, zákazníka, položky.
+- **INV-030** Filtrování podle stavu, zákazníka, období, měny, typu, štítků a příznaku „vytvořeno jinde“. Hledání podle čísla, zákazníka, položky.
 - **INV-031** Řazení podle všech sloupců. Filtry jsou v URL, takže jdou sdílet a přežijí obnovení.
 - **INV-032** Souhrn nad seznamem: fakturováno, uhrazeno, po splatnosti, pro každou měnu zvlášť.
 
@@ -232,12 +242,14 @@ Stavy: `koncept` → `vystavená` → `odeslaná` → `částečně uhrazená` �
 
 - **FOR-001** Přepínač „zahraniční faktura“ ve formuláři odkryje měnu, kurz a doložky. Předvyplní se ze zákazníka podle státu.
 - **FOR-002** Měny: CZK, EUR, USD, GBP, CHF, PLN **[návrh]**.
-- **FOR-003** Kurz se automaticky načte z denního kurzovního lístku ČNB k datu vystavení a jde ručně přepsat. Uloží se na fakturu.
+- **FOR-003** Kurz se automaticky načte z denního kurzovního lístku ČNB k rozhodnému dni a jde ručně přepsat. V konceptu se při změně data nebo měny sám přenačte, ručně zadaný kurz přepíše jen uživatel. Při vystavení se uloží na fakturu a dál se sám nemění.
 - **FOR-004** Při nedostupnosti ČNB se použije poslední známý kurz s upozorněním, nebo ruční zadání.
 - **FOR-005** Účet podle měny dle SET-021. Chybí-li účet v dané měně, UI na to upozorní před vystavením.
 - **FOR-006** U identifikované osoby a služby pro firmu z EU se na fakturu doplní doložka o přenesení daňové povinnosti a VAT ID obou stran, bez výpočtu DPH. Doložka je předvyplněná a upravitelná. Přesné znění ověří daňový poradce před vydáním (viz 24).
 - **FOR-007** Doložky jsou v jazyce faktury.
 - **FOR-008** Přehledy přepočítávají cizí měny do CZK kurzem faktury, viz REP-009.
+- **FOR-009** **[návrh]** Rozhodný den je v nastavení: datum vystavení (výchozí), nebo DUZP, pokud je na faktuře vyplněný.
+- **FOR-010** **[návrh]** Pro každou měnu jde v nastavení zapnout vlastní pevný kurz. Použije se místo ČNB a ve formuláři je u něj vidět, že jde o pevný kurz. Pevný kurz ani ruční přepsání se od ČNB nesmí odchýlit o víc než 5 % bez upozornění.
 
 ### 7.7 Povinné a volitelné údaje na dokladu
 
@@ -473,7 +485,7 @@ Princip: uživatel si ve Fio nastaví e-mailová oznámení do své schránky a 
 
 ## 17. Export (EXP)
 
-- **EXP-001** Hromadný export faktur: PDF v ZIPu, ISDOC v ZIPu, CSV, Excel, XML pro Pohodu.
+- **EXP-001** Hromadný export faktur: PDF v ZIPu, ISDOC v ZIPu, CSV, Excel.
 - **EXP-002** Filtr období, typu, zákazníka, stavu.
 - **EXP-003** Export zákazníků, ceníku, plateb, šablon.
 - **EXP-004** Export audit logu.
@@ -602,7 +614,7 @@ Každá tabulka s daty účtu má `user_id`.
 - auth: tabulky Better Auth, `invitation`
 - `supplier_profile`, `bank_account`, `user_settings`, `mail_settings`, `bank_mailbox`
 - `customer`, `catalog_item`, `unit`
-- `number_series`, `invoice`, `invoice_line`, `invoice_version`, `payment`, `invoice_template`
+- `number_series`, `invoice`, `invoice_line`, `invoice_version`, `payment`, `invoice_template`, `tag`, `invoice_tag`
 - `recurring_invoice`, `recurring_run` (unikátní `(recurring_id, period_key)`)
 - `reminder_rule`, `reminder_sent`, `email_template`, `email_log`
 - `bank_notification`
@@ -657,6 +669,6 @@ Kritické e2e toky: první spuštění a onboarding, pozvánka, faktura od nuly 
 |---|---|---|
 | Vzorek českého avíza Fio | Bez něj nejde ověřit BNK-005, formát není veřejně popsaný. Staví se proti ověřené anglické variantě, česká je do dodání vzorku prozatímní. | zadavatel |
 | Vzorky ISDOC a CSV z Fakturoidu a iDokladu | Fakturovač je ověřený na 40 reálných dokladech, ostatní jen z dokumentace | implementace |
-| Znění doložky FOR-006, náležitosti neplátce, TAX-001 | Daňová správnost, zatím z obecné znalosti | daňový poradce |
+| Znění doložky FOR-006, náležitosti neplátce, TAX-001, použití pevného kurzu FOR-010 | Daňová správnost, zatím z obecné znalosti | daňový poradce |
 | TanStack Charts | Zdroje se rozcházejí, zda jde o stabilní 1.x, nebo alfu; ověřit před začátkem kapitoly 14 | implementace |
 
