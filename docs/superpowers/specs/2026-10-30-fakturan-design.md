@@ -489,7 +489,7 @@ Audit log je základní vlastnost, ne doplněk. Zapisuje se **úplně všechno**
 - **AUD-002** Dále pro: přihlášení úspěšná i neúspěšná, odhlášení, reset hesla, změny auth, pozvánky, role, stažení PDF, exporty, importy, zálohy, zobrazení tajemství, zpracování avíz, párování, běhy plánovače a jejich výsledek, překročení rate limitu, odmítnutý přístup.
 - **AUD-003** Záznam obsahuje: čas, aktéra, účet, zdroj (web, plánovač, import, systém, později API), akci, entitu, ID, změny před/po, IP, user agent, ID požadavku.
 - **AUD-004** Tajemství a hesla se do záznamu nikdy nedostanou, hodnoty se nahrazují `[skryto]`. Test to ověřuje pro každé citlivé pole.
-- **AUD-005** Zápis je ve stejné transakci jako změna. Když audit selže, selže i změna.
+- **AUD-005** Zápis je ve stejné transakci jako změna. Když audit selže, selže i změna. Výjimka: vlastní zápisy Better Auth (účty, relace, hesla) běží v jeho transakci, audit se proto zapíše hned po nich a jeho selhání vrátí chybu 500, změnu ale nevrátí **[návrh]**.
 - **AUD-006** Log je append-only: aplikace nemá cestu pro úpravu nebo smazání a databázové triggery to blokují.
 - **AUD-007** Uživatel vidí vlastní log: filtr podle akce, entity, období, aktéra, zdroje; detail s rozdílem; export.
 - **AUD-008** Administrátor vidí jen události instance: účty, pozvánky, role, konfigurace. Obsah fakturace jiných uživatelů ne.
