@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
-import { auditLog } from "@/server/db/schema";
+import { appearanceFrom } from "@/lib/invoice";
+import type { CustomerSnapshot, SupplierSnapshot } from "@/lib/invoice-document";
+import { DEFAULT_PREFERENCES } from "@/lib/preferences";
+import { auditLog, invoice, invoiceLine } from "@/server/db/schema";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 
@@ -26,6 +29,46 @@ function createSeries(ownerId: string): string {
     .run(id, ownerId);
   return id;
 }
+
+function createInvoice(ownerId: string, over: Partial<typeof invoice.$inferInsert> = {}): string {
+  const id = randomUUID();
+  const now = new Date();
+  db.insert(invoice)
+    .values({
+      id,
+      userId: ownerId,
+      type: "invoice",
+      language: "cs",
+      currency: "CZK",
+      paymentMethod: "cash",
+      appearance: appearanceFrom(DEFAULT_PREFERENCES),
+      createdAt: now,
+      updatedAt: now,
+      ...over,
+    })
+    .run();
+  return id;
+}
+
+function addLine(ownerId: string, invoiceId: string, netMinor: number): void {
+  db.insert(invoiceLine)
+    .values({
+      id: randomUUID(),
+      invoiceId,
+      userId: ownerId,
+      position: 0,
+      quantityMilli: 1000,
+      unitPriceMinor: 10_000,
+      netMinor,
+    })
+    .run();
+}
+
+const issued = {
+  status: "issued",
+  supplierSnapshot: { name: "Dodavatel" } as SupplierSnapshot,
+  customerSnapshot: { name: "Zákazník" } as CustomerSnapshot,
+} as const;
 
 describe("assertConsistent", () => {
   test("[TST-018] prochází na čistém účtu", () => {
@@ -76,6 +119,92 @@ describe("assertConsistent", () => {
     db.$client.pragma("foreign_keys = ON");
 
     expect(() => assertConsistent(db, ghost)).toThrow(/unit/);
+  });
+
+  test("[TST-018] přijme vystavený doklad se součty, číslem a snapshoty", () => {
+    const owner = createUser();
+    const id = createInvoice(owner, {
+      ...issued,
+      number: "1",
+      subtotalMinor: 10_000,
+      totalMinor: 10_000,
+    });
+    addLine(owner, id, 10_000);
+
+    expect(() => assertConsistent(db, owner)).not.toThrow();
+  });
+
+  test("[TST-018] odhalí součet, který neodpovídá položkám", () => {
+    const owner = createUser();
+    const id = createInvoice(owner, { subtotalMinor: 10_000, totalMinor: 9_000 });
+    addLine(owner, id, 10_000);
+
+    expect(() => assertConsistent(db, owner)).toThrow(/součty neodpovídají/);
+  });
+
+  test("[TST-018] odhalí řádek s jinou částkou než výpočet", () => {
+    const owner = createUser();
+    const id = createInvoice(owner, { subtotalMinor: 10_000, totalMinor: 10_000 });
+    addLine(owner, id, 9_000);
+
+    expect(() => assertConsistent(db, owner)).toThrow(/součty neodpovídají/);
+  });
+
+  test("[TST-018] odhalí součty, které nejde spočítat", () => {
+    const owner = createUser();
+    const id = createInvoice(owner);
+    addLine(owner, id, 0);
+    db.update(invoiceLine)
+      .set({ unitPriceMinor: Number.MAX_SAFE_INTEGER })
+      .where(eq(invoiceLine.invoiceId, id))
+      .run();
+
+    expect(() => assertConsistent(db, owner)).toThrow(/nejde spočítat/);
+  });
+
+  test("[TST-018] odhalí koncept s číslem", () => {
+    const owner = createUser();
+    createInvoice(owner, { number: "1" });
+
+    expect(() => assertConsistent(db, owner)).toThrow(/koncept má číslo/);
+  });
+
+  test("[TST-018] odhalí vystavený doklad bez čísla", () => {
+    const owner = createUser();
+    createInvoice(owner, issued);
+
+    expect(() => assertConsistent(db, owner)).toThrow(/nemá číslo/);
+  });
+
+  test("[TST-018] odhalí vystavený doklad bez snapshotů", () => {
+    const owner = createUser();
+    createInvoice(owner, { status: "issued", number: "1" });
+
+    expect(() => assertConsistent(db, owner)).toThrow(/nemá snapshoty/);
+  });
+
+  test("[TST-018] odhalí převod bez snapshotu účtu", () => {
+    const owner = createUser();
+    createInvoice(owner, { ...issued, number: "1", paymentMethod: "transfer" });
+
+    expect(() => assertConsistent(db, owner)).toThrow(/bez snapshotu účtu/);
+  });
+
+  test("[TST-018] odhalí opakované číslo", () => {
+    const owner = createUser();
+    createInvoice(owner, { ...issued, number: "1" });
+    createInvoice(owner, { ...issued, number: "2" });
+    db.run(sql`DROP INDEX invoice_user_number_idx`);
+    try {
+      db.update(invoice).set({ number: "1" }).where(eq(invoice.userId, owner)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/opakovaná čísla 1/);
+    } finally {
+      db.delete(invoice).where(eq(invoice.userId, owner)).run();
+      db.run(
+        sql`CREATE UNIQUE INDEX invoice_user_number_idx ON invoice (user_id, number) WHERE number IS NOT NULL`,
+      );
+    }
   });
 
   // Last on purpose: audit_log is append-only, so the orphan row stays in this file's database.

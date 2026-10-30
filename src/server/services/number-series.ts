@@ -367,7 +367,8 @@ export function deleteSeries(actor: Actor, id: string): void {
 }
 
 // Must run inside the caller's mutate. The upsert is a single statement, and a rollback of the
-// issuing transaction returns the number, so the sequence stays gapless.
+// issuing transaction returns the number, so the sequence stays gapless apart from numbers skipped
+// because a manual renumbering (INV-022) already holds them.
 export function allocateNumber(
   tx: Tx,
   ownerId: string,
@@ -375,23 +376,26 @@ export function allocateNumber(
   date: CalendarDate,
 ): { number: string; n: number } {
   const series = findOwned(tx, ownerId, seriesId);
-  const { n } = tx
-    .insert(numberSeriesCounter)
-    .values({
-      seriesId,
-      periodKey: periodKey(series.reset, date),
-      userId: ownerId,
-      next: 2,
-      highest: 1,
-    })
-    .onConflictDoUpdate({
-      target: [numberSeriesCounter.seriesId, numberSeriesCounter.periodKey],
-      set: {
-        next: sql`${numberSeriesCounter.next} + 1`,
-        highest: numberSeriesCounter.next,
-      },
-    })
-    .returning({ n: numberSeriesCounter.highest })
-    .get();
-  return { number: formatNumber(series.template, date, n), n };
+  for (;;) {
+    const { n } = tx
+      .insert(numberSeriesCounter)
+      .values({
+        seriesId,
+        periodKey: periodKey(series.reset, date),
+        userId: ownerId,
+        next: 2,
+        highest: 1,
+      })
+      .onConflictDoUpdate({
+        target: [numberSeriesCounter.seriesId, numberSeriesCounter.periodKey],
+        set: {
+          next: sql`${numberSeriesCounter.next} + 1`,
+          highest: numberSeriesCounter.next,
+        },
+      })
+      .returning({ n: numberSeriesCounter.highest })
+      .get();
+    const number = formatNumber(series.template, date, n);
+    if (!isNumberTaken(tx, ownerId, number)) return { number, n };
+  }
 }

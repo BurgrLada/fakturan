@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { CURRENCIES } from "@/lib/currency";
 import { INVOICE_STATUSES, INVOICE_TYPES, type Appearance } from "@/lib/invoice";
+import type { AccountSnapshot, CustomerSnapshot, SupplierSnapshot } from "@/lib/invoice-document";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
 import { user } from "./auth";
@@ -65,9 +66,9 @@ export const invoice = sqliteTable(
     totalMinor: integer("total_minor").notNull().default(0),
     paidMinor: integer("paid_minor").notNull().default(0),
     appearance: text({ mode: "json" }).$type<Appearance>().notNull(),
-    supplierSnapshot: text("supplier_snapshot", { mode: "json" }),
-    customerSnapshot: text("customer_snapshot", { mode: "json" }),
-    accountSnapshot: text("account_snapshot", { mode: "json" }),
+    supplierSnapshot: text("supplier_snapshot", { mode: "json" }).$type<SupplierSnapshot>(),
+    customerSnapshot: text("customer_snapshot", { mode: "json" }).$type<CustomerSnapshot>(),
+    accountSnapshot: text("account_snapshot", { mode: "json" }).$type<AccountSnapshot>(),
     logoFileId: imageRef("logo_file_id"),
     qrLogoFileId: imageRef("qr_logo_file_id"),
     signatureFileId: imageRef("signature_file_id"),

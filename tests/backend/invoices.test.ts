@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { diffAudit } from "@/lib/audit-diff";
 import { MAX_DOCUMENT_MINOR } from "@/lib/invoice-totals";
 import { INVOICE_STATUSES, INVOICE_TYPES, isOverdue } from "@/lib/invoice";
+import type { SupplierSnapshot } from "@/lib/invoice-document";
 import { DOCUMENT_TYPES } from "@/lib/number-format";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
 import { setClockForTests } from "@/server/clock";
@@ -635,7 +636,7 @@ describe("duplikace", () => {
       .set({
         variableSymbol: "2026001",
         variableSymbolManual: true,
-        supplierSnapshot: { name: "x" },
+        supplierSnapshot: { name: "x" } as SupplierSnapshot,
         issuedAt: NOW,
         sentAt: NOW,
         paidMinor: 5,

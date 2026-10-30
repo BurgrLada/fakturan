@@ -1,7 +1,6 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Worker } from "node:worker_threads";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
@@ -21,6 +20,7 @@ import {
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
 import { assertIsolated } from "../helpers/isolation";
 import { createTestDb } from "../helpers/db";
+import { runAllocateWorkers } from "../helpers/run-workers";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -385,56 +385,12 @@ describe("přidělení čísla", () => {
 
   test("[NUM-005] 50 souběžných přidělení dá 50 různých čísel bez mezery", async () => {
     const id = newSeries("a4", { template: "S{RRRR}-{NNNN}" });
-    const databasePath = db.$client.name;
-    const gate = new SharedArrayBuffer(4);
+    const job = { ownerId: "a4", seriesId: id, date: "2026-05-05", count: 10 };
     const workerCount = 5;
-
-    const workers = Array.from(
-      { length: workerCount },
-      () =>
-        new Worker(new URL("../helpers/allocate-worker.mjs", import.meta.url), {
-          execArgv: ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON"],
-          workerData: {
-            databasePath,
-            ownerId: "a4",
-            seriesId: id,
-            date: "2026-05-05",
-            count: 10,
-            gate,
-          },
-        }),
+    const perWorker = await runAllocateWorkers<{ number: string; n: number }[]>(
+      Array.from({ length: workerCount }, () => job),
+      db.$client.name,
     );
-    const failure = (worker: Worker) =>
-      new Promise<never>((_, reject) => {
-        worker.once("error", reject);
-        worker.once("exit", (code) => reject(new Error(`Worker skončil s kódem ${code}`)));
-      });
-    const message = <T>(worker: Worker, key: string) =>
-      Promise.race([
-        new Promise<T>((resolve) => {
-          worker.on("message", (received) => {
-            if (key in received) resolve(received[key]);
-          });
-        }),
-        failure(worker),
-      ]);
-    const ready = workers.map((worker) => message<boolean>(worker, "ready"));
-    const results = workers.map((worker) =>
-      message<{ number: string; n: number }[]>(worker, "allocated"),
-    );
-    // A rejection before the gate opens must surface through `ready`, not as an unhandled one.
-    void Promise.allSettled(results);
-
-    let perWorker: { number: string; n: number }[][];
-    try {
-      await Promise.all(ready);
-      const signal = new Int32Array(gate);
-      Atomics.store(signal, 0, 1);
-      Atomics.notify(signal, 0);
-      perWorker = await Promise.all(results);
-    } finally {
-      await Promise.all(workers.map((worker) => worker.terminate()));
-    }
     const all = perWorker.flat();
 
     expect(new Set(all.map((row) => row.number)).size).toBe(50);

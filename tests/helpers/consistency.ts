@@ -1,5 +1,7 @@
-import { getTableColumns, getTableName, is, sql } from "drizzle-orm";
+import { asc, eq, getTableColumns, getTableName, is, sql } from "drizzle-orm";
 import { SQLiteTable } from "drizzle-orm/sqlite-core";
+import { toDiscount } from "@/lib/invoice";
+import { computeTotals } from "@/lib/invoice-totals";
 import type { Db } from "@/server/db";
 import * as schema from "@/server/db/schema";
 
@@ -21,6 +23,59 @@ const OWNED = ownedTables();
 
 function count(db: Db, query: ReturnType<typeof sql>): number {
   return db.get<{ n: number }>(query)?.n ?? 0;
+}
+
+function invoiceProblems(db: Db, ownerId: string): string[] {
+  const { invoice, invoiceLine } = schema;
+  const problems: string[] = [];
+  const rows = db.select().from(invoice).where(eq(invoice.userId, ownerId)).all();
+
+  for (const row of rows) {
+    const label = `invoice ${row.id}`;
+    const lines = db
+      .select()
+      .from(invoiceLine)
+      .where(eq(invoiceLine.invoiceId, row.id))
+      .orderBy(asc(invoiceLine.position))
+      .all();
+    try {
+      const totals = computeTotals(
+        lines.map((line) => ({
+          quantityMilli: line.quantityMilli,
+          unitPriceMinor: line.unitPriceMinor,
+          discount: toDiscount(line.discountKind, line.discountValue),
+        })),
+        toDiscount(row.discountKind, row.discountValue),
+        row.rounding,
+      );
+      const matches =
+        row.subtotalMinor === totals.subtotalMinor &&
+        row.discountMinor === totals.discountMinor &&
+        row.roundingMinor === totals.roundingMinor &&
+        row.totalMinor === totals.totalMinor &&
+        lines.every((line, i) => line.netMinor === totals.lines[i]!.netMinor);
+      if (!matches) problems.push(`${label}: uložené součty neodpovídají položkám`);
+    } catch {
+      problems.push(`${label}: součty nejde spočítat`);
+    }
+
+    if (row.status === "draft") {
+      if (row.number !== null) problems.push(`${label}: koncept má číslo`);
+      continue;
+    }
+    if (row.number === null) problems.push(`${label}: vystavený doklad nemá číslo`);
+    if (!row.supplierSnapshot || !row.customerSnapshot) {
+      problems.push(`${label}: vystavený doklad nemá snapshoty`);
+    }
+    if (row.paymentMethod === "transfer" && !row.accountSnapshot) {
+      problems.push(`${label}: převod bez snapshotu účtu`);
+    }
+  }
+
+  const numbers = rows.flatMap((row) => row.number ?? []);
+  const repeated = numbers.filter((number, i) => numbers.indexOf(number) !== i);
+  if (repeated.length > 0) problems.push(`invoice: opakovaná čísla ${repeated.join(", ")}`);
+  return problems;
 }
 
 // Throws on the first broken invariant. Plans extend it as new entities arrive.
@@ -52,6 +107,8 @@ export function assertConsistent(db: Db, ownerId: string): void {
   );
   if (orphanAudit > 0)
     problems.push(`audit_log: ${orphanAudit} uživatelských záznamů bez vlastníka`);
+
+  problems.push(...invoiceProblems(db, ownerId));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

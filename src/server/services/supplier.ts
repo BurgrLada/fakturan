@@ -1,12 +1,12 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { isValidIco } from "@/lib/ico";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { supplier } from "../db/schema";
+import { invoice, supplier } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { logger } from "../logger";
 import { ServiceError } from "./access";
@@ -58,6 +58,8 @@ export type SupplierInput = z.infer<typeof supplierInputSchema>;
 
 const REQUIRED_FIELDS = ["name", "street", "city", "zip", "country", "ico"] as const;
 
+export type SupplierField = (typeof REQUIRED_FIELDS)[number];
+
 const IMAGE_COLUMN = {
   logo: "logoFileId",
   qr_logo: "qrLogoFileId",
@@ -73,11 +75,13 @@ export function getSupplier(ownerId: string): SupplierProfile | null {
   return db.select().from(supplier).where(scoped(ownerId).where(supplier)).get() ?? null;
 }
 
-export function missingSupplierFields(ownerId: string): string[] {
+export function missingSupplierKeys(ownerId: string): SupplierField[] {
   const profile = getSupplier(ownerId);
-  return REQUIRED_FIELDS.filter((key) => !profile?.[key]?.trim()).map(
-    (key) => TEXTS.supplier.required[key],
-  );
+  return REQUIRED_FIELDS.filter((key) => !profile?.[key]?.trim());
+}
+
+export function missingSupplierFields(ownerId: string): string[] {
+  return missingSupplierKeys(ownerId).map((key) => TEXTS.supplier.required[key]);
 }
 
 export function saveSupplier(actor: Actor, raw: SupplierInput): void {
@@ -166,9 +170,22 @@ export function clearSupplierImage(actor: Actor, kind: SupplierImageKind): void 
   discardFile(actor, previous);
 }
 
-// The swap is already committed, so a leftover file must not turn it into a failure.
+function isUsedByInvoice(ownerId: string, id: string): boolean {
+  return !!db
+    .select({ id: invoice.id })
+    .from(invoice)
+    .where(
+      scoped(ownerId).where(invoice, (t) =>
+        or(eq(t.logoFileId, id), eq(t.qrLogoFileId, id), eq(t.signatureFileId, id)),
+      ),
+    )
+    .get();
+}
+
+// The swap is already committed, so a leftover file must not turn it into a failure. Checking after
+// the commit is safe: issuing reads the profile, which no longer points at this file.
 function discardFile(actor: Actor, id: string | null): void {
-  if (!id) return;
+  if (!id || isUsedByInvoice(ownerOf(actor), id)) return;
   try {
     deleteFile(actor, id);
   } catch (error) {

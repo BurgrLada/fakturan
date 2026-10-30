@@ -152,7 +152,7 @@ type DraftLine = Draft["lines"][number];
 
 export type SavedDraft = { id: string; revision: number; totals: Totals };
 
-function ownerOf(actor: Actor): string {
+export function ownerOf(actor: Actor): string {
   if (!actor.userId) throw new ServiceError(V.forbidden);
   return actor.userId;
 }
@@ -167,13 +167,13 @@ function readOwned(q: Reader, ownerId: string, id: string): Invoice | null {
   );
 }
 
-function findOwned(q: Reader, ownerId: string, id: string): Invoice {
+export function findOwned(q: Reader, ownerId: string, id: string): Invoice {
   const row = readOwned(q, ownerId, id);
   if (!row) throw new ServiceError(V.notFound);
   return row;
 }
 
-function linesOf(q: Reader, ownerId: string, invoiceId: string): InvoiceLine[] {
+export function linesOf(q: Reader, ownerId: string, invoiceId: string): InvoiceLine[] {
   return q
     .select()
     .from(invoiceLine)
@@ -217,7 +217,7 @@ export function newDraftDefaults(ownerId: string, customerId: string | null): Dr
   };
 }
 
-function totalsOf(
+export function totalsOf(
   lines: Pick<DraftLine, "quantityMilli" | "unitPriceMinor" | "discountKind" | "discountValue">[],
   draft: Pick<Draft, "discountKind" | "discountValue" | "rounding">,
 ): Totals {
@@ -279,7 +279,7 @@ function customerNameOf(tx: Tx, ownerId: string, customerId: string | null): str
   );
 }
 
-function searchTextOf(row: {
+export function searchTextOf(row: {
   number?: string | null;
   customerName: string;
   lines: { name: string }[];
@@ -289,7 +289,7 @@ function searchTextOf(row: {
   );
 }
 
-function sumsOf(totals: Totals) {
+export function sumsOf(totals: Totals) {
   const { subtotalMinor, discountMinor, roundingMinor, totalMinor } = totals;
   return { subtotalMinor, discountMinor, roundingMinor, totalMinor };
 }
@@ -351,7 +351,7 @@ type LineChanges = {
 // Lines are replaced on every save, so ids cannot pair them: identical content pairs first (a
 // move), then what is left at the same position (an edit). Only the difference goes to the audit,
 // because autosave would otherwise copy up to 500 lines per pause in typing.
-function diffLines(before: LineRow[], after: LineRow[]): LineChanges | null {
+export function diffLines(before: LineRow[], after: LineRow[]): LineChanges | null {
   const unchanged = (line: LineRow, i: number, other: LineRow[]) =>
     other[i] !== undefined && contentKey(other[i]) === contentKey(line);
   const left = before.filter((line, i) => !unchanged(line, i, after));
@@ -389,14 +389,17 @@ function diffLines(before: LineRow[], after: LineRow[]): LineChanges | null {
   };
 }
 
-function snapshot(row: Invoice, lineCount: number) {
+export function auditSnapshot(row: Invoice, lineCount: number) {
   const { userId: _u, createdAt: _c, updatedAt: _t, searchText: _s, ...rest } = row;
   return { ...rest, lineCount };
 }
 
 class Unchanged extends Error {
-  constructor(readonly saved: SavedDraft) {
+  readonly saved: SavedDraft;
+
+  constructor(saved: SavedDraft) {
     super();
+    this.saved = saved;
   }
 }
 
@@ -462,11 +465,11 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
         ownerId: userId,
         scope: "user",
         before: before && {
-          ...snapshot(before, beforeLines.length),
+          ...auditSnapshot(before, beforeLines.length),
           ...(changes && { lines: changes.before }),
         },
         after: {
-          ...snapshot(findOwned(tx, userId, id), rows.length),
+          ...auditSnapshot(findOwned(tx, userId, id), rows.length),
           ...(changes && { lines: changes.after }),
         },
       });
@@ -492,7 +495,7 @@ export function deleteDraft(actor: Actor, id: string): void {
       entityId: id,
       ownerId: userId,
       scope: "user",
-      before: { ...snapshot(row, lines.length), lines: lines.map(lineBody) },
+      before: { ...auditSnapshot(row, lines.length), lines: lines.map(lineBody) },
     });
   });
 }
@@ -573,7 +576,7 @@ export function duplicateInvoice(actor: Actor, id: string): { id: string } {
       scope: "user",
       after: {
         duplicatedFrom: id,
-        ...snapshot(findOwned(tx, userId, copyId), lines.length),
+        ...auditSnapshot(findOwned(tx, userId, copyId), lines.length),
         lines: lines.map(lineBody),
       },
     });

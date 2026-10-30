@@ -28,11 +28,12 @@ registerHooks({
   },
 });
 
-const { databasePath, ownerId, seriesId, date, count, gate } = workerData;
+const { databasePath, ownerId, seriesId, date, count, issues, gate } = workerData;
 
 const { createDb, setDbForTests } = await import("@/server/db");
 const { mutate } = await import("@/server/services/mutation");
 const { allocateNumber } = await import("@/server/services/number-series");
+const { issueInvoice } = await import("@/server/services/invoice-lifecycle");
 
 setDbForTests(createDb(databasePath));
 
@@ -40,20 +41,23 @@ const signal = new Int32Array(gate);
 parentPort.postMessage({ ready: true });
 Atomics.wait(signal, 0, 0);
 
-const allocated = [];
-for (let i = 0; i < count; i += 1) {
-  allocated.push(
-    mutate({ userId: ownerId, source: "web" }, "number_series.test_allocate", (tx, audit) => {
-      const result = allocateNumber(tx, ownerId, seriesId, date);
-      audit({
-        entity: "number_series",
-        entityId: seriesId,
-        ownerId,
-        scope: "user",
-        after: result,
-      });
-      return result;
-    }),
-  );
+const actor = { userId: ownerId, source: "web" };
+
+function allocateOne() {
+  return mutate(actor, "number_series.test_allocate", (tx, audit) => {
+    const result = allocateNumber(tx, ownerId, seriesId, date);
+    audit({
+      entity: "number_series",
+      entityId: seriesId,
+      ownerId,
+      scope: "user",
+      after: result,
+    });
+    return result;
+  });
 }
+
+const allocated = issues
+  ? issues.map(({ id, revision }) => issueInvoice(actor, id, { revision }))
+  : Array.from({ length: count }, allocateOne);
 parentPort.postMessage({ allocated });
