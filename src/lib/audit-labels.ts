@@ -20,6 +20,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "auth.profile_update_failed": "Neúspěšná úprava profilu",
   "auth.session_revoke": "Ukončení relace",
   "auth.signup_rejected": "Odmítnutá registrace",
+  "file.create": "Nahrání souboru",
+  "file.delete": "Smazání souboru",
   "invitation.accept": "Přijetí pozvánky",
   "invitation.create": "Nová pozvánka",
   "invitation.mail_failed": "Neodeslaný e-mail s pozvánkou",

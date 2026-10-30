@@ -8,6 +8,7 @@ import {
   account,
   auditLog,
   auditPurge,
+  file,
   invitation,
   rateLimit,
   session,
@@ -15,6 +16,7 @@ import {
   verification,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { removeUserDir } from "../files/store";
 import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
 import { mutate } from "./mutation";
@@ -23,7 +25,7 @@ export type Role = "admin" | "user";
 
 // Every table with account data, enforced by a schema test in users.test.ts (ADM-006). Deleted in
 // this order, so a table with a non-cascading foreign key must precede the table it references.
-export const USER_OWNED_TABLES = [session, account];
+export const USER_OWNED_TABLES = [session, account, file];
 
 const REAUTH_WINDOW_MS = 15 * 60_000;
 
@@ -193,6 +195,7 @@ export function deleteUser(actor: Actor, userId: string, confirmEmail: string): 
     assertNotLastAdmin(tx, target);
     purgeAccount(tx, target, audit, false);
   });
+  removeUserDir(userId);
 }
 
 function passwordHash(userId: string): string | null {
@@ -248,4 +251,5 @@ export async function deleteOwnAccount(
     }
     purgeAccount(tx, target, audit, true);
   });
+  removeUserDir(userId);
 }
