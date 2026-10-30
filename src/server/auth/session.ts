@@ -5,6 +5,7 @@ import type { Actor } from "../audit/context";
 import { env } from "../env";
 import { mutate } from "../services/mutation";
 import { auth, type Auth } from "./index";
+import { setMonitoringUser } from "../monitoring/user";
 import { webActor } from "./request-actor";
 
 export type Session = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
@@ -18,7 +19,9 @@ export async function getCurrentSession(): Promise<Session | null> {
     query: { disableRefresh: true },
   });
   // Deactivation deletes sessions, but a login racing it can still leave a row behind (ADM-005).
-  return session?.user.banned ? null : session;
+  if (!session || session.user.banned) return null;
+  await setMonitoringUser(session.user.id);
+  return session;
 }
 
 export function recordAdminDenial(requestHeaders: Headers, userId: string): void {

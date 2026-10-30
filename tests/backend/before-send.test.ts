@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { Event } from "@sentry/nextjs";
 import { initMonitoring } from "../../sentry.server.config";
+import { setMonitoringUser } from "@/server/monitoring/user";
 import { scrubEvent } from "@/server/monitoring/before-send";
 
 describe("monitoring", () => {
@@ -65,5 +66,80 @@ describe("monitoring", () => {
 
   test("[MON-004] událost bez uživatele zůstane bez uživatele", () => {
     expect(scrubEvent({ message: "x" } as Event).user).toBeUndefined();
+  });
+
+  test("[MON-004] transakce, kontexty, spany a tagy neprozradí token pozvánky", () => {
+    const token = "TOKEN-abc123";
+    const out = scrubEvent({
+      type: "transaction",
+      transaction: `GET /pozvanka/${token}`,
+      contexts: {
+        trace: { trace_id: "t", span_id: "s", data: { "url.full": `/pozvanka/${token}` } },
+        runtime: { name: "node" },
+        response: { headers: { location: `/pozvanka/${token}` } },
+      },
+      spans: [
+        {
+          span_id: "a",
+          trace_id: "t",
+          start_timestamp: 1,
+          data: { "http.url": `https://f.cz/pozvanka/${token}?e=a@b.cz` },
+          description: `GET /pozvanka/${token}`,
+        },
+      ],
+      tags: { invitee: "a@b.cz" },
+      breadcrumbs: [{ data: { url: `/pozvanka/${token}` } }],
+      request: { url: `https://f.cz/pozvanka/${token}` },
+      exception: {
+        values: [
+          {
+            type: "Error",
+            value: `bad /pozvanka/${token}`,
+            stacktrace: { frames: [{ filename: "a.js", vars: { password: "hunter2" } }] },
+          },
+        ],
+      },
+    } as unknown as Event);
+    const json = JSON.stringify(out);
+    expect(json).not.toContain(token);
+    expect(json).not.toContain("a@b.cz");
+    expect(json).not.toContain("hunter2");
+    expect(out.spans).toBeUndefined();
+    expect(out.tags).toBeUndefined();
+    expect(out.contexts).toEqual({ trace: expect.objectContaining({ trace_id: "t" }) });
+    expect(out.transaction).toBe("GET /pozvanka/[token]");
+  });
+
+  test("[MON-004] allowlist zachová identitu události", () => {
+    const out = scrubEvent({
+      event_id: "e",
+      level: "error",
+      platform: "node",
+      environment: "prod",
+      release: "1",
+      unknown_field: "x",
+    } as Event);
+    expect(out).toEqual({
+      event_id: "e",
+      level: "error",
+      platform: "node",
+      environment: "prod",
+      release: "1",
+    });
+  });
+
+  test("[MON-004] beforeSendTransaction je také scrubEvent", () => {
+    const sdk = { init: vi.fn() };
+    initMonitoring({ SENTRY_DSN: "https://k@h.example.cz/1" }, sdk);
+    expect(sdk.init.mock.calls[0][0].beforeSendTransaction).toBe(scrubEvent);
+  });
+
+  test("[MON-004] do SDK se nastavuje jen ID uživatele", async () => {
+    const setUser = vi.fn();
+    await setMonitoringUser("u1", "https://k@h.example.cz/1", async () => ({ setUser }));
+    expect(setUser).toHaveBeenCalledWith({ id: "u1" });
+    const idle = vi.fn(async () => ({ setUser }));
+    await setMonitoringUser("u2", undefined, idle);
+    expect(idle).not.toHaveBeenCalled();
   });
 });

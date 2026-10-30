@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 
-test("[OPS-004] /api/health vrátí stav databáze bez citlivých údajů", async ({ freshApp }) => {
+test("/api/health vrátí stav databáze bez citlivých údajů", async ({ freshApp }) => {
   const res = await fetch(`${freshApp.baseURL}/api/health`);
   expect(res.status).toBe(200);
   const body = await res.json();

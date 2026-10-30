@@ -1,3 +1,4 @@
+import { MonitoringUser } from "@/components/monitoring-user";
 import { NavLinks } from "@/components/nav-links";
 import { visibleNavItems } from "@/components/nav";
 import { SignOutButton } from "@/components/auth/session-controls";
@@ -19,6 +20,7 @@ export async function AccountMenu() {
       <p className="text-xs text-muted-foreground">{TEXTS.shell.signedInAs}</p>
       <p className="text-sm break-all">{session.user.email}</p>
       <SignOutButton />
+      <MonitoringUser id={session.user.id} />
     </div>
   );
 }

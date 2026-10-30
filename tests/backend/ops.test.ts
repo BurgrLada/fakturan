@@ -25,12 +25,12 @@ afterEach(() => {
 });
 
 describe("health", () => {
-  test("[OPS-004] checkHealth hlásí databázi a plánovač bez citlivých údajů", () => {
+  test("checkHealth hlásí databázi a plánovač bez citlivých údajů", () => {
     const result = checkHealth(db);
     expect(result).toEqual({ status: "ok", database: "ok", scheduler: "not_started" });
   });
 
-  test("[OPS-004] nedostupná databáze dá status error a nevypíše chybu", () => {
+  test("nedostupná databáze dá status error a nevypíše chybu", () => {
     const broken = {
       $client: {
         prepare: () => {

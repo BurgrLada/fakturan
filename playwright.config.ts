@@ -5,6 +5,7 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: true,
+  workers: 3,
   reporter: "list",
   use: { trace: "retain-on-failure" },
 });

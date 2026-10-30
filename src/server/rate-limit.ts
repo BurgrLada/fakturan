@@ -29,6 +29,7 @@ export const RATE_RULES = {
   sendUser: rule("sendUser", 60, 60),
   importUser: rule("importUser", 60, 60),
   exportUser: rule("exportUser", 60, 60),
+  monitoringIp: rule("monitoringIp", 120, 60),
 } as const satisfies Record<string, RateRule>;
 
 // Fixed window. Denied attempts are not counted, so hammering a blocked key does not extend it.
