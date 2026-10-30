@@ -281,6 +281,16 @@ describe("první účet a uzavřená registrace", () => {
     expect(roleOf("pozvany@example.cz")).toBeUndefined();
   });
 
+  test("[AUTH-002] token pozvánky neplatí pro jiný e-mail při registraci heslem", async () => {
+    await createAdmin(plainAuth);
+    const browser = new Browser(plainAuth);
+    browser.cookies.set("fakturan_invite", insertInvite({ email: "pozvany@example.cz" }));
+
+    expect((await browser.signUp("jiny@example.cz")).status).toBe(400);
+    expect(roleOf("jiny@example.cz")).toBeUndefined();
+    expect(db.select().from(invitation).get()?.acceptedAt).toBeNull();
+  });
+
   test("[AUTH-002] platný token založí účet s rolí z pozvánky a pozvánku spotřebuje", async () => {
     await createAdmin(plainAuth);
     const token = insertInvite({ email: "pozvany@example.cz", role: "admin" });
@@ -399,6 +409,21 @@ describe("přihlášení", () => {
 
       expect(res.headers.get("location")).toBe(`${BASE}/prihlaseni?chyba=pozvanka`);
       expect(roleOf("pozvany@example.cz")).toBeUndefined();
+    });
+
+    test("[AUTH-005] selhání u existujícího účtu vypadá stejně jako bez účtu", async () => {
+      await createAdmin(socialAuth);
+      fakeGithub("admin@example.cz", false);
+
+      const existing = await githubLogin(new Browser(socialAuth));
+      fakeGithub("nikdo@example.cz", false);
+      const unknown = await githubLogin(new Browser(socialAuth));
+
+      expect(existing.headers.get("location")).toBe(`${BASE}/prihlaseni?chyba=pozvanka`);
+      expect(unknown.headers.get("location")).toBe(existing.headers.get("location"));
+      expect(auditRows("auth.login_failed").at(-1)).toMatchObject({
+        after: { method: "github", reason: "account_not_linked" },
+      });
     });
 
     test("[AUTH-005] token pozvánky v cookie projde i s jiným e-mailem poskytovatele", async () => {
@@ -520,7 +545,7 @@ describe("hesla a relace", () => {
 
     expect(await owner.sessionUser()).toBeNull();
     const row = auditRows("auth.password_reset").at(-1);
-    expect(row).toMatchObject({ scope: "instance" });
+    expect(row).toMatchObject({ scope: "instance", userAgent: "vitest" });
     expect(JSON.stringify(row)).not.toContain(token);
   });
 
@@ -559,10 +584,13 @@ describe("hesla a relace", () => {
     ["krátké", "kratke-hesl", "PASSWORD_TOO_SHORT"],
     ["uniklé", "unbelievable", "PASSWORD_COMPROMISED"],
     ["uniklé s velkými písmeny", "Scandinavian", "PASSWORD_COMPROMISED"],
+    ["z 1M seznamu", "qwertyuiop123", "PASSWORD_COMPROMISED"],
+    ["málo různých znaků", "abcdabcdabcd", "PASSWORD_WEAK"],
+    ["místní část e-mailu", "heslo.prijmeni-dlouhe", "PASSWORD_WEAK"],
   ])(
     "[AUTH-010] heslo pod 12 znaků a známé uniklé heslo jsou odmítnuty: %s",
     async (_, password, code) => {
-      const res = await new Browser(plainAuth).signUp("heslo@example.cz", password);
+      const res = await new Browser(plainAuth).signUp("heslo.prijmeni-dlouhe@example.cz", password);
 
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ code });
@@ -584,6 +612,34 @@ describe("hesla a relace", () => {
       body: { token, newPassword: "unbelievable" },
     });
     expect(reset.status).toBe(400);
+    expect(auditRows("auth.password_reset_failed").at(-1)).toMatchObject({
+      after: { reason: "PASSWORD_COMPROMISED" },
+    });
+    const zmena = db.select().from(user).where(eq(user.email, "zmena@example.cz")).get()!;
+    expect(auditRows("auth.password_reset_failed").at(-1)?.ownerId).toBe(zmena.id);
+  });
+
+  test("[AUTH-010] reset nepřijme místní část e-mailu účtu", async () => {
+    await createVerifiedAdmin("dlouha.mistni.cast@example.cz");
+    const token = await requestReset("dlouha.mistni.cast@example.cz");
+
+    const res = await new Browser(mailAuth).request("/reset-password", {
+      body: { token, newPassword: "dlouha.mistni.cast" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "PASSWORD_WEAK" });
+  });
+
+  test("[AUTH-008] žádost o reset se při selhání koncového bodu nezapíše jako provedená", async () => {
+    const before = auditRows("auth.password_reset_request").length;
+
+    const res = await new Browser(plainAuth).request("/request-password-reset", {
+      body: { email: "kdokoli@example.cz" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(auditRows("auth.password_reset_request")).toHaveLength(before);
   });
 
   test("[AUTH-011] ukončení ostatních relací", async () => {
@@ -593,12 +649,13 @@ describe("hesla a relace", () => {
 
     const list = await a.request("/list-sessions");
     expect((await list.json()) as unknown[]).toHaveLength(2);
+    const revokesBefore = auditRows("auth.session_revoke").length;
 
     expect((await a.request("/revoke-other-sessions", { body: {} })).status).toBe(200);
 
     expect(await a.sessionUser()).not.toBeNull();
     expect(await b.sessionUser()).toBeNull();
-    expect(auditRows("auth.session_revoke").length).toBeGreaterThan(0);
+    expect(auditRows("auth.session_revoke").length).toBe(revokesBefore + 1);
   });
 
   test("[AUTH-012] změna hesla ukončí ostatní relace i bez žádosti klienta", async () => {
@@ -700,7 +757,7 @@ describe("hesla a relace", () => {
 });
 
 describe("audit přihlašování", () => {
-  test("[AUD-002 část] úspěšné i neúspěšné přihlášení je v auditu", async () => {
+  test("úspěšné i neúspěšné přihlášení je v auditu", async () => {
     await createAdmin(plainAuth);
     const admin = db.select().from(user).get()!;
     const browser = new Browser(plainAuth);
@@ -734,10 +791,15 @@ describe("audit přihlašování", () => {
     expect(JSON.stringify(failed)).not.toContain("spatne-heslo");
   });
 
-  test("[AUD-002 část] odhlášení, vznik účtu a odmítnutá hesla jsou v auditu bez hesla", async () => {
+  test("odhlášení, vznik účtu a odmítnutá hesla jsou v auditu bez hesla", async () => {
     const browser = await createAdmin(plainAuth);
     const admin = db.select().from(user).get()!;
+    const rejected = "unbelievable";
 
+    const change = await browser.request("/change-password", {
+      body: { currentPassword: PASSWORD, newPassword: rejected },
+    });
+    expect(change.status).toBe(400);
     await browser.request("/sign-out", { body: {} });
 
     expect(auditRows("user.create").at(-1)).toMatchObject({
@@ -747,10 +809,51 @@ describe("audit přihlašování", () => {
     });
     expect(auditRows("auth.first_admin").at(-1)).toMatchObject({ scope: "instance" });
     expect(auditRows("auth.logout").at(-1)).toMatchObject({ actorId: admin.id, ownerId: admin.id });
-    expect(JSON.stringify(db.select().from(auditLog).all())).not.toContain(PASSWORD);
+    expect(auditRows("auth.password_change_failed").at(-1)).toMatchObject({
+      actorId: admin.id,
+      after: { reason: "PASSWORD_COMPROMISED" },
+    });
+    const everything = JSON.stringify(db.select().from(auditLog).all());
+    expect(everything).not.toContain(PASSWORD);
+    expect(everything).not.toContain(rejected);
   });
 
-  test("[AUD-002 část] selhání zápisu auditu přihlášení shodí požadavek", async () => {
+  test("selhání zápisu auditu odhlášení se dostane ke klientovi a relace zůstane", async () => {
+    const browser = await createAdmin(plainAuth);
+    db.$client.exec(
+      "CREATE TRIGGER fail_logout BEFORE INSERT ON audit_log WHEN NEW.action = 'auth.logout' BEGIN SELECT RAISE(ABORT, 'audit down'); END",
+    );
+    try {
+      expect((await browser.request("/sign-out", { body: {} })).status).toBe(500);
+      expect(await browser.sessionUser()).not.toBeNull();
+    } finally {
+      db.$client.exec("DROP TRIGGER fail_logout");
+    }
+  });
+
+  test("automatické přihlášení po ověření e-mailu je v auditu", async () => {
+    const smtp = await startSmtp();
+    try {
+      const auth = createAuth(
+        testEnv({
+          SMTP_HOST: "127.0.0.1",
+          SMTP_PORT: String(smtp.port),
+          SMTP_FROM: "fakturan@example.cz",
+        }),
+      );
+      const browser = new Browser(auth);
+      await browser.signUp("over2@example.cz");
+      const { text } = await smtp.waitFor("over2@example.cz");
+      const link = /https?:\/\/\S+/.exec(text.slice(text.indexOf("\r\n\r\n")))![0];
+      await browser.request(link.slice(`${BASE}/api/auth`.length));
+
+      expect(auditRows("auth.login").at(-1)).toMatchObject({ after: { method: "email-link" } });
+    } finally {
+      await smtp.stop();
+    }
+  });
+
+  test("selhání zápisu auditu přihlášení shodí požadavek", async () => {
     await createAdmin(plainAuth);
     db.$client.exec(
       "CREATE TRIGGER fail_login BEFORE INSERT ON audit_log WHEN NEW.action = 'auth.login' BEGIN SELECT RAISE(ABORT, 'audit down'); END",

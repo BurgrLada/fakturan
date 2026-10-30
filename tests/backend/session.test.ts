@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { auth } from "@/server/auth";
-import { clientIp } from "@/server/auth/request-actor";
+import { clientIp, webActor } from "@/server/auth/request-actor";
 import { actorFromRequest, requireAdmin, requireSession } from "@/server/auth/session";
 import { user } from "@/server/db/schema";
 import { parseEnv } from "@/server/env";
@@ -72,7 +72,7 @@ describe("relace v serverových komponentách", () => {
     });
   });
 
-  test("[ADM-001 část] requireAdmin pustí admina, běžnému uživateli vrátí 404", async () => {
+  test("requireAdmin pustí admina, běžnému uživateli vrátí 404", async () => {
     await expect(requireAdmin()).resolves.toMatchObject({ user: { role: "admin" } });
 
     db.update(user).set({ role: "user" }).run();
@@ -85,5 +85,15 @@ describe("relace v serverových komponentách", () => {
 
     expect(clientIp(headers, parseEnv(envValues))).toBeUndefined();
     expect(clientIp(headers, parseEnv({ ...envValues, TRUST_PROXY: "1" }))).toBe("10.0.0.1");
+  });
+
+  test("[AUD-003] x-request-id se přijme jen za proxy a ve správném formátu", () => {
+    const trusted = parseEnv({ ...envValues, TRUST_PROXY: "1" });
+    const good = new Headers({ "x-request-id": "req-1.a_B" });
+    const bad = new Headers({ "x-request-id": "x y<script>" });
+
+    expect(webActor(good, null, trusted).requestId).toBe("req-1.a_B");
+    expect(webActor(good, null, parseEnv(envValues)).requestId).not.toBe("req-1.a_B");
+    expect(webActor(bad, null, trusted).requestId).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

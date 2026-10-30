@@ -51,6 +51,22 @@ test("[AUTH-005] odmítnuté sociální přihlášení ukáže obecnou hlášku"
   await expect(page.getByText("Přístup je jen na pozvánku")).toBeVisible();
 });
 
+test("[AUTH-001] prázdná instance nabídne z přihlášení registraci, po ní už ne", async ({
+  page,
+  freshApp,
+}) => {
+  await page.goto(`${freshApp.baseURL}/prihlaseni`);
+  await page.getByRole("link", { name: "Vytvořit první účet" }).click();
+  await page.getByLabel("Jméno").fill("Jan Novák");
+  await page.getByLabel("E-mail").fill(EMAIL);
+  await page.getByLabel("Heslo").fill(PASSWORD);
+  await page.getByRole("button", { name: "Vytvořit účet" }).click();
+  await expect(page.getByText(EMAIL)).toBeVisible();
+
+  await page.goto(`${freshApp.baseURL}/prihlaseni`);
+  await expect(page.getByRole("link", { name: "Vytvořit první účet" })).toHaveCount(0);
+});
+
 test("[AUTH-004] bez klíčů se tlačítka poskytovatelů nezobrazí", async ({ page, freshApp }) => {
   await page.goto(`${freshApp.baseURL}/prihlaseni`);
   await expect(page.getByRole("button", { name: "Přihlásit se" })).toBeVisible();

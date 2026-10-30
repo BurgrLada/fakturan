@@ -6,27 +6,30 @@ import { SocialButtons } from "@/components/auth/social-buttons";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { enabledProviders } from "@/server/auth/providers";
+import { isSignupOpen } from "@/server/auth/signup-guard";
+import { db } from "@/server/db";
 import { env } from "@/server/env";
 
 export const metadata: Metadata = { title: "Přihlášení | Fakturan" };
 
 async function LoginContent({ searchParams }: Pick<PageProps<"/prihlaseni">, "searchParams">) {
-  const { chyba, error } = await searchParams;
-  const notice =
-    chyba === "pozvanka"
-      ? "Přístup je jen na pozvánku"
-      : error
-        ? "Přihlášení se nepovedlo, zkuste to prosím znovu."
-        : null;
+  const { chyba } = await searchParams;
   return (
     <>
-      {notice && (
+      {chyba === "pozvanka" && (
         <Alert variant="destructive">
-          <AlertDescription>{notice}</AlertDescription>
+          <AlertDescription>Přístup je jen na pozvánku</AlertDescription>
         </Alert>
       )}
       <LoginForm />
       <SocialButtons providers={enabledProviders(env)} />
+      {isSignupOpen(db) && (
+        <p className="text-sm text-muted-foreground">
+          <Link href="/registrace" className="underline">
+            Vytvořit první účet
+          </Link>
+        </p>
+      )}
     </>
   );
 }

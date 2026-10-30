@@ -18,9 +18,17 @@ type AuthEvent = {
   after?: unknown;
 };
 
-const LOGIN_PATHS = new Set(["/sign-in/email", "/sign-up/email"]);
+const LOGIN_METHODS: Record<string, string> = {
+  "/sign-in/email": "password",
+  "/sign-up/email": "password",
+  "/verify-email": "email-link",
+};
 
-// Paths that act on the signed-in user; sign-out and revocations are audited per deleted session.
+// Every failed social login ends here: a distinct reason would reveal whether an account exists.
+export const SOCIAL_REJECTED_PATH = "/prihlaseni?chyba=pozvanka";
+
+// Paths that act on the signed-in user; revocations are audited per deleted session, sign-out in
+// the before hook because the endpoint swallows errors from session deletion.
 const USER_EVENTS: Record<string, AuditAction> = {
   "/change-password": "auth.password_change",
   "/change-email": "auth.email_change_request",
@@ -29,7 +37,6 @@ const USER_EVENTS: Record<string, AuditAction> = {
 };
 
 const SESSION_END_PATHS = new Set([
-  "/sign-out",
   "/revoke-session",
   "/revoke-sessions",
   "/revoke-other-sessions",
@@ -42,7 +49,7 @@ export function validEmail(value: unknown): string | null {
 }
 
 export function recordAuthEvent(
-  ctx: Ctx | null | undefined,
+  ctx: { headers?: Headers } | null | undefined,
   env: Env,
   { action, actorId = null, ownerId, entity = "user", entityId = ownerId, after }: AuthEvent,
 ): void {
@@ -54,6 +61,15 @@ export function recordAuthEvent(
 async function ownerOfEmail(ctx: Ctx, email: string | null): Promise<string | null> {
   if (!email) return null;
   return (await ctx.context.internalAdapter.findUserByEmail(email))?.user.id ?? null;
+}
+
+function oauthError(ctx: Ctx, env: Env): { location: string; reason: string } | null {
+  const { returned } = ctx.context as { returned?: unknown };
+  if (!isAPIError(returned)) return null;
+  const location = new Headers(returned.headers).get("location");
+  if (!location) return null;
+  const reason = new URL(location, env.BETTER_AUTH_URL).searchParams.get("error");
+  return reason ? { location, reason } : null;
 }
 
 function failure(ctx: Ctx): { code: string | undefined } | null {
@@ -68,14 +84,26 @@ export async function auditAuthEndpoint(ctx: Ctx, env: Env): Promise<void> {
   const failed = failure(ctx);
   const isOAuthCallback = ctx.path === "/callback/:id";
 
-  if (newSession && (LOGIN_PATHS.has(ctx.path) || isOAuthCallback)) {
+  const loginMethod = isOAuthCallback ? ctx.params?.id : LOGIN_METHODS[ctx.path];
+  if (newSession && loginMethod) {
     recordAuthEvent(ctx, env, {
       action: "auth.login",
       actorId: newSession.user.id,
       ownerId: newSession.user.id,
-      after: { method: isOAuthCallback ? ctx.params?.id : "password" },
+      after: { method: loginMethod },
     });
     return;
+  }
+
+  if (isOAuthCallback) {
+    const rejected = oauthError(ctx, env);
+    if (!rejected) return;
+    recordAuthEvent(ctx, env, {
+      action: "auth.login_failed",
+      ownerId: null,
+      after: { method: ctx.params?.id, reason: rejected.reason },
+    });
+    throw ctx.redirect(new URL(SOCIAL_REJECTED_PATH, env.BETTER_AUTH_URL).href);
   }
 
   if (ctx.path === "/sign-in/email" && failed) {
@@ -88,7 +116,7 @@ export async function auditAuthEndpoint(ctx: Ctx, env: Env): Promise<void> {
     return;
   }
 
-  if (ctx.path === "/request-password-reset") {
+  if (ctx.path === "/request-password-reset" && !failed) {
     const email = validEmail(body.email);
     recordAuthEvent(ctx, env, {
       action: "auth.password_reset_request",
@@ -125,7 +153,7 @@ export function auditSessionEnd(
 ): void {
   if (!ctx || !SESSION_END_PATHS.has(ctx.path)) return;
   recordAuthEvent(ctx, env, {
-    action: ctx.path === "/sign-out" ? "auth.logout" : "auth.session_revoke",
+    action: "auth.session_revoke",
     actorId: session.userId,
     ownerId: session.userId,
     entity: "session",

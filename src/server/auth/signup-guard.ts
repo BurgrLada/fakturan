@@ -67,23 +67,31 @@ export function isSignupOpen(q: Reader, inviteToken?: string): boolean {
   return hasNoUsers(q) || inviteByToken(q, inviteToken) !== undefined;
 }
 
-// A token alone is enough, whatever the email: Apple hides the real address (AUTH-007). Without a
-// token, an address only proves anything once a provider has verified it, so password signups must
-// not pass `verifiedEmail`.
+function sameEmail(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+// Social: a token alone is enough, because Apple hides the real address (AUTH-007), and without a
+// token an address counts once the provider has verified it. Password: the address is unproven, so
+// the token must belong to it.
 export function canRegister(
   tx: Tx,
   email: string,
   inviteToken?: string,
-  { verifiedEmail = false }: { verifiedEmail?: boolean } = {},
+  { social = false, verifiedEmail = false }: { social?: boolean; verifiedEmail?: boolean } = {},
 ): SignupDecision {
   if (hasNoUsers(tx) && claimFirstAdmin(tx)) {
     return { allowed: true, role: "admin", invitationId: null };
   }
-  const invite =
-    inviteByToken(tx, inviteToken) ??
-    (verifiedEmail
-      ? usableInvite(tx, eq(sql`lower(${invitation.email})`, email.toLowerCase()))
-      : undefined);
+  const byToken = inviteByToken(tx, inviteToken);
+  const invite = social
+    ? (byToken ??
+      (verifiedEmail
+        ? usableInvite(tx, eq(sql`lower(${invitation.email})`, email.toLowerCase()))
+        : undefined))
+    : byToken && sameEmail(byToken.email, email)
+      ? byToken
+      : undefined;
   if (!invite) return { allowed: false };
   tx.update(invitation).set({ acceptedAt: clock.now() }).where(eq(invitation.id, invite.id)).run();
   return { allowed: true, role: invite.role, invitationId: invite.id };

@@ -1,15 +1,22 @@
 import "server-only";
 import { betterAuth, type GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { admin } from "better-auth/plugins";
+import type { AuditAction } from "../audit/record";
 import { db } from "../db";
 import * as schema from "../db/schema";
 import { env as defaultEnv, type Env } from "../env";
 import { isInstanceMailConfigured, sendInstanceMail } from "../mail/instance";
 import { mutate } from "../services/mutation";
-import { auditAuthEndpoint, auditSessionEnd, recordAuthEvent, validEmail } from "./audit-hooks";
-import { isCommonPassword, MIN_PASSWORD_LENGTH } from "./passwords";
+import {
+  auditAuthEndpoint,
+  auditSessionEnd,
+  recordAuthEvent,
+  SOCIAL_REJECTED_PATH,
+  validEmail,
+} from "./audit-hooks";
+import { MIN_PASSWORD_LENGTH, passwordProblem } from "./passwords";
 import { enabledProviders, socialProviders } from "./providers";
 import { webActor } from "./request-actor";
 import { canRegister, INVITE_COOKIE, isSignupOpen } from "./signup-guard";
@@ -17,7 +24,6 @@ import { canRegister, INVITE_COOKIE, isSignupOpen } from "./signup-guard";
 const DAY_SECONDS = 86_400;
 
 export const AUTH_ERROR_INVITE_REQUIRED = "INVITE_REQUIRED";
-export const AUTH_ERROR_PASSWORD_COMPROMISED = "PASSWORD_COMPROMISED";
 
 // Disabled over HTTP: these would bypass the invitation, last-admin and audit rules, and
 // impersonation would let an admin read another account's data (ADM-007).
@@ -48,13 +54,43 @@ function inviteRequired(): APIError {
   });
 }
 
-function assertPasswordAllowed(password: unknown): void {
-  if (typeof password === "string" && isCommonPassword(password)) {
-    throw new APIError("BAD_REQUEST", {
-      code: AUTH_ERROR_PASSWORD_COMPROMISED,
-      message: "Toto heslo je mezi známými uniklými hesly",
+const PASSWORD_MESSAGES = {
+  PASSWORD_COMPROMISED: "Toto heslo je mezi známými uniklými hesly",
+  PASSWORD_WEAK: "Toto heslo je příliš jednoduché",
+};
+
+type PasswordOwner = { id: string; email: string } | null;
+
+function assertPasswordAllowed(
+  ctx: GenericEndpointContext,
+  env: Env,
+  password: unknown,
+  email: string | null,
+  rejection?: { action: AuditAction; owner: PasswordOwner },
+): void {
+  if (typeof password !== "string") return;
+  const problem = passwordProblem(password, email);
+  if (!problem) return;
+  if (rejection) {
+    const ownerId = rejection.owner?.id ?? null;
+    recordAuthEvent(ctx, env, {
+      action: rejection.action,
+      actorId: ownerId,
+      ownerId,
+      after: { reason: problem },
     });
   }
+  throw new APIError("BAD_REQUEST", { code: problem, message: PASSWORD_MESSAGES[problem] });
+}
+
+async function resetTokenOwner(
+  ctx: GenericEndpointContext,
+  token: unknown,
+): Promise<PasswordOwner> {
+  if (typeof token !== "string") return null;
+  const { internalAdapter } = ctx.context;
+  const verification = await internalAdapter.findVerificationValue(`reset-password:${token}`);
+  return verification ? internalAdapter.findUserById(verification.value) : null;
 }
 
 function guardSignup(
@@ -68,7 +104,8 @@ function guardSignup(
     "auth.signup_rejected",
     (tx, audit) => {
       const result = canRegister(tx, newUser.email, ctx?.getCookie(INVITE_COOKIE) ?? undefined, {
-        verifiedEmail: isSocial && newUser.emailVerified,
+        social: isSocial,
+        verifiedEmail: newUser.emailVerified,
       });
       const base = { entity: "user", entityId: null, ownerId: null, scope: "instance" } as const;
       if (!result.allowed) {
@@ -88,7 +125,7 @@ function guardSignup(
     },
   );
   if (decision.allowed) return { data: { role: decision.role } };
-  if (isSocial) throw ctx.redirect(new URL("/prihlaseni?chyba=pozvanka", env.BETTER_AUTH_URL).href);
+  if (isSocial) throw ctx.redirect(new URL(SOCIAL_REJECTED_PATH, env.BETTER_AUTH_URL).href);
   throw inviteRequired();
 }
 
@@ -126,8 +163,8 @@ export function createAuth(env: Env) {
               `Heslo obnovíte na této adrese, odkaz platí 1 hodinu:\n\n${url}\n`,
             )
         : undefined,
-      onPasswordReset: async ({ user }) => {
-        recordAuthEvent(null, env, {
+      onPasswordReset: async ({ user }, request) => {
+        recordAuthEvent({ headers: request?.headers }, env, {
           action: "auth.password_reset",
           actorId: user.id,
           ownerId: user.id,
@@ -207,11 +244,33 @@ export function createAuth(env: Env) {
             });
             throw inviteRequired();
           }
-          assertPasswordAllowed(body.password);
+          assertPasswordAllowed(ctx, env, body.password, validEmail(body.email));
         }
-        if (ctx.path === "/reset-password") assertPasswordAllowed(body.newPassword);
+        if (ctx.path === "/sign-out") {
+          const current = await getSessionFromCtx(ctx, { disableRefresh: true });
+          if (current) {
+            recordAuthEvent(ctx, env, {
+              action: "auth.logout",
+              actorId: current.user.id,
+              ownerId: current.user.id,
+              entity: "session",
+              entityId: current.session.id,
+            });
+          }
+        }
+        if (ctx.path === "/reset-password") {
+          const owner = await resetTokenOwner(ctx, body.token ?? ctx.query?.token);
+          assertPasswordAllowed(ctx, env, body.newPassword, owner?.email ?? null, {
+            action: "auth.password_reset_failed",
+            owner,
+          });
+        }
         if (ctx.path === "/change-password") {
-          assertPasswordAllowed(body.newPassword);
+          const owner = (await getSessionFromCtx(ctx, { disableRefresh: true }))?.user ?? null;
+          assertPasswordAllowed(ctx, env, body.newPassword, owner?.email ?? null, {
+            action: "auth.password_change_failed",
+            owner,
+          });
           return { context: { body: { ...body, revokeOtherSessions: true } } };
         }
       }),

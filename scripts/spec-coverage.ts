@@ -7,7 +7,7 @@ const pendingPath = join(root, "tests/spec-pending.txt");
 const testsDir = join(root, "tests");
 
 export function extractSpecIds(markdown: string): string[] {
-  const ids = [...markdown.matchAll(/\*\*([A-Z]{2,3}-\d{3})\*\*/g)].map((m) => m[1]);
+  const ids = [...markdown.matchAll(/\*\*([A-Z]{2,4}-\d{3})\*\*/g)].map((m) => m[1]);
   return [...new Set(ids)];
 }
 
@@ -15,7 +15,7 @@ export function extractTestedIds(source: string): string[] {
   const titles = source.matchAll(
     /\b(?:test|it|describe)(?:\.\w+)*\(\s*(["'`])((?:\\.|(?!\1).)*)\1/g,
   );
-  const ids = [...titles].flatMap((m) => [...m[2].matchAll(/\[([A-Z]{2,3}-\d{3})\]/g)]);
+  const ids = [...titles].flatMap((m) => [...m[2].matchAll(/\[([A-Z]{2,4}-\d{3})\]/g)]);
   return [...new Set(ids.map((m) => m[1]))];
 }
 

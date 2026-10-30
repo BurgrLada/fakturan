@@ -5,6 +5,7 @@ export const authClient = createAuthClient();
 const MESSAGES: Record<string, string> = {
   INVITE_REQUIRED: "Přístup je jen na pozvánku.",
   PASSWORD_COMPROMISED: "Toto heslo je mezi známými uniklými hesly, zvolte jiné.",
+  PASSWORD_WEAK: "Toto heslo je příliš jednoduché, zvolte jiné.",
   PASSWORD_TOO_SHORT: "Heslo musí mít aspoň 12 znaků.",
   PASSWORD_TOO_LONG: "Heslo je příliš dlouhé.",
   INVALID_EMAIL_OR_PASSWORD: "Nesprávný e-mail nebo heslo.",
