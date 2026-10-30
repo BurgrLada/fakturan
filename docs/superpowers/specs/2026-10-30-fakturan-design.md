@@ -365,6 +365,7 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 - **REM-006** Upomínky nejdou na uhrazené, stornované a částečně uhrazené faktury bez výslovného zapnutí, u částečné se uvádí zbývající částka.
 - **REM-007** Stejný stupeň upomínky se k faktuře nepošle dvakrát.
 - **REM-008** Odesílá se v čase nastaveném uživatelem, výchozí 9:00 **[návrh]**.
+- **REM-009** Upozornění pro uživatele na faktury po splatnosti a blížící se splatnost: vždy v centru upozornění a na Přehledu, volitelně denní e-mail uživateli. Výchozí stav e-mailu je vypnuto a nikdy nejde klientovi.
 
 ## 13. Platby (PAY)
 
@@ -588,7 +589,7 @@ Pravidla:
 - **UI-008** Přístupnost: ovládání klávesnicí, popisky polí, WCAG AA kontrast.
 - **UI-009** Prázdné stavy s jasnou další akcí. Stavy načítání a chyb u každé stránky.
 - **UI-010** Rychlé hledání napříč aplikací (Ctrl+K).
-- **UI-011** Centrum upozornění v aplikaci: selhání odeslání, nespárované platby, nerozpoznaná avíza, blížící se limity.
+- **UI-011** Centrum upozornění v aplikaci: selhání odeslání, faktury po splatnosti, nespárované platby, nerozpoznaná avíza, blížící se limity.
 
 Navigace: Přehled, Faktury, Pravidelné, Zákazníci, Ceník, Platby, Přehledy, Nastavení, Administrace.
 
