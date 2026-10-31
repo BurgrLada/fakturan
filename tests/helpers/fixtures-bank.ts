@@ -38,6 +38,8 @@ export function noticeText(over: NoticeFields = {}): string {
   ].join("\r\n");
 }
 
+export const AUTHSERV_ID = "mx.example.cz";
+
 export const PASS_HEADER =
   "Authentication-Results: mx.example.cz; dkim=pass header.d=fio.cz; spf=pass smtp.mailfrom=fio.cz";
 
@@ -124,6 +126,7 @@ export function seedMailbox(
       passwordEnc: encryptSecret("tajne-heslo-imap-4c1d"),
       updatedAt: now,
       requireConfirmation: true,
+      authServId: AUTHSERV_ID,
       ...over,
     })
     .run();

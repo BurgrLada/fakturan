@@ -16,6 +16,7 @@ const notice = (over: Partial<MatchableNotice> = {}): MatchableNotice => ({
   amountMinor: 100_000,
   currency: "CZK",
   variableSymbol: "20260042",
+  paidOn: "2026-10-30",
   ...over,
 });
 const candidate = (over: Partial<MatchCandidate> = {}): MatchCandidate => ({
@@ -26,10 +27,11 @@ const candidate = (over: Partial<MatchCandidate> = {}): MatchCandidate => ({
   variableSymbol: "20260042",
   totalMinor: 100_000,
   paidMinor: 0,
+  manualPayments: [],
   ...over,
 });
 const match = (n: MatchableNotice, candidates: MatchCandidate[], autoAllowed = true) =>
-  matchNotice(n, candidates, { autoAllowed, targetAccountId: ACCOUNT });
+  matchNotice(n, candidates, { autoAllowed, targetAccountId: ACCOUNT, today: "2026-11-01" });
 
 describe("normalizeSymbol", () => {
   test("úvodní nuly ve VS se srovnají", () => {
@@ -150,7 +152,7 @@ describe("matchNotice", () => {
     });
   });
 
-  const scenarios: Record<Exclude<QueueReason, "undone">, () => unknown> = {
+  const scenarios: Record<Exclude<QueueReason, "undone" | "conflict">, () => unknown> = {
     unknown_vs: () => match(notice(), []),
     no_vs: () => match(notice({ variableSymbol: null }), [candidate({ variableSymbol: null })]),
     amount: () => match(notice({ amountMinor: 1 }), [candidate()]),
@@ -161,9 +163,14 @@ describe("matchNotice", () => {
     provisional: () => match(notice({ variant: "cs_block" }), [candidate()], false),
     unverified: () => match(notice({ authResult: "none" }), [candidate()], false),
     auth_failed: () => match(notice({ authResult: "fail" }), [candidate()], false),
+    manual_duplicate: () =>
+      match(notice(), [
+        candidate({ manualPayments: [{ amountMinor: 100_000, paidOn: "2026-10-30" }] }),
+      ]),
+    future_date: () => match(notice({ paidOn: "2026-11-02" }), [candidate()]),
   };
 
-  test.each(QUEUE_REASONS.filter((reason) => reason !== "undone"))(
+  test.each(QUEUE_REASONS.filter((reason) => reason !== "undone" && reason !== "conflict"))(
     "[BNK-010] důvod %s jde do fronty bez platby",
     (reason) => {
       expect(scenarios[reason]()).toMatchObject({ result: "queue", reason });
@@ -182,6 +189,36 @@ describe("matchNotice", () => {
     expect(invoiceIds(notice(), [euro, paid])).toEqual(["e"]);
     expect(invoiceIds(notice(), [euro, czk, paid])).toEqual(["c"]);
     expect(invoiceIds(notice(), [foreign, czk])).toEqual(["f"]);
+  });
+
+  test("ruční platba jiné částky nebo data párování nezastaví", () => {
+    const other = [
+      { amountMinor: 100_000, paidOn: "2026-10-29" },
+      { amountMinor: 99_999, paidOn: "2026-10-30" },
+    ];
+    expect(match(notice(), [candidate({ manualPayments: other })])).toMatchObject({
+      result: "match",
+    });
+  });
+
+  test("ruční platba se stejnou částkou a datem nabídne ten doklad", () => {
+    const recorded = [{ amountMinor: 100_000, paidOn: "2026-10-30" }];
+    expect(match(notice(), [candidate({ manualPayments: recorded })])).toEqual({
+      result: "queue",
+      reason: "manual_duplicate",
+      invoiceIds: ["inv-1"],
+    });
+  });
+
+  test("avízo s dnešním datem se páruje, budoucí nabídne otevřené doklady", () => {
+    expect(match(notice({ paidOn: "2026-11-01" }), [candidate()])).toMatchObject({
+      result: "match",
+    });
+    expect(match(notice({ paidOn: "2026-11-02" }), [candidate()])).toEqual({
+      result: "queue",
+      reason: "future_date",
+      invoiceIds: ["inv-1"],
+    });
   });
 
   test("bez VS se nic nenabízí", () => {

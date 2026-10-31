@@ -15,6 +15,10 @@ export type TestImap = {
   failNext(kind: FailKind): void;
   // FETCH of this uid never gets an answer.
   blockUid(uid: number): void;
+  hangLogout(): void;
+  // LOGIN stays unanswered until release().
+  holdLogin(): { release(): void };
+  openSockets(): number;
   connections(): number;
   close(): Promise<void>;
 };
@@ -76,6 +80,9 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
   const sockets = new Set<Socket>();
   const pending: FailKind[] = [];
   const blocked = new Set<number>();
+  let silentLogout = false;
+  let heldLogin: (() => void) | null = null;
+  let loginGate: Promise<void> | null = null;
   let uidValidity = 1000;
   let connections = 0;
 
@@ -159,6 +166,7 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
         case "NOOP":
           return send(`${tag} OK NOOP completed`);
         case "LOGOUT":
+          if (silentLogout) return;
           send("* BYE");
           send(`${tag} OK LOGOUT completed`);
           return socket.end();
@@ -166,6 +174,12 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
           const user = (rest[0] ?? "").replace(/^"|"$/g, "");
           const pass = (rest[1] ?? "").replace(/^"|"$/g, "");
           logins.push({ username: user, password: pass });
+          if (loginGate) {
+            const gate = loginGate;
+            loginGate = null;
+            void gate.then(() => handle(line));
+            return;
+          }
           if (takeFailure("drop")) return socket.destroy();
           if (takeFailure("auth") || user !== username || pass !== password) {
             return send(`${tag} NO [AUTHENTICATIONFAILED] Authentication failed`);
@@ -267,6 +281,16 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
     blockUid(uid) {
       blocked.add(uid);
     },
+    hangLogout() {
+      silentLogout = true;
+    },
+    holdLogin() {
+      loginGate = new Promise((resolve) => {
+        heldLogin = resolve;
+      });
+      return { release: () => heldLogin?.() };
+    },
+    openSockets: () => sockets.size,
     connections: () => connections,
     close: () =>
       new Promise<void>((resolve) => {

@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { DrizzleQueryError, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { fioParser } from "@/lib/bank-notices/fio";
 import type { BankNoticeParser } from "@/lib/bank-notices/types";
@@ -25,7 +25,7 @@ import { drainJobs } from "@/server/jobs/worker";
 import { bankStatus } from "@/server/services/bank-notices";
 import {
   checkMailboxNow,
-  firstRawHeader,
+  isDatabaseError,
   planBankPolls,
   pollMailbox,
   type PollOptions,
@@ -106,30 +106,6 @@ const payments = (owner: string) =>
   db.select().from(payment).where(eq(payment.userId, owner)).all();
 const invoiceStatus = (owner: string, id: string) => getInvoice(owner, id)!.status;
 const bodyFetches = () => imap.commands.filter((command) => /BODY/i.test(command));
-
-describe("firstRawHeader", () => {
-  test("vrátí první výskyt bez závěrečného CRLF a se zachovaným složením", () => {
-    const raw = Buffer.from(
-      "Received: x\r\nAuthentication-Results: a;\r\n dkim=pass\r\nauthentication-results: b\r\n\r\nbody",
-    );
-    expect(firstRawHeader(raw, "authentication-results")).toBe("a;\r\n dkim=pass");
-  });
-
-  test("funguje i s holým LF a ignoruje podobná jména a tělo zprávy", () => {
-    const raw = Buffer.from(
-      "ARC-Authentication-Results: x\nX-Authentication-Results: y\n\nAuthentication-Results: z\n",
-    );
-    expect(firstRawHeader(raw, "authentication-results")).toBeNull();
-    expect(
-      firstRawHeader(Buffer.from("Authentication-Results: a\n"), "authentication-results"),
-    ).toBe("a");
-  });
-
-  test("zpráva bez hlaviček nic nevrátí", () => {
-    expect(firstRawHeader(Buffer.from("\r\nAuthentication-Results: z\r\n"), "x")).toBeNull();
-    expect(firstRawHeader(Buffer.alloc(0), "authentication-results")).toBeNull();
-  });
-});
 
 describe("tok ze schránky", () => {
   test("[TST-006] tok přes testovací IMAP server od zprávy po uhrazenou fakturu", async () => {
@@ -271,9 +247,45 @@ describe("Authentication-Results", () => {
     expect(invoiceStatus(owner, invoiceId)).not.toBe("paid");
   });
 
-  test("[BNK-013] none bez vyžadovaného potvrzení spáruje", async () => {
+  test("[BNK-013] podvržená dkim=pass cizího serveru nic neuhradí ani s vypnutým potvrzením", async () => {
     const { owner, invoiceId } = account({ requireConfirmation: false });
+    imap.addMessage(
+      rawMail({ headers: ["Authentication-Results: mail.podvod.cz; dkim=pass header.d=fio.cz"] }),
+    );
+
+    await poll(owner);
+
+    expect(notices(owner)[0]).toMatchObject({
+      status: "pending",
+      reason: "unverified",
+      authResult: "none",
+    });
+    expect(invoiceStatus(owner, invoiceId)).not.toBe("paid");
+  });
+
+  test("[BNK-013] bez nastaveného serveru ověření jde i pass do fronty", async () => {
+    const { owner, invoiceId } = account({ requireConfirmation: false, authServId: null });
+    imap.addMessage(rawMail());
+
+    await poll(owner);
+
+    expect(notices(owner)[0]).toMatchObject({ reason: "unverified", authResult: "none" });
+    expect(invoiceStatus(owner, invoiceId)).not.toBe("paid");
+  });
+
+  test("[BNK-013] zpráva bez hlavičky jde do fronty i s vypnutým potvrzením", async () => {
+    const { owner } = account({ requireConfirmation: false });
     imap.addMessage(rawMail({ headers: [] }));
+
+    await poll(owner);
+
+    expect(notices(owner)[0]).toMatchObject({ reason: "unverified", authResult: "none" });
+    expect(payments(owner)).toEqual([]);
+  });
+
+  test("[BNK-013] none od důvěryhodného serveru se řídí nastavením", async () => {
+    const { owner, invoiceId } = account({ requireConfirmation: false });
+    imap.addMessage(rawMail({ headers: ["Authentication-Results: MX.example.cz; none"] }));
 
     await poll(owner);
 
@@ -466,6 +478,45 @@ describe("selhání", () => {
     expect(invoiceStatus(owner, invoiceId)).not.toBe("paid");
     expect(mailbox(owner).lastUid).toBeNull();
     assertConsistent(db, owner);
+  });
+
+  test("databázovou chybu pozná podle třídy nebo příčiny, ne podle jména", () => {
+    const sqlite = Object.assign(new Error("x"), { code: "SQLITE_BUSY" });
+    expect(isDatabaseError(new DrizzleQueryError("q", [], sqlite))).toBe(true);
+    expect(isDatabaseError(new DrizzleQueryError("q", []))).toBe(true);
+    expect(isDatabaseError(sqlite)).toBe(true);
+    expect(isDatabaseError(new Error("obal", { cause: sqlite }))).toBe(true);
+    expect(isDatabaseError(new TypeError("kód"))).toBe(false);
+    expect(isDatabaseError(new Error("x", { cause: new Error("y") }))).toBe(false);
+    expect(isDatabaseError("SQLITE_BUSY")).toBe(false);
+  });
+
+  test("visící LOGOUT běh nezdrží a spojení se zavře", async () => {
+    const { owner } = account();
+    imap.addMessage(rawMail());
+    imap.hangLogout();
+    const started = performance.now();
+
+    await poll(owner, { closeGraceMs: 200 });
+
+    expect(performance.now() - started).toBeLessThan(3_000);
+    expect(mailbox(owner)).toMatchObject({ lastUid: 1, failures: 0 });
+    await vi.waitFor(() => expect(imap.openSockets()).toBe(0));
+  });
+
+  test("spojení otevřené až po stropu se zavře a nic nepřečte", async () => {
+    const { owner } = account();
+    imap.addMessage(rawMail());
+    const login = imap.holdLogin();
+
+    await poll(owner, { deadlineMs: 300 });
+    expect(mailbox(owner)).toMatchObject({ failureCode: "timeout", failures: 1 });
+
+    login.release();
+    await vi.waitFor(() => expect(imap.commands.join()).toContain("EXAMINE"));
+    await vi.waitFor(() => expect(imap.openSockets()).toBe(0));
+    expect(imap.commands.join()).not.toContain("UID");
+    expect(notices(owner)).toEqual([]);
   });
 
   test("běh dodrží strop času na zablokovaném serveru", async () => {

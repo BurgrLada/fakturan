@@ -1,23 +1,23 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import type { BankFailureCode } from "@/lib/bank-mailbox";
 import { clock } from "../clock";
 import { db } from "../db";
-import { bankMailbox, job, user } from "../db/schema";
+import { bankMailbox, job, notification, user } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { enqueue } from "../jobs/queue";
-import { notify, resolveNotification } from "../services/notifications";
+import { notify, resolveNotificationsOf } from "../services/notifications";
 
 // Reading position and health, not a user's action: they change every 5 minutes for every
 // mailbox, so they live outside services and leave no audit trail.
 
 const SLOT_MS = 5 * 60_000;
 const FAILURES_BEFORE_ALERT = 3;
+const ALERT = "bank_connection_failed";
 
 export type MailboxHandle = {
   userId: string;
   updatedAt: Date;
-  lastSuccessAt: Date | null;
 };
 
 // updated_at moves only when the user saves the settings, and a save may have pointed the
@@ -37,12 +37,6 @@ export function moveCursor(mailbox: MailboxHandle, lastUid: number): void {
   db.update(bankMailbox).set({ lastUid }).where(current(mailbox)).run();
 }
 
-// Stable for the whole outage, so that repeated failures stay one notification, and new after
-// each success, so that the next outage does not hit the resolved row of the previous one.
-function alertKey({ lastSuccessAt }: MailboxHandle): string {
-  return `bank_connection:${lastSuccessAt?.getTime() ?? "never"}`;
-}
-
 export function recordSuccess(mailbox: MailboxHandle, lastNoticeAt: Date | null): void {
   const now = clock.now();
   db.transaction((tx) => {
@@ -57,7 +51,7 @@ export function recordSuccess(mailbox: MailboxHandle, lastNoticeAt: Date | null)
       })
       .where(current(mailbox))
       .run();
-    if (changes > 0) resolveNotification(tx, mailbox.userId, alertKey(mailbox));
+    if (changes > 0) resolveNotificationsOf(tx, mailbox.userId, ALERT);
   });
 }
 
@@ -79,10 +73,21 @@ export function recordFailure(
       .returning({ failures: bankMailbox.failures })
       .get();
     if (!row || row.failures < FAILURES_BEFORE_ALERT) return;
+    const open = tx
+      .select({ id: notification.id })
+      .from(notification)
+      .where(
+        scoped(mailbox.userId).where(notification, (t, { eq, and }) =>
+          and(eq(t.kind, ALERT), isNull(t.resolvedAt)),
+        ),
+      )
+      .get();
+    if (open) return;
+    // One outage is one row; the time makes a key that a resolved earlier outage cannot block.
     notify(tx, {
       userId: mailbox.userId,
-      kind: "bank_connection_failed",
-      dedupeKey: alertKey(mailbox),
+      kind: ALERT,
+      dedupeKey: `bank_connection:${clock.now().getTime()}`,
       params: { code },
     });
   });

@@ -68,6 +68,32 @@ function passesFor({ method, result, properties }: Statement, domain: string): b
   );
 }
 
+// mailparser would merge all occurrences into one value. Folding stays: checkAuthResults reads a
+// bare line break as a smuggled header. Only the trailing line end goes.
+export function firstRawHeader(raw: string, name: string): string | null {
+  const start = `${name.toLowerCase()}:`;
+  const found: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line === "" || line === "\r") break;
+    if (found.length > 0) {
+      if (!/^[ \t]/.test(line)) break;
+      found.push(line);
+    } else if (line.toLowerCase().startsWith(start)) {
+      found.push(line.slice(start.length).trimStart());
+    }
+  }
+  return found.length > 0 ? found.join("\n").replace(/[\r\n]+$/, "") : null;
+}
+
+// Who wrote the header. A result counts only from the server the user named in the settings
+// (R-16), the same text from anyone else is forgeable.
+export function authservIdOf(topHeader: string | null): string | null {
+  if (!topHeader || UNFOLDED_BREAK.test(topHeader)) return null;
+  const parts = splitStatements(topHeader.toLowerCase());
+  if (!parts || parts.length < 2) return null;
+  return parts[0]!.trim().split(/\s+/)[0] || null;
+}
+
 // topHeader must be the highest Authentication-Results, the one the recipient's server
 // added. Anything below it can come from the sender.
 export function checkAuthResults(topHeader: string | null, domain: string): AuthResult {

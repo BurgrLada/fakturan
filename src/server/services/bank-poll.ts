@@ -1,9 +1,14 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { eq, getTableColumns } from "drizzle-orm";
+import { DrizzleQueryError, eq, getTableColumns } from "drizzle-orm";
 import { simpleParser } from "mailparser";
 import { TEXTS } from "@/lib/texts";
-import { checkAuthResults, type AuthResult } from "@/lib/bank-notices/auth";
+import {
+  authservIdOf,
+  checkAuthResults,
+  firstRawHeader,
+  type AuthResult,
+} from "@/lib/bank-notices/auth";
 import { BANK_PARSERS, parserFor } from "@/lib/bank-notices";
 import type { BankNoticeParser, NoticeMeta } from "@/lib/bank-notices/types";
 import type { BankFailureCode } from "@/lib/bank-mailbox";
@@ -55,6 +60,7 @@ export type PollOptions = {
   env?: Env;
   deadlineMs?: number;
   parsers?: readonly BankNoticeParser[];
+  closeGraceMs?: number;
 };
 
 type Mailbox = typeof bankMailbox.$inferSelect;
@@ -93,26 +99,13 @@ function report(step: string, error: unknown, job: Job): void {
   });
 }
 
-function isDatabaseError(error: unknown): boolean {
-  return error instanceof Error && ["DrizzleQueryError", "SqliteError"].includes(error.name);
-}
-
-// The first one is what the recipient's server added, and mailparser would merge it with the
-// forgeable rest. Folding stays, checkAuthResults reads a bare line break as a smuggled header.
-export function firstRawHeader(raw: Buffer, name: string): string | null {
-  const lines = raw.toString("latin1").split("\n");
-  const start = `${name.toLowerCase()}:`;
-  const found: string[] = [];
-  for (const line of lines) {
-    if (line === "" || line === "\r") break;
-    if (found.length > 0) {
-      if (!/^[ \t]/.test(line)) break;
-      found.push(line);
-    } else if (line.toLowerCase().startsWith(start)) {
-      found.push(line.slice(start.length).trimStart());
-    }
+// Drizzle wraps only some paths and keeps the name "Error", so the name proves nothing.
+export function isDatabaseError(error: unknown): boolean {
+  for (let cause = error; cause instanceof Error; cause = cause.cause) {
+    if (cause instanceof DrizzleQueryError) return true;
+    if (String((cause as { code?: unknown }).code).startsWith("SQLITE_")) return true;
   }
-  return found.length > 0 ? found.join("\n").replace(/[\r\n]+$/, "") : null;
+  return false;
 }
 
 type Reader = {
@@ -149,15 +142,19 @@ async function readNotice(
   raw: Buffer,
 ): Promise<IngestInput> {
   const fingerprint = envelope.messageId ?? createHash("sha256").update(raw).digest("hex");
+  const { authServId, requireConfirmation } = reader.mailbox;
+  const header = firstRawHeader(raw.toString("latin1"), "authentication-results");
+  const trusted = authServId !== null && authservIdOf(header) === authServId;
   const context = {
     bank: parser.bank,
-    requireConfirmation: reader.mailbox.requireConfirmation,
+    // Untrusted means nobody checked the sender, which is no case for the user's opt-out.
+    requireConfirmation: requireConfirmation || !trusted,
     receivedAt: envelope.date ?? clock.now(),
   };
   let authResult: AuthResult = "none";
   let text: string | null = null;
   try {
-    authResult = checkAuthResults(firstRawHeader(raw, "authentication-results"), parser.domain);
+    if (trusted) authResult = checkAuthResults(header, parser.domain);
     const parsed = await reader.deadline.within(simpleParser(raw, MAIL_OPTIONS));
     text = parsed.text?.trim() ? parsed.text : null;
     const notice = text ? parser.parse(text, meta) : null;
@@ -184,7 +181,7 @@ function store(reader: Reader, input: IngestInput, fallback: () => IngestInput):
     report("zápis avíza", error, job);
     throw new WriteFailed();
   }
-  if (result.status !== "duplicate") reader.stored = clock.now();
+  if (result.status !== "duplicate" && result.status !== "dropped") reader.stored = clock.now();
 }
 
 async function processMessage(reader: Reader, uid: number): Promise<void> {
@@ -238,8 +235,8 @@ function failureCode(error: unknown): BankFailureCode {
   return classifyImapError(error);
 }
 
-async function closeSession(session: MailboxSession): Promise<void> {
-  const grace = startDeadline(CLOSE_GRACE_MS);
+async function closeSession(session: MailboxSession, graceMs: number): Promise<void> {
+  const grace = startDeadline(graceMs);
   try {
     await grace.within(session.close());
   } catch {
@@ -267,7 +264,12 @@ function decrypted(mailbox: Mailbox): string | null {
 }
 
 export async function pollMailbox(job: Job, options: PollOptions = {}): Promise<void> {
-  const { env = defaultEnv, deadlineMs = RUN_CAP_MS, parsers = BANK_PARSERS } = options;
+  const {
+    env = defaultEnv,
+    deadlineMs = RUN_CAP_MS,
+    parsers = BANK_PARSERS,
+    closeGraceMs = CLOSE_GRACE_MS,
+  } = options;
   const mailbox = job.userId ? loadMailbox(job.userId) : undefined;
   if (!mailbox?.enabled || mailbox.banned) return;
 
@@ -301,7 +303,7 @@ export async function pollMailbox(job: Job, options: PollOptions = {}): Promise<
   } finally {
     deadline.clear();
   }
-  if (session) await closeSession(session);
+  if (session) await closeSession(session, closeGraceMs);
 }
 
 export function planBankPolls(now: Date): void {

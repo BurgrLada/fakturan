@@ -1461,6 +1461,11 @@ export const TEXTS = {
       auth_failed: "Ověření odesílatele selhalo, avízo může být podvržené.",
       undone: "Spárování bylo vráceno.",
       foreign_account: "Platba přišla na účet, který ve Fakturanu nemáte.",
+      conflict:
+        "Ověřené avízo se liší od dřívější neověřené zprávy se stejným ID pokynu. Ukázané jsou údaje z ověřeného avíza, zkontrolujte je.",
+      manual_duplicate:
+        "U dokladu už je ruční platba se stejnou částkou a datem, může jít o tytéž peníze.",
+      future_date: "Avízo má datum v budoucnosti.",
     },
     statuses: {
       matched: "Spárováno",
@@ -1579,14 +1584,20 @@ export const TEXTS = {
       enabled: "Číst schránku a zpracovávat avíza",
       requireConfirmation: "Vyžadovat potvrzení, když nejde ověřit odesílatele",
       requireConfirmationHint:
-        "Zapnuto (doporučeno): avízo, u kterého zpráva neobsahuje úspěšné ověření odesílatele, počká ve frontě na vaše potvrzení. Vypnuto: takové avízo uhradí fakturu samo, i kdyby ho někdo podvrhl. Kdo zná číslo vaší faktury, může poslat zprávu, která vypadá jako avízo.",
+        "Zapnuto (doporučeno): avízo, u kterého váš poštovní server nic neověřil, počká ve frontě na vaše potvrzení. Vypnuto: takové avízo uhradí fakturu samo, jde to jen s vyplněným serverem ověření níže. Kdo zná číslo vaší faktury, může poslat zprávu, která vypadá jako avízo.",
+      authServId: "Server ověření (authserv-id)",
+      authServIdHint:
+        "Název, kterým se váš poštovní server podepisuje v hlavičce Authentication-Results. Bez něj jde každé avízo do fronty, protože hlavičku může napsat i odesílatel. Zkouška připojení ho z posledního avíza nabídne.",
     },
     save: "Uložit",
     saved: "Nastavení schránky je uložené",
     test: "Vyzkoušet připojení",
     testHint:
-      "Zkouška ověří přihlášení a existenci složky uloženého nastavení. Žádnou zprávu nečte.",
+      "Zkouška ověří přihlášení a existenci složky uloženého nastavení. U posledních zpráv čte odesílatele a z posledního avíza jen hlavičky, nic v nich nemění.",
     tested: "Připojení funguje",
+    authServSuggestion: (id: string) =>
+      `V posledním avízu je nejvyšší hlavička ověření od serveru ${id}. Použijte ho, jen pokud je to opravdu váš poštovní server.`,
+    authServUse: "Použít",
     clear: "Smazat schránku",
     cleared: "Schránka je smazaná",
     clearTitle: "Smazat nastavení schránky?",
@@ -1621,6 +1632,7 @@ export const TEXTS = {
       passwordChanged: "Při změně serveru, portu, šifrování nebo uživatele zadejte heslo znovu",
       blockedHost: "Tento server pošty není povolený",
       notConfigured: "Schránka není nastavená",
+      authServId: "Server ověření je jeden název bez mezer",
       disabled: "Napojení na schránku je vypnuté",
       testFailed: "Připojení se nepodařilo, zkontrolujte nastavení serveru a přihlášení",
     },

@@ -1,0 +1,1 @@
+ALTER TABLE `bank_mailbox` ADD `auth_serv_id` text;

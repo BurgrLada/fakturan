@@ -73,8 +73,19 @@ test.describe("vlastní schránka", () => {
       await expect(page.getByText("Vyžadovat potvrzení")).toBeVisible();
       await expect(page.getByLabel("Vyžadovat potvrzení")).toBeChecked();
 
+      imap.addMessage(
+        [
+          "Authentication-Results: mx.vlastni.cz; dkim=pass header.d=fio.cz",
+          "From: Fio banka <automat@fio.cz>",
+          "Subject: Fio banka - new income on account",
+          "",
+          "Text",
+        ].join("\r\n"),
+      );
       await page.getByRole("button", { name: "Vyzkoušet připojení" }).click();
       await expect(page.getByRole("status")).toContainText("Připojení funguje");
+      await page.getByRole("button", { name: "Použít", exact: true }).click();
+      await expect(page.getByLabel("Server ověření (authserv-id)")).toHaveValue("mx.vlastni.cz");
       await expect(page.getByText("Připojení ověřené testem")).toBeVisible();
       // The scheduler polls a saved mailbox as well, so the count may be higher.
       expect(imap.logins.length).toBeGreaterThanOrEqual(1);

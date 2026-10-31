@@ -43,6 +43,10 @@ export const bankMailboxSchema = z.object({
   folder: line(255).transform((value) => value || DEFAULT_BANK_FOLDER),
   enabled: z.boolean(),
   requireConfirmation: z.boolean(),
+  authServId: line(255)
+    .regex(/^[^\s;()"]*$/, E.authServId)
+    .transform((value) => value.toLowerCase())
+    .default(""),
 });
 
 export type BankMailboxInput = z.input<typeof bankMailboxSchema>;

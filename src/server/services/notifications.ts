@@ -49,6 +49,17 @@ export function resolveNotification(tx: Tx, userId: string, dedupeKey: string): 
     .run();
 }
 
+export function resolveNotificationsOf(tx: Tx, userId: string, kind: NotificationKind): void {
+  tx.update(notification)
+    .set({ resolvedAt: clock.now() })
+    .where(
+      scoped(userId).where(notification, (t, { eq, and }) =>
+        and(eq(t.kind, kind), isNull(t.resolvedAt)),
+      ),
+    )
+    .run();
+}
+
 export function listNotifications(ownerId: string, page: number) {
   const current = Number.isInteger(page) && page > 0 ? page : 1;
   const rows = db

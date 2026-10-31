@@ -91,6 +91,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "notice.assigned": "Přiřazení avíza z fronty",
   "notice.dismissed": "Zahození avíza",
   "notice.ignored": "Ignorované avízo z cizího účtu",
+  "notice.conflict": "Rozpor ověřeného avíza s dřívější zprávou",
   "notice.matched": "Spárované avízo",
   "notice.purged": "Vyčištění starých avíz",
   "notice.queued": "Avízo ve frontě",

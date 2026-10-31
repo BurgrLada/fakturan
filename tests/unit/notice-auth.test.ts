@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { checkAuthResults } from "@/lib/bank-notices/auth";
+import { authservIdOf, checkAuthResults, firstRawHeader } from "@/lib/bank-notices/auth";
 
 const check = (header: string | null) => checkAuthResults(header, "fio.cz");
 const results = (...parts: string[]) => ["mx.prijemce.cz", ...parts].join("; ");
@@ -113,4 +113,44 @@ describe("Authentication-Results", () => {
     expect(check("mx.prijemce.cz;\r\n\tdkim=pass\r\n header.d=fio.cz")).toBe("pass");
     expect(checkAuthResults(results("dkim=pass header.d=fio.cz"), "FIO.CZ")).toBe("pass");
   });
+});
+
+describe("firstRawHeader", () => {
+  const NAME = "authentication-results";
+
+  test("vrátí první výskyt bez závěrečného CRLF a se zachovaným složením", () => {
+    const raw =
+      "Received: x\r\nAuthentication-Results: a;\r\n dkim=pass\r\nauthentication-results: b\r\n\r\nbody";
+    expect(firstRawHeader(raw, NAME)).toBe("a;\r\n dkim=pass");
+  });
+
+  test("funguje i s holým LF a ignoruje podobná jména a tělo zprávy", () => {
+    const raw =
+      "ARC-Authentication-Results: x\nX-Authentication-Results: y\n\nAuthentication-Results: z\n";
+    expect(firstRawHeader(raw, NAME)).toBeNull();
+    expect(firstRawHeader("Authentication-Results: a\n", NAME)).toBe("a");
+  });
+
+  test("zpráva bez hlaviček nic nevrátí", () => {
+    expect(firstRawHeader("\r\nAuthentication-Results: z\r\n", NAME)).toBeNull();
+    expect(firstRawHeader("", NAME)).toBeNull();
+  });
+});
+
+describe("authservIdOf", () => {
+  test.each([
+    ["mx.example.cz; dkim=pass", "mx.example.cz"],
+    ["MX.Example.CZ 1; none", "mx.example.cz"],
+    ["mx.example.cz (a;b); spf=pass", "mx.example.cz"],
+    ["mx.example.cz;\r\n dkim=pass", "mx.example.cz"],
+  ])("%s", (header, expected) => {
+    expect(authservIdOf(header)).toBe(expected);
+  });
+
+  test.each([[null], [""], ["jen-nazev"], ["; dkim=pass"], ["mx;\nInjected: x"], ["mx (; a"]])(
+    "bez čitelného serveru %s",
+    (header) => {
+      expect(authservIdOf(header)).toBeNull();
+    },
+  );
 });

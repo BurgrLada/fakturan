@@ -3,6 +3,7 @@ import { isProvisional } from "./bank-notices";
 import type { NoticeVariant } from "./bank-notices/types";
 import type { Currency } from "./currency";
 import { AWAITING_PAYMENT, type InvoiceStatus } from "./invoice";
+import type { CalendarDate } from "./number-format";
 import { amountDue } from "./qr-payload";
 
 export const QUEUE_REASONS = [
@@ -17,6 +18,9 @@ export const QUEUE_REASONS = [
   "unverified",
   "auth_failed",
   "undone",
+  "conflict",
+  "manual_duplicate",
+  "future_date",
 ] as const;
 export type QueueReason = (typeof QUEUE_REASONS)[number];
 
@@ -26,6 +30,7 @@ export type MatchableNotice = {
   amountMinor: number;
   currency: Currency;
   variableSymbol: string | null;
+  paidOn: CalendarDate;
 };
 
 export type MatchCandidate = {
@@ -36,6 +41,7 @@ export type MatchCandidate = {
   variableSymbol: string | null;
   totalMinor: number;
   paidMinor: number;
+  manualPayments: readonly { amountMinor: number; paidOn: CalendarDate }[];
 };
 
 export type MatchResult =
@@ -69,7 +75,7 @@ function queue(reason: QueueReason, candidates: MatchCandidate[]): MatchResult {
 export function matchNotice(
   notice: MatchableNotice,
   candidates: readonly MatchCandidate[],
-  opts: { autoAllowed: boolean; targetAccountId: string },
+  opts: { autoAllowed: boolean; targetAccountId: string; today: CalendarDate },
 ): MatchResult {
   const symbol = normalizeSymbol(notice.variableSymbol);
   const sameSymbol = symbol
@@ -81,6 +87,7 @@ export function matchNotice(
 
   const blocked = blockReason(notice, opts.autoAllowed);
   if (blocked) return queue(blocked, open);
+  if (notice.paidOn > opts.today) return queue("future_date", open);
   if (!symbol) return queue("no_vs", []);
   if (sameSymbol.length === 0) return queue("unknown_vs", []);
   if (open.length === 0) return queue("closed", sameSymbol);
@@ -94,5 +101,11 @@ export function matchNotice(
   );
   if (onAccount.length === 0) return queue("other_account", sameAmount);
   if (onAccount.length > 1) return queue("multiple", onAccount);
-  return { result: "match", invoiceId: onAccount[0]!.id };
+  const [only] = onAccount as [MatchCandidate];
+  // The user may have written this very money down by hand before the notice arrived.
+  const recorded = only.manualPayments.some(
+    (row) => row.amountMinor === notice.amountMinor && row.paidOn === notice.paidOn,
+  );
+  if (recorded) return queue("manual_duplicate", onAccount);
+  return { result: "match", invoiceId: only.id };
 }

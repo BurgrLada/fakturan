@@ -1,12 +1,13 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import type { ZodType } from "zod";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { AuthResult } from "@/lib/bank-notices/auth";
 import { maskAccount, maskDigits } from "@/lib/bank-notices/mask";
 import type { ParsedNotice } from "@/lib/bank-notices/types";
 import { czechAccountToIban, normalizeIban } from "@/lib/iban";
 import { AWAITING_PAYMENT } from "@/lib/invoice";
+import { calendarDateInPrague } from "@/lib/number-format";
 import {
   assignInputSchema,
   splitInputSchema,
@@ -26,6 +27,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
+import { logger } from "../logger";
 import {
   bankAccount,
   bankMailbox,
@@ -43,6 +45,9 @@ import { insertPayment, undoNoticeIn } from "./payments";
 const FIO_DEFAULT_BANK_CODE = "2010";
 const RETENTION_MS = 90 * 86_400_000;
 const MAX_STORED_TEXT = 64 * 1024;
+const MAX_FAILED_AUTH_TEXT = 2 * 1024;
+const MAX_UNRECOGNIZED_PER_DAY = 50;
+const DAY_MS = 86_400_000;
 
 type IngestContext = {
   bank: string;
@@ -62,11 +67,14 @@ export type IngestResult =
   | { status: "matched"; id: string; invoiceId: string }
   | { status: "pending"; id: string; reason: QueueReason }
   | { status: "ignored"; id: string; reason: "foreign_account" }
-  | { status: "unrecognized"; id: string };
+  | { status: "unrecognized"; id: string }
+  | { status: "dropped" };
 
 // Thrown to roll back an empty transaction: mutate refuses to commit one without an audit entry,
 // and a repeated message must leave no trace at all.
 class AlreadyStored extends Error {}
+
+class OverLimit extends Error {}
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -102,7 +110,7 @@ function ownAccountId(tx: Tx, userId: string, account: string): string | null {
 function candidatesFor(tx: Tx, userId: string, variableSymbol: string | null): MatchCandidate[] {
   const symbol = normalizeSymbol(variableSymbol);
   if (!symbol) return [];
-  return tx
+  const rows = tx
     .select({
       id: invoice.id,
       status: invoice.status,
@@ -124,11 +132,37 @@ function candidatesFor(tx: Tx, userId: string, variableSymbol: string | null): M
       ),
     )
     .all();
+  if (rows.length === 0) return [];
+  const manual = tx
+    .select({
+      invoiceId: payment.invoiceId,
+      amountMinor: payment.amountMinor,
+      paidOn: payment.paidOn,
+    })
+    .from(payment)
+    .where(
+      scoped(userId).where(payment, (t) =>
+        and(
+          eq(t.source, "manual"),
+          eq(t.kind, "payment"),
+          inArray(
+            t.invoiceId,
+            rows.map((row) => row.id),
+          ),
+        ),
+      ),
+    )
+    .all();
+  return rows.map((row) => ({
+    ...row,
+    manualPayments: manual.filter((entry) => entry.invoiceId === row.id),
+  }));
 }
 
-function maskedText(text: string | null): string | null {
+function maskedText(text: string | null, authResult: AuthResult): string | null {
+  const limit = authResult === "fail" ? MAX_FAILED_AUTH_TEXT : MAX_STORED_TEXT;
   // Masked before the cut, which could otherwise shorten a number below the masking threshold.
-  return text ? maskDigits(text).slice(0, MAX_STORED_TEXT) : null;
+  return text ? maskDigits(text).slice(0, limit) : null;
 }
 
 type Decision = { status: "matched"; invoiceId: string } | QueuedDecision;
@@ -152,11 +186,13 @@ function decide(
       amountMinor: notice.amountMinor,
       currency: notice.currency,
       variableSymbol: notice.variableSymbol,
+      paidOn: notice.occurredAt.date,
     },
     candidatesFor(tx, userId, notice.variableSymbol),
     {
       autoAllowed: autoMatchAllowed(notice.variant, authResult, requireConfirmation),
       targetAccountId: accountId,
+      today: calendarDateInPrague(clock.now()),
     },
   );
   return match.result === "match"
@@ -185,29 +221,55 @@ function receivedAt(input: IngestContext): Date {
   return input.receivedAt > now ? now : input.receivedAt;
 }
 
-function ingestParsed(
-  tx: Tx,
-  audit: Audit,
-  userId: string,
-  input: IngestContext & { notice: ParsedNotice; text: string },
-): IngestResult {
-  const { notice } = input;
-  const accountId = ownAccountId(tx, userId, notice.targetAccount);
-  const decision = decide(tx, userId, input, notice, accountId);
-  const reason = decision.status === "matched" ? null : decision.reason;
-  const { amountMinor, currency } = notice;
+type ParsedInput = IngestContext & { notice: ParsedNotice; text: string };
+type NoticeValues = Parameters<typeof insertRow>[2];
 
-  const id = insertRow(tx, userId, {
-    dedupeKey: noticeKey(input.bank, notice),
+function findByKey(tx: Tx, userId: string, dedupeKey: string): BankNotification | undefined {
+  return tx
+    .select()
+    .from(bankNotification)
+    .where(scoped(userId).where(bankNotification, (t, { eq }) => eq(t.dedupeKey, dedupeKey)))
+    .get();
+}
+
+// A forged message that guessed the instruction ID must not cost the real notice its match. An
+// undone row is left alone: the user took that match back on purpose (R-22).
+function isOverridable(tx: Tx, userId: string, row: BankNotification, input: ParsedInput): boolean {
+  if (input.authResult !== "pass" || row.authResult === "pass") return false;
+  if (row.status !== "pending" || row.reason === "undone") return false;
+  const paid = tx
+    .select({ id: payment.id })
+    .from(payment)
+    .where(scoped(userId).where(payment, (t, { eq }) => eq(t.notificationId, row.id)))
+    .get();
+  return paid === undefined;
+}
+
+function contradicts(row: BankNotification, values: NoticeValues): boolean {
+  return (
+    row.amountMinor !== values.amountMinor ||
+    row.currency !== values.currency ||
+    row.accountMasked !== values.accountMasked ||
+    normalizeSymbol(row.variableSymbol) !== normalizeSymbol(values.variableSymbol ?? null)
+  );
+}
+
+function noticeValues(
+  input: ParsedInput,
+  dedupeKey: string,
+  accountId: string | null,
+): NoticeValues {
+  const { notice } = input;
+  return {
+    dedupeKey,
     bank: input.bank,
     variant: notice.variant,
-    status: decision.status,
-    reason,
+    status: "pending",
     authResult: input.authResult,
     bankAccountId: accountId,
     accountMasked: maskAccount(notice.targetAccount),
-    amountMinor,
-    currency,
+    amountMinor: notice.amountMinor,
+    currency: notice.currency,
     paidOn: notice.occurredAt.date,
     paidTime: notice.occurredAt.time,
     variableSymbol: notice.variableSymbol,
@@ -216,9 +278,37 @@ function ingestParsed(
     counterpartyName: notice.counterpartyName,
     message: notice.message,
     instructionId: notice.instructionId,
-    textMasked: maskedText(input.text),
+    textMasked: maskedText(input.text, input.authResult),
     receivedAt: receivedAt(input),
-  });
+  };
+}
+
+function ingestParsed(tx: Tx, audit: Audit, userId: string, input: ParsedInput): IngestResult {
+  const { notice } = input;
+  const { amountMinor, currency } = notice;
+  const dedupeKey = noticeKey(input.bank, notice);
+  const accountId = ownAccountId(tx, userId, notice.targetAccount);
+  const values = noticeValues(input, dedupeKey, accountId);
+
+  const existing = findByKey(tx, userId, dedupeKey);
+  if (existing && !isOverridable(tx, userId, existing, input)) throw new AlreadyStored();
+  const conflict = existing !== undefined && contradicts(existing, values);
+  const decision: Decision = conflict
+    ? { status: "pending", reason: "conflict" }
+    : decide(tx, userId, input, notice, accountId);
+  const reason = decision.status === "matched" ? null : decision.reason;
+
+  const stored = { ...values, status: decision.status, reason };
+  let id: string;
+  if (existing) {
+    id = existing.id;
+    tx.update(bankNotification)
+      .set({ ...stored, updatedAt: clock.now() })
+      .where(scoped(userId).where(bankNotification, (t, { eq }) => eq(t.id, id)))
+      .run();
+  } else {
+    id = insertRow(tx, userId, stored);
+  }
 
   const entry = {
     entity: "bank_notification",
@@ -226,6 +316,15 @@ function ingestParsed(
     ownerId: userId,
     scope: "user",
   } as const;
+  if (conflict) {
+    audit({
+      ...entry,
+      action: "notice.conflict",
+      before: { amountMinor: existing.amountMinor, currency: existing.currency },
+      after: { amountMinor, currency, reason },
+    });
+    return { status: "pending", id, reason: "conflict" };
+  }
   if (decision.status === "matched") {
     const { invoiceId } = decision;
     insertPayment(tx, audit, userId, invoiceId, {
@@ -250,18 +349,35 @@ function ingestParsed(
   return { ...decision, id };
 }
 
+// Anyone can send a message from a forged Fio address, so one day's mail must not fill the
+// database. Dismissed rows count too, or dismissing would reopen the limit.
+function overDailyLimit(tx: Tx, userId: string): boolean {
+  const since = new Date(clock.now().getTime() - DAY_MS);
+  const row = tx
+    .select({ n: sql<number>`count(*)` })
+    .from(bankNotification)
+    .where(
+      scoped(userId).where(bankNotification, (t) =>
+        and(isNull(t.variant), gte(t.createdAt, since)),
+      ),
+    )
+    .get();
+  return (row?.n ?? 0) >= MAX_UNRECOGNIZED_PER_DAY;
+}
+
 function ingestUnrecognized(
   tx: Tx,
   audit: Audit,
   userId: string,
   input: IngestContext & { fingerprint: string; text: string | null },
 ): IngestResult {
+  if (overDailyLimit(tx, userId)) throw new OverLimit();
   const id = insertRow(tx, userId, {
     dedupeKey: `msg:${sha256(input.fingerprint)}`,
     bank: input.bank,
     status: "unrecognized",
     authResult: input.authResult,
-    textMasked: maskedText(input.text),
+    textMasked: maskedText(input.text, input.authResult),
     receivedAt: receivedAt(input),
   });
   audit({
@@ -286,6 +402,10 @@ export function ingestNotice(actorUserId: string, input: IngestInput): IngestRes
     );
   } catch (error) {
     if (error instanceof AlreadyStored) return { status: "duplicate" };
+    if (error instanceof OverLimit) {
+      logger.warn("Denní strop nerozpoznaných avíz", { userId: actorUserId });
+      return { status: "dropped" };
+    }
     throw error;
   }
 }

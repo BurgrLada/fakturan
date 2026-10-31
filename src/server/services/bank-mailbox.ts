@@ -1,7 +1,9 @@
 import "server-only";
+import { parserFor } from "@/lib/bank-notices";
+import { authservIdOf, firstRawHeader } from "@/lib/bank-notices/auth";
 import { bankMailboxSchema, type BankFailureCode, type BankTlsMode } from "@/lib/bank-mailbox";
 import { TEXTS } from "@/lib/texts";
-import { classifyImapError, openMailbox } from "../bank/imap";
+import { classifyImapError, openMailbox, type MailboxSession } from "../bank/imap";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { decryptSecret, encryptSecret } from "../crypto";
@@ -14,8 +16,13 @@ import { assertPublicHost, BlockedHostError, IMAP_PORTS } from "../mail/host-gua
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError } from "./access";
 import { mutate } from "./mutation";
+import { resolveNotificationsOf } from "./notifications";
 
 const E = TEXTS.bankMailbox.errors;
+
+const SAMPLE_MESSAGES = 20;
+const SAMPLE_BYTES = 256 * 1024;
+const ALERT = "bank_connection_failed";
 
 type Row = typeof bankMailbox.$inferSelect;
 
@@ -27,6 +34,7 @@ export type BankMailboxView = {
   folder: string;
   enabled: boolean;
   requireConfirmation: boolean;
+  authServId: string;
   hasCredentials: boolean;
   verifiedAt: Date | null;
   lastCheckAt: Date | null;
@@ -54,6 +62,7 @@ function auditSnapshot(row: Row | undefined) {
     folder: row?.folder ?? null,
     enabled: row?.enabled ?? false,
     requireConfirmation: row?.requireConfirmation ?? true,
+    authServId: row?.authServId ?? null,
     hasCredentials: Boolean(row?.passwordEnc),
   };
 }
@@ -69,6 +78,7 @@ export function getBankMailbox(ownerId: string): BankMailboxView | null {
     folder: row.folder,
     enabled: row.enabled,
     requireConfirmation: row.requireConfirmation,
+    authServId: row.authServId ?? "",
     hasCredentials: Boolean(row.passwordEnc),
     verifiedAt: row.verifiedAt,
     lastCheckAt: row.lastCheckAt,
@@ -127,8 +137,11 @@ export async function saveBankMailbox(
       folder: input.folder,
       enabled: input.enabled,
       requireConfirmation: input.requireConfirmation,
+      authServId: input.authServId || null,
       ...(sameMailbox ? {} : { uidValidity: null, lastUid: null, firstReadAt: null }),
-      ...(keepsConnection && sameMailbox ? {} : { failureCode: null, failures: 0 }),
+      ...(keepsConnection && sameMailbox && input.enabled
+        ? {}
+        : { failureCode: null, failures: 0 }),
       verifiedAt: keepsConnection && sameMailbox ? row.verifiedAt : null,
       updatedAt: clock.now(),
     };
@@ -136,6 +149,7 @@ export async function saveBankMailbox(
       .values({ ...next, userId })
       .onConflictDoUpdate({ target: bankMailbox.userId, set: next })
       .run();
+    if (!input.enabled) resolveNotificationsOf(tx, userId, ALERT);
     audit({
       entity: "bank_mailbox",
       entityId: userId,
@@ -158,6 +172,7 @@ export function clearBankMailbox(actor: Actor): void {
   mutate(actor, "bank_mailbox.clear", (tx, audit) => {
     const row = tx.select().from(bankMailbox).where(scoped(userId).where(bankMailbox)).get();
     tx.delete(bankMailbox).where(scoped(userId).where(bankMailbox)).run();
+    resolveNotificationsOf(tx, userId, ALERT);
     audit({
       entity: "bank_mailbox",
       entityId: userId,
@@ -179,14 +194,32 @@ function markVerified(actor: Actor, userId: string): void {
   });
 }
 
-// Checks the login and the folder of the saved settings; no message is listed or read. One
-// generic failure on purpose: distinct errors would turn this page into a network scanner.
-export async function testBankMailbox(actor: Actor, env: Env = defaultEnv): Promise<void> {
+// Only the headers of the newest notice are used, and only as an offer: the user has to confirm
+// that the name is their own server, a forged top header looks the same here.
+async function suggestAuthServId(session: MailboxSession): Promise<string | null> {
+  const messages = await session.listSince(0, { limit: Number.MAX_SAFE_INTEGER });
+  for (const { uid } of messages.slice(-SAMPLE_MESSAGES).reverse()) {
+    const envelope = await session.envelope(uid);
+    if (!envelope || parserFor(envelope)?.kind !== "income") continue;
+    const raw = await session.download(uid, SAMPLE_BYTES);
+    if (!raw) continue;
+    return authservIdOf(firstRawHeader(raw.toString("latin1"), "authentication-results"));
+  }
+  return null;
+}
+
+// Checks the login and the folder of the saved settings. One generic failure on purpose:
+// distinct errors would turn this page into a network scanner.
+export async function testBankMailbox(
+  actor: Actor,
+  env: Env = defaultEnv,
+): Promise<{ suggestedAuthServId: string | null }> {
   const userId = ownerOf(actor);
   enforceRateLimit(actor, RATE_RULES.bankTestUser);
   const row = readRow(userId);
   if (!row) throw new ServiceError(E.notConfigured);
 
+  let suggestedAuthServId: string | null = null;
   let password: string;
   try {
     password = decryptSecret(row.passwordEnc);
@@ -196,11 +229,16 @@ export async function testBankMailbox(actor: Actor, env: Env = defaultEnv): Prom
   }
   try {
     const session = await openMailbox({ ...row, password }, env);
-    await session.close();
+    try {
+      suggestedAuthServId = await suggestAuthServId(session);
+    } finally {
+      await session.close();
+    }
   } catch (error) {
     if (error instanceof BlockedHostError) throw new ServiceError(E.blockedHost);
     logger.warn("Test schránky s avízy selhal", { code: classifyImapError(error) });
     throw new ServiceError(E.testFailed);
   }
   markVerified(actor, userId);
+  return { suggestedAuthServId };
 }

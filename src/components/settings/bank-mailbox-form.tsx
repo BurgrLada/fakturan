@@ -29,10 +29,10 @@ import type { BankMailboxView } from "@/server/services/bank-mailbox";
 const T = TEXTS.bankMailbox;
 const F = T.form;
 
-type Outcome = { ok: true } | { ok: false; error: string };
+type Outcome = { ok: true; suggestedAuthServId?: string | null } | { ok: false; error: string };
 type Message = { ok: boolean; text: string } | null;
 
-type TextName = "host" | "port" | "username" | "password" | "folder";
+type TextName = "host" | "port" | "username" | "password" | "folder" | "authServId";
 
 type Fields = {
   host: string;
@@ -43,6 +43,7 @@ type Fields = {
   folder: string;
   enabled: boolean;
   requireConfirmation: boolean;
+  authServId: string;
 };
 
 function toFields(settings: BankMailboxView | null): Fields {
@@ -55,6 +56,7 @@ function toFields(settings: BankMailboxView | null): Fields {
     folder: settings?.folder ?? "INBOX",
     enabled: settings?.enabled ?? true,
     requireConfirmation: settings?.requireConfirmation ?? true,
+    authServId: settings?.authServId ?? "",
   };
 }
 
@@ -162,15 +164,18 @@ export function BankMailboxForm({ settings }: { settings: BankMailboxView | null
   const [fields, setFields] = useState(() => toFields(settings));
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<Message>(null);
+  const [suggestion, setSuggestion] = useState<string | null>(null);
   const change = <K extends keyof Fields>(name: K, value: Fields[K]) =>
     setFields((current) => ({ ...current, [name]: value }));
   const setText = (name: TextName, value: string) => change(name, value);
 
   function perform(run: () => Promise<Outcome>, success: string, after?: () => void) {
     setMessage(null);
+    setSuggestion(null);
     startTransition(async () => {
       const result = await run();
       setMessage(result.ok ? { ok: true, text: success } : { ok: false, text: result.error });
+      if (result.ok) setSuggestion(result.suggestedAuthServId ?? null);
       if (result.ok) after?.();
     });
   }
@@ -255,6 +260,13 @@ export function BankMailboxForm({ settings }: { settings: BankMailboxView | null
               {F.requireConfirmationHint}
             </p>
           </div>
+          <TextField
+            name="authServId"
+            label={F.authServId}
+            hint={F.authServIdHint}
+            fields={fields}
+            onChange={setText}
+          />
         </section>
 
         <div>
@@ -266,6 +278,16 @@ export function BankMailboxForm({ settings }: { settings: BankMailboxView | null
 
       <section className="flex max-w-xl flex-col gap-3">
         <p className="text-sm text-muted-foreground">{T.testHint}</p>
+        {suggestion && suggestion !== fields.authServId && (
+          <Alert>
+            <AlertDescription className="flex flex-col items-start gap-2">
+              <span>{T.authServSuggestion(suggestion)}</span>
+              <Button variant="outline" onClick={() => change("authServId", suggestion)}>
+                {T.authServUse}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"

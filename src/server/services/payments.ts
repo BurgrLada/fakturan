@@ -123,6 +123,7 @@ export function insertPayment(
   input: NewPayment,
 ): { id: string } {
   const { action = "payment.create", kind = "payment", ...fields } = input;
+  assertPaidOn(fields.paidOn);
   const before = findOwned(tx, userId, invoiceId);
   assertPayable(before);
   if (before.totalMinor <= 0) throw new ServiceError(E.zeroTotal);

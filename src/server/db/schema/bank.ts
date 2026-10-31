@@ -25,6 +25,7 @@ export const bankMailbox = sqliteTable("bank_mailbox", {
   folder: text().notNull().default(DEFAULT_BANK_FOLDER),
   enabled: integer({ mode: "boolean" }).notNull().default(true),
   requireConfirmation: integer("require_confirmation", { mode: "boolean" }).notNull().default(true),
+  authServId: text("auth_serv_id"),
   uidValidity: integer("uid_validity"),
   lastUid: integer("last_uid"),
   firstReadAt: integer("first_read_at", { mode: "timestamp_ms" }),

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vit
 import { openMailbox } from "@/server/bank/imap";
 import { setClockForTests } from "@/server/clock";
 import { encryptSecret } from "@/server/crypto";
-import { auditLog, bankMailbox, rateLimit, user } from "@/server/db/schema";
+import { auditLog, bankMailbox, notification, rateLimit, user } from "@/server/db/schema";
 import { parseEnv } from "@/server/env";
 import { RATE_RULES } from "@/server/rate-limit";
 import {
@@ -204,9 +204,9 @@ describe("ukládání", () => {
     expect(imap.logins).toEqual([{ username: "avizo", password: PASSWORD }]);
   });
 
-  test("test jen otevře složku ke čtení a žádnou zprávu nevypíše ani nestáhne", async () => {
+  test("test otevře složku jen ke čtení a cizí zprávu nestáhne", async () => {
     const id = seed();
-    imap.addMessage("From: automat@fio.cz\r\nSubject: s\r\n\r\ntelo\r\n");
+    imap.addMessage("From: jiny@example.cz\r\nSubject: s\r\n\r\ntelo\r\n");
     await saveBankMailbox(actor(id), own(), allowPrivate());
 
     await testBankMailbox(actor(id), allowPrivate());
@@ -214,9 +214,8 @@ describe("ukládání", () => {
     const verbs = imap.commands.map((command) => command.split(" ")[0]);
     expect(verbs).toContain("EXAMINE");
     expect(verbs).not.toContain("SELECT");
-    expect(verbs).not.toContain("UID");
-    expect(verbs).not.toContain("FETCH");
-    expect(verbs).not.toContain("SEARCH");
+    expect(verbs).not.toContain("STORE");
+    expect(imap.commands.join("\n")).not.toMatch(/BODY/i);
   });
 
   test("[BNK-001] chybná složka se uloží prázdná jako INBOX a cizí složka projde testem jen když existuje", async () => {
@@ -290,7 +289,7 @@ describe("ukládání", () => {
       .where(eq(bankMailbox.userId, id))
       .run();
 
-    await saveBankMailbox(actor(id), own({ password: "", enabled: false }), env);
+    await saveBankMailbox(actor(id), own({ password: "", requireConfirmation: false }), env);
     expect(row(id)).toMatchObject({
       uidValidity: 7,
       lastUid: 42,
@@ -637,5 +636,103 @@ describe("sezení", () => {
     const session = await openMailbox(settings(), allowPrivate());
     expect(session.uidValidity).toBe(2000);
     await session.close();
+  });
+});
+
+describe("server ověření", () => {
+  const fioMail = (header: string) =>
+    [
+      header,
+      "From: Fio banka <automat@fio.cz>",
+      "Subject: Fio banka - new income on account",
+      "",
+      "Text",
+    ].join("\r\n");
+
+  test("[BNK-013] test připojení nabídne server z posledního avíza a nic neuloží", async () => {
+    const id = seed();
+    await saveBankMailbox(actor(id), own(), allowPrivate());
+    imap.addMessage(fioMail("Authentication-Results: starsi.example.cz; none"));
+    imap.addMessage(fioMail("Authentication-Results: MX.Example.cz; dkim=pass header.d=fio.cz"));
+    imap.addMessage(
+      "From: jiny@example.cz\r\nSubject: Ahoj\r\nAuthentication-Results: cizi.cz; none\r\n\r\nx",
+    );
+
+    await expect(testBankMailbox(actor(id), allowPrivate())).resolves.toEqual({
+      suggestedAuthServId: "mx.example.cz",
+    });
+    expect(row(id)!.authServId).toBeNull();
+    expect(imap.commands.filter((command) => /BODY/i.test(command))).toHaveLength(1);
+  });
+
+  test("[BNK-013] bez avíza se nic nenabízí", async () => {
+    const id = seed();
+    await saveBankMailbox(actor(id), own(), allowPrivate());
+    await expect(testBankMailbox(actor(id), allowPrivate())).resolves.toEqual({
+      suggestedAuthServId: null,
+    });
+  });
+
+  test("[BNK-013] server se uloží malými písmeny, prázdný je null a jeden název", async () => {
+    const id = seed();
+    await saveBankMailbox(actor(id), own({ authServId: " MX.Example.cz " }), allowPrivate());
+    expect(row(id)!.authServId).toBe("mx.example.cz");
+    expect(getBankMailbox(id)!.authServId).toBe("mx.example.cz");
+
+    await saveBankMailbox(actor(id), own({ authServId: "" }), allowPrivate());
+    expect(row(id)!.authServId).toBeNull();
+    expect(getBankMailbox(id)!.authServId).toBe("");
+
+    await expect(
+      saveBankMailbox(actor(id), own({ authServId: "a b" }), allowPrivate()),
+    ).rejects.toThrow("jeden název");
+  });
+
+  function outage(id: string) {
+    db.insert(notification)
+      .values({
+        id: randomUUID(),
+        userId: id,
+        kind: "bank_connection_failed",
+        dedupeKey: `bank_connection:${randomUUID()}`,
+        params: {},
+        createdAt: T0,
+      })
+      .run();
+    db.update(bankMailbox)
+      .set({ failures: 4, failureCode: "auth" })
+      .where(eq(bankMailbox.userId, id))
+      .run();
+  }
+  const open = (id: string) =>
+    db
+      .select()
+      .from(notification)
+      .where(eq(notification.userId, id))
+      .all()
+      .filter((item) => item.resolvedAt === null);
+
+  test("[BNK-015] vypnutí schránky vyřeší upozornění a vynuluje selhání", async () => {
+    const id = seed();
+    await saveBankMailbox(actor(id), own(), allowPrivate());
+    outage(id);
+
+    await saveBankMailbox(actor(id), own({ password: "", enabled: true }), allowPrivate());
+    expect(open(id)).toHaveLength(1);
+    expect(row(id)!.failures).toBe(4);
+
+    await saveBankMailbox(actor(id), own({ password: "", enabled: false }), allowPrivate());
+    expect(open(id)).toEqual([]);
+    expect(row(id)).toMatchObject({ failures: 0, failureCode: null });
+  });
+
+  test("[BNK-015] smazání schránky vyřeší upozornění", async () => {
+    const id = seed();
+    await saveBankMailbox(actor(id), own(), allowPrivate());
+    outage(id);
+
+    clearBankMailbox(actor(id));
+
+    expect(open(id)).toEqual([]);
   });
 });
