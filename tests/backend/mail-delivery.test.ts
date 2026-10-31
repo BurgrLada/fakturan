@@ -970,6 +970,48 @@ describe("převzetí úlohy za běhu", () => {
   });
 });
 
+describe("změna během odesílání", () => {
+  async function whileSending(owner: string, invoiceId: string, change: (id: string) => void) {
+    const release = smtp.holdData();
+    const id = send(owner, invoiceId);
+    const drained = drainJobs(WORKER);
+    await vi.waitFor(() => expect(logOf(id).status).toBe("sending"));
+    change(id);
+    release();
+    await drained;
+    return id;
+  }
+
+  test("storno během sending: záznam je odeslaný, stav dokladu zůstane a uživatel se to dozví", async () => {
+    const { owner, invoiceId } = account();
+    const id = await whileSending(owner, invoiceId, () =>
+      cancelInvoice(webActor(owner), invoiceId),
+    );
+
+    expect(logOf(id).status).toBe("sent");
+    expect(getInvoice(owner, invoiceId)?.status).toBe("cancelled");
+    expect(noticesOf(owner).map((row) => row.kind)).toContain("mail_stale");
+    expect(mocks.captureException).not.toHaveBeenCalled();
+    assertConsistent(db, owner);
+  });
+
+  test("beze změny dokladu upozornění nevznikne", async () => {
+    const { owner, invoiceId } = account();
+    await whileSending(owner, invoiceId, () => {});
+    expect(noticesOf(owner)).toEqual([]);
+  });
+
+  test("záznam převzatý obnovou výsledek nepřepíše a není to chyba kódu", async () => {
+    const { owner, invoiceId } = account();
+    const id = await whileSending(owner, invoiceId, (logId) => {
+      db.update(emailLog).set({ status: "unknown" }).where(eq(emailLog.id, logId)).run();
+    });
+
+    expect(logOf(id).status).toBe("unknown");
+    expect(mocks.captureException).not.toHaveBeenCalled();
+  });
+});
+
 describe("časový strop", () => {
   test("jedno odeslání dodrží celkový strop času i na zablokovaném serveru", async () => {
     const { owner, invoiceId } = account();

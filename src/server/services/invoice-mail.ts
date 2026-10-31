@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import * as Sentry from "@sentry/nextjs";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { AutomationKey } from "@/lib/automation";
 import { kindForInvoice, type MessageKind } from "@/lib/email-template";
 import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
@@ -27,7 +27,7 @@ import { InvoicePdfNotFoundError } from "./invoice-pdf";
 import { findOwned, getInvoice, type Invoice } from "./invoices";
 import { mailAvailability } from "./mail-settings";
 import { mutate } from "./mutation";
-import { notify } from "./notifications";
+import { notify, resolveNotification } from "./notifications";
 
 const E = TEXTS.invoiceMail.errors;
 const B = TEXTS.invoiceMail.bulk.reasons;
@@ -49,6 +49,7 @@ export type QueueInput = {
   message: Message;
   plannedFor?: CalendarDate;
   automation?: AutomationKey;
+  stageKey?: string;
 };
 
 export const mailNoticeKey = (logId: string) => `mail:${logId}`;
@@ -116,6 +117,7 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
       invoiceRevision: row.revision,
       plannedFor: input.plannedFor ?? null,
       automation: input.automation ?? null,
+      stageKey: input.stageKey ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -168,6 +170,7 @@ export function hasUnresolvedUnknown(
           is(t.invoiceId, invoiceId),
           is(t.kind, kind),
           is(t.status, "unknown"),
+          isNull(t.acknowledgedAt),
           sql`NOT EXISTS (
             SELECT 1 FROM email_log AS newer
             WHERE newer.invoice_id = email_log.invoice_id AND newer.kind = email_log.kind
@@ -183,6 +186,7 @@ export function hasUnresolvedUnknown(
 type ClickOptions = {
   confirmedUnknown: boolean;
   kind?: MessageKind;
+  stageKey?: string | null;
   revision: number;
   // Runs in the queueing transaction: a throw takes the queued message back with it.
   alongside?: (tx: Tx, audit: Audit, row: Invoice, logId: string) => void;
@@ -220,6 +224,7 @@ function queueClicked(
       trigger: "manual",
       key,
       message,
+      stageKey: opts.stageKey ?? undefined,
     });
     if (!result) throw new ServiceError(E.alreadySending);
     opts.alongside?.(tx, audit, row, result.logId);
@@ -239,6 +244,7 @@ export function queueReminder(
   actor: Actor,
   invoiceId: string,
   raw: SendInput,
+  stageKey: string,
   alongside: NonNullable<ClickOptions["alongside"]>,
 ): { logId: string } {
   const userId = ownerOf(actor);
@@ -258,7 +264,7 @@ export function queueReminder(
     invoiceId,
     requestId,
     { to, cc, bcc, subject, body },
-    { confirmedUnknown, revision, kind: "reminder", alongside },
+    { confirmedUnknown, revision, kind: "reminder", stageKey, alongside },
   );
 }
 
@@ -274,6 +280,7 @@ export function sendInvoice(actor: Actor, invoiceId: string, raw: SendInput): { 
     confirmedUnknown,
     revision,
     kind: replaced?.kind,
+    stageKey: replaced?.stageKey,
   });
 }
 
@@ -305,7 +312,9 @@ function supersededBy(log: EmailLog): boolean {
 }
 
 function assertResendable(log: EmailLog): void {
-  if (!RESENDABLE.includes(log.status)) throw new ServiceError(E.notResendable);
+  if (!RESENDABLE.includes(log.status) || log.acknowledgedAt) {
+    throw new ServiceError(E.notResendable);
+  }
   if (supersededBy(log)) throw new ServiceError(E.superseded);
 }
 
@@ -338,8 +347,41 @@ export function resendFromLog(
     log.invoiceId,
     opts.requestId,
     { to, cc, bcc, subject, body },
-    { confirmedUnknown: opts.confirmedUnknown, kind: log.kind, revision: log.invoiceRevision },
+    {
+      confirmedUnknown: opts.confirmedUnknown,
+      kind: log.kind,
+      stageKey: log.stageKey,
+      revision: log.invoiceRevision,
+    },
   );
+}
+
+// Only a person can tell whether the message arrived. Open for any document state, because
+// marking the invoice as sent by hand takes away everything else that could close the record.
+export function acknowledgeUnknown(actor: Actor, logId: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "mail.acknowledged", (tx, audit) => {
+    const now = clock.now();
+    const row = tx
+      .update(emailLog)
+      .set({ acknowledgedAt: now, updatedAt: now })
+      .where(
+        scoped(userId).where(emailLog, (t, { and, eq }) =>
+          and(eq(t.id, logId), eq(t.status, "unknown"), isNull(t.acknowledgedAt)),
+        ),
+      )
+      .returning({ invoiceId: emailLog.invoiceId, kind: emailLog.kind })
+      .get();
+    if (!row) throw new ServiceError(E.notAcknowledgeable);
+    resolveNotification(tx, userId, mailNoticeKey(logId));
+    audit({
+      entity: "invoice",
+      entityId: row.invoiceId,
+      ownerId: userId,
+      scope: "user",
+      after: { logId, kind: row.kind },
+    });
+  });
 }
 
 // A failed, held or cancelled attempt leaves a rendered PDF behind that no client ever received.
@@ -355,9 +397,15 @@ export function listEmailLog(ownerId: string, invoiceId: string) {
     .orderBy(desc(emailLog.createdAt), sql`rowid DESC`)
     .all()
     .map(({ fileId, ...row }) => {
-      const resendable = RESENDABLE.includes(row.status) && !delivered.has(row.kind);
+      const resendable =
+        RESENDABLE.includes(row.status) && !delivered.has(row.kind) && !row.acknowledgedAt;
       if (mayHaveLeft(row)) delivered.add(row.kind);
-      return { ...row, hasArchive: fileId !== null && mayHaveLeft(row), resendable };
+      return {
+        ...row,
+        hasArchive: fileId !== null && mayHaveLeft(row),
+        resendable,
+        acknowledgeable: row.status === "unknown" && !row.acknowledgedAt,
+      };
     });
 }
 

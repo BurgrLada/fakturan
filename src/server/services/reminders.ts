@@ -284,20 +284,26 @@ export function sendManualReminder(
   const { stageKey, confirmedRepeat, ...message } = raw;
   if (stageKey !== null && typeof stageKey !== "string") throw new ServiceError(E.invalid);
   chosenRule(db, userId, stageKey);
-  return queueReminder(actor, invoiceId, message, (tx, audit, _row, logId) => {
-    const stage = stageOf(chosenRule(tx, userId, stageKey));
-    const repeated = alreadyUsed(tx, userId, invoiceId, stage);
-    if (repeated && confirmedRepeat !== true) throw new ServiceError(E.confirmRepeat);
-    insertSent(tx, userId, invoiceId, stage, "manual", logId);
-    audit({
-      action: "reminder.manual",
-      entity: "invoice",
-      entityId: invoiceId,
-      ownerId: userId,
-      scope: "user",
-      after: { stageKey, confirmedRepeat: confirmedRepeat === true, repeated, logId },
-    });
-  });
+  return queueReminder(
+    actor,
+    invoiceId,
+    message,
+    stageKey ?? MANUAL_STAGE,
+    (tx, audit, _row, logId) => {
+      const stage = stageOf(chosenRule(tx, userId, stageKey));
+      const repeated = alreadyUsed(tx, userId, invoiceId, stage);
+      if (repeated && confirmedRepeat !== true) throw new ServiceError(E.confirmRepeat);
+      insertSent(tx, userId, invoiceId, stage, "manual", logId);
+      audit({
+        action: "reminder.manual",
+        entity: "invoice",
+        entityId: invoiceId,
+        ownerId: userId,
+        scope: "user",
+        after: { stageKey, confirmedRepeat: confirmedRepeat === true, repeated, logId },
+      });
+    },
+  );
 }
 
 function changeInvoice(
@@ -542,6 +548,7 @@ function sendStage(ownerId: string, invoiceId: string, seen: string, today: Cale
         automation: "reminders",
         plannedFor: date,
         key: `reminder:${invoiceId}:${rule.offsetDays}`,
+        stageKey: rule.id,
         message: built.message,
       });
       // Either way the stage stays unspent, and a conflict must take the queued message back.

@@ -69,6 +69,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "invitation.mail_failed": "Neodeslaný e-mail s pozvánkou",
   "invitation.resend": "Nové odeslání pozvánky",
   "invitation.revoke": "Zrušení pozvánky",
+  "mail.acknowledged": "Potvrzení nejasného výsledku odeslání",
   "mail.cancelled": "Zrušení čekajícího e-mailu",
   "mail.digest": "Odeslání denního přehledu",
   "mail.digest_plan": "Naplánování denního přehledu",

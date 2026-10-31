@@ -765,6 +765,8 @@ export const TEXTS = {
         `U dokladu ${p.invoice ?? ""} nevíme, zda e-mail odešel. Zkontrolujte to a rozhodněte o dalším kroku.`,
       mail_held: (p: Record<string, unknown>) =>
         `E-mail k dokladu ${p.invoice ?? ""} byl zadržen a sám se neodešle.`,
+      mail_stale: (p: Record<string, unknown>) =>
+        `Doklad ${p.invoice ?? ""} se během odesílání změnil. Klient dostal původní verzi, zkontrolujte, zda je třeba poslat novou.`,
       mail_partial: (p: Record<string, unknown>) =>
         `E-mail k dokladu ${p.invoice ?? ""} odešel, ale někteří příjemci ho odmítli.`,
       recurring_failed: (p: Record<string, unknown>) =>
@@ -1110,6 +1112,7 @@ export const TEXTS = {
       logNotFound: "Záznam o odeslání neexistuje",
       notResendable: "Tuto zprávu nejde odeslat znovu",
       superseded: "Tato zpráva už byla odeslána znovu, podívejte se do historie",
+      notAcknowledgeable: "Tento záznam už nejde vzít na vědomí",
       confirmUnknown: "Nevíme, zda zpráva odešla. Opakované odeslání musíte potvrdit",
       unknownPending:
         "U předchozí zprávy nevíme, zda odešla. Nové odeslání může klient dostat dvakrát, musíte ho potvrdit",
@@ -1169,6 +1172,8 @@ export const TEXTS = {
       title: "Historie odeslání",
       empty: "Doklad zatím nikdo neodeslal.",
       archive: "Stáhnout odeslané PDF",
+      acknowledge: "Beru na vědomí",
+      acknowledgeFailed: "Záznam se nepodařilo uzavřít.",
       subject: "Předmět",
       to: "Komu",
     },

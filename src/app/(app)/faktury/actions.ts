@@ -25,6 +25,7 @@ import {
   type IssueProblem,
 } from "@/server/services/invoice-lifecycle";
 import {
+  acknowledgeUnknown,
   bulkSend,
   bulkSendPreview,
   resendFromLog,
@@ -234,6 +235,14 @@ function changedInvoices() {
 export async function markSentAction(raw: unknown) {
   return run(idInput, raw, ({ id: invoiceId }, actor) => {
     markSent(actor, invoiceId);
+    changedInvoices();
+    return {};
+  });
+}
+
+export async function acknowledgeUnknownAction(raw: unknown) {
+  return run(idInput, raw, ({ id: logId }, actor) => {
+    acknowledgeUnknown(actor, logId);
     changedInvoices();
     return {};
   });

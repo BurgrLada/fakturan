@@ -225,6 +225,30 @@ test.describe("se SMTP", () => {
     await expect(page.getByTestId("send-problem")).toHaveCount(0);
   });
 
+  test("[MAIL-005] Beru na vědomí uzavře unknown po ručním označení jako odeslané", async ({
+    page,
+    freshApp,
+    smtp,
+  }) => {
+    const { baseURL } = freshApp;
+    await connected(page, baseURL, smtp);
+    await issued(page, baseURL);
+
+    smtp.dropDuringData();
+    await openDialog(page);
+    await submit(page).click();
+    await expect(page.getByTestId("send-problem")).toContainText("Nevíme, zda odešlo", {
+      timeout: 20_000,
+    });
+
+    await page.getByRole("button", { name: "Označit jako odeslanou" }).click();
+    await page.getByRole("button", { name: "Beru na vědomí" }).click();
+
+    await expect(page.getByRole("button", { name: "Beru na vědomí" })).toHaveCount(0);
+    await expect(page.getByTestId("send-problem")).toHaveCount(0);
+    expect(smtp.messages).toHaveLength(0);
+  });
+
   test("Odeslat ručně u unknown žádá potvrzení a pošle stejný text", async ({
     page,
     freshApp,

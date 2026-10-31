@@ -11,6 +11,7 @@ import {
   file,
   invoice,
   job,
+  notification,
   rateLimit,
   schedulerState,
 } from "@/server/db/schema";
@@ -23,6 +24,7 @@ import { cancelInvoice, markSent } from "@/server/services/invoice-lifecycle";
 import { getInvoice } from "@/server/services/invoices";
 import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import {
+  acknowledgeUnknown,
   archivedPdf,
   bulkSend,
   bulkSendPreview,
@@ -238,6 +240,44 @@ describe("sendInvoice", () => {
       await drainJobs(WORKER);
       return fixture;
     }
+
+    test("[MAIL-005] Beru na vědomí uzavře unknown i po ručním označení jako odeslané", async () => {
+      const { owner, invoiceId } = await unknown();
+      const { id } = logsOf(owner)[0]!;
+      markSent(webActor(owner), invoiceId);
+      expect(listEmailLog(owner, invoiceId)[0]).toMatchObject({ acknowledgeable: true });
+
+      acknowledgeUnknown(webActor(owner), id);
+
+      expect(hasUnresolvedUnknown(owner, invoiceId, "invoice")).toBe(false);
+      const rows = listEmailLog(owner, invoiceId);
+      expect(rows[0]).toMatchObject({ acknowledgeable: false, resendable: false });
+      expect(mailStateOf(rows).problem).toBeNull();
+      const notice = db.select().from(notification).where(eq(notification.userId, owner)).get();
+      expect(notice).toMatchObject({ kind: "mail_unknown" });
+      expect(notice?.resolvedAt).not.toBeNull();
+      expect(
+        db.select().from(auditLog).where(eq(auditLog.action, "mail.acknowledged")).all(),
+      ).toHaveLength(1);
+    });
+
+    test("[MAIL-005] Beru na vědomí jde jen jednou, u unknown a na vlastní záznam", async () => {
+      const { owner } = await unknown();
+      const { id } = logsOf(owner)[0]!;
+      const stranger = seedOwner(db, T0);
+      expect(fail(() => acknowledgeUnknown(webActor(stranger), id))).toBe(
+        TEXTS.invoiceMail.errors.notAcknowledgeable,
+      );
+      acknowledgeUnknown(webActor(owner), id);
+      expect(fail(() => acknowledgeUnknown(webActor(owner), id))).toBe(
+        TEXTS.invoiceMail.errors.notAcknowledgeable,
+      );
+      expect(
+        fail(() =>
+          resendFromLog(webActor(owner), id, { confirmedUnknown: true, requestId: randomUUID() }),
+        ),
+      ).toBe(TEXTS.invoiceMail.errors.notResendable);
+    });
 
     test("nové odeslání vyžaduje potvrzení a potvrzené projde", async () => {
       const { owner, invoiceId } = await unknown();

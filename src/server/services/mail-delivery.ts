@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { NotificationKind } from "@/lib/automation";
 import { kindForInvoice } from "@/lib/email-template";
 import { daysBetween } from "@/lib/invoice";
@@ -93,11 +93,16 @@ function noticeKind(log: EmailLog, status: EmailLog["status"]): NotificationKind
   return status === "unknown" ? "mail_unknown" : "mail_held";
 }
 
-function raiseNotice(tx: Tx, log: EmailLog, kind: NotificationKind): void {
+function raiseNotice(
+  tx: Tx,
+  log: EmailLog,
+  kind: NotificationKind,
+  dedupeKey = noticeKey(log.id),
+): void {
   notify(tx, {
     userId: log.userId,
     kind,
-    dedupeKey: noticeKey(log.id),
+    dedupeKey,
     params: { invoice: getInvoice(log.userId, log.invoiceId)?.number ?? null },
     entity: { type: "invoice", id: log.invoiceId },
   });
@@ -129,11 +134,12 @@ function settle(
   from: EmailLog["status"],
   status: "held" | "cancelled" | "failed" | "unknown",
   reason: string,
+  quiet = false,
 ): void {
   try {
     mutate(actorOf(log), `mail.${status}`, (tx, audit) => {
       moveLog(tx, log, from, { status, reason: reason.slice(0, MAX_REASON_CHARS) });
-      raiseNotice(tx, log, noticeKind(log, status));
+      if (!quiet) raiseNotice(tx, log, noticeKind(log, status));
       audit({
         entity: "invoice",
         entityId: log.invoiceId,
@@ -147,7 +153,8 @@ function settle(
   }
 }
 
-type Refusal = { status: "held" | "cancelled"; reason: string };
+// `quiet`: the reason is what the person wanted, so there is nothing to tell them.
+type Refusal = { status: "held" | "cancelled"; reason: string; quiet?: boolean };
 
 // A payment or a snooze may arrive while the message waits for its next attempt.
 function reminderLapsed(log: EmailLog, row: InvoiceDetail): boolean {
@@ -163,10 +170,11 @@ function refusal(log: EmailLog): Refusal | null {
   if (isDeactivated(log.userId)) return { status: "cancelled", reason: R.deactivated };
   const row = getInvoice(log.userId, log.invoiceId);
   if (!row || !isSendable(row.status)) return { status: "held", reason: R.status };
-  if (row.revision !== log.invoiceRevision) return { status: "held", reason: R.revision };
+  // First: a payment raises the revision too, and it is no reason to alarm anyone.
   if (log.kind === "reminder" && reminderLapsed(log, row)) {
-    return { status: "held", reason: TEXTS.reminders.held };
+    return { status: "held", reason: TEXTS.reminders.held, quiet: true };
   }
+  if (row.revision !== log.invoiceRevision) return { status: "held", reason: R.revision };
   if (log.trigger !== "automatic") return null;
   if (!log.automation || !automaticSendAllowed(log.userId, log.automation)) {
     return { status: "held", reason: R.automation };
@@ -249,13 +257,15 @@ function startSending(row: Job, log: EmailLog, messageId: string): boolean {
     });
     return true;
   } catch (error) {
-    if (error instanceof Refused) settle(log, "queued", error.verdict.status, error.verdict.reason);
-    else if (!(error instanceof AlreadyMoved)) throw error;
+    if (error instanceof Refused) {
+      const { status, reason, quiet } = error.verdict;
+      settle(log, "queued", status, reason, quiet);
+    } else if (!(error instanceof AlreadyMoved)) throw error;
     return false;
   }
 }
 
-function recordSent(log: EmailLog, { rejected }: SendResult, messageId: string): void {
+function recordSentIn(log: EmailLog, { rejected }: SendResult, messageId: string): void {
   const reason = rejected.length > 0 ? R.partial(rejected.join(", ")) : null;
   mutate(actorOf(log), "mail.sent", (tx, audit) => {
     moveLog(tx, log, "sending", {
@@ -265,6 +275,10 @@ function recordSent(log: EmailLog, { rejected }: SendResult, messageId: string):
     });
     if (reason) raiseNotice(tx, log, "mail_partial");
     const row = getInvoice(log.userId, log.invoiceId);
+    // The message is out and cannot be recalled: the document keeps its state, the owner is told.
+    if (!row || !isSendable(row.status) || row.revision !== log.invoiceRevision) {
+      raiseNotice(tx, log, "mail_stale", `${noticeKey(log.id)}:stale`);
+    }
     if (row && log.kind === kindForInvoice(row.type)) applySent(tx, log.userId, log.invoiceId);
     const earlier = tx
       .select({ id: emailLog.id })
@@ -274,6 +288,7 @@ function recordSent(log: EmailLog, { rejected }: SendResult, messageId: string):
           and(
             is(t.invoiceId, log.invoiceId),
             is(t.kind, log.kind),
+            log.stageKey === null ? isNull(t.stageKey) : is(t.stageKey, log.stageKey),
             inArray(t.status, ["failed", "unknown", "held", "cancelled"]),
           ),
         ),
@@ -295,6 +310,15 @@ function recordSent(log: EmailLog, { rejected }: SendResult, messageId: string):
       },
     });
   });
+}
+
+function recordSent(log: EmailLog, result: SendResult, messageId: string): void {
+  try {
+    recordSentIn(log, result, messageId);
+  } catch (error) {
+    // Recovery took the record over and its notice stands: this is no failure of the code.
+    if (!(error instanceof AlreadyMoved)) throw error;
+  }
 }
 
 function requeue(log: EmailLog, reason: string): void {
@@ -362,7 +386,7 @@ export async function deliverMail(row: Job): Promise<void> {
 
   const refused = refusal(log);
   if (refused) {
-    settle(log, "queued", refused.status, refused.reason);
+    settle(log, "queued", refused.status, refused.reason, refused.quiet);
     return;
   }
 

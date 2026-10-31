@@ -64,6 +64,8 @@ export const emailLog = sqliteTable(
     invoiceRevision: integer("invoice_revision").notNull(),
     plannedFor: text("planned_for"),
     automation: text({ enum: AUTOMATION_KEYS }),
+    stageKey: text("stage_key"),
+    acknowledgedAt: integer("acknowledged_at", { mode: "timestamp_ms" }),
     attempts: integer().notNull().default(0),
     messageId: text("message_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

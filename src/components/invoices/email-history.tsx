@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { acknowledgeUnknownAction } from "@/app/(app)/faktury/actions";
 import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
 import { TEXTS } from "@/lib/texts";
@@ -41,6 +42,17 @@ export function EmailHistory({
 }) {
   const router = useRouter();
   const [resending, setResending] = useState<string | null>(null);
+  const [acknowledging, startAcknowledging] = useTransition();
+  const [failure, setFailure] = useState<string | null>(null);
+
+  function acknowledge(id: string) {
+    setFailure(null);
+    startAcknowledging(async () => {
+      const reply = await acknowledgeUnknownAction({ id }).catch(() => null);
+      if (reply?.ok) router.refresh();
+      else setFailure(reply?.error ?? T.history.acknowledgeFailed);
+    });
+  }
 
   return (
     <>
@@ -91,10 +103,25 @@ export function EmailHistory({
                     {row.status === "unknown" ? T.detail.manualSend : T.detail.resend}
                   </Button>
                 )}
+                {row.acknowledgeable && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={acknowledging}
+                    onClick={() => acknowledge(row.id)}
+                  >
+                    {T.history.acknowledge}
+                  </Button>
+                )}
               </div>
             </li>
           ))}
         </ul>
+      )}
+      {failure && (
+        <p role="alert" className="text-sm text-destructive">
+          {failure}
+        </p>
       )}
       <SendDialog
         invoiceId={invoiceId}

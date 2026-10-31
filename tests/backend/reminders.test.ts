@@ -780,6 +780,61 @@ describe("ruční upomínka", () => {
   });
 });
 
+describe("zpráva, která přestala platit", () => {
+  test("[REM-006] upomínka zaplacená s novou revizí skončí held bez upozornění", async () => {
+    const { owner, customerId } = account();
+    const id = sentInvoice(owner, customerId);
+    manual(owner, id, null);
+    setInvoice(id, { status: "paid", paidMinor: 300_000, revision: 99 });
+
+    await drainJobs("w");
+
+    expect(smtp.messages).toEqual([]);
+    expect(logsOf(owner)[0]).toMatchObject({ status: "held", reason: TEXTS.reminders.held });
+    expect(noticesOf(owner)).toEqual([]);
+  });
+
+  test("[REM-003] odeslání jiného stupně nevyřeší unknown, stejný stupeň ano", async () => {
+    const { owner, customerId } = account();
+    const first = rule(owner, 1);
+    const second = rule(owner, 5);
+    const id = sentInvoice(owner, customerId);
+    smtp.dropDuringData();
+    manual(owner, id, first);
+    await drainJobs("w");
+    const open = () => noticesOf(owner).filter((row) => row.resolvedAt === null);
+    expect(open().map((row) => row.kind)).toEqual(["mail_unknown"]);
+
+    const again = (stageKey: string, confirmedRepeat: boolean) => {
+      const { to, cc, bcc, subject, body, requestId, revision } = reminderPrefill(
+        owner,
+        id,
+        stageKey,
+      );
+      sendManualReminder(webActor(owner), id, {
+        to,
+        cc,
+        bcc,
+        subject,
+        body,
+        requestId,
+        revision,
+        stageKey,
+        confirmedRepeat,
+        confirmedUnknown: true,
+      });
+    };
+
+    again(second, false);
+    await drainJobs("w");
+    expect(open()).toHaveLength(1);
+
+    again(first, true);
+    await drainJobs("w");
+    expect(open()).toEqual([]);
+  });
+});
+
 describe("nastavení na faktuře", () => {
   test("koncept a storno změny upomínek odmítnou", () => {
     const { owner, customerId } = account();
