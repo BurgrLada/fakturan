@@ -29,7 +29,7 @@ import {
   type Invoice,
   type InvoiceLine,
 } from "./invoices";
-import { mutate } from "./mutation";
+import { mutate, type Audit } from "./mutation";
 import { allocateNumber, defaultSeriesFor, peekNumber, type NumberSeries } from "./number-series";
 import { getPreferences } from "./preferences";
 import { missingSupplierKeys } from "./supplier";
@@ -328,95 +328,105 @@ export function automaticSymbol(ownerId: string, number: string): string | null 
   return (format === "digits" && variableSymbolFrom(number)) || null;
 }
 
-export function issueInvoice(
-  actor: Actor,
+type IssueOptions = { revision: number; seriesId?: string; variableSymbol?: string };
+
+export function issueIn(
+  tx: Tx,
+  audit: Audit,
+  userId: string,
   id: string,
-  opts: { revision: number; seriesId?: string; variableSymbol?: string },
+  opts: IssueOptions,
 ): { id: string; number: string } {
-  const userId = ownerOf(actor);
   const manualSymbol = opts.variableSymbol;
   if (manualSymbol !== undefined && !MANUAL_VARIABLE_SYMBOL.test(manualSymbol)) {
     throw new ServiceError(V.variableSymbol);
   }
+  const row = findOwned(tx, userId, id);
+  if (row.status !== "draft" || row.revision !== opts.revision) {
+    throw new ServiceError(TEXTS.invoices.stale);
+  }
+  const lines = linesOf(tx, userId, id);
+  const picked = pickSeries(tx, userId, row, opts.seriesId ?? row.seriesId);
+  const problems = draftProblems(tx, userId, row, lines);
+  if ("problem" in picked) problems.push(picked.problem);
+  if (problems.length > 0 || "problem" in picked) throw new NotIssuableError(problems);
 
-  return mutate(actor, "invoice.issue", (tx, audit) => {
-    const row = findOwned(tx, userId, id);
-    if (row.status !== "draft" || row.revision !== opts.revision) {
-      throw new ServiceError(TEXTS.invoices.stale);
-    }
-    const lines = linesOf(tx, userId, id);
-    const picked = pickSeries(tx, userId, row, opts.seriesId ?? row.seriesId);
-    const problems = draftProblems(tx, userId, row, lines);
-    if ("problem" in picked) problems.push(picked.problem);
-    if (problems.length > 0 || "problem" in picked) throw new NotIssuableError(problems);
+  const totals = totalsOf(lines, row);
+  const { number, skipped } = allocateNumber(tx, userId, picked.series.id, row.issueDate!);
+  const texts = issuedTexts(tx, userId, row, lines, number);
+  const overLimit = textProblems(texts);
+  if (overLimit.length > 0) throw new NotIssuableError(overLimit);
+  const issuedLines = texts.lines.map((line, i) => ({
+    ...line,
+    netMinor: totals.lines[i]!.netMinor,
+  }));
+  const now = clock.now();
 
-    const totals = totalsOf(lines, row);
-    const { number, skipped } = allocateNumber(tx, userId, picked.series.id, row.issueDate!);
-    const texts = issuedTexts(tx, userId, row, lines, number);
-    const overLimit = textProblems(texts);
-    if (overLimit.length > 0) throw new NotIssuableError(overLimit);
-    const issuedLines = texts.lines.map((line, i) => ({
-      ...line,
-      netMinor: totals.lines[i]!.netMinor,
-    }));
-    const now = clock.now();
-
-    storeLines(tx, userId, lines, issuedLines);
-    for (const line of lines) {
-      if (line.catalogItemId) recordCatalogUse(tx, userId, line.catalogItemId);
-    }
-    const catalogUse = catalogUses(tx, userId, lines);
-    tx.update(invoice)
-      .set({
-        ...sumsOf(totals),
-        ...texts.images,
-        status: "issued",
+  storeLines(tx, userId, lines, issuedLines);
+  for (const line of lines) {
+    if (line.catalogItemId) recordCatalogUse(tx, userId, line.catalogItemId);
+  }
+  const catalogUse = catalogUses(tx, userId, lines);
+  tx.update(invoice)
+    .set({
+      ...sumsOf(totals),
+      ...texts.images,
+      status: "issued",
+      number,
+      variableSymbol:
+        manualSymbol === undefined ? automaticSymbol(userId, number) : manualSymbol || null,
+      variableSymbolManual: manualSymbol !== undefined,
+      seriesId: picked.series.id,
+      customerName: texts.customerName,
+      dateFormat: texts.dateFormat,
+      orderRef: texts.orderRef,
+      reference: texts.reference,
+      textBefore: texts.textBefore,
+      textAfter: texts.textAfter,
+      note: texts.note,
+      supplierSnapshot: texts.snapshot.supplier,
+      customerSnapshot: texts.snapshot.customer,
+      accountSnapshot: texts.snapshot.account,
+      searchText: searchTextOf({
         number,
-        variableSymbol:
-          manualSymbol === undefined ? automaticSymbol(userId, number) : manualSymbol || null,
-        variableSymbolManual: manualSymbol !== undefined,
-        seriesId: picked.series.id,
         customerName: texts.customerName,
-        dateFormat: texts.dateFormat,
-        orderRef: texts.orderRef,
-        reference: texts.reference,
-        textBefore: texts.textBefore,
-        textAfter: texts.textAfter,
-        note: texts.note,
-        supplierSnapshot: texts.snapshot.supplier,
-        customerSnapshot: texts.snapshot.customer,
-        accountSnapshot: texts.snapshot.account,
-        searchText: searchTextOf({
-          number,
-          customerName: texts.customerName,
-          lines: texts.lines,
-        }),
-        revision: row.revision + 1,
-        issuedAt: now,
-        updatedAt: now,
-      })
-      .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
-      .run();
+        lines: texts.lines,
+      }),
+      revision: row.revision + 1,
+      issuedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
+    .run();
 
-    const changes = diffLines(lines, issuedLines);
-    audit({
-      entity: "invoice",
-      entityId: id,
-      ownerId: userId,
-      scope: "user",
-      before: {
-        ...auditSnapshot(row, lines.length),
-        ...(changes && { lines: changes.before }),
-      },
-      after: {
-        ...auditSnapshot(findOwned(tx, userId, id), lines.length),
-        ...(changes && { lines: changes.after }),
-        ...(skipped.length > 0 && { skippedNumbers: skipped }),
-        ...(catalogUse.length > 0 && { catalogUse }),
-      },
-    });
-    return { id, number };
+  const changes = diffLines(lines, issuedLines);
+  audit({
+    action: "invoice.issue",
+    entity: "invoice",
+    entityId: id,
+    ownerId: userId,
+    scope: "user",
+    before: {
+      ...auditSnapshot(row, lines.length),
+      ...(changes && { lines: changes.before }),
+    },
+    after: {
+      ...auditSnapshot(findOwned(tx, userId, id), lines.length),
+      ...(changes && { lines: changes.after }),
+      ...(skipped.length > 0 && { skippedNumbers: skipped }),
+      ...(catalogUse.length > 0 && { catalogUse }),
+    },
   });
+  return { id, number };
+}
+
+export function issueInvoice(
+  actor: Actor,
+  id: string,
+  opts: IssueOptions,
+): { id: string; number: string } {
+  const userId = ownerOf(actor);
+  return mutate(actor, "invoice.issue", (tx, audit) => issueIn(tx, audit, userId, id, opts));
 }
 
 type StatusChange = {

@@ -63,7 +63,7 @@ import type { Page } from "./audit-read";
 import { defaultAccountFor } from "./bank-accounts";
 import { MAX_PRICE_MINOR } from "./catalog";
 import { customerDefaults, escapeLike } from "./customers";
-import { mutate } from "./mutation";
+import { mutate, type Audit } from "./mutation";
 import { defaultSeriesFor } from "./number-series";
 import { colorSchema, designIdSchema, getPreferences, logoPositionSchema } from "./preferences";
 import { linkTags, listTags, tagsOf, type Tag } from "./tags";
@@ -207,8 +207,8 @@ export const issuedInputSchema = z
 
 export type DraftInput = z.input<typeof draftInputSchema>;
 export type IssuedInput = z.input<typeof issuedInputSchema>;
-type Draft = z.output<typeof draftInputSchema>;
-type DraftLine = Draft["lines"][number];
+export type ParsedDraft = z.output<typeof draftInputSchema>;
+type DraftLine = ParsedDraft["lines"][number];
 
 export type SavedDraft = { id: string; revision: number; totals: Totals };
 
@@ -289,7 +289,7 @@ export function newDraftDefaults(ownerId: string, customerId: string | null): Dr
 
 export function totalsOf(
   lines: Pick<DraftLine, "quantityMilli" | "unitPriceMinor" | "discountKind" | "discountValue">[],
-  draft: Pick<Draft, "discountKind" | "discountValue" | "rounding">,
+  draft: Pick<ParsedDraft, "discountKind" | "discountValue" | "rounding">,
 ): Totals {
   try {
     return computeTotals(
@@ -327,7 +327,7 @@ function assertOwned(
 export function assertReferencesOwned(
   tx: Tx,
   ownerId: string,
-  draft: Pick<Draft, "customerId" | "bankAccountId" | "seriesId" | "lines">,
+  draft: Pick<ParsedDraft, "customerId" | "bankAccountId" | "seriesId" | "lines">,
 ): void {
   assertOwned(tx, ownerId, customer, draft.customerId, V.customerNotFound);
   assertOwned(tx, ownerId, bankAccount, draft.bankAccountId, V.accountNotFound);
@@ -428,15 +428,65 @@ export function unlessUnchanged<T>(run: () => T): T {
   }
 }
 
+export function parseDraft(raw: DraftInput): ParsedDraft {
+  const parsed = draftInputSchema.safeParse(raw);
+  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
+  return parsed.data;
+}
+
+export function createDraftIn(
+  tx: Tx,
+  audit: Audit,
+  userId: string,
+  input: ParsedDraft,
+  auditNote: Record<string, unknown> = {},
+): SavedDraft {
+  const { id: _i, clientId, revision: _r, lines, ...fields } = input;
+  const totals = totalsOf(lines, fields);
+  const rows = lineRows(lines, totals);
+  assertReferencesOwned(tx, userId, input);
+  const customerName = customerNameOf(tx, userId, fields.customerId);
+  const id = clientId ?? randomUUID();
+  const now = clock.now();
+  tx.insert(invoice)
+    .values({
+      id,
+      userId,
+      ...fields,
+      ...sumsOf(totals),
+      customerName,
+      searchText: searchTextOf({ customerName, lines: rows }),
+      revision: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  insertLines(tx, userId, id, rows);
+  const changes = diffLines([], rows);
+  audit({
+    action: "invoice.save",
+    entity: "invoice",
+    entityId: id,
+    ownerId: userId,
+    scope: "user",
+    before: null,
+    after: {
+      ...auditNote,
+      ...auditSnapshot(findOwned(tx, userId, id), rows.length),
+      ...(changes && { lines: changes.after }),
+    },
+  });
+  return { id, revision: 1, totals };
+}
+
 export function saveDraft(
   actor: Actor,
   raw: DraftInput,
   auditNote: Record<string, unknown> = {},
 ): SavedDraft {
   const userId = ownerOf(actor);
-  const parsed = draftInputSchema.safeParse(raw);
-  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
-  const { id: existingId, clientId, revision, lines, ...fields } = parsed.data;
+  const input = parseDraft(raw);
+  const { id: existingId, clientId, revision, lines, ...fields } = input;
   const totals = totalsOf(lines, fields);
   const rows = lineRows(lines, totals);
 
@@ -447,14 +497,14 @@ export function saveDraft(
         : clientId
           ? draftWithClientId(tx, userId, clientId)
           : null;
-      if (before && before.status !== "draft") throw new ServiceError(TEXTS.invoices.stale);
-      assertReferencesOwned(tx, userId, parsed.data);
+      if (!before) return createDraftIn(tx, audit, userId, input, auditNote);
+      if (before.status !== "draft") throw new ServiceError(TEXTS.invoices.stale);
+      assertReferencesOwned(tx, userId, input);
 
       const customerName = customerNameOf(tx, userId, fields.customerId);
       const values = { ...fields, ...sumsOf(totals), customerName };
-      const beforeLines = before ? linesOf(tx, userId, before.id) : [];
+      const beforeLines = linesOf(tx, userId, before.id);
       if (
-        before &&
         matches(before, values) &&
         beforeLines.length === rows.length &&
         rows.every((row, i) => matches(beforeLines[i]!, row))
@@ -466,38 +516,22 @@ export function saveDraft(
         });
       }
       // Checked after the comparison: a retry of a write whose reply got lost changes nothing.
-      if (before && before.revision !== revision) throw new ServiceError(TEXTS.invoices.stale);
+      if (before.revision !== revision) throw new ServiceError(TEXTS.invoices.stale);
 
-      const id = before?.id ?? clientId ?? randomUUID();
-      const nextRevision = (before?.revision ?? 0) + 1;
-      const searchText = searchTextOf({ customerName, lines: rows });
-      const now = clock.now();
-      if (before) {
-        tx.update(invoice)
-          .set({
-            ...values,
-            searchText,
-            revision: nextRevision,
-            updatedAt: now,
-          })
-          .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
-          .run();
-        tx.delete(invoiceLine)
-          .where(scoped(userId).where(invoiceLine, (t, { eq }) => eq(t.invoiceId, id)))
-          .run();
-      } else {
-        tx.insert(invoice)
-          .values({
-            id,
-            userId,
-            ...values,
-            searchText,
-            revision: nextRevision,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .run();
-      }
+      const { id } = before;
+      const nextRevision = before.revision + 1;
+      tx.update(invoice)
+        .set({
+          ...values,
+          searchText: searchTextOf({ customerName, lines: rows }),
+          revision: nextRevision,
+          updatedAt: clock.now(),
+        })
+        .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
+        .run();
+      tx.delete(invoiceLine)
+        .where(scoped(userId).where(invoiceLine, (t, { eq }) => eq(t.invoiceId, id)))
+        .run();
       insertLines(tx, userId, id, rows);
       const changes = diffLines(beforeLines, rows);
       audit({
@@ -505,7 +539,7 @@ export function saveDraft(
         entityId: id,
         ownerId: userId,
         scope: "user",
-        before: before && {
+        before: {
           ...auditSnapshot(before, beforeLines.length),
           ...(changes && { lines: changes.before }),
         },

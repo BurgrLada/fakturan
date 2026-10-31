@@ -5,6 +5,8 @@ import { db, type Tx } from "../db";
 
 type MutationEntry = Omit<AuditEntry, "action"> & { action?: AuditAction };
 
+export type Audit = (entry: MutationEntry) => void;
+
 type NotThenable<T> = T extends PromiseLike<unknown> ? never : unknown;
 
 function isThenable(value: unknown): boolean {
@@ -14,7 +16,7 @@ function isThenable(value: unknown): boolean {
 export function mutate<T>(
   actor: Actor,
   action: AuditAction,
-  fn: (tx: Tx, audit: (entry: MutationEntry) => void) => T & NotThenable<T>,
+  fn: (tx: Tx, audit: Audit) => T & NotThenable<T>,
 ): T {
   return runWithActor(actor, () =>
     db.transaction(
