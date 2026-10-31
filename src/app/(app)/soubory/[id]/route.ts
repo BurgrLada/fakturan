@@ -10,7 +10,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const actor = await actorFromRequest();
   if (!actor.userId) return notFound();
   try {
-    const { data, mimeType, name } = readOwnedFile(actor, id);
+    const { data, mimeType, name, kind } = readOwnedFile(actor, id);
+    // The archive has its own route with a rate limit and an audit row.
+    if (kind === "sent_pdf") return notFound();
     return new Response(new Uint8Array(data), {
       headers: {
         "Content-Type": mimeType,

@@ -19,7 +19,12 @@ import {
   startScheduler,
   stopScheduler,
 } from "@/server/scheduler/start";
-import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
+import {
+  registerTickTask,
+  resetTickTasksForTests,
+  tickTasksForTests,
+  tick,
+} from "@/server/scheduler/tick";
 import { scrubEvent } from "@/server/monitoring/before-send";
 import { createTestDb } from "../helpers/db";
 
@@ -405,6 +410,7 @@ describe("start", () => {
     stubEnv();
     startScheduler();
     expect(jobDefinition("mail.send")).toEqual({ run: deliverMail, recover: recoverMail });
+    expect(tickTasksForTests()).toContain("dead-mail");
   });
 
   test("[R-5] SIGTERM s běžící úlohou lease neuvolní a nechá ho vypršet", async () => {

@@ -18,6 +18,10 @@ export function registerTickTask(task: TickTask): void {
   tasks.set(task.name, task);
 }
 
+export function tickTasksForTests(): string[] {
+  return [...tasks.keys()];
+}
+
 export function resetTickTasksForTests(): void {
   tasks.clear();
 }

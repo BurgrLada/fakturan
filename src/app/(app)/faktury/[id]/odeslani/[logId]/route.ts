@@ -6,6 +6,6 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string; logId: string }> },
 ) {
-  const { logId } = await params;
-  return servePdf("attachment", RATE_RULES.pdfUser, async (actor) => archivedPdf(actor, logId));
+  const { id, logId } = await params;
+  return servePdf("attachment", RATE_RULES.pdfUser, async (actor) => archivedPdf(actor, logId, id));
 }

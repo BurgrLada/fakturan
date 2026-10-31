@@ -437,9 +437,11 @@ Pravidla:
 - Tlačítko „Odeslat klientovi“ je v `InvoiceActions` pro každý stav ze `SENDABLE_STATUSES`. Dialog má příjemce, kopii, skrytou kopii, předmět, text a název přílohy, předvyplněné z `composeMail`. `requestId` vzniká při otevření dialogu.
 - Po vystavení `invoice-form.tsx:330` přejde na `/faktury/<id>?vystaveno=1` a detail ukáže nabídku s tlačítkem. Parametr jen otevírá nabídku, nikdy neodesílá. Stejně `?odeslat=1` po úpravě nebo obnovení verze a `resendSuggested` ve formuláři.
 - Odeslání je jen ve frontě, UI ukáže „Odesílá se“ a po doručení `router.refresh`. Detail ukáže poslední selhání, `held` a `unknown` s důvodem. `unknown` nabízí ruční odeslání až po potvrzení, že uživatel ví o riziku duplicity.
+- `sendInvoice` odmítne doklad s nevyřešeným `unknown` stejného druhu textem `E.unknownPending`, dokud nepřijde `confirmedUnknown: true`. Dialog to zjistí přes `hasUnresolvedUnknown` už při otevření a nabídne výslovné potvrzení rizika duplicity. Bez potvrzení neodesílá.
+- `resendFromLog` se volá jen přes tento dialog, nikdy jedním klikem z historie: dialog ukáže příjemce a předmět záznamu a u `unknown` žádá stejné potvrzení. `confirmedUnknown` posílá akce jen po tomto potvrzení.
 - Bez SMTP je tlačítko aktivní a dialog vysvětlí SET-053 s odkazem na nastavení, stažení PDF funguje.
 - Historie je sekce detailu nad historií změn.
-- Hromadně: akce v panelu výběru. Náhled ukáže souhrn příjemců a přeskočené s důvodem (stav, bez adresy, už odesílá se). Do hromadného odeslání jde jen `issued`. Potvrzení je povinné, server znovu vyhodnotí stav a text je výchozí šablona. Rate limit `sendBulkUser` a `sendUser`, limit `MAX_BULK_DOCUMENTS`. Selhání jednoho dokladu nezastaví ostatní.
+- Hromadně: akce v panelu výběru. Náhled ukáže souhrn příjemců a přeskočené s důvodem (stav, bez adresy, už odesílá se, nejasný výsledek předchozího odeslání). Doklad s `hasUnresolvedUnknown` hromadné odeslání vždy přeskočí, `bulkSend` nikdy neposílá `confirmedUnknown`. Do hromadného odeslání jde jen `issued`. Potvrzení je povinné, server znovu vyhodnotí stav a text je výchozí šablona. Rate limit `sendBulkUser` a `sendUser`, limit `MAX_BULK_DOCUMENTS`. Selhání jednoho dokladu nezastaví ostatní.
 - INV-024 čeká na úhradu a export, ID zůstává v pending a MAIL-001 kvůli ISDOC také. Odpovídající testy ID v názvu nenesou.
 
 - [ ] **Step 1: Napiš testy**
@@ -448,6 +450,10 @@ Pravidla:
 test('tlačítko Odeslat klientovi je na detailu vystavené i odeslané faktury a chybí na konceptu a stornu', ...) // MAIL-001 částečně
 test('po vystavení se nabídne odeslání a nic neodejde bez kliknutí', ...) // e2e, smtp.messages prázdné
 test('odeslání z dialogu s upraveným předmětem a přílohou PDF', ...) // e2e, kontrola přes TestSmtp
+test('skutečné doručení přes frontu v produkčním buildu', ...) // povinné e2e nad next start: klik, worker v instrumentation, render PDF, TestSmtp dostane přílohu, doklad je odeslaný, archiv jde stáhnout
+test('dialog při nevyřešeném unknown bez potvrzení neodešle, po potvrzení ano', ...) // e2e
+test('hromadné odeslání přeskočí doklad s unknown s důvodem', ...)
+test('znovu odeslání z historie jde přes dialog a nic neodejde bez potvrzení', ...) // e2e
 test('[INV-020] po úpravě odeslané faktury se nabídne opětovné odeslání a nic neodejde', ...)
 test('resendSuggested po obnovení verze otevře nabídku, ne odeslání', ...)
 test('[SET-053] bez SMTP dialog vysvětlí nedostupnost a PDF jde stáhnout', ...) // e2e

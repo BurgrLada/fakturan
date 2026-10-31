@@ -9,7 +9,7 @@ import { env } from "../env";
 import { purgeFinishedJobs } from "../jobs/queue";
 import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
-import { deliverMail, recoverMail } from "../services/mail-delivery";
+import { deliverMail, recoverMail, settleDeadMail } from "../services/mail-delivery";
 import { backupTask } from "./backup";
 import { releaseLease } from "./lease";
 import { reportFailure } from "./report";
@@ -36,6 +36,8 @@ export const jobCleanupTask: TickTask = {
     purgeFinishedJobs(now);
   },
 };
+
+export const deadMailTask: TickTask = { name: "dead-mail", run: () => settleDeadMail() };
 
 export function cronPattern(seconds: number): string {
   return `*/${seconds} * * * * *`;
@@ -66,6 +68,7 @@ export function startScheduler(): void {
     .onConflictDoUpdate({ target: schedulerState.id, set: { startedAt, lastTickAt: null } })
     .run();
   registerJob("mail.send", { run: deliverMail, recover: recoverMail });
+  registerTickTask(deadMailTask);
   registerTickTask(jobCleanupTask);
   registerTickTask(backupTask);
   bindWorker(holder);

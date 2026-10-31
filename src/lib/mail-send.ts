@@ -40,6 +40,7 @@ export const sendInputSchema = mailContentSchema
     to: addresses.min(1, E.noRecipient),
     cc: addresses,
     bcc: addresses,
+    confirmedUnknown: z.boolean(E.invalid).optional(),
   })
   .refine(({ to, cc, bcc }) => to.length + cc.length + bcc.length <= MAX_RECIPIENTS, E.recipients);
 

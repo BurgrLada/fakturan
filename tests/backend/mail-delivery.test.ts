@@ -14,7 +14,9 @@ import {
   notification,
   schedulerState,
 } from "@/server/db/schema";
+import { claimNext } from "@/server/jobs/queue";
 import { recoverInterrupted, drainJobs } from "@/server/jobs/worker";
+import { acquireLease } from "@/server/scheduler/lease";
 import { registerJob } from "@/server/jobs/registry";
 import { composeMail } from "@/server/services/email-templates";
 import { setAutomation, setPaused } from "@/server/services/automation";
@@ -26,6 +28,7 @@ import {
   deliverMail,
   recoverMail,
   setDeliveryLimitsForTests,
+  settleDeadMail,
 } from "@/server/services/mail-delivery";
 import { mutate } from "@/server/services/mutation";
 import { deactivateUser, reactivateUser } from "@/server/services/users";
@@ -41,15 +44,25 @@ import {
 } from "../helpers/fixtures-mail";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
 
-const mocks = vi.hoisted(() => ({ captureException: vi.fn(), failRender: { on: false } }));
+const mocks = vi.hoisted(() => ({
+  captureException: vi.fn(),
+  failRender: { on: false },
+  hold: { gate: null as Promise<void> | null, entered: false },
+}));
 
 vi.mock("@sentry/nextjs", () => ({ captureException: mocks.captureException }));
 vi.mock("@/server/pdf/render", async (original) => {
   const real = await original<typeof import("@/server/pdf/render")>();
   return {
     ...real,
-    renderInvoicePdf: (view: Parameters<typeof real.renderInvoicePdf>[0]) => {
+    renderInvoicePdf: async (view: Parameters<typeof real.renderInvoicePdf>[0]) => {
       if (mocks.failRender.on) throw new Error("render spadl");
+      const { gate } = mocks.hold;
+      if (gate) {
+        mocks.hold.gate = null;
+        mocks.hold.entered = true;
+        await gate;
+      }
       return real.renderInvoicePdf(view);
     },
   };
@@ -91,6 +104,7 @@ beforeEach(() => {
   now(T0);
   mocks.captureException.mockClear();
   mocks.failRender.on = false;
+  mocks.hold.gate = null;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   registerJob("mail.send", { run: deliverMail, recover: recoverMail });
 });
@@ -147,6 +161,37 @@ function automatic(
       ...over,
     }),
   )!.logId;
+}
+
+function holdRender(): () => void {
+  let release = () => {};
+  mocks.hold.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  mocks.hold.entered = false;
+  return release;
+}
+
+// The real attempt stands in the render while the action changes the world under it.
+async function duringRender(action: () => void) {
+  const release = holdRender();
+  const drained = drainJobs(WORKER);
+  await vi.waitFor(() => expect(mocks.hold.entered).toBe(true));
+  action();
+  release();
+  await drained;
+}
+
+// Attempt A stalls in the render long enough to lose its lease, then B recovers the job.
+async function stalledAttempt() {
+  const release = holdRender();
+  acquireLease("A");
+  const attempt = deliverMail(claimNext("A")!);
+  await vi.waitFor(() => expect(mocks.hold.entered).toBe(true));
+  later(121_000);
+  expect(acquireLease("B")).toBe("taken_over");
+  recoverInterrupted("B");
+  return { attempt, release };
 }
 
 function crash(logId: string) {
@@ -519,15 +564,37 @@ describe("svolení těsně před SMTP", () => {
   test("změna dokladu během skládání PDF zadrží zprávu před SMTP", async () => {
     const { owner, invoiceId } = account();
     const id = send(owner, invoiceId);
-    const render = await import("@/server/pdf/render");
-    const original = render.renderInvoicePdf;
-    vi.spyOn(render, "renderInvoicePdf").mockImplementation(async (view) => {
-      const data = await original(view);
-      cancelInvoice(webActor(owner), invoiceId);
-      return data;
-    });
-    await drainJobs(WORKER);
+    await duringRender(() => cancelInvoice(webActor(owner), invoiceId));
     expect(logOf(id).status).toBe("held");
+    expect(smtp.connections()).toBe(0);
+  });
+
+  test("změna revize během skládání PDF zadrží zprávu před SMTP", async () => {
+    const { owner, invoiceId } = account();
+    const id = send(owner, invoiceId);
+    await duringRender(() =>
+      db
+        .update(invoice)
+        .set({ revision: sql`${invoice.revision} + 1` })
+        .where(eq(invoice.id, invoiceId))
+        .run(),
+    );
+    expect(logOf(id).status).toBe("held");
+    expect(smtp.connections()).toBe(0);
+  });
+
+  test("vypnutí automatiky i hlavní vypínač během skládání PDF zadrží zprávu", async () => {
+    for (const change of [
+      (owner: string) =>
+        setAutomation(webActor(owner), "recurringSend", false, { confirmed: true }),
+      (owner: string) => setPaused(webActor(owner), true, { confirmed: true }),
+    ]) {
+      const { owner, invoiceId } = account();
+      setAutomation(webActor(owner), "recurringSend", true, { confirmed: true });
+      const id = automatic(owner, invoiceId);
+      await duringRender(() => change(owner));
+      expect(logOf(id).status).toBe("held");
+    }
     expect(smtp.connections()).toBe(0);
   });
 
@@ -583,19 +650,24 @@ describe("svolení těsně před SMTP", () => {
     expect(smtp.connections()).toBe(0);
   });
 
+  test("po dalším úspěchu se vyřeší i upozornění ze zrušeného záznamu", async () => {
+    const { owner, invoiceId } = account();
+    const admin = seedOwner(db, T0);
+    db.run(sql`UPDATE user SET role = 'admin' WHERE id = ${admin}`);
+    send(owner, invoiceId);
+    deactivateUser(webActor(admin), owner);
+    reactivateUser(webActor(admin), owner);
+    send(owner, invoiceId);
+    await drainJobs(WORKER);
+    expect(noticesOf(owner)[0]!.resolvedAt).toEqual(T0);
+  });
+
   test("deaktivace během skládání PDF zastaví zprávu před SMTP", async () => {
     const { owner, invoiceId } = account();
     const admin = seedOwner(db, T0);
     db.run(sql`UPDATE user SET role = 'admin' WHERE id = ${admin}`);
     const id = send(owner, invoiceId);
-    const render = await import("@/server/pdf/render");
-    const original = render.renderInvoicePdf;
-    vi.spyOn(render, "renderInvoicePdf").mockImplementation(async (view) => {
-      const data = await original(view);
-      deactivateUser(webActor(admin), owner);
-      return data;
-    });
-    await drainJobs(WORKER);
+    await duringRender(() => deactivateUser(webActor(admin), owner));
     expect(logOf(id).status).toBe("cancelled");
     expect(smtp.connections()).toBe(0);
   });
@@ -690,6 +762,77 @@ describe("obnova po přerušení", () => {
     expect(noticesOf(owner)).toMatchObject([{ kind: "mail_failed" }]);
   });
 
+  test("pád mezi requeue a retryJob drží odstup R-3", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(421);
+    const id = send(owner, invoiceId);
+    await drainJobs(WORKER);
+    crash(id);
+    later(MINUTE);
+    recoverInterrupted(WORKER);
+    expect(jobOf(id)).toMatchObject({
+      status: "pending",
+      runAt: new Date(T0.getTime() + 5 * MINUTE),
+    });
+    await drainJobs(WORKER);
+    expect(smtp.connections()).toBe(1);
+    later(4 * MINUTE);
+    await drainJobs(WORKER);
+    expect(smtp.connections()).toBe(2);
+    expect(logOf(id).status).toBe("sent");
+  });
+
+  test("recover po vyčerpaných pokusech ponechá důvod serveru, jinak řekne, že zpráva neodešla", async () => {
+    const tried = account();
+    smtp.rejectNext(421);
+    const withReason = send(tried.owner, tried.invoiceId);
+    await drainJobs(WORKER);
+    crash(withReason);
+    db.update(job)
+      .set({ attempts: 4 })
+      .where(eq(job.id, jobOf(withReason).id))
+      .run();
+
+    const fresh = account();
+    const without = send(fresh.owner, fresh.invoiceId);
+    crash(without);
+    db.update(job)
+      .set({ attempts: 4 })
+      .where(eq(job.id, jobOf(without).id))
+      .run();
+
+    recoverInterrupted(WORKER);
+    expect(logOf(withReason).reason).toContain("421");
+    expect(logOf(without).reason).toMatch(/neodešla/);
+  });
+
+  test("mrtvá úloha se záznamem sending je unknown s upozorněním a uvolní blokaci", async () => {
+    const { owner, invoiceId } = account();
+    const id = send(owner, invoiceId);
+    db.update(emailLog).set({ status: "sending" }).where(eq(emailLog.id, id)).run();
+    db.update(job)
+      .set({ status: "dead" })
+      .where(eq(job.id, jobOf(id).id))
+      .run();
+    settleDeadMail();
+    expect(logOf(id).status).toBe("unknown");
+    expect(noticesOf(owner)).toMatchObject([{ kind: "mail_unknown" }]);
+    expect(send(owner, invoiceId, { confirmedUnknown: true })).toBeTruthy();
+  });
+
+  test("mrtvá úloha se záznamem queued je failed a neodešle nic", async () => {
+    const { owner, invoiceId } = account();
+    const id = send(owner, invoiceId);
+    db.update(job)
+      .set({ status: "dead" })
+      .where(eq(job.id, jobOf(id).id))
+      .run();
+    settleDeadMail();
+    await drainJobs(WORKER);
+    expect(logOf(id).status).toBe("failed");
+    expect(smtp.connections()).toBe(0);
+  });
+
   test("recover hotového záznamu jen ukončí úlohu", async () => {
     const { owner, invoiceId } = account();
     const id = send(owner, invoiceId);
@@ -699,6 +842,61 @@ describe("obnova po přerušení", () => {
     expect(jobOf(id).status).toBe("done");
     expect(logOf(id).status).toBe("sent");
     expect(smtp.messages).toHaveLength(1);
+  });
+});
+
+describe("převzetí úlohy za běhu", () => {
+  test("pozdní pokus po doručení novým držitelem nic neodešle", async () => {
+    const { owner, invoiceId } = account();
+    const id = send(owner, invoiceId);
+    const { attempt, release } = await stalledAttempt();
+    await drainJobs("B");
+    expect(logOf(id).status).toBe("sent");
+
+    release();
+    await attempt;
+    expect(smtp.messages).toHaveLength(1);
+    expect(smtp.connections()).toBe(1);
+    expect(logOf(id).status).toBe("sent");
+    expect(db.select().from(file).where(eq(file.userId, owner)).all()).toHaveLength(1);
+    assertConsistent(db, owner);
+  });
+
+  test("pozdní pokus po 421 nového držitele čeká na jeho opakování a neposílá", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(421);
+    const id = send(owner, invoiceId);
+    const { attempt, release } = await stalledAttempt();
+    await drainJobs("B");
+    expect(logOf(id).status).toBe("queued");
+    expect(smtp.connections()).toBe(1);
+
+    release();
+    await attempt;
+    expect(smtp.connections()).toBe(1);
+    expect(logOf(id)).toMatchObject({ status: "queued", attempts: 1 });
+    expect(jobOf(id).status).toBe("pending");
+
+    later(30 * MINUTE);
+    await drainJobs("B");
+    expect(smtp.messages).toHaveLength(1);
+    expect(smtp.connections()).toBe(2);
+    expect(logOf(id).status).toBe("sent");
+  });
+
+  test("pozdní pokus se spadlým renderem nového držitele nepřebije", async () => {
+    const { owner, invoiceId } = account();
+    const id = send(owner, invoiceId);
+    const { attempt, release } = await stalledAttempt();
+    db.update(job)
+      .set({ attempts: 4 })
+      .where(eq(job.id, jobOf(id).id))
+      .run();
+    await drainJobs("B");
+    mocks.failRender.on = true;
+    release();
+    await attempt.catch(() => {});
+    expect(logOf(id).status).toBe("sent");
   });
 });
 
@@ -715,6 +913,24 @@ describe("časový strop", () => {
     expect(logOf(id).status).toBe("unknown");
     expect(smtp.connections()).toBe(1);
     expect(mocks.captureException).not.toHaveBeenCalled();
+  });
+
+  test("render přes strop pdfMs do SMTP nedojde a zkusí se znovu", async () => {
+    const { owner, invoiceId } = account();
+    const release = holdRender();
+    setDeliveryLimitsForTests({ pdfMs: 100 });
+    const id = send(owner, invoiceId);
+    await drainJobs(WORKER);
+    release();
+    expect(logOf(id)).toMatchObject({ status: "queued", attempts: 0 });
+    expect(jobOf(id).status).toBe("pending");
+    expect(smtp.connections()).toBe(0);
+    expect(mocks.captureException).toHaveBeenCalledOnce();
+
+    setDeliveryLimitsForTests(null);
+    later(5 * MINUTE);
+    await drainJobs(WORKER);
+    expect(logOf(id).status).toBe("sent");
   });
 
   test("součet stropů zůstává pod lease 120 s", () => {

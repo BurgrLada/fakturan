@@ -22,6 +22,7 @@ import { archiveSentPdf, deleteFile } from "@/server/services/files";
 import { cancelInvoice } from "@/server/services/invoice-lifecycle";
 import {
   archivedPdf,
+  hasUnresolvedUnknown,
   listEmailLog,
   queueMail,
   resendFromLog,
@@ -207,6 +208,48 @@ describe("sendInvoice", () => {
     expect(logsOf(owner)).toEqual([]);
   });
 
+  describe("nevyřešené unknown", () => {
+    async function unknown() {
+      const fixture = account();
+      smtp.dropDuringData();
+      sendInvoice(webActor(fixture.owner), fixture.invoiceId, input());
+      await drainJobs(WORKER);
+      return fixture;
+    }
+
+    test("nové odeslání vyžaduje potvrzení a potvrzené projde", async () => {
+      const { owner, invoiceId } = await unknown();
+      expect(fail(() => sendInvoice(webActor(owner), invoiceId, input()))).toMatch(/potvrdit/);
+      expect(logsOf(owner)).toHaveLength(1);
+      const confirmed = input({ confirmedUnknown: true });
+      expect(sendInvoice(webActor(owner), invoiceId, confirmed).logId).toBeTruthy();
+    });
+
+    test("novější sent ho vyřeší a jiný druh zprávy neblokuje", async () => {
+      const { owner, invoiceId } = await unknown();
+      expect(hasUnresolvedUnknown(owner, invoiceId, "invoice")).toBe(true);
+      expect(hasUnresolvedUnknown(owner, invoiceId, "reminder")).toBe(false);
+      sendInvoice(webActor(owner), invoiceId, input({ confirmedUnknown: true }));
+      await drainJobs(WORKER);
+      expect(hasUnresolvedUnknown(owner, invoiceId, "invoice")).toBe(false);
+      expect(sendInvoice(webActor(owner), invoiceId, input()).logId).toBeTruthy();
+    });
+
+    test("znovu odeslání selhaného záznamu nepřeskočí nevyřešené unknown", async () => {
+      const { owner, invoiceId } = await unknown();
+      smtp.rejectNext(550);
+      const { logId } = sendInvoice(webActor(owner), invoiceId, input({ confirmedUnknown: true }));
+      await drainJobs(WORKER);
+      const again = { confirmedUnknown: false, requestId: randomUUID() };
+      expect(fail(() => resendFromLog(webActor(owner), logId, again))).toMatch(/potvrdit/);
+    });
+
+    test("cizí unknown se nezjistí", async () => {
+      const { invoiceId } = await unknown();
+      expect(hasUnresolvedUnknown(seedOwner(db, T0), invoiceId, "invoice")).toBe(false);
+    });
+  });
+
   test("20 příjemců projde", () => {
     const { owner, invoiceId } = account();
     const to = Array.from({ length: 20 }, (_, i) => `a${i}@example.cz`);
@@ -369,6 +412,33 @@ describe("archiv", () => {
     expect((await route(invoiceId, logId)).status).toBe(429);
   });
 
+  test("archiv patří jen k dokladu v adrese", async () => {
+    const { owner, logId } = await delivered();
+    session.userId = owner;
+    expect((await route(issuedInvoice(owner), logId)).status).toBe(404);
+  });
+
+  test("obecná trasa souborů archiv nevydá", async () => {
+    const { owner } = await delivered();
+    session.userId = owner;
+    const id = logsOf(owner)[0]!.fileId!;
+    const { GET } = await import("@/app/(app)/soubory/[id]/route");
+    const response = await GET(new Request("http://localhost/"), {
+      params: Promise.resolve({ id }),
+    });
+    expect(response.status).toBe(404);
+  });
+
+  test("PDF neodeslaného pokusu se jako archiv nenabízí ani nevydá", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(550);
+    const { logId } = sendInvoice(webActor(owner), invoiceId, input());
+    await drainJobs(WORKER);
+    expect(logsOf(owner)[0]!.fileId).toBeTruthy();
+    expect(listEmailLog(owner, invoiceId)[0]!.hasArchive).toBe(false);
+    expect(() => archivedPdf(webActor(owner), logId)).toThrow(InvoicePdfNotFoundError);
+  });
+
   test("záznam bez archivu je 404", () => {
     const { owner, invoiceId } = account();
     const { logId } = sendInvoice(webActor(owner), invoiceId, input());
@@ -382,6 +452,7 @@ describe("archiv", () => {
     expect(archiveSentPdf(scheduler, logId, Buffer.from("%PDF-nove"), "x.pdf")).toEqual({
       id: fileId,
     });
+    expect(db.select().from(file).where(eq(file.userId, owner)).all()).toHaveLength(1);
     expect(() => deleteFile(webActor(owner), fileId)).toThrow(ServiceError);
 
     const other = account();

@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NotificationKind } from "@/lib/automation";
 import { kindForInvoice } from "@/lib/email-template";
 import { daysBetween } from "@/lib/invoice";
@@ -10,7 +10,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { emailLog, user, type EmailLog, type Job } from "../db/schema";
+import { emailLog, job, user, type EmailLog, type Job } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { completeJob, retryJob } from "../jobs/queue";
 import { RetryLater } from "../jobs/registry";
@@ -73,6 +73,17 @@ function isDeactivated(userId: string): boolean {
 }
 
 const exhausted = (row: Job) => row.attempts >= row.maxAttempts;
+
+// False once recovery has taken the job over: a late attempt must leave everything to the new one.
+function holdsJob(row: Job, q: Pick<Tx, "select"> = db): boolean {
+  if (!row.lockedBy) return false;
+  const held = q
+    .select({ id: job.id })
+    .from(job)
+    .where(and(eq(job.id, row.id), eq(job.status, "running"), eq(job.lockedBy, row.lockedBy)))
+    .get();
+  return held !== undefined;
+}
 
 function noticeKind(log: EmailLog, status: EmailLog["status"]): NotificationKind {
   if (status === "failed") return log.kind === "reminder" ? "reminder_failed" : "mail_failed";
@@ -191,13 +202,16 @@ async function prepare(log: EmailLog): Promise<Prepared | null> {
 }
 
 class Refused extends Error {
-  constructor(readonly verdict: Refusal) {
+  verdict: Refusal;
+
+  constructor(verdict: Refusal) {
     super("Odeslání není povolené");
+    this.verdict = verdict;
   }
 }
 
 // Consent is judged again here, in one transaction with the write: the PDF took time.
-function startSending(log: EmailLog, messageId: string): boolean {
+function startSending(row: Job, log: EmailLog, messageId: string): boolean {
   try {
     mutate(actorOf(log), "mail.sending", (tx, audit) => {
       const current = tx
@@ -205,7 +219,7 @@ function startSending(log: EmailLog, messageId: string): boolean {
         .from(emailLog)
         .where(scoped(log.userId).where(emailLog, (t, { eq: is }) => is(t.id, log.id)))
         .get();
-      if (current?.status !== "queued") throw new AlreadyMoved();
+      if (current?.status !== "queued" || !holdsJob(row, tx)) throw new AlreadyMoved();
       const refused = refusal(current);
       if (refused) throw new Refused(refused);
       moveLog(tx, log, "queued", { status: "sending", attempts: current.attempts + 1, messageId });
@@ -244,7 +258,7 @@ function recordSent(log: EmailLog, { rejected }: SendResult, messageId: string):
           and(
             is(t.invoiceId, log.invoiceId),
             is(t.kind, log.kind),
-            inArray(t.status, ["failed", "unknown", "held"]),
+            inArray(t.status, ["failed", "unknown", "held", "cancelled"]),
           ),
         ),
       )
@@ -279,6 +293,8 @@ function requeue(log: EmailLog, reason: string): void {
     });
   });
 }
+
+const retryDelay = (row: Job) => RETRY_DELAYS_MS[row.attempts - 1] ?? RETRY_DELAYS_MS.at(-1)!;
 
 function failureContext(row: Job) {
   return {
@@ -316,7 +332,7 @@ function recordFailure(row: Job, log: EmailLog, error: unknown): number | null {
     return null;
   }
   requeue(log, reason);
-  return RETRY_DELAYS_MS[row.attempts - 1] ?? RETRY_DELAYS_MS.at(-1)!;
+  return retryDelay(row);
 }
 
 export async function deliverMail(row: Job): Promise<void> {
@@ -338,9 +354,10 @@ export async function deliverMail(row: Job): Promise<void> {
   try {
     prepared = await prepare(log);
   } catch (error) {
-    if (exhausted(row)) settle(log, "queued", "failed", R.archive);
+    if (exhausted(row) && holdsJob(row)) settle(log, "queued", "failed", R.archive);
     throw error;
   }
+  if (!holdsJob(row)) return;
   if (!prepared) {
     settle(log, "queued", "failed", R.unavailable);
     return;
@@ -348,7 +365,7 @@ export async function deliverMail(row: Job): Promise<void> {
 
   const { transport, message } = prepared;
   const messageId = message.messageId!;
-  if (!startSending(log, messageId)) return;
+  if (!startSending(row, log, messageId)) return;
 
   // From here on an exception must never mean another attempt: the message may be on its way.
   let result: SendResult | null = null;
@@ -371,6 +388,14 @@ export async function deliverMail(row: Job): Promise<void> {
   if (retryIn !== null) throw new RetryLater("Odeslání se zopakuje", retryIn);
 }
 
+// A crash between requeue and retryJob must not turn the R-3 pause into an immediate attempt.
+function recoveredRunAt(row: Job, log: EmailLog): Date {
+  const now = clock.now();
+  if (log.attempts === 0) return now;
+  const due = log.updatedAt.getTime() + retryDelay(row);
+  return due > now.getTime() ? new Date(due) : now;
+}
+
 export function recoverMail(row: Job): void {
   const worker = row.lockedBy;
   if (!worker) throw new Error("Obnovovaná úloha nemá držitele");
@@ -380,12 +405,32 @@ export function recoverMail(row: Job): void {
   } else if (log?.status === "queued") {
     const deactivated = isDeactivated(log.userId);
     if (deactivated) settle(log, "queued", "cancelled", R.deactivated);
-    else if (exhausted(row)) settle(log, "queued", "failed", R.archive);
+    else if (exhausted(row)) settle(log, "queued", "failed", log.reason ?? R.notStarted);
     if (deactivated || !exhausted(row)) {
       // Cancels the job itself for a deactivated owner, so reactivation releases nothing (R-21).
-      retryJob(row.id, worker, { runAt: clock.now(), reason: "přerušený běh" });
+      retryJob(row.id, worker, { runAt: recoveredRunAt(row, log), reason: "přerušený běh" });
       return;
     }
   }
   completeJob(row.id, worker);
+}
+
+// A dead job has no further run or recovery, and its record would block the partial index for good.
+export function settleDeadMail(): void {
+  const stranded = db
+    .select({ log: emailLog })
+    .from(job)
+    .innerJoin(emailLog, sql`${emailLog.id} = json_extract(${job.payload}, '$.logId')`)
+    .where(
+      and(
+        eq(job.status, "dead"),
+        eq(job.kind, "mail.send"),
+        inArray(emailLog.status, ["queued", "sending"]),
+      ),
+    )
+    .all();
+  for (const { log } of stranded) {
+    if (log.status === "sending") settle(log, "sending", "unknown", R.interrupted);
+    else settle(log, "queued", "failed", log.reason ?? R.notStarted);
+  }
 }

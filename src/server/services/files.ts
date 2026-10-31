@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { isNull } from "drizzle-orm";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -77,15 +78,17 @@ export function storeFile(
 
 const E = TEXTS.invoiceMail.errors;
 
-function archiveOf(userId: string, logId: string) {
-  return db
-    .select({ fileId: emailLog.fileId })
-    .from(emailLog)
-    .where(scoped(userId).where(emailLog, (t, { eq: is }) => is(t.id, logId)))
-    .get();
+class AlreadyArchived extends Error {
+  fileId: string;
+
+  constructor(fileId: string) {
+    super("Archiv už existuje");
+    this.fileId = fileId;
+  }
 }
 
-// Blob, row and link commit together, so a repeated attempt finds the archive or nothing at all.
+// Blob, row and link commit together. The check sits inside the transaction, so a recovered job
+// and the late attempt it replaced cannot both attach a PDF.
 export function archiveSentPdf(
   actor: Actor,
   logId: string,
@@ -94,13 +97,16 @@ export function archiveSentPdf(
 ): { id: string } {
   const userId = ownerOf(actor);
   if (data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new ServiceError(E.notPdf);
-  const log = archiveOf(userId, logId);
-  if (!log) throw new ServiceError(E.logNotFound);
-  if (log.fileId) return { id: log.fileId };
-
   const id = randomUUID();
   try {
     mutate(actor, "file.create", (tx, audit) => {
+      const log = tx
+        .select({ fileId: emailLog.fileId })
+        .from(emailLog)
+        .where(scoped(userId).where(emailLog, (t, { eq: is }) => is(t.id, logId)))
+        .get();
+      if (!log) throw new ServiceError(E.logNotFound);
+      if (log.fileId) throw new AlreadyArchived(log.fileId);
       tx.insert(file)
         .values({
           id,
@@ -115,7 +121,11 @@ export function archiveSentPdf(
       writeBlob(userId, id, data);
       tx.update(emailLog)
         .set({ fileId: id, updatedAt: clock.now() })
-        .where(scoped(userId).where(emailLog, (t, { eq: is }) => is(t.id, logId)))
+        .where(
+          scoped(userId).where(emailLog, (t, { and, eq: is }) =>
+            and(is(t.id, logId), isNull(t.fileId)),
+          ),
+        )
         .run();
       audit({
         entity: "file",
@@ -126,6 +136,7 @@ export function archiveSentPdf(
       });
     });
   } catch (error) {
+    if (error instanceof AlreadyArchived) return { id: error.fileId };
     removeBlob(userId, id);
     throw error;
   }
@@ -135,7 +146,7 @@ export function archiveSentPdf(
 export function readOwnedFile(
   actor: Actor,
   id: string,
-): { data: Buffer; mimeType: string; name: string } {
+): { data: Buffer; mimeType: string; name: string; kind: FileKind } {
   const userId = ownerOf(actor);
   const row = db
     .select()
@@ -144,7 +155,7 @@ export function readOwnedFile(
     .get();
   if (!row) throw new FileNotFoundError();
   try {
-    return { data: readBlob(userId, id), mimeType: row.mimeType, name: row.name };
+    return { data: readBlob(userId, id), mimeType: row.mimeType, name: row.name, kind: row.kind };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new FileNotFoundError();
     throw error;

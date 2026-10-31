@@ -791,6 +791,8 @@ export const TEXTS = {
       notResendable: "Tuto zprávu nejde odeslat znovu",
       superseded: "Tato zpráva už byla odeslána znovu, podívejte se do historie",
       confirmUnknown: "Nevíme, zda zpráva odešla. Opakované odeslání musíte potvrdit",
+      unknownPending:
+        "U předchozí zprávy nevíme, zda odešla. Nové odeslání může klient dostat dvakrát, musíte ho potvrdit",
       notPdf: "Soubor není PDF",
       archiveLocked: "Archiv odeslaného dokladu nejde smazat",
     },
@@ -805,6 +807,7 @@ export const TEXTS = {
       unreachable: "Server pošty se nepodařilo kontaktovat",
       refused: "Server pošty zprávu odmítl",
       interrupted: "Spojení se přerušilo během odesílání, zpráva mohla odejít",
+      notStarted: "Příprava se přerušila před spojením se serverem, zpráva neodešla",
       partial: (addresses: string) => `Odmítnutí příjemci: ${addresses}`,
     },
   },

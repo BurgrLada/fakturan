@@ -54,7 +54,7 @@ async function scripted(script: Script): Promise<number> {
       buffer += chunk.toString("latin1");
       if (inData) {
         act(socket, rules.body);
-        if (buffer.includes("\r\n.\r\n")) {
+        if (buffer.includes("\r\n.\r\n") || buffer.startsWith(".\r\n")) {
           inData = false;
           buffer = "";
           act(socket, rules.end);
@@ -65,8 +65,9 @@ async function scripted(script: Script): Promise<number> {
         const line = buffer.slice(0, at);
         buffer = buffer.slice(at + 2);
         const verb = line.slice(0, 4).toUpperCase() as "EHLO" | "MAIL" | "RCPT" | "DATA";
-        if (verb === "DATA") inData = true;
+        if (verb === "DATA") inData = !/^[45]/.test(rules.DATA);
         act(socket, rules[verb] ?? "500 what");
+        if (inData) break;
       }
     });
   });
@@ -117,6 +118,23 @@ describe("skutečné chyby nodemaileru", () => {
     ["ticho po těle", { end: "silent" }, "ambiguous"],
     ["ukončení hned po DATA", { DATA: "drop" }, "ambiguous"],
   ])("%s", async (_name, script, expected) => {
+    expect(classifySmtpError(await failure(script))).toBe(expected);
+  });
+
+  // With PIPELINING the DATA command leaves together with MAIL and RCPT, before any reply.
+  const PIPELINING = "250-test\r\n250 PIPELINING";
+  test.each<[string, Script, "retry" | "permanent" | "ambiguous"]>([
+    ["ukončení po EHLO", { EHLO: "drop" }, "retry"],
+    ["ukončení po MAIL", { EHLO: PIPELINING, MAIL: "drop" }, "ambiguous"],
+    ["ukončení po RCPT", { EHLO: PIPELINING, RCPT: "drop" }, "ambiguous"],
+    ["451 na MAIL", { EHLO: PIPELINING, MAIL: "451 later", DATA: "503 no" }, "retry"],
+    ["550 na všechny příjemce", { EHLO: PIPELINING, RCPT: "550 x", DATA: "503 no" }, "permanent"],
+    ["450 na všechny příjemce", { EHLO: PIPELINING, RCPT: "450 x", DATA: "503 no" }, "retry"],
+    ["550 a server přesto přijme DATA", { EHLO: PIPELINING, RCPT: "550 x" }, "permanent"],
+    ["ukončení během těla", { EHLO: PIPELINING, body: "drop" }, "ambiguous"],
+    ["ticho po těle", { EHLO: PIPELINING, end: "silent" }, "ambiguous"],
+    ["451 po těle zprávy", { EHLO: PIPELINING, end: "451 later" }, "retry"],
+  ])("PIPELINING: %s", async (_name, script, expected) => {
     expect(classifySmtpError(await failure(script))).toBe(expected);
   });
 
