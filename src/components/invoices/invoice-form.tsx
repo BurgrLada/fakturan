@@ -42,6 +42,7 @@ import {
 } from "@/lib/invoice-form";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { formatMoney } from "@/lib/money";
+import { setLeaveGuard } from "@/lib/leave-guard";
 import { LANGUAGES, PAYMENT_METHODS, type DesignChoice } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import { useRouteShown } from "@/lib/use-route-shown";
@@ -121,7 +122,7 @@ function Form(props: InvoiceFormProps) {
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<IssueSummary | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  const shown = useRouteShown();
+  const { shown, root } = useRouteShown<HTMLDivElement>();
 
   const touched = useRef(new Set<TouchedField>());
   const identity = useRef({ exists: props.saved, revision: props.revision });
@@ -205,9 +206,15 @@ function Form(props: InvoiceFormProps) {
         });
       }
     };
+    const dropLeaveGuard = setLeaveGuard(async () => {
+      if (needsConfirm.current()) return window.confirm(T.leaveConfirm);
+      if (!dirty() || (await saver.flush())) return true;
+      return window.confirm(T.leaveConfirm);
+    });
     window.addEventListener("beforeunload", warn);
     document.addEventListener("click", guardLink, true);
     return () => {
+      dropLeaveGuard();
       window.removeEventListener("beforeunload", warn);
       document.removeEventListener("click", guardLink, true);
       if (mode === "draft") void saver.flush();
@@ -228,7 +235,8 @@ function Form(props: InvoiceFormProps) {
       const reply = await customerDefaultsAction({ customerId: customer.id });
       if (ticket !== customerTicket.current) return;
       if (!reply.ok) {
-        setMessage({ ok: false, text: reply.error });
+        if (reply.expired) setLock("expired");
+        else setMessage({ ok: false, text: reply.error });
         return;
       }
       setValues((current) =>
@@ -241,7 +249,11 @@ function Form(props: InvoiceFormProps) {
 
   function focusFirstInvalid() {
     const first = result.ok ? null : result.invalid[0];
-    if (first) document.getElementById(first)?.focus();
+    if (!first) return;
+    const field = document.getElementById(first);
+    const section = field?.closest("details");
+    if (section) section.open = true;
+    field?.focus();
   }
 
   async function startIssue() {
@@ -384,7 +396,7 @@ function Form(props: InvoiceFormProps) {
   if (!shown) return null;
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+    <div ref={root} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
       <form onSubmit={submit} className="flex min-w-0 flex-col gap-6">
         {lock && (
           <Alert variant="destructive" role="alert">
@@ -469,6 +481,7 @@ function Form(props: InvoiceFormProps) {
                     setValues((current) => ({ ...current, customerId: null }));
                   }}
                   onPick={pickCustomer}
+                  onExpired={() => setLock("expired")}
                 />
                 <Field id="field-seriesId" label={F.series}>
                   <NativeSelect

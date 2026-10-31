@@ -815,6 +815,23 @@ test("[SET-030] vzhled konkrétní faktury jde změnit ve sbalené sekci", async
   await expect(page.getByLabel("Zobrazit QR platbu")).not.toBeChecked();
 });
 
+test("[SET-031] Vystavit u neplatné barvy otevře sbalenou sekci a dá na pole focus", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByText("Vzhled dokladu").click();
+  await page.getByLabel("Akcent").fill("modrá");
+  await page.getByText("Vzhled dokladu").click();
+  await expect(page.getByLabel("Akcent")).toBeHidden();
+
+  await page.getByRole("button", { name: "Vystavit" }).click();
+  await expect(page.getByLabel("Akcent")).toBeVisible();
+  await expect(page.getByLabel("Akcent")).toBeFocused();
+});
+
 test("[SET-031] neplatná barva dokladu se neuloží a je zvýrazněná", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
   await register(page, baseURL);
@@ -853,6 +870,128 @@ test("[INV-013] uložení do ceníku nepřepíše psaný text a odmítne neplatn
 
   await page.goto(`${baseURL}/cenik`);
   await expect(page.getByRole("link", { name: "Audit" })).toBeVisible();
+});
+
+test("[INV-013] prázdná cena se do ceníku neuloží jako nula", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByRole("combobox", { name: "Název položky" }).fill("Bez ceny");
+  await page.getByRole("button", { name: "Uložit do ceníku" }).click();
+  await expect(page.getByText("Zadejte platnou cenu")).toBeVisible();
+  await expect(page.getByText("Uloženo v ceníku")).toHaveCount(0);
+
+  await page.goto(`${baseURL}/cenik`);
+  await expect(page.getByRole("link", { name: "Bez ceny" })).toHaveCount(0);
+});
+
+test("[INV-017] odhlášení u neplatného formuláře nejdřív varuje", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByText("Vzhled dokladu").click();
+  await page.getByLabel("Akcent").fill("modrá");
+  const form = page.url();
+
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "Odhlásit se" }).click();
+  await page.waitForTimeout(500);
+  expect(page.url()).toBe(form);
+  await expect(page.getByLabel("Akcent")).toHaveValue("modrá");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Odhlásit se" }).click();
+  await page.waitForURL(/\/prihlaseni/);
+});
+
+test("[INV-017] odhlášení během čekání na uložení změnu nejdřív uloží", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL, dataDir } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Poznámka").fill("před odhlášením");
+  await page.getByRole("button", { name: "Odhlásit se" }).click();
+  await page.waitForURL(/\/prihlaseni/);
+
+  const sqlite = new Database(join(dataDir, "fakturan.db"), { readonly: true });
+  const notes = sqlite.prepare("SELECT note FROM invoice").pluck().all();
+  sqlite.close();
+  expect(notes).toEqual(["před odhlášením"]);
+});
+
+test("[INV-017] skrytý předchozí formulář nedrží stejná id", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  // Sampled on every mutation, because a stale copy may disappear before an assertion polls.
+  await page.addInitScript(() => {
+    const store = window as unknown as { maxForms: number };
+    store.maxForms = 0;
+    const sample = () => {
+      const count = document.querySelectorAll('[id="field-note"]').length;
+      store.maxForms = Math.max(store.maxForms, count);
+    };
+    new MutationObserver(sample).observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+    });
+  });
+  await page.goto(`${baseURL}/faktury`);
+  await page.waitForLoadState("networkidle");
+
+  for (const note of ["první", "druhá"]) {
+    await page.getByRole("link", { name: "Nová faktura" }).click();
+    await page.waitForURL(/upravit$/);
+    await expect(page.getByLabel("Poznámka")).toHaveValue("");
+    await page.getByLabel("Poznámka").fill(note);
+    await settled(page);
+    await page.getByRole("link", { name: "Zpět na faktury" }).click();
+    await page.waitForURL(/\/faktury$/);
+    await expect(page.locator('[id="field-note"]')).toHaveCount(0);
+  }
+
+  await page.goBack();
+  await expect(page.getByLabel("Poznámka")).toHaveValue("druhá");
+
+  // No screen links two forms directly yet, but the router may swap them without a page between.
+  await page.evaluate(() => {
+    const { next } = window as unknown as { next: { router: { push(href: string): void } } };
+    next.router.push("/faktury/nova");
+  });
+  await page.waitForFunction(() => {
+    const note = document.querySelector<HTMLTextAreaElement>('[id="field-note"]');
+    return note?.checkVisibility() && note.value === "";
+  });
+  await expect(page.getByLabel("Poznámka")).toHaveValue("");
+  await expect(page.locator('[id="field-note"]')).toHaveCount(1);
+  const most = await page.evaluate(() => (window as unknown as { maxForms: number }).maxForms);
+  expect(most).toBe(1);
+});
+
+test("[INV-017] vypršená relace v panelu zákazníka nezahodí formulář", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL, dataDir } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Poznámka").fill("rozepsáno");
+  await settled(page);
+  const form = page.url();
+
+  await page.getByRole("combobox", { name: "Zákazník" }).fill("Nový klient");
+  await page.getByRole("option", { name: "Založit zákazníka „Nový klient“" }).click();
+  await expect(page.getByRole("button", { name: "Uložit zákazníka" })).toBeVisible();
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  sqlite.prepare("DELETE FROM session").run();
+  sqlite.close();
+
+  await page.getByRole("button", { name: "Uložit zákazníka" }).click();
+  await expect(page.getByRole("link", { name: "Přihlásit se" })).toBeVisible();
+  expect(page.url()).toBe(form);
+  await expect(page.getByLabel("Poznámka")).toHaveValue("rozepsáno");
 });
 
 test("[SEC-002] cizí nebo neznámý doklad vrátí 404", async ({ page, browser, freshApp }) => {

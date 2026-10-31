@@ -9,7 +9,7 @@ import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
-import { searchCustomers } from "@/server/services/customers";
+import { customerInputSchema, saveCustomer, searchCustomers } from "@/server/services/customers";
 import {
   checkIssuable,
   issueInvoice,
@@ -132,6 +132,14 @@ export async function saveLineToCatalogAction(raw: unknown) {
   return run(lineInput, raw, ({ description = "", priceMinor, ...line }, actor) =>
     saveCatalogItem(actor, { ...line, description, priceMinor, category: "", tags: [] }),
   );
+}
+
+export async function createCustomerAction(raw: unknown) {
+  return run(customerInputSchema, raw, (input, actor) => {
+    const saved = saveCustomer(actor, input);
+    revalidatePath("/zakaznici", "layout");
+    return saved;
+  });
 }
 
 export async function customerDefaultsAction(raw: unknown) {

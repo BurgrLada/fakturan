@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
+import { mayLeave } from "@/lib/leave-guard";
 
 export function SignOutButton() {
   const router = useRouter();
@@ -13,6 +14,7 @@ export function SignOutButton() {
       <Button
         variant="outline"
         onClick={async () => {
+          if (!(await mayLeave())) return;
           const { error } = await authClient.signOut();
           setFailed(Boolean(error));
           if (error) return;

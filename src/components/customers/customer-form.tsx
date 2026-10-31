@@ -141,7 +141,7 @@ export function CustomerForm({
   designs: DesignChoice[];
 }) {
   const router = useRouter();
-  const shown = useRouteShown();
+  const { shown, root } = useRouteShown<HTMLFormElement>();
   const [values, setValues] = useState<CustomerValues>(initial ?? EMPTY_CUSTOMER);
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -192,7 +192,7 @@ export function CustomerForm({
   if (!shown) return null;
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-8 sm:max-w-xl">
+    <form ref={root} onSubmit={submit} className="flex flex-col gap-8 sm:max-w-xl">
       {message && (
         <Alert variant={message.ok ? "default" : "destructive"} role="status">
           <AlertDescription>{message.text}</AlertDescription>

@@ -83,7 +83,7 @@ function LineRow({
   }
 
   async function toCatalog() {
-    const priceMinor = line.price.trim() ? parseMoney(line.price) : 0;
+    const priceMinor = parseMoney(line.price);
     if (priceMinor === null || priceMinor < 0) {
       setCatalogError(TEXTS.catalog.validation.price);
       return;

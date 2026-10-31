@@ -1,8 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition, type KeyboardEvent } from "react";
-import { searchCustomersAction } from "@/app/(app)/faktury/actions";
-import { saveCustomerAction } from "@/app/(app)/zakaznici/actions";
+import { createCustomerAction, searchCustomersAction } from "@/app/(app)/faktury/actions";
 import { EMPTY_CUSTOMER, toPayload } from "@/components/customers/customer-form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -24,11 +23,13 @@ export function CustomerPicker({
   invalid,
   onNameChange,
   onPick,
+  onExpired,
 }: {
   name: string;
   invalid?: boolean;
   onNameChange: (name: string) => void;
   onPick: (customer: { id: string; name: string }) => void;
+  onExpired: () => void;
 }) {
   const [panel, setPanel] = useState<Record<PanelField, string> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,9 @@ export function CustomerPicker({
 
   async function search(q: string): Promise<Option[]> {
     const result = await searchCustomersAction({ q });
-    return result.ok ? result.customers : [];
+    if (result.ok) return result.customers;
+    if (result.expired) onExpired();
+    return [];
   }
 
   function openPanel(query: string) {
@@ -50,9 +53,10 @@ export function CustomerPicker({
     creating.current = true;
     startTransition(async () => {
       try {
-        const result = await saveCustomerAction(toPayload({ ...EMPTY_CUSTOMER, ...panel }));
+        const result = await createCustomerAction(toPayload({ ...EMPTY_CUSTOMER, ...panel }));
         if (!result.ok) {
-          setError(result.error);
+          if (result.expired) onExpired();
+          else setError(result.error);
           return;
         }
         onPick({ id: result.id, name: panel.name.trim() });

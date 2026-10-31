@@ -36,7 +36,7 @@ export function CatalogForm({
   defaultCurrency: Currency;
 }) {
   const router = useRouter();
-  const shown = useRouteShown();
+  const { shown, root } = useRouteShown<HTMLFormElement>();
   const [values, setValues] = useState<CatalogValues>(
     initial ?? {
       name: "",
@@ -88,7 +88,7 @@ export function CatalogForm({
   if (!shown) return null;
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 sm:max-w-xl">
+    <form ref={root} onSubmit={submit} className="flex flex-col gap-4 sm:max-w-xl">
       {message && (
         <Alert variant={message.ok ? "default" : "destructive"} role="status">
           <AlertDescription>{message.text}</AlertDescription>
