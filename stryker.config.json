@@ -12,6 +12,7 @@
     "src/lib/bank-notices/auth.ts",
     "src/lib/bank-notices/mask.ts",
     "src/lib/payments.ts",
+    "src/lib/payment-matching.ts",
     "src/lib/recurrence.ts",
     "src/lib/czech-holidays.ts"
   ],

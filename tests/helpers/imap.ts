@@ -13,6 +13,8 @@ export type TestImap = {
   setUidValidity(value: number): void;
   // Applies to the next connection that reaches that stage.
   failNext(kind: FailKind): void;
+  // FETCH of this uid never gets an answer.
+  blockUid(uid: number): void;
   connections(): number;
   close(): Promise<void>;
 };
@@ -73,6 +75,7 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
   const logins: TestImap["logins"] = [];
   const sockets = new Set<Socket>();
   const pending: FailKind[] = [];
+  const blocked = new Set<number>();
   let uidValidity = 1000;
   let connections = 0;
 
@@ -112,6 +115,7 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
 
     function fetch(tag: string, set: string, spec: string) {
       const newest = messages.at(-1)?.uid ?? 0;
+      if (expandSet(set, newest).some((uid) => blocked.has(uid))) return;
       for (const uid of expandSet(set, newest)) {
         const message = messages.find((item) => item.uid === uid);
         if (!message) continue;
@@ -259,6 +263,9 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
     },
     failNext(kind) {
       pending.push(kind);
+    },
+    blockUid(uid) {
+      blocked.add(uid);
     },
     connections: () => connections,
     close: () =>

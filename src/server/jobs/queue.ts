@@ -10,6 +10,7 @@ export { JOB_KINDS, type Job, type JobKind, type JobPayload } from "../db/schema
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const RETENTION_MS = 90 * 86_400_000;
+const BANK_POLL_RETENTION_MS = 7 * 86_400_000;
 
 type EnqueueInput = {
   kind: JobKind;
@@ -151,6 +152,16 @@ export function purgeFinishedJobs(now: Date): void {
       and(
         or(eq(job.status, "done"), and(eq(job.status, "cancelled"), ne(job.kind, "recurring.run"))),
         lt(job.updatedAt, new Date(now.getTime() - RETENTION_MS)),
+      ),
+    )
+    .run();
+  // A poll every 5 minutes would pile up, and bank_notification holds its idempotency (R-29).
+  db.delete(job)
+    .where(
+      and(
+        eq(job.kind, "bank.poll"),
+        inArray(job.status, ["done", "dead", "cancelled"]),
+        lt(job.updatedAt, new Date(now.getTime() - BANK_POLL_RETENTION_MS)),
       ),
     )
     .run();

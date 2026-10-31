@@ -1,7 +1,13 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { user } from "./auth";
 
-export const JOB_KINDS = ["mail.send", "recurring.run", "user.notice", "user.digest"] as const;
+export const JOB_KINDS = [
+  "mail.send",
+  "recurring.run",
+  "user.notice",
+  "user.digest",
+  "bank.poll",
+] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export const JOB_STATUSES = ["pending", "running", "done", "dead", "cancelled"] as const;

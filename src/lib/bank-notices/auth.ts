@@ -1,4 +1,4 @@
-type AuthResult = "pass" | "fail" | "none";
+export type AuthResult = "pass" | "fail" | "none";
 
 type Statement = { method: string; result: string; properties: [string, string][] };
 

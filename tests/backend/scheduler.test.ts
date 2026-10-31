@@ -411,6 +411,7 @@ describe("start", () => {
     startScheduler();
     expect(jobDefinition("mail.send")).toEqual({ run: deliverMail, recover: recoverMail });
     expect(tickTasksForTests()).toContain("dead-mail");
+    expect(tickTasksForTests()).toContain("bank-poll");
   });
 
   test("[R-5] SIGTERM s běžící úlohou lease neuvolní a nechá ho vypršet", async () => {

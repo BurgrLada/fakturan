@@ -9,6 +9,8 @@ import { env } from "../env";
 import { purgeFinishedJobs } from "../jobs/queue";
 import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
+import { purgeNotices } from "../services/bank-notices";
+import { planBankPolls, pollMailbox } from "../services/bank-poll";
 import { deliverDigest, planDigests } from "../services/due-alerts";
 import { deliverMail, recoverMail, settleDeadMail } from "../services/mail-delivery";
 import {
@@ -43,6 +45,7 @@ export const jobCleanupTask: TickTask = {
     if (cleanedOn === today || !isDailyDue(now, CLEANUP_AT)) return;
     cleanedOn = today;
     purgeFinishedJobs(now);
+    purgeNotices(now);
   },
 };
 
@@ -60,6 +63,8 @@ export const recurringNoticeTask: TickTask = {
 export const reminderPlanTask: TickTask = { name: "reminder-plan", run: planReminders };
 
 export const digestPlanTask: TickTask = { name: "digest-plan", run: planDigests };
+
+export const bankPollTask: TickTask = { name: "bank-poll", run: planBankPolls };
 
 export function cronPattern(seconds: number): string {
   return `*/${seconds} * * * * *`;
@@ -93,12 +98,14 @@ export function startScheduler(): void {
   registerJob("recurring.run", { run: runRecurringJob });
   registerJob("user.notice", { run: deliverUserNotice });
   registerJob("user.digest", { run: deliverDigest });
+  registerJob("bank.poll", { run: pollMailbox });
   registerTickTask(deadMailTask);
   registerTickTask(deadRecurringTask);
   registerTickTask(recurringPlanTask);
   registerTickTask(recurringNoticeTask);
   registerTickTask(reminderPlanTask);
   registerTickTask(digestPlanTask);
+  registerTickTask(bankPollTask);
   registerTickTask(jobCleanupTask);
   registerTickTask(backupTask);
   bindWorker(holder);

@@ -29,6 +29,8 @@ export type MailboxSession = {
   envelope(uid: number): Promise<MessageEnvelope | null>;
   download(uid: number, maxBytes: number): Promise<Buffer | null>;
   close(): Promise<void>;
+  // For a server that stopped answering: close() would wait for its LOGOUT reply.
+  destroy(): void;
 };
 
 export const IMAP_TIMEOUTS = {
@@ -176,6 +178,9 @@ export async function openMailbox(
       } catch {
         client.close();
       }
+    },
+    destroy() {
+      client.close();
     },
   };
 }

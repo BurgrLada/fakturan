@@ -2,6 +2,7 @@ import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { CURRENCIES } from "@/lib/currency";
 import { PAYMENT_CHANNELS, PAYMENT_KINDS, PAYMENT_SOURCES } from "@/lib/payments";
 import { user } from "./auth";
+import { bankNotification } from "./bank";
 import { invoice } from "./invoice";
 
 // invoice_id does not cascade: USER_OWNED_TABLES must list payment before invoice, and a document
@@ -24,11 +25,15 @@ export const payment = sqliteTable(
     method: text({ enum: PAYMENT_CHANNELS }).notNull(),
     note: text().notNull().default(""),
     source: text({ enum: PAYMENT_SOURCES }).notNull(),
+    notificationId: text("notification_id").references(() => bankNotification.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [
     index("payment_user_invoice_idx").on(t.userId, t.invoiceId),
     index("payment_user_paid_on_idx").on(t.userId, t.paidOn),
+    index("payment_notification_idx").on(t.notificationId),
   ],
 );

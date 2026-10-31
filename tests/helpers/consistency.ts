@@ -179,6 +179,44 @@ function recurringProblems(db: Db, ownerId: string): string[] {
   return problems;
 }
 
+function noticeProblems(db: Db, ownerId: string): string[] {
+  const problems: string[] = [];
+  const unpaid = count(
+    db,
+    sql`SELECT count(*) AS n FROM bank_notification n
+      WHERE n.user_id = ${ownerId} AND n.status = 'matched'
+        AND NOT EXISTS (SELECT 1 FROM payment p WHERE p.notification_id = n.id)`,
+  );
+  if (unpaid > 0) problems.push(`bank_notification: ${unpaid} spárovaných bez platby`);
+
+  const mismatched = count(
+    db,
+    sql`SELECT count(*) AS n FROM bank_notification n
+      JOIN (SELECT notification_id, sum(amount_minor) AS total FROM payment
+        WHERE notification_id IS NOT NULL GROUP BY notification_id) p ON p.notification_id = n.id
+      WHERE n.user_id = ${ownerId} AND p.total <> n.amount_minor`,
+  );
+  if (mismatched > 0) problems.push(`bank_notification: ${mismatched} s jinou částkou plateb`);
+
+  const repeated = count(
+    db,
+    sql`SELECT count(*) AS n FROM (
+      SELECT 1 FROM bank_notification WHERE user_id = ${ownerId}
+      GROUP BY dedupe_key HAVING count(*) > 1
+    )`,
+  );
+  if (repeated > 0) problems.push(`bank_notification: ${repeated}× opakovaný dedupe_key`);
+
+  const paidPending = count(
+    db,
+    sql`SELECT count(*) AS n FROM bank_notification n
+      JOIN payment p ON p.notification_id = n.id
+      WHERE n.user_id = ${ownerId} AND n.status = 'pending'`,
+  );
+  if (paidPending > 0) problems.push(`bank_notification: ${paidPending} nevyřízených s platbou`);
+  return problems;
+}
+
 // Throws on the first broken invariant. Plans extend it as new entities arrive.
 export function assertConsistent(db: Db, ownerId: string): void {
   const problems: string[] = [];
@@ -213,6 +251,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
   problems.push(...paymentProblems(db, ownerId));
   problems.push(...mailProblems(db, ownerId));
   problems.push(...recurringProblems(db, ownerId));
+  problems.push(...noticeProblems(db, ownerId));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

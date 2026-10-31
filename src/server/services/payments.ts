@@ -30,7 +30,7 @@ export type Payment = typeof payment.$inferSelect;
 export type NewPayment = Pick<
   Payment,
   "paidOn" | "amountMinor" | "currency" | "creditedMinor" | "method" | "note" | "source"
-> & { kind?: PaymentKind; action?: AuditAction };
+> & { kind?: PaymentKind; action?: AuditAction; notificationId?: string };
 
 const CHANNEL_OF_METHOD: Record<PaymentMethod, PaymentChannel> = {
   transfer: "transfer",

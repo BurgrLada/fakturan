@@ -890,6 +890,8 @@ export const TEXTS = {
         `Faktury po splatnosti: ${p.count ?? 0}, nejstarší ${p.oldest ?? ""}.`,
       invoices_due_soon: (p: Record<string, unknown>) =>
         `Faktury se splatností do ${p.days ?? 3} dnů: ${p.count ?? 0}, nejbližší ${p.nearest ?? ""}.`,
+      bank_connection_failed: () =>
+        "Schránku s avízy se opakovaně nepodařilo přečíst. Platby se teď samy nespárují, zkontrolujte nastavení schránky.",
     },
   },
   recurring: {
@@ -1476,6 +1478,7 @@ export const TEXTS = {
       passwordChanged: "Při změně serveru, portu, šifrování nebo uživatele zadejte heslo znovu",
       blockedHost: "Tento server pošty není povolený",
       notConfigured: "Schránka není nastavená",
+      disabled: "Napojení na schránku je vypnuté",
       testFailed: "Připojení se nepodařilo, zkontrolujte nastavení serveru a přihlášení",
     },
   },

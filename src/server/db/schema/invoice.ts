@@ -101,6 +101,7 @@ export const invoice = sqliteTable(
     index("invoice_user_status_idx").on(t.userId, t.status),
     index("invoice_user_issue_date_idx").on(t.userId, t.issueDate),
     index("invoice_user_customer_idx").on(t.userId, t.customerId),
+    index("invoice_user_variable_symbol_idx").on(t.userId, t.variableSymbol),
     index("invoice_recurring_idx").on(t.recurringId),
   ],
 );
