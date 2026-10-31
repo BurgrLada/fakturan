@@ -502,7 +502,7 @@ test('[TST-009] izolace šablon', ...)
 ## Přenos do dalších plánů
 
 - **Plán 4:** tlačítko „Odeslat klientovi“ na detailu a po vystavení (MAIL-001), archiv odeslaného PDF (PDF-010), `resendSuggested`, hromadné odeslání, proměnné s obdobím z plánu, šablony v pravidelných fakturách.
-- **Plán 5:** `paid_minor`, stavy `partially_paid` a `paid`, návrat stavu INV-023, zákaz storna s platbami, průměr úhrady CUS-006, hromadné „označit jako uhrazené“.
-- **Plán 6:** typy `advance` a `credit_note`, přepínač zahraniční faktury, ČNB, FOR-003, FOR-004, FOR-009, FOR-010, doložky.
+- **Plán 5:** `paid_minor`, stavy `partially_paid` a `paid`, návrat stavu INV-023, zákaz storna s platbami, průměr úhrady CUS-006, hromadné „označit jako uhrazené“. Výchozí řady `{RRRR}-{NNN}` a `Z{RRRR}-{NNN}` dají faktuře a záloze stejný VS, řeší to párování. Změna měny dokladu s platbami.
+- **Plán 6:** typy `advance` a `credit_note`, přepínač zahraniční faktury, ČNB, FOR-003, FOR-004, FOR-009, FOR-010, doložky. Změna EUR→USD ponechá starý kurz, CZK s kurzem, stav `credited` v souhrnech, `computeTotals` pro záporné položky.
 - **Plán 8:** filtr „vytvořeno jinde“ dostane data z importu, ZIP přes `fflate` se znovu použije v exportech.
 - **ARC-005:** první `use cache` s daty účtu stále chybí, zůstává na dashboard v plánu 7.
