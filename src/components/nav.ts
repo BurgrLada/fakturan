@@ -48,7 +48,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   item("recurring", "/pravidelne", Repeat),
   item("customers", "/zakaznici", Users),
   item("catalog", "/cenik", Tag),
-  item("payments", "/platby", CreditCard, { planned: true }),
+  item("payments", "/platby", CreditCard),
   item("reports", "/prehledy", PieChart, { planned: true }),
   item("settings", "/nastaveni/ucet", Settings),
   item("admin", "/administrace", Shield, { adminOnly: true }),

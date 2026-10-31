@@ -37,6 +37,15 @@ import {
   saveRecurringAction,
 } from "@/app/(app)/pravidelne/actions";
 import {
+  assignNoticeAction,
+  checkMailboxNowAction,
+  dismissNoticeAction,
+  noticeCandidatesAction,
+  restoreNoticeAction,
+  splitNoticeAction,
+  undoNoticeAction,
+} from "@/app/(app)/platby/actions";
+import {
   deleteTemplateAction,
   draftFromTemplateAction,
   saveInvoiceAsTemplateAction,
@@ -63,7 +72,9 @@ import {
   setRemindersOffAction,
   snoozeRemindersAction,
 } from "@/app/(app)/faktury/actions";
-import { emailLog, recurringInvoice, user } from "@/server/db/schema";
+import { bankNotification, emailLog, payment, recurringInvoice, user } from "@/server/db/schema";
+import { ingestNotice } from "@/server/services/bank-notices";
+import { seedAccount } from "../helpers/fixtures-bank";
 import { issuedInvoice, ownSmtp, seedCustomer, seedOwner } from "../helpers/fixtures-mail";
 import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accounts";
 import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
@@ -498,5 +509,72 @@ describe("cizí id přes server actions", () => {
     expect(result).toMatchObject({ ok: true });
     expect(getPreferences("c2").dueDays).toBe(30);
     expect(getPreferences("c1").dueDays).toBe(14);
+  });
+
+  test("[SEC-002] akce avíz odmítnou cizí ID", async () => {
+    const NOW = new Date();
+    const mine = seedAccount(db, NOW);
+    const stranger = seedAccount(db, NOW);
+    ingestNotice(mine.owner, {
+      bank: "fio",
+      notice: {
+        variant: "en",
+        targetAccount: "9999999999/2010",
+        amountMinor: 300_000,
+        currency: "CZK",
+        occurredAt: { date: "2026-10-30", time: null },
+        variableSymbol: "20260042",
+        constantSymbol: null,
+        counterpartyAccount: null,
+        counterpartyName: null,
+        message: null,
+        instructionId: "77",
+      },
+      text: "x",
+      authResult: "none",
+      requireConfirmation: true,
+      receivedAt: NOW,
+    });
+    const noticeId = db
+      .select()
+      .from(bankNotification)
+      .where(eq(bankNotification.userId, mine.owner))
+      .get()!.id;
+
+    session.userId = stranger.owner;
+    const replies = [
+      await assignNoticeAction({ id: noticeId, assign: { invoiceId: stranger.invoiceId } }),
+      await assignNoticeAction({ id: noticeId, assign: { invoiceId: mine.invoiceId } }),
+      await splitNoticeAction({
+        id: noticeId,
+        split: {
+          parts: [
+            { invoiceId: stranger.invoiceId, amountMinor: 100_000 },
+            { invoiceId: mine.invoiceId, amountMinor: 200_000 },
+          ],
+        },
+      }),
+      await dismissNoticeAction({ id: noticeId }),
+      await restoreNoticeAction({ id: noticeId }),
+      await undoNoticeAction({ id: noticeId }),
+      await noticeCandidatesAction({ id: noticeId }),
+      await checkMailboxNowAction({ requestId: REQUEST }),
+      await assignNoticeAction({ id: noticeId, assign: { invoiceId: "" } }),
+    ];
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: false });
+    expect(
+      db.select().from(bankNotification).where(eq(bankNotification.id, noticeId)).get(),
+    ).toMatchObject({
+      status: "pending",
+    });
+    expect(db.select().from(payment).where(eq(payment.userId, mine.owner)).all()).toEqual([]);
+
+    session.userId = mine.owner;
+    expect(await noticeCandidatesAction({ id: noticeId })).toMatchObject({
+      ok: true,
+      candidates: [{ id: mine.invoiceId, suggested: true }],
+    });
+    expect(await dismissNoticeAction({ id: noticeId })).toEqual({ ok: true });
   });
 });

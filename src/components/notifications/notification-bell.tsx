@@ -3,6 +3,7 @@ import Link from "next/link";
 import { TEXTS } from "@/lib/texts";
 import { getCurrentSession } from "@/server/auth/session";
 import "@/server/services/due-alerts";
+import "@/server/services/payment-alerts";
 import { unreadCount } from "@/server/services/notifications";
 
 export function NotificationBellView({ count }: { count: number }) {

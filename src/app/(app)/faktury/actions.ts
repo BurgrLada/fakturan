@@ -249,6 +249,7 @@ export async function searchCatalogAction(raw: unknown) {
 function changedInvoices() {
   revalidatePath("/faktury", "layout");
   revalidatePath("/zakaznici", "layout");
+  revalidatePath("/platby");
 }
 
 export async function markSentAction(raw: unknown) {

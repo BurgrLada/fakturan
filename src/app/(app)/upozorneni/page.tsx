@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import "@/server/services/due-alerts";
+import "@/server/services/payment-alerts";
 import { notificationFeed } from "@/server/services/notifications";
 
 export const metadata: Metadata = { title: `${TEXTS.notifications.title} | ${TEXTS.appName}` };

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
@@ -7,6 +8,7 @@ import {
   deletePaymentAction,
   markPaidAction,
 } from "@/app/(app)/faktury/actions";
+import { undoNoticeAction } from "@/app/(app)/platby/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -29,6 +31,7 @@ import { TEXTS } from "@/lib/texts";
 import { PaymentDialog, type PaymentView } from "./payment-dialog";
 
 const T = TEXTS.payments.panel;
+const N = TEXTS.bankQueue.paymentPanel;
 
 type Reply = { ok: true } | { ok: false; error: string; stale?: true; expired?: true };
 const TOUCH = "max-sm:h-11 max-sm:min-w-11";
@@ -58,6 +61,7 @@ export function PaymentPanel({
   const [markDate, setMarkDate] = useState(today);
   const [editing, setEditing] = useState<PaymentView | "new" | null>(null);
   const [removing, setRemoving] = useState<PaymentView | null>(null);
+  const [returning, setReturning] = useState<PaymentView | null>(null);
   const [closing, setClosing] = useState(false);
   const [expired, setExpired] = useState(false);
 
@@ -138,6 +142,14 @@ export function PaymentPanel({
                 {item.source === "notice" && (
                   <Badge variant="outline">{TEXTS.payments.sources.notice}</Badge>
                 )}
+                {item.notificationId && (
+                  <Link
+                    href={`/platby#avizo-${item.notificationId}`}
+                    className={`${TOUCH} inline-flex items-center px-2 text-xs underline`}
+                  >
+                    {N.open}
+                  </Link>
+                )}
                 {item.kind === "payment" && (
                   <Button
                     variant="ghost"
@@ -147,6 +159,17 @@ export function PaymentPanel({
                     onClick={() => setEditing(item)}
                   >
                     {T.edit}
+                  </Button>
+                )}
+                {item.notificationId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={TOUCH}
+                    disabled={pending}
+                    onClick={() => setReturning(item)}
+                  >
+                    {N.undo}
                   </Button>
                 )}
                 {item.source !== "notice" && (
@@ -291,6 +314,38 @@ export function PaymentPanel({
               }}
             >
               {T.removeConfirm}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={returning !== null}
+        onOpenChange={(open) => {
+          if (!open) setReturning(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{N.undoTitle}</AlertDialogTitle>
+            <AlertDialogDescription data-testid="undo-notice-body">
+              {N.undoBody}
+            </AlertDialogDescription>
+            <p className="text-sm text-muted-foreground">{TEXTS.bankQueue.undo.sentWarning}</p>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{T.removeBack}</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const target = returning;
+                setReturning(null);
+                if (target?.notificationId) {
+                  const noticeId = target.notificationId;
+                  perform(() => undoNoticeAction({ id: noticeId }));
+                }
+              }}
+            >
+              {N.undoConfirm}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

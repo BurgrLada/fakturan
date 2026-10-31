@@ -1,11 +1,18 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { and, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import type { ZodType } from "zod";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { AuthResult } from "@/lib/bank-notices/auth";
 import { maskAccount, maskDigits } from "@/lib/bank-notices/mask";
 import type { ParsedNotice } from "@/lib/bank-notices/types";
 import { czechAccountToIban, normalizeIban } from "@/lib/iban";
 import { AWAITING_PAYMENT } from "@/lib/invoice";
+import {
+  assignInputSchema,
+  splitInputSchema,
+  type AssignInput,
+  type SplitInput,
+} from "@/lib/notice-queue";
 import {
   autoMatchAllowed,
   matchNotice,
@@ -13,13 +20,25 @@ import {
   type MatchCandidate,
   type QueueReason,
 } from "@/lib/payment-matching";
+import { isProvisional } from "@/lib/bank-notices";
+import { amountDue } from "@/lib/qr-payload";
+import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { bankAccount, bankMailbox, bankNotification, invoice } from "../db/schema";
+import {
+  bankAccount,
+  bankMailbox,
+  bankNotification,
+  invoice,
+  payment,
+  type BankNotification,
+} from "../db/schema";
 import { scoped } from "../db/scoped";
+import { ServiceError, type Reader } from "./access";
+import { findOwned, ownerOf } from "./invoices";
 import { mutate, type Audit } from "./mutation";
-import { insertPayment } from "./payments";
+import { insertPayment, undoNoticeIn } from "./payments";
 
 const FIO_DEFAULT_BANK_CODE = "2010";
 const RETENTION_MS = 90 * 86_400_000;
@@ -326,4 +345,330 @@ export function bankStatus(ownerId: string) {
     .where(scoped(ownerId).where(bankMailbox))
     .get();
   return row ?? null;
+}
+
+const E = TEXTS.bankQueue.errors;
+
+type NoticeStatus = BankNotification["status"];
+
+export type NoticeFilter = { statuses: readonly NoticeStatus[]; limit?: number };
+
+export type NoticeRow = {
+  id: string;
+  status: NoticeStatus;
+  reason: string | null;
+  provisional: boolean;
+  authResult: BankNotification["authResult"];
+  paidOn: string | null;
+  paidTime: string | null;
+  amountMinor: number | null;
+  currency: BankNotification["currency"];
+  variableSymbol: string | null;
+  counterpartyName: string | null;
+  counterpartyMasked: string | null;
+  message: string | null;
+  accountMasked: string | null;
+  receivedAt: Date;
+  purged: boolean;
+  invoices: { id: string; number: string | null }[];
+};
+
+const DEFAULT_LIST_LIMIT = 100;
+const OTHER_CANDIDATES = 50;
+
+export function listNotices(ownerId: string, filter: NoticeFilter): NoticeRow[] {
+  if (filter.statuses.length === 0) return [];
+  const rows = db
+    .select()
+    .from(bankNotification)
+    .where(scoped(ownerId).where(bankNotification, (t) => inArray(t.status, [...filter.statuses])))
+    .orderBy(desc(bankNotification.receivedAt), desc(bankNotification.id))
+    .limit(filter.limit ?? DEFAULT_LIST_LIMIT)
+    .all();
+  if (rows.length === 0) return [];
+
+  const linked = db
+    .select({
+      noticeId: payment.notificationId,
+      invoiceId: invoice.id,
+      number: invoice.number,
+    })
+    .from(payment)
+    .innerJoin(invoice, eq(invoice.id, payment.invoiceId))
+    .where(
+      scoped(ownerId).where(payment, (t) =>
+        inArray(
+          t.notificationId,
+          rows.map((row) => row.id),
+        ),
+      ),
+    )
+    .all();
+  return rows.map((row) => {
+    const seen = new Set<string>();
+    const invoices = linked
+      .filter((link) => link.noticeId === row.id && !seen.has(link.invoiceId))
+      .map((link) => {
+        seen.add(link.invoiceId);
+        return { id: link.invoiceId, number: link.number };
+      });
+    return {
+      id: row.id,
+      status: row.status,
+      reason: row.reason,
+      provisional: row.variant !== null && isProvisional(row.variant),
+      authResult: row.authResult,
+      paidOn: row.paidOn,
+      paidTime: row.paidTime,
+      amountMinor: row.amountMinor,
+      currency: row.currency,
+      variableSymbol: row.variableSymbol,
+      counterpartyName: row.counterpartyName,
+      counterpartyMasked: row.counterpartyMasked,
+      message: row.message,
+      accountMasked: row.accountMasked,
+      receivedAt: row.receivedAt,
+      purged: row.purgedAt !== null,
+      invoices,
+    };
+  });
+}
+
+export function noticeCounts(ownerId: string): { pending: number; unrecognized: number } {
+  const rows = db
+    .select({ status: bankNotification.status, n: sql<number>`count(*)` })
+    .from(bankNotification)
+    .where(
+      scoped(ownerId).where(bankNotification, (t) =>
+        inArray(t.status, ["pending", "unrecognized"]),
+      ),
+    )
+    .groupBy(bankNotification.status)
+    .all();
+  const of = (status: NoticeStatus) => rows.find((row) => row.status === status)?.n ?? 0;
+  return { pending: of("pending"), unrecognized: of("unrecognized") };
+}
+
+export type NoticeCandidate = {
+  id: string;
+  number: string | null;
+  customerName: string;
+  currency: typeof invoice.$inferSelect.currency;
+  variableSymbol: string | null;
+  dueMinor: number;
+  suggested: boolean;
+};
+
+// Same-symbol documents come first, then the other documents waiting for money: a notice with
+// no or a wrong symbol still has to be assignable by hand.
+export function noticeCandidates(ownerId: string, noticeId: string): NoticeCandidate[] {
+  const notice = readNotice(db, ownerId, noticeId);
+  const symbol = normalizeSymbol(notice.variableSymbol);
+  const rows = db
+    .select({
+      id: invoice.id,
+      number: invoice.number,
+      customerName: invoice.customerName,
+      currency: invoice.currency,
+      variableSymbol: invoice.variableSymbol,
+      totalMinor: invoice.totalMinor,
+      paidMinor: invoice.paidMinor,
+      status: invoice.status,
+    })
+    .from(invoice)
+    .where(
+      scoped(ownerId).where(invoice, (t) =>
+        and(
+          inArray(t.status, [...AWAITING_PAYMENT, "paid"]),
+          isNotNull(t.number),
+          ne(t.type, "credit_note"),
+        ),
+      ),
+    )
+    .orderBy(asc(invoice.dueDate), asc(invoice.id))
+    .all();
+  const toCandidate = (row: (typeof rows)[number], suggested: boolean): NoticeCandidate => ({
+    id: row.id,
+    number: row.number,
+    customerName: row.customerName,
+    currency: row.currency,
+    variableSymbol: row.variableSymbol,
+    dueMinor: amountDue(row),
+    suggested,
+  });
+  const same = symbol ? rows.filter((row) => normalizeSymbol(row.variableSymbol) === symbol) : [];
+  const others = rows
+    .filter((row) => (AWAITING_PAYMENT as readonly string[]).includes(row.status))
+    .filter((row) => !same.includes(row))
+    .slice(0, OTHER_CANDIDATES);
+  return [
+    ...same.map((row) => toCandidate(row, true)),
+    ...others.map((row) => toCandidate(row, false)),
+  ];
+}
+
+function readNotice(q: Reader, ownerId: string, id: string): BankNotification {
+  const row = q
+    .select()
+    .from(bankNotification)
+    .where(scoped(ownerId).where(bankNotification, (t, { eq }) => eq(t.id, id)))
+    .get();
+  if (!row) throw new ServiceError(E.notFound);
+  return row;
+}
+
+type OpenNotice = BankNotification & {
+  amountMinor: number;
+  currency: NonNullable<BankNotification["currency"]>;
+  paidOn: string;
+};
+
+// The status is the guard against a double click: the second call finds a notice that is no
+// longer pending.
+function pendingNotice(tx: Tx, userId: string, id: string): OpenNotice {
+  const row = readNotice(tx, userId, id);
+  const { amountMinor, currency, paidOn } = row;
+  if (row.status !== "pending" || amountMinor === null || currency === null || paidOn === null) {
+    throw new ServiceError(E.notPending);
+  }
+  return { ...row, amountMinor, currency, paidOn };
+}
+
+function setStatus(tx: Tx, userId: string, id: string, status: NoticeStatus): void {
+  tx.update(bankNotification)
+    .set({ status, updatedAt: clock.now() })
+    .where(scoped(userId).where(bankNotification, (t, { eq }) => eq(t.id, id)))
+    .run();
+}
+
+function credit(
+  invoiceCurrency: string,
+  notice: OpenNotice,
+  amountMinor: number,
+  creditedMinor: number | null | undefined,
+): number {
+  if (invoiceCurrency === notice.currency) return amountMinor;
+  if (!creditedMinor) throw new ServiceError(TEXTS.payments.errors.creditedRequired);
+  return creditedMinor;
+}
+
+function parseOrThrow<T>(schema: ZodType<T>, raw: unknown): T {
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
+  return parsed.data;
+}
+
+function settle(
+  tx: Tx,
+  audit: Audit,
+  userId: string,
+  notice: OpenNotice,
+  parts: { invoiceId: string; amountMinor: number; creditedMinor?: number | null }[],
+  action: "notice.assigned" | "notice.split",
+): void {
+  for (const part of parts) {
+    const row = findOwned(tx, userId, part.invoiceId);
+    insertPayment(tx, audit, userId, part.invoiceId, {
+      paidOn: notice.paidOn,
+      amountMinor: part.amountMinor,
+      currency: notice.currency,
+      creditedMinor: credit(row.currency, notice, part.amountMinor, part.creditedMinor),
+      method: "transfer",
+      note: "",
+      source: "notice",
+      notificationId: notice.id,
+    });
+  }
+  setStatus(tx, userId, notice.id, "matched");
+  audit({
+    action,
+    entity: "bank_notification",
+    entityId: notice.id,
+    ownerId: userId,
+    scope: "user",
+    after: {
+      amountMinor: notice.amountMinor,
+      currency: notice.currency,
+      reason: notice.reason,
+      invoiceIds: parts.map((part) => part.invoiceId),
+    },
+  });
+}
+
+export function assignNotice(actor: Actor, id: string, raw: AssignInput): void {
+  const userId = ownerOf(actor);
+  const input = parseOrThrow(assignInputSchema, raw);
+  mutate(actor, "notice.assigned", (tx, audit) => {
+    const notice = pendingNotice(tx, userId, id);
+    settle(
+      tx,
+      audit,
+      userId,
+      notice,
+      [
+        {
+          invoiceId: input.invoiceId,
+          amountMinor: notice.amountMinor,
+          creditedMinor: input.creditedMinor,
+        },
+      ],
+      "notice.assigned",
+    );
+  });
+}
+
+// R-23: money without a record is not allowed, so the parts must add up to the whole notice.
+export function splitNotice(actor: Actor, id: string, raw: SplitInput): void {
+  const userId = ownerOf(actor);
+  const { parts } = parseOrThrow(splitInputSchema, raw);
+  mutate(actor, "notice.split", (tx, audit) => {
+    const notice = pendingNotice(tx, userId, id);
+    const total = parts.reduce((sum, part) => sum + part.amountMinor, 0);
+    if (total !== notice.amountMinor) throw new ServiceError(E.splitSum);
+    settle(tx, audit, userId, notice, parts, "notice.split");
+  });
+}
+
+function queueAudit(
+  audit: Audit,
+  userId: string,
+  action: "notice.dismissed" | "notice.restored",
+  row: BankNotification,
+) {
+  audit({
+    action,
+    entity: "bank_notification",
+    entityId: row.id,
+    ownerId: userId,
+    scope: "user",
+    after: { amountMinor: row.amountMinor, currency: row.currency, reason: row.reason },
+  });
+}
+
+export function dismissNotice(actor: Actor, id: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "notice.dismissed", (tx, audit) => {
+    const row = readNotice(tx, userId, id);
+    if (row.status !== "pending" && row.status !== "unrecognized") {
+      throw new ServiceError(E.notDismissable);
+    }
+    setStatus(tx, userId, id, "dismissed");
+    queueAudit(audit, userId, "notice.dismissed", row);
+  });
+}
+
+// A dismissed message without a read amount goes back among the unrecognized ones.
+export function restoreNotice(actor: Actor, id: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "notice.restored", (tx, audit) => {
+    const row = readNotice(tx, userId, id);
+    if (row.status !== "dismissed") throw new ServiceError(E.notRestorable);
+    setStatus(tx, userId, id, row.amountMinor === null ? "unrecognized" : "pending");
+    queueAudit(audit, userId, "notice.restored", row);
+  });
+}
+
+export function undoNotice(actor: Actor, id: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "notice.undone", (tx, audit) => undoNoticeIn(tx, audit, userId, id));
 }

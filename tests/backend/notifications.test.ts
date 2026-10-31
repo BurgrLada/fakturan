@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, notification, user } from "@/server/db/schema";
+import { auditLog, bankNotification, notification, user } from "@/server/db/schema";
+import "@/server/services/payment-alerts";
+import { dismissNotice, ingestNotice } from "@/server/services/bank-notices";
+import { seedAccount } from "../helpers/fixtures-bank";
 import {
   derivedAlerts,
   listNotifications,
@@ -224,6 +227,49 @@ describe("odvozená upozornění", () => {
 });
 
 describe("odvozená upozornění ve zvonku", () => {
+  test("[UI-011] nespárované a nerozpoznané jsou v centru i na zvonku a po vyřízení zmizí", () => {
+    const { owner } = seedAccount(db, T0);
+    const base = {
+      bank: "fio",
+      authResult: "none" as const,
+      requireConfirmation: true,
+      receivedAt: T0,
+    };
+    ingestNotice(owner, {
+      ...base,
+      notice: {
+        variant: "en",
+        targetAccount: "9999999999/2010",
+        amountMinor: 300_000,
+        currency: "CZK",
+        occurredAt: { date: "2026-10-30", time: null },
+        variableSymbol: "20260042",
+        constantSymbol: null,
+        counterpartyAccount: null,
+        counterpartyName: null,
+        message: null,
+        instructionId: "9",
+      },
+      text: "x",
+    });
+    ingestNotice(owner, { ...base, notice: null, fingerprint: "m", text: null });
+    const kinds = () => derivedAlerts(owner).map((alert) => alert.kind);
+
+    expect(kinds()).toEqual(expect.arrayContaining(["payments_unmatched", "notices_unrecognized"]));
+    expect(unreadCount(owner)).toBe(2);
+    expect(notificationFeed(owner, 1).derived.map((alert) => alert.params.count)).toEqual([1, 1]);
+
+    const queued = db
+      .select()
+      .from(bankNotification)
+      .where(eq(bankNotification.userId, owner))
+      .all();
+    for (const row of queued) dismissNotice(actor(owner), row.id);
+
+    expect(kinds()).toEqual([]);
+    expect(unreadCount(owner)).toBe(0);
+  });
+
   test("[UI-011] zvonek započítá i odvozená upozornění", () => {
     const id = seed();
     add(id);

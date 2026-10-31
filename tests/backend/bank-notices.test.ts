@@ -8,8 +8,21 @@ import { czechAccountToIban } from "@/lib/iban";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, bankNotification, invoice, payment, user } from "@/server/db/schema";
 import { scoped } from "@/server/db/scoped";
-import { ingestNotice, purgeNotices, type IngestInput } from "@/server/services/bank-notices";
+import { ServiceError } from "@/server/services/access";
+import {
+  assignNotice,
+  dismissNotice,
+  ingestNotice,
+  listNotices,
+  noticeCandidates,
+  purgeNotices,
+  restoreNotice,
+  splitNotice,
+  undoNotice,
+  type IngestInput,
+} from "@/server/services/bank-notices";
 import { getInvoice } from "@/server/services/invoices";
+import { deletePayment, updatePayment } from "@/server/services/payments";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
@@ -22,6 +35,7 @@ import {
   VS,
 } from "../helpers/fixtures-bank";
 import { assertIsolated } from "../helpers/isolation";
+import { issuedInvoice } from "../helpers/fixtures-mail";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -442,5 +456,326 @@ describe("vlastnictví", () => {
     deleteUser({ userId: admin, source: "web" }, owner, email);
 
     expect(rows(owner)).toEqual([]);
+  });
+});
+
+describe("fronta", () => {
+  const actor = (userId: string) => ({ userId, source: "web" as const });
+  const unverified = (over: Partial<ParsedNotice> = {}) =>
+    income(parsed(over), { authResult: "none" });
+
+  function queued(over: Partial<ParsedNotice> = {}) {
+    const account = seedAccount(db, NOW);
+    ingestNotice(account.owner, unverified(over));
+    return { ...account, noticeId: rows(account.owner)[0]!.id };
+  }
+
+  test("[BNK-010] přiřazení z fronty zapíše platbu s datem avíza", () => {
+    const { owner, invoiceId, noticeId } = queued();
+    expect(rows(owner)[0]).toMatchObject({ status: "pending", reason: "unverified" });
+
+    assignNotice(actor(owner), noticeId, { invoiceId });
+
+    expect(payments(owner)).toMatchObject([
+      {
+        paidOn: "2026-10-30",
+        source: "notice",
+        notificationId: noticeId,
+        amountMinor: INVOICE_TOTAL,
+      },
+    ]);
+    expect(getInvoice(owner, invoiceId)!.status).toBe("paid");
+    expect(rows(owner)[0]!.status).toBe("matched");
+    assertConsistent(db, owner);
+  });
+
+  test("[BNK-010] nabídka dokladů dá napřed shodu podle VS a nezná cizí avízo", () => {
+    const { owner, invoiceId, noticeId, customerId } = queued();
+    const other = issuedInvoice(owner, customerId);
+    const stranger = seedAccount(db, NOW);
+
+    const offered = noticeCandidates(owner, noticeId);
+
+    expect(offered[0]).toMatchObject({ id: invoiceId, suggested: true });
+    expect(offered.slice(1).map((row) => row.id)).toEqual([other]);
+    expect(() => noticeCandidates(stranger.owner, noticeId)).toThrow(ServiceError);
+  });
+
+  test("[BNK-010] rozdělení na dvě faktury musí dát celou částku", () => {
+    const { owner, invoiceId, noticeId, customerId } = queued();
+    const second = issuedInvoice(owner, customerId);
+
+    for (const parts of [
+      [
+        { invoiceId, amountMinor: 100_000 },
+        { invoiceId: second, amountMinor: 100_000 },
+      ],
+      [{ invoiceId, amountMinor: INVOICE_TOTAL }],
+    ]) {
+      expect(() => splitNotice(actor(owner), noticeId, { parts })).toThrow(ServiceError);
+    }
+    expect(payments(owner)).toEqual([]);
+    expect(rows(owner)[0]!.status).toBe("pending");
+
+    splitNotice(actor(owner), noticeId, {
+      parts: [
+        { invoiceId, amountMinor: 100_000 },
+        { invoiceId: second, amountMinor: 200_000 },
+      ],
+    });
+
+    expect(getInvoice(owner, invoiceId)).toMatchObject({
+      status: "partially_paid",
+      paidMinor: 100_000,
+    });
+    expect(getInvoice(owner, second)).toMatchObject({
+      status: "partially_paid",
+      paidMinor: 200_000,
+    });
+    expect(payments(owner).every((row) => row.notificationId === noticeId)).toBe(true);
+    expect(rows(owner)[0]!.status).toBe("matched");
+    assertConsistent(db, owner);
+  });
+
+  test("[BNK-010] zahození jde vrátit a nevznikne platba", () => {
+    const { owner, invoiceId, noticeId } = queued();
+
+    dismissNotice(actor(owner), noticeId);
+    expect(rows(owner)[0]!.status).toBe("dismissed");
+    expect(() => assignNotice(actor(owner), noticeId, { invoiceId })).toThrow(ServiceError);
+    expect(() => dismissNotice(actor(owner), noticeId)).toThrow(ServiceError);
+    expect(payments(owner)).toEqual([]);
+
+    restoreNotice(actor(owner), noticeId);
+    expect(rows(owner)[0]!.status).toBe("pending");
+    expect(() => restoreNotice(actor(owner), noticeId)).toThrow(ServiceError);
+  });
+
+  test("[BNK-012] nerozpoznané avízo jde jen zahodit a po obnovení je zase nerozpoznané", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    ingestNotice(owner, unrecognized());
+    const id = rows(owner)[0]!.id;
+
+    expect(() => assignNotice(actor(owner), id, { invoiceId })).toThrow(ServiceError);
+    expect(() =>
+      splitNotice(actor(owner), id, {
+        parts: [
+          { invoiceId, amountMinor: 1 },
+          { invoiceId, amountMinor: 2 },
+        ],
+      }),
+    ).toThrow(ServiceError);
+
+    dismissNotice(actor(owner), id);
+    restoreNotice(actor(owner), id);
+
+    expect(rows(owner)[0]!.status).toBe("unrecognized");
+    expect(listNotices(owner, { statuses: ["unrecognized"] })).toMatchObject([
+      { id, amountMinor: null, invoices: [] },
+    ]);
+  });
+
+  test("ignorované avízo z cizího účtu přiřadit ani zahodit nejde", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    ingestNotice(owner, income(parsed({ targetAccount: "1234567899/2010" })));
+    const id = rows(owner)[0]!.id;
+
+    expect(() => assignNotice(actor(owner), id, { invoiceId })).toThrow(ServiceError);
+    expect(() => dismissNotice(actor(owner), id)).toThrow(ServiceError);
+    expect(payments(owner)).toEqual([]);
+  });
+
+  test("[BNK-011] přijetí částečné platby z fronty dá partially_paid", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    ingestNotice(owner, income(parsed({ amountMinor: 100_000 })));
+    const noticeId = rows(owner)[0]!.id;
+    expect(rows(owner)[0]!.reason).toBe("amount");
+
+    assignNotice(actor(owner), noticeId, { invoiceId });
+
+    expect(getInvoice(owner, invoiceId)).toMatchObject({
+      status: "partially_paid",
+      paidMinor: 100_000,
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("platba v jiné měně vyžaduje připsanou částku a přeplatek je povolený", () => {
+    const { owner, invoiceId, noticeId } = queued({ currency: "EUR", amountMinor: 10_000 });
+
+    expect(() => assignNotice(actor(owner), noticeId, { invoiceId })).toThrow(/jiné měně/);
+    expect(rows(owner)[0]!.status).toBe("pending");
+
+    assignNotice(actor(owner), noticeId, { invoiceId, creditedMinor: 310_000 });
+
+    expect(payments(owner)[0]).toMatchObject({
+      amountMinor: 10_000,
+      currency: "EUR",
+      creditedMinor: 310_000,
+    });
+    expect(getInvoice(owner, invoiceId)).toMatchObject({ status: "paid", paidMinor: 310_000 });
+    assertConsistent(db, owner);
+  });
+
+  test("dvojklik: spárované avízo už přiřadit nejde a nevzniknou dvě platby", () => {
+    const { owner, invoiceId, noticeId } = queued();
+    assignNotice(actor(owner), noticeId, { invoiceId });
+
+    expect(() => assignNotice(actor(owner), noticeId, { invoiceId })).toThrow(ServiceError);
+
+    expect(payments(owner)).toHaveLength(1);
+  });
+
+  test("[BNK-014] vrácení jedním kliknutím smaže platbu, vrátí stav a avízo jde do fronty", () => {
+    const { owner, invoiceId, noticeId } = queued();
+    assignNotice(actor(owner), noticeId, { invoiceId });
+    const revision = getInvoice(owner, invoiceId)!.revision;
+
+    undoNotice(actor(owner), noticeId);
+
+    expect(payments(owner)).toEqual([]);
+    expect(getInvoice(owner, invoiceId)).toMatchObject({ status: "issued", paidMinor: 0 });
+    expect(getInvoice(owner, invoiceId)!.revision).toBeGreaterThan(revision);
+    expect(rows(owner)[0]).toMatchObject({ status: "pending", reason: "undone" });
+    expect(() => undoNotice(actor(owner), noticeId)).toThrow(ServiceError);
+    assertConsistent(db, owner);
+  });
+
+  test("[BNK-014] vrácené avízo se samo znovu nespáruje", () => {
+    const account = seedAccount(db, NOW);
+    const notice = parsed();
+    expect(ingestNotice(account.owner, income(notice))).toMatchObject({ status: "matched" });
+    undoNotice(actor(account.owner), rows(account.owner)[0]!.id);
+
+    expect(ingestNotice(account.owner, income(notice))).toEqual({ status: "duplicate" });
+    purgeNotices(new Date(NOW.getTime() + 91 * DAY));
+
+    expect(payments(account.owner)).toEqual([]);
+    expect(rows(account.owner)[0]).toMatchObject({ status: "pending", reason: "undone" });
+    expect(getInvoice(account.owner, account.invoiceId)!.status).toBe("issued");
+  });
+
+  test("vrácení nechá sent_at a vrátí odeslanou fakturu na sent", () => {
+    const { owner, invoiceId, noticeId } = queued();
+    db.update(invoice).set({ sentAt: NOW, status: "sent" }).where(eq(invoice.id, invoiceId)).run();
+    assignNotice(actor(owner), noticeId, { invoiceId });
+
+    undoNotice(actor(owner), noticeId);
+
+    expect(getInvoice(owner, invoiceId)).toMatchObject({ status: "sent", sentAt: NOW });
+  });
+
+  test("smazání platby z avíza vrátí celé avízo", () => {
+    const { owner, invoiceId, noticeId, customerId } = queued();
+    const second = issuedInvoice(owner, customerId);
+    splitNotice(actor(owner), noticeId, {
+      parts: [
+        { invoiceId, amountMinor: 100_000 },
+        { invoiceId: second, amountMinor: 200_000 },
+      ],
+    });
+    const target = payments(owner).find((row) => row.invoiceId === invoiceId)!;
+
+    deletePayment(actor(owner), target.id, getInvoice(owner, invoiceId)!.revision);
+
+    expect(payments(owner)).toEqual([]);
+    expect(getInvoice(owner, invoiceId)!.status).toBe("issued");
+    expect(getInvoice(owner, second)).toMatchObject({ status: "issued", paidMinor: 0 });
+    expect(rows(owner)[0]).toMatchObject({ status: "pending", reason: "undone" });
+    assertConsistent(db, owner);
+  });
+
+  test("částky platby z avíza nejde upravit, datum a poznámku ano", () => {
+    const { owner, invoiceId, noticeId } = queued();
+    assignNotice(actor(owner), noticeId, { invoiceId });
+    const [stored] = payments(owner);
+    const edit = (over: object) => ({
+      revision: getInvoice(owner, invoiceId)!.revision,
+      paidOn: stored!.paidOn,
+      amountMinor: stored!.amountMinor,
+      currency: stored!.currency,
+      creditedMinor: stored!.creditedMinor,
+      method: stored!.method,
+      note: "",
+      ...over,
+    });
+
+    expect(() => updatePayment(actor(owner), stored!.id, edit({ amountMinor: 5 }))).toThrow(
+      ServiceError,
+    );
+    updatePayment(actor(owner), stored!.id, edit({ note: "ověřeno", paidOn: "2026-10-29" }));
+
+    expect(payments(owner)[0]).toMatchObject({ note: "ověřeno", amountMinor: INVOICE_TOTAL });
+  });
+
+  test("[SEC-002] cizí avízo ani cizí doklad service nepřijme", () => {
+    const mine = queued();
+    const stranger = seedAccount(db, NOW);
+
+    for (const run of [
+      () => assignNotice(actor(stranger.owner), mine.noticeId, { invoiceId: stranger.invoiceId }),
+      () => dismissNotice(actor(stranger.owner), mine.noticeId),
+      () => restoreNotice(actor(stranger.owner), mine.noticeId),
+      () => undoNotice(actor(stranger.owner), mine.noticeId),
+      () => assignNotice(actor(mine.owner), mine.noticeId, { invoiceId: stranger.invoiceId }),
+    ]) {
+      expect(run).toThrow(ServiceError);
+    }
+    expect(rows(mine.owner)[0]!.status).toBe("pending");
+    expect(payments(stranger.owner)).toEqual([]);
+  });
+
+  test("[AUD-001] přiřazení, rozdělení, zahození a vrácení jsou v auditu bez osobních údajů", () => {
+    const first = queued();
+    const second = queued();
+    const dismissed = queued({ variableSymbol: "111" });
+    const split = issuedInvoice(second.owner, second.customerId);
+    assignNotice(actor(first.owner), first.noticeId, { invoiceId: first.invoiceId });
+    undoNotice(actor(first.owner), first.noticeId);
+    splitNotice(actor(second.owner), second.noticeId, {
+      parts: [
+        { invoiceId: second.invoiceId, amountMinor: 100_000 },
+        { invoiceId: split, amountMinor: 200_000 },
+      ],
+    });
+    dismissNotice(actor(dismissed.owner), dismissed.noticeId);
+    restoreNotice(actor(dismissed.owner), dismissed.noticeId);
+
+    const actions = (owner: string) =>
+      db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.ownerId, owner), eq(auditLog.entity, "bank_notification")))
+        .all()
+        .map((entry) => entry.action);
+    expect(actions(first.owner)).toEqual(
+      expect.arrayContaining(["notice.assigned", "notice.undone"]),
+    );
+    expect(actions(second.owner)).toContain("notice.split");
+    expect(actions(dismissed.owner)).toEqual(
+      expect.arrayContaining(["notice.dismissed", "notice.restored"]),
+    );
+    const stored = JSON.stringify(db.select().from(auditLog).all());
+    expect(stored).not.toContain("Ukazkova");
+    expect(stored).not.toContain("1111111116");
+    expect(stored).not.toContain("Fiktivni");
+  });
+
+  test("seznam ukáže prozatímní variantu a doklady spárovaných avíz", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    ingestNotice(owner, income(parsed()));
+    ingestNotice(owner, income(parsed({ variant: "cs_block", amountMinor: 5 })));
+
+    const all = listNotices(owner, { statuses: ["matched", "pending"] });
+
+    expect(all.find((row) => row.status === "matched")).toMatchObject({
+      provisional: false,
+      invoices: [{ id: invoiceId }],
+    });
+    expect(all.find((row) => row.status === "pending")).toMatchObject({
+      provisional: true,
+      reason: "provisional",
+    });
+    expect(JSON.stringify(all)).not.toContain(TARGET.number);
   });
 });

@@ -12,12 +12,8 @@ FOR-005	Upozornění v UI nemá e2e test, ověřený je jen backend	plán 6
 CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán 6
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
-UI-011	Chybí nespárované platby a nerozpoznaná avíza (plán 5) a blížící se limity, spec je nedefinuje (plán 8)	plán 5, plán 8
+UI-011	Chybí blížící se limity, spec je nedefinuje	plán 8
 INV-024	Chybí export (plán 8)	plán 8
 TST-016	Matice kryje jen pravidelné odeslání a upomínky, potvrzení platby a faktura po záloze přijdou s automatikami	plán 5, plán 6
 BNK-005	Česká varianta je prozatímní bez reálného vzorku, automaticky se nepáruje	dodání vzorku zadavatelem
-BNK-012	Ukládání hotové, chybí zobrazení Nerozpoznaný formát a odvozené upozornění	plán 5 Task 6
 TST-006	Tok přes testovací IMAP server hotový, chybí skutečný český vzorek	dodání vzorku zadavatelem
-BNK-003	Kontrola a checkMailboxNow hotové, chybí tlačítko Zkontrolovat teď	plán 5 Task 6
-BNK-010	Důvody fronty hotové, chybí fronta v rozhraní a přiřazení, rozdělení a zahození	plán 5 Task 6
-BNK-015	Stav a upozornění hotové, chybí zobrazení stavu napojení	plán 5 Task 6

@@ -18,7 +18,7 @@ import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { invoice, payment } from "../db/schema";
+import { bankNotification, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { findOwned, ownerOf, type Invoice } from "./invoices";
@@ -146,6 +146,59 @@ export function insertPayment(
   return { id };
 }
 
+// R-22: the one way back from a matched notice. Every payment of the notice goes, each invoice's
+// state is recomputed, and the notice returns to the queue, from where nothing matches it again.
+export function undoNoticeIn(tx: Tx, audit: Audit, userId: string, noticeId: string): void {
+  const notice = tx
+    .select()
+    .from(bankNotification)
+    .where(scoped(userId).where(bankNotification, (t, { eq }) => eq(t.id, noticeId)))
+    .get();
+  if (!notice) throw new ServiceError(TEXTS.bankQueue.errors.notFound);
+  if (notice.status !== "matched") throw new ServiceError(TEXTS.bankQueue.errors.notMatched);
+
+  const removed = tx
+    .select()
+    .from(payment)
+    .where(scoped(userId).where(payment, (t, { eq }) => eq(t.notificationId, noticeId)))
+    .all();
+  tx.delete(payment)
+    .where(scoped(userId).where(payment, (t, { eq }) => eq(t.notificationId, noticeId)))
+    .run();
+  for (const invoiceId of new Set(removed.map((row) => row.invoiceId))) {
+    const before = findOwned(tx, userId, invoiceId);
+    const after = applyPayments(tx, userId, invoiceId);
+    for (const row of removed.filter((item) => item.invoiceId === invoiceId)) {
+      audit({
+        action: "payment.delete",
+        entity: "payment",
+        entityId: row.id,
+        ownerId: userId,
+        scope: "user",
+        before: { ...auditFields(row), status: before.status },
+        after: { invoiceId, status: after.status },
+      });
+    }
+  }
+  tx.update(bankNotification)
+    .set({ status: "pending", reason: "undone", updatedAt: clock.now() })
+    .where(scoped(userId).where(bankNotification, (t, { eq }) => eq(t.id, noticeId)))
+    .run();
+  audit({
+    action: "notice.undone",
+    entity: "bank_notification",
+    entityId: noticeId,
+    ownerId: userId,
+    scope: "user",
+    after: {
+      amountMinor: notice.amountMinor,
+      currency: notice.currency,
+      reason: "undone",
+      invoiceIds: [...new Set(removed.map((row) => row.invoiceId))],
+    },
+  });
+}
+
 export function listPayments(ownerId: string, invoiceId: string): Payment[] {
   return db
     .select()
@@ -224,6 +277,7 @@ export function deletePayment(actor: Actor, id: string, revision: number): void 
     const row = findOwned(tx, userId, before.invoiceId);
     assertPayable(row);
     assertRevision(row, revision);
+    if (before.notificationId) return undoNoticeIn(tx, audit, userId, before.notificationId);
     if (before.source === "notice") throw new ServiceError(E.noticeDelete);
 
     tx.delete(payment)

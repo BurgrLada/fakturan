@@ -227,6 +227,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
             creditedMinor: item.creditedMinor,
             method: item.method,
             note: item.note,
+            notificationId: item.notificationId,
           }))}
         />
       )}

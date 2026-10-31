@@ -54,6 +54,8 @@ export const NOTIFICATION_KINDS = [
   "invoices_overdue",
   "invoices_due_soon",
   "bank_connection_failed",
+  "payments_unmatched",
+  "notices_unrecognized",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

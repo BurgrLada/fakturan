@@ -32,6 +32,7 @@ export type PaymentView = {
   creditedMinor: number;
   method: PaymentChannel;
   note: string;
+  notificationId: string | null;
 };
 
 export type PaymentTarget = {
