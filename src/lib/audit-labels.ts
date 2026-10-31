@@ -20,6 +20,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "auth.profile_update_failed": "Neúspěšná úprava profilu",
   "auth.session_revoke": "Ukončení relace",
   "auth.signup_rejected": "Odmítnutá registrace",
+  "backup.create": "Záloha databáze",
+  "backup.failed": "Neúspěšná záloha databáze",
   "bank_account.delete": "Smazání bankovního účtu",
   "bank_account.hide": "Skrytí bankovního účtu",
   "bank_account.save": "Uložení bankovního účtu",

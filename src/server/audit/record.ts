@@ -26,6 +26,7 @@ const INSTANCE_ENTITIES = new Set([
   "invitation",
   "rate_limit",
   "route",
+  "backup",
 ]);
 
 function assertValidScope({ scope, ownerId, entity, action }: AuditEntry): void {

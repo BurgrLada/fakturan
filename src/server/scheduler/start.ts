@@ -8,6 +8,7 @@ import { schedulerState } from "../db/schema";
 import { env } from "../env";
 import { purgeFinishedJobs } from "../jobs/queue";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
+import { backupTask } from "./backup";
 import { releaseLease } from "./lease";
 import { reportFailure } from "./report";
 import { registerTickTask, tick, type TickTask } from "./tick";
@@ -63,6 +64,7 @@ export function startScheduler(): void {
     .onConflictDoUpdate({ target: schedulerState.id, set: { startedAt, lastTickAt: null } })
     .run();
   registerTickTask(jobCleanupTask);
+  registerTickTask(backupTask);
   bindWorker(holder);
   const cron = new Cron(cronPattern(env.SCHEDULER_TICK_SECONDS), { protect: true }, async () => {
     await tick(holder).catch((error) => reportFailure(error, { task: "tick" }));

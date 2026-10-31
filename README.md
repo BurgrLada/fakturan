@@ -50,26 +50,26 @@ Content-Security-Policy nemění. Odesílá se jen ID uživatele, ne e-mail, IP 
 
 ### Záloha a obnova
 
-Automatická denní záloha se připravuje. Do té doby zálohujte svazek ručně, nejlépe při zastaveném
-kontejneru:
+Aplikace jednou denně po 2:30 (Praha) uloží konzistentní kopii databáze do `backups/` ve složce
+dat: soubor `fakturan-RRRR-MM-DD.db`, oprávnění `0600`, posledních 14 kopií. Kopie se ověří
+(`integrity_check`) a teprve potom se přejmenuje, takže poškozená záloha nikdy nenahradí dobrou.
+Po selhání se pokus opakuje nejdříve za hodinu a starší kopie zůstanou. Stav a čas poslední zálohy
+ukazuje Administrace. Tajemství (SMTP hesla klientů apod.) jsou v záloze šifrovaná, takže k obnově
+potřebujete stejný `ENCRYPTION_KEY`.
+
+Složka `files/` (nahrané obrázky a archiv PDF) v záloze není. Záloha leží na stejném svazku jako
+data, takže ji kopírujte i mimo svazek, jinak nechrání před ztrátou disku.
+
+Obnova: zastavte kontejner, nahraďte `fakturan.db` vybranou zálohou, smažte `fakturan.db-wal`
+a `fakturan.db-shm` a kontejner spusťte se stejným `ENCRYPTION_KEY`.
 
 ```bash
 docker stop fakturan
-docker run --rm -v fakturan-data:/data -v "$PWD":/backup debian:bookworm-slim \
-  tar czf /backup/fakturan-data.tgz -C /data .
+docker run --rm -v fakturan-data:/data debian:bookworm-slim sh -c \
+  'cp /data/backups/fakturan-2026-11-02.db /data/fakturan.db \
+   && rm -f /data/fakturan.db-wal /data/fakturan.db-shm && chown 1000:1000 /data/fakturan.db'
 docker start fakturan
 ```
-
-Obnova: zastavte kontejner, vyprázdněte svazek a rozbalte zálohu, pak kontejner spusťte.
-
-```bash
-docker stop fakturan
-docker run --rm -v fakturan-data:/data -v "$PWD":/backup debian:bookworm-slim \
-  sh -c 'rm -rf /data/* && tar xzf /backup/fakturan-data.tgz -C /data && chown -R 1000:1000 /data'
-docker start fakturan
-```
-
-Záloha musí obsahovat soubory `fakturan.db*` pohromadě (databáze běží v režimu WAL).
 
 ## Provoz za reverzní proxy
 

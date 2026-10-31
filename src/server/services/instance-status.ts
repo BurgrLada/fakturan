@@ -1,7 +1,9 @@
 import "server-only";
 import { statSync } from "node:fs";
 import type { Actor } from "../audit/context";
+import { eq } from "drizzle-orm";
 import { db } from "../db";
+import { schedulerState } from "../db/schema";
 import { env } from "../env";
 import { isInstanceMailConfigured } from "../mail/instance";
 import { schedulerHealth } from "../scheduler/start";
@@ -20,11 +22,12 @@ function fileSize(path: string): number {
 export function getInstanceStatus(actor: Actor) {
   assertAdmin(db, actor);
   const path = env.DATABASE_PATH;
+  const state = db.select().from(schedulerState).where(eq(schedulerState.id, 1)).get();
   return {
     version: pkg.version,
     databaseBytes: fileSize(path) + fileSize(`${path}-wal`),
     scheduler: schedulerHealth(db),
-    lastBackupAt: null as Date | null,
+    lastBackupAt: state?.lastBackupAt ?? null,
     smtpConfigured: isInstanceMailConfigured(env),
     monitoringConfigured: Boolean(env.SENTRY_DSN),
   };
