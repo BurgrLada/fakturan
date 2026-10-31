@@ -54,7 +54,8 @@ export function automaticSendAllowed(ownerId: string, key: AutomationKey): boole
 }
 
 // A null override follows the account (R-12). Only a customer with an address and a document that
-// could be reminded of can actually receive anything.
+// could be reminded of can actually receive anything. Archiving hides a customer from new work,
+// but reminders on documents already sent still go out, so archived customers count.
 export function automationImpact(ownerId: string): { plans: number; customers: number } {
   const row = db
     .select({ n: count() })
@@ -62,7 +63,6 @@ export function automationImpact(ownerId: string): { plans: number; customers: n
     .where(
       scoped(ownerId).where(customer, (t) =>
         and(
-          isNull(t.archivedAt),
           or(isNull(t.remindersEnabled), ne(t.remindersEnabled, false)),
           ne(t.email, ""),
           exists(

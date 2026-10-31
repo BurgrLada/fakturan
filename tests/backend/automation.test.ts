@@ -162,7 +162,7 @@ describe("zapnutí a potvrzení", () => {
     document(row("h"), { status: "sent", type: "credit_note" });
     row("i");
 
-    expect(automationImpact(id)).toEqual({ plans: 0, customers: 2 });
+    expect(automationImpact(id)).toEqual({ plans: 0, customers: 3 });
   });
 
   test("[REM-001] zapnutí upomínek si pamatuje den, od kterého platí", () => {

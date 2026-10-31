@@ -67,6 +67,7 @@ export function listNotifications(ownerId: string, page: number) {
   };
 }
 
+// Derived alerts have no read state: they count for as long as their cause lasts.
 export function unreadCount(ownerId: string): number {
   const row = db
     .select({ n: count() })
@@ -77,7 +78,7 @@ export function unreadCount(ownerId: string): number {
       ),
     )
     .get();
-  return row?.n ?? 0;
+  return (row?.n ?? 0) + derivedAlerts(ownerId).length;
 }
 
 function ownerOf(actor: Actor): string {

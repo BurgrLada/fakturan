@@ -210,6 +210,7 @@ describe("odvozená upozornění", () => {
     const id = seed();
     const calls: [string, string][] = [];
     registerDerivedAlerts((ownerId, today) => {
+      if (ownerId !== id) return [];
       calls.push([ownerId, today]);
       return [{ dedupeKey: "overdue:1", kind: "mail_failed", params: { n: 1 } }];
     });
@@ -219,6 +220,22 @@ describe("odvozená upozornění", () => {
 
     expect(alerts).toEqual([{ dedupeKey: "overdue:1", kind: "mail_failed", params: { n: 1 } }]);
     expect(calls).toEqual([[id, "2026-11-03"]]);
+  });
+});
+
+describe("odvozená upozornění ve zvonku", () => {
+  test("[UI-011] zvonek započítá i odvozená upozornění", () => {
+    const id = seed();
+    add(id);
+    registerDerivedAlerts((ownerId) =>
+      ownerId === id
+        ? [{ dedupeKey: "ve-zvonku", kind: "invoices_overdue", params: { count: 2 } }]
+        : [],
+    );
+
+    expect(unreadCount(id)).toBe(2);
+    markAllRead(actor(id));
+    expect(unreadCount(id)).toBe(1);
   });
 });
 
