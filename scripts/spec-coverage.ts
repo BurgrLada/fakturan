@@ -4,6 +4,7 @@ import { join } from "node:path";
 const root = join(import.meta.dirname, "..");
 const specPath = join(root, "docs/superpowers/specs/2026-10-30-fakturan-design.md");
 const pendingPath = join(root, "tests/spec-pending.txt");
+const partialPath = join(root, "tests/spec-partial.txt");
 const testsDir = join(root, "tests");
 
 export function extractSpecIds(markdown: string): string[] {
@@ -31,6 +32,28 @@ export function findMissing(input: {
 export function findStalePending(input: { tested: string[]; pending: string[] }): string[] {
   const tested = new Set(input.tested);
   return input.pending.filter((id) => tested.has(id));
+}
+
+export type PartialEntry = { id: string; missing: string; plan: string };
+
+export function parsePartial(source: string): { entries: PartialEntry[]; malformed: string[] } {
+  const entries: PartialEntry[] = [];
+  const malformed: string[] = [];
+  for (const line of source.split("\n")) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const [id, missing, plan, ...rest] = line.split("\t").map((part) => part.trim());
+    if (id && missing && plan && rest.length === 0) entries.push({ id, missing, plan });
+    else malformed.push(line);
+  }
+  return { entries, malformed };
+}
+
+export function findUnknownPartial(input: {
+  specIds: string[];
+  partial: PartialEntry[];
+}): string[] {
+  const known = new Set(input.specIds);
+  return input.partial.map((entry) => entry.id).filter((id) => !known.has(id));
 }
 
 function testFiles(dir: string): string[] {
@@ -65,10 +88,17 @@ function main() {
   const pending = readPending();
   const missing = findMissing({ specIds, tested, pending });
   const stale = findStalePending({ tested, pending });
+  const { entries: partial, malformed } = parsePartial(readFileSync(partialPath, "utf8"));
+  const unknown = findUnknownPartial({ specIds, partial });
   if (missing.length) console.error(`ID bez testu: ${missing.join(", ")}`);
   if (stale.length) console.error(`ID s testem je stále v spec-pending.txt: ${stale.join(", ")}`);
-  if (missing.length || stale.length) process.exit(1);
-  console.log(`OK: ${specIds.length} ID, ${pending.length} čeká na test`);
+  if (unknown.length) console.error(`Neznámé ID v spec-partial.txt: ${unknown.join(", ")}`);
+  if (malformed.length) console.error(`Vadné řádky spec-partial.txt:\n${malformed.join("\n")}`);
+  if (missing.length || stale.length || unknown.length || malformed.length) process.exit(1);
+  console.log(
+    `OK: ${specIds.length} ID, ${pending.length} čeká na test, ${partial.length} částečně`,
+  );
+  for (const { id, missing: gap, plan } of partial) console.log(`  ${id}: ${gap} (${plan})`);
 }
 
 if (import.meta.filename === process.argv[1]) main();
