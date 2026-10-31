@@ -7,19 +7,27 @@ import { MESSAGE_KINDS } from "@/lib/email-template";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
-import { resetEmailTemplate, saveEmailTemplate } from "@/server/services/email-templates";
+import {
+  getEmailTemplate,
+  resetEmailTemplate,
+  saveEmailTemplate,
+} from "@/server/services/email-templates";
 
-type Outcome = { ok: true } | { ok: false; error: string };
+type Failure = { ok: false; error: string };
+type Outcome = { ok: true } | Failure;
+type ResetOutcome = { ok: true; subject: string; body: string } | Failure;
 type ActorOf = Awaited<ReturnType<typeof actorFromRequest>>;
 
 const resetSchema = z.object({ kind: z.enum(MESSAGE_KINDS), language: z.enum(LANGUAGES) });
 
 // Only known refusals become messages: requireSession's redirect must keep propagating.
-async function guarded(work: (actor: ActorOf) => void): Promise<Outcome> {
+async function guarded<T extends object>(
+  work: (actor: ActorOf) => T,
+): Promise<({ ok: true } & T) | Failure> {
   try {
-    work(await actorFromRequest());
+    const result = work(await actorFromRequest());
     revalidatePath("/nastaveni/posta/sablony");
-    return { ok: true };
+    return { ok: true, ...result };
   } catch (error) {
     if (error instanceof ServiceError) return { ok: false, error: error.message };
     throw error;
@@ -28,12 +36,20 @@ async function guarded(work: (actor: ActorOf) => void): Promise<Outcome> {
 
 export async function saveEmailTemplateAction(raw: unknown): Promise<Outcome> {
   await requireSession();
-  return guarded((actor) => saveEmailTemplate(actor, raw));
+  return guarded((actor) => {
+    saveEmailTemplate(actor, raw);
+    return {};
+  });
 }
 
-export async function resetEmailTemplateAction(raw: unknown): Promise<Outcome> {
+export async function resetEmailTemplateAction(raw: unknown): Promise<ResetOutcome> {
   await requireSession();
   const parsed = resetSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: TEXTS.emailTemplates.errors.invalid };
-  return guarded((actor) => resetEmailTemplate(actor, parsed.data.kind, parsed.data.language));
+  const { kind, language } = parsed.data;
+  return guarded((actor) => {
+    resetEmailTemplate(actor, kind, language);
+    const { subject, body } = getEmailTemplate(actor.userId ?? "", kind, language);
+    return { subject, body };
+  });
 }

@@ -8,7 +8,7 @@ import { MESSAGE_KINDS, kindForInvoice } from "@/lib/email-template";
 import { LANGUAGES } from "@/lib/preferences";
 import { formatMoney } from "@/lib/money";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, emailTemplate, user } from "@/server/db/schema";
+import { auditLog, emailTemplate, rateLimit, user } from "@/server/db/schema";
 import { DEFAULT_MAIL_CONTENT } from "@/server/mail/defaults";
 import { ServiceError } from "@/server/services/access";
 import { saveCustomer } from "@/server/services/customers";
@@ -23,6 +23,7 @@ import {
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { issueInvoice } from "@/server/services/invoice-lifecycle";
 import { newDraftDefaults, saveDraft, type DraftInput } from "@/server/services/invoices";
+import { RATE_RULES } from "@/server/rate-limit";
 import { saveMailSettings } from "@/server/services/mail-settings";
 import { ensureDefaultSeries } from "@/server/services/number-series";
 import { saveSupplier } from "@/server/services/supplier";
@@ -217,6 +218,36 @@ describe("předvyplnění", () => {
     };
 
     expect(renderVariables("Zbývá {{zbyva}}", ctx)).toBe("Zbývá {{zbyva}}");
+  });
+
+  test("[SEC-006] vykreslený předmět má strop 200 znaků bez rozseknutí znaku", () => {
+    const owner = seed();
+    saveEmailTemplate(actor(owner), input({ subject: "{{zakaznik}}" }));
+    const subjectFor = (name: string) => {
+      const id = issued(owner, newCustomer(owner));
+      db.run(sql`UPDATE invoice SET customer_name = ${name} WHERE id = ${id}`);
+      return composeMail(owner, id, "invoice").subject;
+    };
+    const long = subjectFor("a".repeat(250));
+    const emoji = subjectFor(`${"b".repeat(199)}😀`);
+
+    expect(long).toBe("a".repeat(200));
+    expect(emoji).toBe("b".repeat(199));
+  });
+
+  test("[SEC-006] konec řádku ve jménu zákazníka nebo dodavatele se v předmětu změní na mezeru", () => {
+    const owner = seed();
+    saveEmailTemplate(actor(owner), input({ subject: "{{zakaznik}} / {{dodavatel}}" }));
+    const id = issued(owner, newCustomer(owner));
+    db.run(
+      sql`UPDATE invoice SET customer_name = ${"Alfa\r\nBcc: x@y.cz"},
+        supplier_snapshot = json_set(supplier_snapshot, '$.name', ${"Jan\n\u2028Novák"}) WHERE id = ${id}`,
+    );
+
+    const { subject } = composeMail(owner, id, "invoice");
+
+    expect(subject).toBe("Alfa Bcc: x@y.cz / Jan Novák");
+    expect(subject).not.toMatch(/[\r\n\u0085\u2028\u2029]/);
   });
 
   test("[SEC-011] jméno zákazníka s {{rok}} a <script> zůstane doslova", () => {
@@ -421,6 +452,62 @@ describe("izolace a účet", () => {
     expect(db.select().from(emailTemplate).where(eq(emailTemplate.userId, owner)).all()).toEqual(
       [],
     );
-    expect(typeof deleteUser).toBe("function");
+  });
+
+  test("[TST-009] deleteUser odstraní šablony e-mailů", () => {
+    const admin = seed();
+    db.update(user).set({ role: "admin" }).where(eq(user.id, admin)).run();
+    const owner = seed();
+    saveEmailTemplate(actor(owner), input());
+    saveEmailTemplate(actor(admin), input());
+
+    deleteUser(actor(admin), owner, `${owner}@example.cz`);
+
+    expect(db.select().from(emailTemplate).where(eq(emailTemplate.userId, owner)).all()).toEqual(
+      [],
+    );
+    expect(
+      db.select().from(emailTemplate).where(eq(emailTemplate.userId, admin)).all(),
+    ).toHaveLength(1);
+  });
+});
+
+describe("audit a omezení", () => {
+  const templateAudits = (owner: string, action: string) =>
+    db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.ownerId, owner))
+      .all()
+      .filter((row) => row.action === action);
+
+  test("[AUD-004] audit uložení šablony má obsah před a po", () => {
+    const owner = seed();
+
+    saveEmailTemplate(actor(owner), input({ subject: "První", body: "A" }));
+    saveEmailTemplate(actor(owner), input({ subject: "Druhý", body: "B" }));
+
+    const [first, second] = templateAudits(owner, "email_template.save");
+    expect(first.before).toBeNull();
+    expect(first.after).toEqual({ kind: "invoice", language: "cs", subject: "První", body: "A" });
+    expect(second.before).toEqual({ kind: "invoice", language: "cs", subject: "První", body: "A" });
+    expect(second.after).toEqual({ kind: "invoice", language: "cs", subject: "Druhý", body: "B" });
+  });
+
+  test("[SEC-001] uložení i vrácení šablony sdílí omezení s nastavením pošty", () => {
+    const owner = seed();
+    saveEmailTemplate(actor(owner), input());
+    db.update(rateLimit)
+      .set({ count: RATE_RULES.mailSaveUser.limit })
+      .where(eq(rateLimit.key, `${RATE_RULES.mailSaveUser.name}:${owner}`))
+      .run();
+
+    expect(() => saveEmailTemplate(actor(owner), input({ subject: "Jiný" }))).toThrow(
+      "Příliš mnoho pokusů",
+    );
+    expect(() => resetEmailTemplate(actor(owner), "invoice", "cs")).toThrow("Příliš mnoho pokusů");
+
+    expect(getEmailTemplate(owner, "invoice", "cs").subject).toBe("Faktura {{cislo_faktury}}");
+    expect(templateAudits(owner, "rate_limit.exceeded")).toHaveLength(1);
   });
 });

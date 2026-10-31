@@ -17,7 +17,8 @@ import { db } from "../db";
 import { emailTemplate } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { DEFAULT_MAIL_CONTENT, type MailContent } from "../mail/defaults";
-import { ServiceError } from "./access";
+import { RATE_RULES } from "../rate-limit";
+import { enforceRateLimit, ServiceError } from "./access";
 import { getCustomer } from "./customers";
 import { loadInvoiceDocument, variablesFor } from "./invoice-document";
 import { fileNameFor } from "./invoice-pdf";
@@ -26,6 +27,19 @@ import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
 
 const E = TEXTS.emailTemplates.errors;
+
+const SUBJECT_LIMIT = 200;
+
+// Cuts on grapheme boundaries so a surrogate pair or combining mark is never split.
+function capSubject(subject: string): string {
+  if (subject.length <= SUBJECT_LIMIT) return subject;
+  let out = "";
+  for (const { segment } of new Intl.Segmenter().segment(subject)) {
+    if (out.length + segment.length > SUBJECT_LIMIT) break;
+    out += segment;
+  }
+  return out.trimEnd();
+}
 
 export type MailDraft = {
   to: string[];
@@ -85,6 +99,7 @@ export function listEmailTemplates(ownerId: string) {
 
 export function saveEmailTemplate(actor: Actor, raw: unknown): void {
   const userId = ownerOf(actor);
+  enforceRateLimit(actor, RATE_RULES.mailSaveUser);
   const parsed = emailTemplateSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
   const { kind, language, subject, body } = parsed.data;
@@ -120,6 +135,7 @@ export function saveEmailTemplate(actor: Actor, raw: unknown): void {
 
 export function resetEmailTemplate(actor: Actor, kind: MessageKind, language: Language): void {
   const userId = ownerOf(actor);
+  enforceRateLimit(actor, RATE_RULES.mailSaveUser);
   if (!readRow(userId, kind, language)) return;
   mutate(actor, "email_template.reset", (tx, audit) => {
     const existing = tx
@@ -182,9 +198,8 @@ export function composeMail(
       dodavatel: doc.snapshot.supplier?.name ?? "",
     };
     content = {
-      subject: renderVariables(template.subject, ctx, extra).replace(
-        /[\r\n\u0085\u2028\u2029]+/g,
-        " ",
+      subject: capSubject(
+        renderVariables(template.subject, ctx, extra).replace(/[\r\n\u0085\u2028\u2029]+/g, " "),
       ),
       body: renderVariables(template.body, ctx, extra),
     };

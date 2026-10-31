@@ -103,7 +103,7 @@ describe("cizí id přes server actions", () => {
     expect(getEmailTemplate("s2", "invoice", "cs").subject).not.toBe("Moje");
 
     session.userId = "s2";
-    expect(await resetEmailTemplateAction({ kind: "invoice", language: "cs" })).toEqual({
+    expect(await resetEmailTemplateAction({ kind: "invoice", language: "cs" })).toMatchObject({
       ok: true,
     });
     expect(getEmailTemplate("s1", "invoice", "cs").subject).toBe("Moje");

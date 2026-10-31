@@ -24,7 +24,7 @@ type Template = {
   custom: boolean;
 };
 
-type Outcome = { ok: true } | { ok: false; error: string };
+type Outcome = { ok: true; subject?: string; body?: string } | { ok: false; error: string };
 type Message = { ok: boolean; text: string } | null;
 
 function TemplateCard({ template }: { template: Template }) {
@@ -35,12 +35,16 @@ function TemplateCard({ template }: { template: Template }) {
   const [message, setMessage] = useState<Message>(null);
   const id = `email-${kind}-${language}`;
 
-  function perform(run: () => Promise<Outcome>, success: string, after?: () => void) {
+  function perform(
+    run: () => Promise<Outcome>,
+    success: string,
+    after?: (result: { subject?: string; body?: string }) => void,
+  ) {
     setMessage(null);
     startTransition(async () => {
       const result = await run();
       setMessage(result.ok ? { ok: true, text: success } : { ok: false, text: result.error });
-      if (result.ok) after?.();
+      if (result.ok) after?.(result);
     });
   }
 
@@ -50,7 +54,14 @@ function TemplateCard({ template }: { template: Template }) {
   }
 
   function reset() {
-    perform(() => resetEmailTemplateAction({ kind, language }), T.resetDone);
+    perform(
+      () => resetEmailTemplateAction({ kind, language }),
+      T.resetDone,
+      (result) => {
+        if (result.subject !== undefined) setSubject(result.subject);
+        if (result.body !== undefined) setBody(result.body);
+      },
+    );
   }
 
   return (
