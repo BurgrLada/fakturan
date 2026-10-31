@@ -12,10 +12,12 @@ const SIDEBAR_ID = "sidebar";
 
 export function AppShell({
   nav,
+  bell,
   account,
   children,
 }: {
   nav: ReactNode;
+  bell: ReactNode;
   account: ReactNode;
   children: ReactNode;
 }) {
@@ -31,17 +33,20 @@ export function AppShell({
       </a>
       <div className="flex items-center justify-between border-b bg-sidebar px-4 py-2 md:hidden">
         <span className="font-brand text-lg">{TEXTS.appName}</span>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-expanded={open}
-          aria-controls={SIDEBAR_ID}
-          aria-label={open ? TEXTS.shell.closeMenu : TEXTS.shell.openMenu}
-          onClick={() => setOpen(!open)}
-        >
-          {open ? <X /> : <Menu />}
-        </Button>
+        <div className="flex items-center gap-2">
+          {bell}
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-expanded={open}
+            aria-controls={SIDEBAR_ID}
+            aria-label={open ? TEXTS.shell.closeMenu : TEXTS.shell.openMenu}
+            onClick={() => setOpen(!open)}
+          >
+            {open ? <X /> : <Menu />}
+          </Button>
+        </div>
       </div>
       {/* Closing on link clicks keeps the shell free of usePathname, which would block prerendering dynamic routes. */}
       <aside
@@ -54,7 +59,10 @@ export function AppShell({
           open ? "flex" : "hidden",
         )}
       >
-        <Logo className="w-36" />
+        <div className="flex items-center justify-between">
+          <Logo className="w-36" />
+          <div className="hidden md:block">{bell}</div>
+        </div>
         {nav}
         <div className="mt-auto flex flex-col gap-3">
           <ThemeToggle />

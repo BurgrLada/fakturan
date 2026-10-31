@@ -7,6 +7,7 @@ import { db, type Tx } from "../db";
 import {
   account,
   auditLog,
+  automationSettings,
   auditPurge,
   bankAccount,
   catalogItem,
@@ -19,6 +20,7 @@ import {
   invoiceTemplate,
   invoiceVersion,
   job,
+  notification,
   numberSeries,
   numberSeriesCounter,
   preferences,
@@ -61,6 +63,8 @@ export const USER_OWNED_TABLES = [
   preferences,
   file,
   job,
+  automationSettings,
+  notification,
 ];
 
 const REAUTH_WINDOW_MS = 15 * 60_000;

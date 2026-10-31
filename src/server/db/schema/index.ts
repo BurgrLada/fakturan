@@ -13,3 +13,5 @@ export * from "./invoice";
 export * from "./invoice-version";
 export * from "./invoice-template";
 export * from "./job";
+export * from "./automation";
+export * from "./notification";

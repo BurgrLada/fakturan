@@ -141,6 +141,13 @@
       "when": 1793446902250,
       "tag": "0019_job",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1793448315388,
+      "tag": "0020_automation",
+      "breakpoints": true
     }
   ]
 }

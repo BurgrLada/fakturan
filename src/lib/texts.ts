@@ -17,6 +17,8 @@ export const TEXTS = {
     closeMenu: "Zavřít nabídku",
     skipToContent: "Přeskočit na obsah",
     signedInAs: "Přihlášen jako",
+    notifications: "Upozornění",
+    notificationsUnread: (n: number) => `Upozornění, nepřečtených: ${n}`,
   },
   theme: {
     group: "Vzhled",
@@ -677,6 +679,102 @@ export const TEXTS = {
     body: "Stránku se nepodařilo načíst. Zkuste to prosím znovu.",
     retry: "Zkusit znovu",
   },
+  automation: {
+    title: "Automatizace",
+    listLabel: "Seznam automatik",
+    intro:
+      "Nic se klientům neposílá samo, dokud to tady výslovně nezapnete. Každé zapnutí potvrdíte.",
+    errors: {
+      forbidden: "Na tuto akci nemáte oprávnění",
+      unknown: "Neznámá automatika",
+      unavailable: "Tuto automatiku zatím nejde zapnout",
+      confirmRequired: "Změnu je potřeba potvrdit",
+      sendTime: "Zadejte čas ve tvaru HH:MM, například 09:00",
+      changed: "Nastavení se mezitím změnilo, zkuste to znovu",
+    },
+    master: {
+      title: "Hlavní vypínač",
+      active: "Automatika běží",
+      pausedState: "Automatika je pozastavená",
+      body: "Pozastavení zastaví veškeré automatické odesílání klientům. Pravidelné faktury se dál vytvářejí jako koncepty.",
+      pause: "Pozastavit vše",
+      resume: "Obnovit",
+      resumeTitle: "Obnovit automatiku?",
+      resumeBody:
+        "Automatika se znovu rozběhne. Nic, co se za dobu pozastavení zadrželo, se samo neodešle.",
+    },
+    keys: {
+      recurringSend: {
+        title: "Pravidelné faktury: vystavit a odeslat",
+        body: "Pravidelné faktury v režimu „vystavit a odeslat“ se po vystavení samy pošlou zákazníkovi e-mailem.",
+        impact: (plans: number) => `Dotčené plány: ${plans}.`,
+      },
+      reminders: {
+        title: "Upomínky po splatnosti",
+        body: "Zákazníkům s fakturou po splatnosti odejde upomínka e-mailem. Staré dluhy z doby před zapnutím se nerozesílají.",
+        impact: (customers: number) => `Upomínky mohou dostat zákazníci: ${customers}.`,
+      },
+      paymentReceipt: {
+        title: "Potvrzení o přijaté platbě",
+        body: "Zákazník dostane potvrzení, jakmile platbu spárujete s fakturou.",
+        impact: () => "",
+      },
+      advanceInvoice: {
+        title: "Odeslání po záloze",
+        body: "Po přijetí zálohy se zákazníkovi automaticky odešle navazující doklad.",
+        impact: () => "",
+      },
+    },
+    on: "Zapnuto",
+    off: "Vypnuto",
+    unavailable: "Připravujeme",
+    enable: "Zapnout",
+    disable: "Vypnout",
+    confirmTitle: (title: string) => `Zapnout: ${title}?`,
+    confirmEnable: "Zapnout a potvrdit",
+    cancel: "Zpět",
+    schedule: {
+      title: "Čas odeslání",
+      body: "Denní práce, tedy upomínky a pravidelné faktury, běží po tomto čase v pražském čase.",
+      label: "Čas",
+      save: "Uložit čas",
+    },
+    digest: {
+      title: "Denní přehled",
+      body: "Jednou denně vám přijde e-mail s tím, co se nepovedlo. Hlavní vypínač se ho netýká.",
+      label: "Posílat denní přehled",
+    },
+    saved: "Uloženo.",
+  },
+  notifications: {
+    title: "Upozornění",
+    intro: "Co se stalo na pozadí a čeká na vaši pozornost.",
+    empty: "Žádná upozornění",
+    emptyBody: "Až se na pozadí něco nepovede, objeví se to tady.",
+    markAll: "Označit vše jako přečtené",
+    markRead: "Označit jako přečtené",
+    unread: "Nepřečtené",
+    resolved: "Vyřešeno",
+    list: "Seznam upozornění",
+    newer: "Novější",
+    older: "Starší",
+    kinds: {
+      mail_failed: (p: Record<string, unknown>) =>
+        `E-mail k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,
+      mail_unknown: (p: Record<string, unknown>) =>
+        `U dokladu ${p.invoice ?? ""} nevíme, zda e-mail odešel. Zkontrolujte to a rozhodněte o dalším kroku.`,
+      mail_held: (p: Record<string, unknown>) =>
+        `E-mail k dokladu ${p.invoice ?? ""} byl zadržen a sám se neodešle.`,
+      recurring_failed: (p: Record<string, unknown>) =>
+        `Pravidelnou fakturu „${p.plan ?? ""}“ se nepodařilo vystavit, vznikl koncept.`,
+      recurring_missed: (p: Record<string, unknown>) =>
+        `Pravidelná faktura „${p.plan ?? ""}“ nevznikla v termínu ${p.date ?? ""}.`,
+      reminder_failed: (p: Record<string, unknown>) =>
+        `Upomínku k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,
+      reminder_missed: (p: Record<string, unknown>) =>
+        `Upomínka k dokladu ${p.invoice ?? ""} se neodeslala včas a čeká na kontrolu.`,
+    },
+  },
   settings: {
     nav: "Nastavení",
     account: "Účet",
@@ -686,6 +784,7 @@ export const TEXTS = {
     defaults: "Výchozí hodnoty",
     designs: "Designy",
     history: "Historie",
+    automation: "Automatizace",
   },
   supplier: {
     title: "Dodavatel",
