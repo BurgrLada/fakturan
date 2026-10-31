@@ -389,6 +389,8 @@ test('[TST-009] izolace avíz včetně update a remove', ...)
 
 ---
 
+Doplnění k Task 5: `meta.from` předává parseru jen holé adresy, `checkAuthResults` dostává jen první surovou hlavičku a `counterparty_masked` a `account_masked` používají `maskAccount`. Prázdný text avíza je nerozpoznané avízo, ne výjimka.
+
 ### Task 6: Fronta nespárovaných plateb
 
 **Files:**
