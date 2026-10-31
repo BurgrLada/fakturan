@@ -46,6 +46,13 @@ import {
   saveDraft,
 } from "@/server/services/invoices";
 import { ensureDefaultSeries } from "@/server/services/number-series";
+import {
+  reminderPrefill,
+  sendManualReminder,
+  setPartialReminders,
+  setRemindersOff,
+  snoozeReminders,
+} from "@/server/services/reminders";
 import { assertTagNames, setInvoiceTags } from "@/server/services/tags";
 
 type Failure = {
@@ -85,6 +92,16 @@ const bulkInput = idsInput.extend({
   requestId,
   previewed: z.record(z.string(V.invalid), z.object({ to: addressList, copies: addressList })),
 });
+const stageKey = id.nullable();
+const reminderPrefillInput = z.object({ id, stageKey });
+const reminderInput = z.object({
+  id,
+  stageKey,
+  confirmedRepeat: z.boolean(V.invalid),
+  message: sendInputSchema,
+});
+const snoozeInput = z.object({ id, until: z.string(V.invalid).nullable() });
+const flagInput = z.object({ id, on: z.boolean(V.invalid) });
 const lineInput = z.object({
   name: z.string(V.invalid),
   description: z.string(V.invalid).optional(),
@@ -316,5 +333,43 @@ export async function bulkSendAction(raw: unknown) {
     const result = bulkSend(actor, ids, request, previewed);
     changedInvoices();
     return result;
+  });
+}
+
+export async function reminderPrefillAction(raw: unknown) {
+  return run(reminderPrefillInput, raw, ({ id: invoiceId, stageKey: stage }, actor) => ({
+    draft: reminderPrefill(ownerOf(actor), invoiceId, stage),
+  }));
+}
+
+export async function sendReminderAction(raw: unknown) {
+  return run(reminderInput, raw, ({ id: invoiceId, message, ...choice }, actor) => {
+    const queued = sendManualReminder(actor, invoiceId, { ...message, ...choice });
+    changedInvoices();
+    return queued;
+  });
+}
+
+export async function snoozeRemindersAction(raw: unknown) {
+  return run(snoozeInput, raw, ({ id: invoiceId, until }, actor) => {
+    snoozeReminders(actor, invoiceId, until);
+    changedInvoices();
+    return {};
+  });
+}
+
+export async function setRemindersOffAction(raw: unknown) {
+  return run(flagInput, raw, ({ id: invoiceId, on }, actor) => {
+    setRemindersOff(actor, invoiceId, on);
+    changedInvoices();
+    return {};
+  });
+}
+
+export async function setPartialRemindersAction(raw: unknown) {
+  return run(flagInput, raw, ({ id: invoiceId, on }, actor) => {
+    setPartialReminders(actor, invoiceId, on);
+    changedInvoices();
+    return {};
   });
 }

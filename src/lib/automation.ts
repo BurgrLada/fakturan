@@ -49,6 +49,8 @@ export const NOTIFICATION_KINDS = [
   "recurring_upcoming",
   "reminder_failed",
   "reminder_missed",
+  "invoices_overdue",
+  "invoices_due_soon",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

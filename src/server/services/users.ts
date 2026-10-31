@@ -37,6 +37,8 @@ import {
   unit,
   user,
   verification,
+  reminderRule,
+  reminderSent,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { logger } from "../logger";
@@ -56,6 +58,8 @@ export const USER_OWNED_TABLES = [
   session,
   account,
   supplier,
+  reminderSent,
+  reminderRule,
   emailLog,
   recurringRun,
   recurringInvoice,

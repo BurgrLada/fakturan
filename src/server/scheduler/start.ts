@@ -9,6 +9,7 @@ import { env } from "../env";
 import { purgeFinishedJobs } from "../jobs/queue";
 import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
+import { deliverDigest, planDigests } from "../services/due-alerts";
 import { deliverMail, recoverMail, settleDeadMail } from "../services/mail-delivery";
 import {
   deliverUserNotice,
@@ -17,6 +18,7 @@ import {
   runRecurringJob,
   settleDeadRuns,
 } from "../services/recurring-run";
+import { planReminders } from "../services/reminders";
 import { backupTask } from "./backup";
 import { releaseLease } from "./lease";
 import { reportFailure } from "./report";
@@ -55,6 +57,10 @@ export const recurringNoticeTask: TickTask = {
   run: planRecurringNotices,
 };
 
+export const reminderPlanTask: TickTask = { name: "reminder-plan", run: planReminders };
+
+export const digestPlanTask: TickTask = { name: "digest-plan", run: planDigests };
+
 export function cronPattern(seconds: number): string {
   return `*/${seconds} * * * * *`;
 }
@@ -86,10 +92,13 @@ export function startScheduler(): void {
   registerJob("mail.send", { run: deliverMail, recover: recoverMail });
   registerJob("recurring.run", { run: runRecurringJob });
   registerJob("user.notice", { run: deliverUserNotice });
+  registerJob("user.digest", { run: deliverDigest });
   registerTickTask(deadMailTask);
   registerTickTask(deadRecurringTask);
   registerTickTask(recurringPlanTask);
   registerTickTask(recurringNoticeTask);
+  registerTickTask(reminderPlanTask);
+  registerTickTask(digestPlanTask);
   registerTickTask(jobCleanupTask);
   registerTickTask(backupTask);
   bindWorker(holder);

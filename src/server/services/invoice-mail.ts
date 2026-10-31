@@ -5,6 +5,8 @@ import { desc, eq, inArray, sql } from "drizzle-orm";
 import type { AutomationKey } from "@/lib/automation";
 import { kindForInvoice, type MessageKind } from "@/lib/email-template";
 import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
+import type { Language } from "@/lib/preferences";
+import { amountDue } from "@/lib/qr-payload";
 import { isSendable, sendInputSchema, type EmailTrigger, type SendInput } from "@/lib/mail-send";
 import type { CalendarDate } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
@@ -15,13 +17,14 @@ import { emailLog, invoice, job, type EmailLog } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { enqueue } from "../jobs/queue";
 import { kickWorker } from "../jobs/worker";
+import type { MailContent } from "../mail/defaults";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError } from "./access";
 import { getAutomation } from "./automation";
 import { composeMail, type MailDraft } from "./email-templates";
 import { FileNotFoundError, readOwnedFile } from "./files";
 import { InvoicePdfNotFoundError } from "./invoice-pdf";
-import { findOwned, getInvoice } from "./invoices";
+import { findOwned, getInvoice, type Invoice } from "./invoices";
 import { mailAvailability } from "./mail-settings";
 import { mutate } from "./mutation";
 import { notify } from "./notifications";
@@ -177,13 +180,21 @@ export function hasUnresolvedUnknown(
   return row !== undefined;
 }
 
+type ClickOptions = {
+  confirmedUnknown: boolean;
+  kind?: MessageKind;
+  revision: number;
+  // Runs in the queueing transaction: a throw takes the queued message back with it.
+  alongside?: (tx: Tx, row: Invoice, logId: string) => void;
+};
+
 function queueClicked(
   actor: Actor,
   userId: string,
   invoiceId: string,
   requestId: string,
   message: Message,
-  opts: { confirmedUnknown: boolean; kind?: MessageKind; revision: number },
+  opts: ClickOptions,
 ): { logId: string } {
   const key = requestKey(userId, requestId);
   const logged = loggedRequest(userId, key);
@@ -196,6 +207,9 @@ function queueClicked(
     // The text was written for one version of the document and the PDF is rendered from the latest.
     if (row.revision !== opts.revision) throw new ServiceError(E.staleDraft);
     const kind = opts.kind ?? kindForInvoice(row.type);
+    if (kind === "reminder" && amountDue(row) <= 0) {
+      throw new ServiceError(TEXTS.reminders.errors.nothingDue);
+    }
     if (!opts.confirmedUnknown && hasUnresolvedUnknown(userId, invoiceId, kind)) {
       throw new ServiceError(E.unknownPending);
     }
@@ -208,18 +222,50 @@ function queueClicked(
       message,
     });
     if (!result) throw new ServiceError(E.alreadySending);
+    opts.alongside?.(tx, row, result.logId);
     return result;
   });
   kickWorker();
   return queued;
 }
 
+function parseSend(raw: SendInput) {
+  const parsed = sendInputSchema.safeParse(raw);
+  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
+  return parsed.data;
+}
+
+export function queueReminder(
+  actor: Actor,
+  invoiceId: string,
+  raw: SendInput,
+  alongside: NonNullable<ClickOptions["alongside"]>,
+): { logId: string } {
+  const userId = ownerOf(actor);
+  const {
+    requestId,
+    confirmedUnknown = false,
+    revision,
+    to,
+    cc,
+    bcc,
+    subject,
+    body,
+  } = parseSend(raw);
+  return queueClicked(
+    actor,
+    userId,
+    invoiceId,
+    requestId,
+    { to, cc, bcc, subject, body },
+    { confirmedUnknown, revision, kind: "reminder", alongside },
+  );
+}
+
 export function sendInvoice(actor: Actor, invoiceId: string, raw: SendInput): { logId: string } {
   const userId = ownerOf(actor);
   enforceRateLimit(actor, RATE_RULES.sendUser);
-  const parsed = sendInputSchema.safeParse(raw);
-  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
-  const { requestId, confirmedUnknown = false, revision, logId, ...message } = parsed.data;
+  const { requestId, confirmedUnknown = false, revision, logId, ...message } = parseSend(raw);
   const replaced =
     logId && !loggedRequest(userId, requestKey(userId, requestId))
       ? replacedLog(userId, invoiceId, logId)
@@ -336,6 +382,7 @@ export type SendPrefill = MailDraft & {
   revision: number;
   unknownPending: boolean;
   paused: boolean;
+  repeat?: boolean;
   log: {
     id: string;
     status: EmailLog["status"];
@@ -345,14 +392,19 @@ export type SendPrefill = MailDraft & {
 };
 
 // The request id is born here, so reopening the dialog is a new send and a double click is not.
-export function sendPrefill(ownerId: string, invoiceId: string, logId?: string): SendPrefill {
+export function sendPrefill(
+  ownerId: string,
+  invoiceId: string,
+  logId?: string,
+  fresh?: { kind: MessageKind; texts: Partial<Record<Language, MailContent>> | null },
+): SendPrefill {
   const row = getInvoice(ownerId, invoiceId);
   if (!row) throw new ServiceError(E.notFound);
   if (!isSendable(row.status)) throw new ServiceError(E.notSendable);
   const log = logId ? readLog(ownerId, logId) : undefined;
   if (logId && log?.invoiceId !== invoiceId) throw new ServiceError(E.logNotFound);
-  const kind = log?.kind ?? kindForInvoice(row.type);
-  const draft = composeMail(ownerId, invoiceId, kind);
+  const kind = log?.kind ?? fresh?.kind ?? kindForInvoice(row.type);
+  const draft = composeMail(ownerId, invoiceId, kind, undefined, fresh?.texts);
   // After a change the recorded text describes a document the attachment no longer matches.
   const current = log?.invoiceRevision === row.revision;
   return {

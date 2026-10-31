@@ -177,6 +177,8 @@ export function composeMail(
   invoiceId: string,
   kind: MessageKind,
   override?: MailContent,
+  // Unlike the override, these go through variables, as the account's own template would.
+  texts?: Partial<Record<Language, MailContent>> | null,
 ): MailDraft {
   const doc = loadInvoiceDocument(ownerId, invoiceId);
   if (!doc) throw new ServiceError(E.invoiceNotFound);
@@ -187,7 +189,7 @@ export function composeMail(
     if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
     content = parsed.data;
   } else {
-    const template = getEmailTemplate(ownerId, kind, doc.language);
+    const template = texts?.[doc.language] ?? getEmailTemplate(ownerId, kind, doc.language);
     const base = variablesFor(ownerId, doc, doc.number ?? "", doc.customerName);
     const ctx = { ...base, dateFormat: doc.dateFormat ?? base.dateFormat };
     const extra = {

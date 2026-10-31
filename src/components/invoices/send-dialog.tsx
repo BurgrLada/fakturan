@@ -2,9 +2,11 @@
 
 import { useEffect, useId, useState, useTransition, type FormEvent } from "react";
 import {
+  reminderPrefillAction,
   resendFromLogAction,
   sendInvoiceAction,
   sendPrefillAction,
+  sendReminderAction,
 } from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -25,6 +27,9 @@ import type { SendPrefill } from "@/server/services/invoice-mail";
 
 const T = TEXTS.invoiceMail.dialog;
 const E = TEXTS.invoiceMail.errors;
+const R = TEXTS.reminders;
+
+export type ReminderChoice = { stageKey: string | null };
 
 function Field({
   label,
@@ -79,11 +84,13 @@ function RecordedMessage({ draft }: { draft: SendPrefill }) {
 function Composer({
   invoiceId,
   logId,
+  reminder,
   onClose,
   onSent,
 }: {
   invoiceId: string;
   logId?: string;
+  reminder?: ReminderChoice;
   onClose: () => void;
   onSent: () => void;
 }) {
@@ -94,25 +101,29 @@ function Composer({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [repeatConfirmed, setRepeatConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
     let current = true;
-    sendPrefillAction({ id: invoiceId, logId }).then(
+    const prefill = reminder
+      ? reminderPrefillAction({ id: invoiceId, stageKey: reminder.stageKey })
+      : sendPrefillAction({ id: invoiceId, logId });
+    prefill.then(
       (reply) => {
         if (!current) return;
         if (!reply.ok) {
           setError(reply.error);
           return;
         }
-        const { draft: prefill } = reply;
-        setDraft(prefill);
-        setTo(prefill.to.join(", "));
-        setCc(prefill.cc.join(", "));
-        setBcc(prefill.bcc.join(", "));
-        setSubject(prefill.subject);
-        setBody(prefill.body);
+        const { draft: loaded } = reply;
+        setDraft(loaded);
+        setTo(loaded.to.join(", "));
+        setCc(loaded.cc.join(", "));
+        setBcc(loaded.bcc.join(", "));
+        setSubject(loaded.subject);
+        setBody(loaded.body);
       },
       () => {
         if (current) setError(T.failed);
@@ -121,9 +132,10 @@ function Composer({
     return () => {
       current = false;
     };
-  }, [invoiceId, logId]);
+  }, [invoiceId, logId, reminder]);
 
-  const blocked = !draft || (draft.unknownPending && !confirmed);
+  const blocked =
+    !draft || (draft.unknownPending && !confirmed) || (draft.repeat === true && !repeatConfirmed);
   const recorded = Boolean(logId && draft?.log?.current);
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -133,25 +145,32 @@ function Composer({
     setError(null);
     startTransition(async () => {
       try {
-        const reply = recorded
-          ? await resendFromLogAction({ id: logId, requestId, confirmedUnknown: confirmed })
-          : await sendInvoiceAction({
+        const message = {
+          requestId,
+          revision,
+          ...(logId && { logId }),
+          to: splitAddresses(to),
+          cc: splitAddresses(cc),
+          bcc: splitAddresses(bcc),
+          subject,
+          body,
+          ...(confirmed && { confirmedUnknown: true }),
+        };
+        const reply = reminder
+          ? await sendReminderAction({
               id: invoiceId,
-              message: {
-                requestId,
-                revision,
-                ...(logId && { logId }),
-                to: splitAddresses(to),
-                cc: splitAddresses(cc),
-                bcc: splitAddresses(bcc),
-                subject,
-                body,
-                ...(confirmed && { confirmedUnknown: true }),
-              },
-            });
+              stageKey: reminder.stageKey,
+              confirmedRepeat: repeatConfirmed,
+              message,
+            })
+          : recorded
+            ? await resendFromLogAction({ id: logId, requestId, confirmedUnknown: confirmed })
+            : await sendInvoiceAction({ id: invoiceId, message });
         if (reply.ok) onSent();
         else if (reply.error === E.unknownPending) {
           setDraft({ ...draft, unknownPending: true });
+        } else if (reply.error === R.errors.confirmRepeat) {
+          setDraft({ ...draft, repeat: true });
         } else setError(reply.error);
       } catch {
         setError(T.failed);
@@ -164,7 +183,9 @@ function Composer({
   return (
     <form onSubmit={submit} className="contents">
       <AlertDialogHeader>
-        <AlertDialogTitle>{logId ? T.resendTitle : T.title}</AlertDialogTitle>
+        <AlertDialogTitle>
+          {reminder ? R.dialog.title : logId ? T.resendTitle : T.title}
+        </AlertDialogTitle>
         <AlertDialogDescription>
           {draft ? (recorded ? draft.attachmentName : T.review) : error ? T.loadFailed : T.loading}
         </AlertDialogDescription>
@@ -225,6 +246,21 @@ function Composer({
           </AlertDescription>
         </Alert>
       )}
+      {draft?.repeat && (
+        <Alert variant="destructive">
+          <AlertDescription className="flex flex-col items-start gap-2">
+            {R.dialog.repeatWarning}
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={repeatConfirmed}
+                onChange={(event) => setRepeatConfirmed(event.target.checked)}
+              />
+              {R.dialog.repeatConfirm}
+            </label>
+          </AlertDescription>
+        </Alert>
+      )}
       {error && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error}</AlertDescription>
@@ -245,12 +281,14 @@ function Composer({
 export function SendDialog({
   invoiceId,
   logId,
+  reminder,
   open,
   onClose,
   onSent,
 }: {
   invoiceId: string;
   logId?: string;
+  reminder?: ReminderChoice;
   open: boolean;
   onClose: () => void;
   onSent: () => void;
@@ -263,7 +301,13 @@ export function SendDialog({
       }}
     >
       <AlertDialogContent size="lg" className="max-h-[90dvh] overflow-y-auto">
-        <Composer invoiceId={invoiceId} logId={logId} onClose={onClose} onSent={onSent} />
+        <Composer
+          invoiceId={invoiceId}
+          logId={logId}
+          reminder={reminder}
+          onClose={onClose}
+          onSent={onSent}
+        />
       </AlertDialogContent>
     </AlertDialog>
   );

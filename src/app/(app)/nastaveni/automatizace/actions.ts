@@ -11,6 +11,7 @@ import {
   setPaused,
   setSendTime,
 } from "@/server/services/automation";
+import { deleteReminderRule, saveReminderRule } from "@/server/services/reminders";
 
 type Outcome = { ok: true } | { ok: false; error: string };
 type ActorOf = Awaited<ReturnType<typeof actorFromRequest>>;
@@ -54,4 +55,16 @@ export async function setSendTimeAction(value: string): Promise<Outcome> {
 export async function setDailyDigestAction(enabled: boolean): Promise<Outcome> {
   await requireSession();
   return guarded((actor) => setDailyDigest(actor, enabled === true));
+}
+
+export async function saveReminderRuleAction(raw: unknown): Promise<Outcome> {
+  await requireSession();
+  return guarded((actor) => {
+    saveReminderRule(actor, raw);
+  });
+}
+
+export async function deleteReminderRuleAction(id: string): Promise<Outcome> {
+  await requireSession();
+  return guarded((actor) => deleteReminderRule(actor, String(id)));
 }

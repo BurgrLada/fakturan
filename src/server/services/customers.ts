@@ -316,7 +316,7 @@ export async function verifyVat(actor: Actor, id: string): Promise<VatStatus> {
 
 export type CustomerDefaults = Preferences & { remindersEnabled: boolean | null };
 
-// null in remindersEnabled still means "follow the account setting"; plan 3 resolves it with REM-005.
+// remindersEnabled only ever blocks: true and null both follow the account switch (R-12).
 export function customerDefaults(
   ownerId: string,
   customerId: string,

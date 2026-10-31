@@ -33,13 +33,15 @@ registerHooks({
   },
 });
 
-const { databasePath, gate, mode, worker, ticks, ownerId, recurringId, occurrence } = workerData;
+const { databasePath, gate, mode, worker, ticks, ownerId, recurringId, occurrence, now } =
+  workerData;
 
 const { createDb, db, setDbForTests } = await import("@/server/db");
 const { claimNext, completeJob, enqueue } = await import("@/server/jobs/queue");
 const { registerJob } = await import("@/server/jobs/registry");
 const { registerTickTask, tick } = await import("@/server/scheduler/tick");
 const { processOccurrence } = await import("@/server/services/recurring-run");
+const { planReminders } = await import("@/server/services/reminders");
 
 setDbForTests(createDb(databasePath));
 
@@ -79,5 +81,6 @@ const work = {
   claim: claimAll,
   tick: tickRepeatedly,
   recurring: () => processOccurrence(ownerId, recurringId, occurrence),
+  reminders: () => planReminders(new Date(now)),
 };
 parentPort.postMessage({ result: await work[mode]() });

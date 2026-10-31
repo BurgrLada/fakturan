@@ -5,6 +5,8 @@ import { kindForInvoice } from "@/lib/email-template";
 import { daysBetween } from "@/lib/invoice";
 import { isSendable } from "@/lib/mail-send";
 import { calendarDateInPrague } from "@/lib/number-format";
+import { amountDue } from "@/lib/qr-payload";
+import { isEligibleForReminder } from "@/lib/reminders";
 import { classifySmtpError, smtpFailureText } from "@/lib/smtp-errors";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -17,11 +19,12 @@ import { RetryLater } from "../jobs/registry";
 import type { MailAddress, MailMessage, MailTransport, SendResult } from "../mail/transport";
 import { reportFailure } from "../scheduler/report";
 import { automaticSendAllowed } from "./automation";
+import { getCustomer } from "./customers";
 import { archiveSentPdf, readOwnedFile } from "./files";
 import { applySent } from "./invoice-lifecycle";
 import { invoicePdf } from "./invoice-pdf";
 import { mailNoticeKey as noticeKey } from "./invoice-mail";
-import { getInvoice } from "./invoices";
+import { getInvoice, type InvoiceDetail } from "./invoices";
 import { resolveTransport } from "./mail-settings";
 import { mutate } from "./mutation";
 import { resolveNotification, notify } from "./notifications";
@@ -146,11 +149,24 @@ function settle(
 
 type Refusal = { status: "held" | "cancelled"; reason: string };
 
+// A payment or a snooze may arrive while the message waits for its next attempt.
+function reminderLapsed(log: EmailLog, row: InvoiceDetail): boolean {
+  if (amountDue(row) <= 0) return true;
+  if (log.trigger !== "automatic") return false;
+  const card = row.customerId ? getCustomer(log.userId, row.customerId) : null;
+  const today = calendarDateInPrague(clock.now());
+  const snoozed = row.remindersSnoozeUntil !== null && row.remindersSnoozeUntil > today;
+  return snoozed || !isEligibleForReminder(row, card);
+}
+
 function refusal(log: EmailLog): Refusal | null {
   if (isDeactivated(log.userId)) return { status: "cancelled", reason: R.deactivated };
   const row = getInvoice(log.userId, log.invoiceId);
   if (!row || !isSendable(row.status)) return { status: "held", reason: R.status };
   if (row.revision !== log.invoiceRevision) return { status: "held", reason: R.revision };
+  if (log.kind === "reminder" && reminderLapsed(log, row)) {
+    return { status: "held", reason: TEXTS.reminders.held };
+  }
   if (log.trigger !== "automatic") return null;
   if (!log.automation || !automaticSendAllowed(log.userId, log.automation)) {
     return { status: "held", reason: R.automation };

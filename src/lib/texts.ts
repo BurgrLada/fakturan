@@ -710,7 +710,7 @@ export const TEXTS = {
       },
       reminders: {
         title: "Upomínky po splatnosti",
-        body: "Zákazníkům s fakturou po splatnosti odejde upomínka e-mailem. Staré dluhy z doby před zapnutím se nerozesílají.",
+        body: "Zákazníkům s fakturou po splatnosti odejde upomínka e-mailem podle stupňů níže. Staré dluhy z doby před zapnutím se nerozesílají.",
         impact: (customers: number) => `Upomínky mohou dostat zákazníci: ${customers}.`,
       },
       paymentReceipt: {
@@ -781,9 +781,13 @@ export const TEXTS = {
           ? `Pravidelná faktura „${p.plan ?? ""}“ se odešle ${p.date ?? ""}.`
           : `Pravidelná faktura „${p.plan ?? ""}“ má termín ${p.date ?? ""}. Automatika je vypnutá, vznikne jen koncept.`,
       reminder_failed: (p: Record<string, unknown>) =>
-        `Upomínku k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,
+        `Upomínku k dokladu ${p.invoice ?? ""} se nepodařilo odeslat. ${p.problems ?? ""}`.trim(),
       reminder_missed: (p: Record<string, unknown>) =>
-        `Upomínka k dokladu ${p.invoice ?? ""} se neodeslala včas a čeká na kontrolu.`,
+        `Upomínky čekající na kontrolu v Automatizaci: ${p.count ?? 1}.`,
+      invoices_overdue: (p: Record<string, unknown>) =>
+        `Faktury po splatnosti: ${p.count ?? 0}, nejstarší ${p.oldest ?? ""}.`,
+      invoices_due_soon: (p: Record<string, unknown>) =>
+        `Faktury se splatností do ${p.days ?? 3} dnů: ${p.count ?? 0}, nejbližší ${p.nearest ?? ""}.`,
     },
   },
   recurring: {
@@ -994,6 +998,87 @@ export const TEXTS = {
         sends
           ? `Pravidelná faktura „${plan}“ se automaticky vystaví a odešle ${date}. Pokud s tím nesouhlasíte, plán ve Fakturanu včas upravte nebo pozastavte.`
           : `Pravidelná faktura „${plan}“ má termín ${date}. Automatika je vypnutá, takže vznikne jen koncept a nic neodejde.`,
+    },
+  },
+  reminders: {
+    errors: {
+      forbidden: "Na tuto akci nemáte oprávnění",
+      invalid: "Neplatné údaje",
+      offset: "Zadejte celý počet dnů od -365 do 365",
+      unknownVariable: (names: string[]) =>
+        `Neznámá proměnná: ${names.map((name) => `{{${name}}}`).join(", ")}`,
+      duplicate: "Stupeň s tímto počtem dnů už existuje",
+      tooMany: "Stupňů může být nejvýš 20",
+      notFound: "Stupeň upomínky neexistuje",
+      nothingDue: "Na tomto dokladu nezbývá nic k úhradě",
+      confirmRepeat: "Tato upomínka už odešla, opakované odeslání musíte potvrdit",
+      snoozeRange: "Upomínku jde odložit nejvýš o 30 dní od dneška",
+      noAddress: "Zákazník nemá e-mail",
+    },
+    held: "Upomínka už není platná, doklad je uhrazený, vypnutý nebo odložený",
+    rules: {
+      title: "Stupně upomínek",
+      body: "Každý stupeň je počet dnů od splatnosti, záporné číslo znamená před splatností. Bez vlastního textu se použije šablona upomínky.",
+      empty: "Zatím tu není žádný stupeň.",
+      list: "Seznam stupňů",
+      offset: "Dny od splatnosti",
+      before: (days: number) => `${days} dní před splatností`,
+      onDay: "V den splatnosti",
+      after: (days: number) => `${days} dní po splatnosti`,
+      custom: "Vlastní text",
+      fromTemplate: "Šablona",
+      subject: (language: string) => `Předmět (${language})`,
+      text: (language: string) => `Text (${language})`,
+      variables: "Můžete použít proměnné šablon, například {{zbyva}} nebo {{splatnost}}.",
+      add: "Přidat stupeň",
+      save: "Uložit stupeň",
+      edit: "Upravit",
+      remove: "Smazat",
+      cancel: "Zrušit",
+      saved: "Stupeň je uložený.",
+      removed: "Stupeň je smazaný.",
+    },
+    review: {
+      title: "Ke kontrole",
+      body: "Stupně, které prošly před zapnutím nebo jsou starší než 3 dny. Samy neodejdou, upomínku pošlete z detailu faktury.",
+      empty: "Nic nečeká na kontrolu.",
+      list: "Upomínky ke kontrole",
+      due: "splatnost",
+    },
+    panel: {
+      title: "Upomínky",
+      stage: "Stupeň",
+      manualStage: "Bez stupně",
+      send: "Odeslat upomínku",
+      snooze: "Odložit do",
+      snoozeHint: "Nejvýš 30 dní od dneška.",
+      snoozeSave: "Odložit",
+      snoozeClear: "Zrušit odklad",
+      snoozed: (date: string) => `Odloženo do ${date}.`,
+      off: "Na této faktuře upomínky neposílat",
+      partial: "Posílat i při částečné úhradě",
+      sentTitle: "Odeslané upomínky",
+      none: "Žádná upomínka zatím neodešla.",
+      automatic: "automaticky",
+      manual: "ručně",
+      failed: "Změnu se nepodařilo uložit. Zkuste to znovu.",
+    },
+    dialog: {
+      title: "Odeslat upomínku",
+      repeatWarning: "Tato upomínka už odešla. Klient ji dostane znovu.",
+      repeatConfirm: "Rozumím, chci ji poslat znovu",
+    },
+    alerts: {
+      title: "Splatnost faktur",
+      overdue: "Po splatnosti",
+      dueSoon: "Blíží se splatnost",
+      all: "Zobrazit vše",
+      due: "splatnost",
+    },
+    digest: {
+      subject: "Fakturan: přehled splatnosti",
+      overdue: "Po splatnosti:",
+      dueSoon: "Blíží se splatnost:",
     },
   },
   invoiceMail: {

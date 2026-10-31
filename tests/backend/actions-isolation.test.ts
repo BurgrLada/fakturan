@@ -37,11 +37,20 @@ import {
   saveInvoiceAsTemplateAction,
 } from "@/app/(app)/faktury/sablony/actions";
 import {
+  deleteReminderRuleAction,
+  saveReminderRuleAction,
+} from "@/app/(app)/nastaveni/automatizace/actions";
+import {
   bulkSendAction,
   bulkSendPreviewAction,
+  reminderPrefillAction,
   resendFromLogAction,
   sendInvoiceAction,
   sendPrefillAction,
+  sendReminderAction,
+  setPartialRemindersAction,
+  setRemindersOffAction,
+  snoozeRemindersAction,
 } from "@/app/(app)/faktury/actions";
 import { emailLog, recurringInvoice, user } from "@/server/db/schema";
 import { issuedInvoice, ownSmtp, seedCustomer, seedOwner } from "../helpers/fixtures-mail";
@@ -54,6 +63,7 @@ import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
 import { nextOccurrences } from "@/lib/recurrence";
 import { getRecurring } from "@/server/services/recurring";
+import { listReminderRules, saveReminderRule } from "@/server/services/reminders";
 import { pauseRecurring, processOccurrence } from "@/server/services/recurring-run";
 import { createTestDb } from "../helpers/db";
 import { planInput, savePlan } from "../helpers/fixtures-recurring";
@@ -109,6 +119,49 @@ describe("akce pošty", () => {
     const invoiceId = issuedInvoice(owner, seedCustomer(owner));
     return { owner, invoiceId };
   }
+
+  test("[SEC-002] akce upomínek odmítnou cizí ID", async () => {
+    const mine = mailAccount();
+    const stranger = mailAccount();
+    const stage = saveReminderRule(actor(mine.owner), { offsetDays: 3, texts: null }).id;
+    const before = getInvoice(mine.owner, mine.invoiceId)!;
+
+    session.userId = stranger.owner;
+    const replies = [
+      await reminderPrefillAction({ id: mine.invoiceId, stageKey: null }),
+      await reminderPrefillAction({ id: stranger.invoiceId, stageKey: stage }),
+      await sendReminderAction({
+        id: mine.invoiceId,
+        stageKey: null,
+        confirmedRepeat: false,
+        message: { ...message, revision: before.revision },
+      }),
+      await sendReminderAction({
+        id: stranger.invoiceId,
+        stageKey: stage,
+        confirmedRepeat: false,
+        message: {
+          ...message,
+          requestId: "55555555-5555-4555-8555-555555555555",
+          revision: getInvoice(stranger.owner, stranger.invoiceId)!.revision,
+        },
+      }),
+      await snoozeRemindersAction({ id: mine.invoiceId, until: null }),
+      await setRemindersOffAction({ id: mine.invoiceId, on: true }),
+      await setPartialRemindersAction({ id: mine.invoiceId, on: true }),
+      await saveReminderRuleAction({ id: stage, offsetDays: 9, texts: null }),
+      await deleteReminderRuleAction(stage),
+    ];
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: false });
+    expect(getInvoice(mine.owner, mine.invoiceId)).toMatchObject({
+      remindersOff: false,
+      remindersPartial: false,
+    });
+    expect(listReminderRules(mine.owner)).toMatchObject([{ id: stage, offsetDays: 3 }]);
+    expect(db.select().from(emailLog).where(eq(emailLog.userId, mine.owner)).all()).toEqual([]);
+    expect(db.select().from(emailLog).where(eq(emailLog.userId, stranger.owner)).all()).toEqual([]);
+  });
 
   test("[SEC-002] akce pošty odmítnou cizí ID", async () => {
     const mine = mailAccount();

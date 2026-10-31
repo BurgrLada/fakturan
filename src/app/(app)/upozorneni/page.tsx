@@ -8,6 +8,7 @@ import { PageLoading } from "@/components/page-loading";
 import { buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
+import "@/server/services/due-alerts";
 import { derivedAlerts, listNotifications } from "@/server/services/notifications";
 
 export const metadata: Metadata = { title: `${TEXTS.notifications.title} | ${TEXTS.appName}` };

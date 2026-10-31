@@ -17,3 +17,4 @@ export * from "./job";
 export * from "./automation";
 export * from "./notification";
 export * from "./mail";
+export * from "./reminder";

@@ -83,6 +83,10 @@ export const invoice = sqliteTable(
     // Stored so a late issue still bills the plan's period, not the one of the issue date (R-15).
     periodFrom: text("period_from"),
     periodTo: text("period_to"),
+    // Organisational, like tags: changing them leaves revision and versions alone.
+    remindersOff: integer("reminders_off", { mode: "boolean" }).notNull().default(false),
+    remindersSnoozeUntil: text("reminders_snooze_until"),
+    remindersPartial: integer("reminders_partial", { mode: "boolean" }).notNull().default(false),
     searchText: text("search_text").notNull().default(""),
     revision: integer().notNull().default(0),
     issuedAt: integer("issued_at", { mode: "timestamp_ms" }),

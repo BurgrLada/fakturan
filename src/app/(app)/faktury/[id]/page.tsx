@@ -6,18 +6,20 @@ import { EntityHistory } from "@/components/audit/entity-history";
 import { EmailHistory } from "@/components/invoices/email-history";
 import { InvoiceActions } from "@/components/invoices/invoice-actions";
 import { InvoiceStatusBadge } from "@/components/invoices/invoice-status";
+import { ReminderPanel } from "@/components/invoices/reminder-panel";
 import { VersionList } from "@/components/invoices/version-list";
 import { PageLoading } from "@/components/page-loading";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
-import { isOverdue } from "@/lib/invoice";
+import { addDays, isOverdue } from "@/lib/invoice";
 import { isSendable } from "@/lib/mail-send";
 import { invoiceDocument } from "@/lib/invoice-document";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague } from "@/lib/number-format";
-import { qrStateOf } from "@/lib/qr-payload";
+import { amountDue, qrStateOf } from "@/lib/qr-payload";
+import { MAX_SNOOZE_DAYS } from "@/lib/reminders";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
@@ -27,6 +29,7 @@ import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
 import { mailAvailability } from "@/server/services/mail-settings";
 import { getRecurring } from "@/server/services/recurring";
+import { listReminderRules, reminderHistory } from "@/server/services/reminders";
 
 const T = TEXTS.invoices.detail;
 
@@ -161,6 +164,19 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           {TEXTS.invoices.qr[qr]}
         </p>
       </section>
+      {sendable && amountDue(row) > 0 && (
+        <ReminderPanel
+          invoiceId={id}
+          rules={listReminderRules(user.id)}
+          history={reminderHistory(user.id, id)}
+          snoozeUntil={row.remindersSnoozeUntil}
+          off={row.remindersOff}
+          partial={row.remindersPartial}
+          today={today}
+          latestSnooze={addDays(today, MAX_SNOOZE_DAYS)}
+          canSend={available && !sending}
+        />
+      )}
       <section className="flex flex-col gap-3 sm:max-w-xl">
         <h2 className="text-lg">{TEXTS.invoices.versions.title}</h2>
         <VersionList invoiceId={id} versions={listVersions(user.id, id)} />

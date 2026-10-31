@@ -176,6 +176,13 @@
       "when": 1793462303370,
       "tag": "0024_recurring",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1793466329478,
+      "tag": "0025_reminder",
+      "breakpoints": true
     }
   ]
 }

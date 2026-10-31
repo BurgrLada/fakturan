@@ -2,15 +2,26 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { PageLoading } from "@/components/page-loading";
 import { AutomationPanel } from "@/components/settings/automation-panel";
+import { ReminderReview, ReminderRules } from "@/components/settings/reminder-rules";
+import { calendarDateInPrague } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
+import { clock } from "@/server/clock";
 import { automationImpact, getAutomation } from "@/server/services/automation";
+import { listReminderRules, remindersForReview } from "@/server/services/reminders";
 
 export const metadata: Metadata = { title: `${TEXTS.automation.title} | ${TEXTS.appName}` };
 
 async function AutomationContent() {
   const { user } = await requireSession();
-  return <AutomationPanel settings={getAutomation(user.id)} impact={automationImpact(user.id)} />;
+  const today = calendarDateInPrague(clock.now());
+  return (
+    <>
+      <AutomationPanel settings={getAutomation(user.id)} impact={automationImpact(user.id)} />
+      <ReminderRules rules={listReminderRules(user.id)} />
+      <ReminderReview rows={remindersForReview(user.id, today)} />
+    </>
+  );
 }
 
 export default function AutomationPage() {
