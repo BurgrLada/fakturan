@@ -1,8 +1,7 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { FilterField } from "@/components/filter-field";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { CURRENCIES } from "@/lib/currency";
 import { INVOICE_TYPES } from "@/lib/invoice";
@@ -16,17 +15,6 @@ import {
 } from "@/server/services/invoices";
 
 const T = TEXTS.invoices.list;
-
-// Controls sit inside their label: a route hidden by Next keeps its ids in the DOM, and the same
-// list with another query is a separate hidden route.
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <Label className="flex-col items-stretch gap-1">
-      {label}
-      {children}
-    </Label>
-  );
-}
 
 export function InvoiceFilters({
   filter,
@@ -45,15 +33,15 @@ export function InvoiceFilters({
       {Object.entries(invoiceSortParams(filter)).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
-      <Field label={T.search}>
+      <FilterField label={T.search}>
         <Input
           name="q"
           type="search"
           defaultValue={filter.q ?? ""}
           placeholder={T.searchPlaceholder}
         />
-      </Field>
-      <Field label={T.status}>
+      </FilterField>
+      <FilterField label={T.status}>
         <NativeSelect
           name="stav"
           defaultValue={filter.status ? INVOICE_STATUS_PARAM[filter.status] : ""}
@@ -65,8 +53,8 @@ export function InvoiceFilters({
             </option>
           ))}
         </NativeSelect>
-      </Field>
-      <Field label={T.customer}>
+      </FilterField>
+      <FilterField label={T.customer}>
         <NativeSelect name="zakaznik" defaultValue={filter.customerId ?? ""}>
           <option value="">{T.all}</option>
           {options.customers.map((customer) => (
@@ -75,14 +63,14 @@ export function InvoiceFilters({
             </option>
           ))}
         </NativeSelect>
-      </Field>
-      <Field label={T.from}>
+      </FilterField>
+      <FilterField label={T.from}>
         <Input name="od" type="date" defaultValue={filter.from ?? ""} />
-      </Field>
-      <Field label={T.to}>
+      </FilterField>
+      <FilterField label={T.to}>
         <Input name="do" type="date" defaultValue={filter.to ?? ""} />
-      </Field>
-      <Field label={T.currency}>
+      </FilterField>
+      <FilterField label={T.currency}>
         <NativeSelect name="mena" defaultValue={filter.currency ?? ""}>
           <option value="">{T.all}</option>
           {CURRENCIES.map((currency) => (
@@ -91,8 +79,8 @@ export function InvoiceFilters({
             </option>
           ))}
         </NativeSelect>
-      </Field>
-      <Field label={T.type}>
+      </FilterField>
+      <FilterField label={T.type}>
         <NativeSelect name="typ" defaultValue={filter.type ?? ""}>
           <option value="">{T.all}</option>
           {INVOICE_TYPES.map((type) => (
@@ -101,9 +89,9 @@ export function InvoiceFilters({
             </option>
           ))}
         </NativeSelect>
-      </Field>
+      </FilterField>
       {options.tags.length > 0 && (
-        <Field label={T.tag}>
+        <FilterField label={T.tag}>
           <NativeSelect name="stitek" defaultValue={filter.tagId ?? ""}>
             <option value="">{T.all}</option>
             {options.tags.map((tag) => (
@@ -112,7 +100,7 @@ export function InvoiceFilters({
               </option>
             ))}
           </NativeSelect>
-        </Field>
+        </FilterField>
       )}
       <label className="flex items-center gap-2 text-sm sm:pb-2">
         <input type="checkbox" name="jinde" value="1" defaultChecked={filter.external ?? false} />

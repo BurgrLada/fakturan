@@ -640,6 +640,7 @@ function Form(props: InvoiceFormProps) {
               onChange={(update) =>
                 setValues((current) => ({ ...current, lines: update(current.lines) }))
               }
+              onExpired={() => setLock("expired")}
             />
           </section>
 

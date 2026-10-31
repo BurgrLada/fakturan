@@ -46,6 +46,7 @@ function LineRow({
   onChange,
   onRemove,
   onlyLine,
+  onExpired,
 }: {
   line: FormLine;
   position: number;
@@ -56,6 +57,7 @@ function LineRow({
   onChange: (patch: Partial<FormLine>) => void;
   onRemove: () => void;
   onlyLine: boolean;
+  onExpired: () => void;
 }) {
   const {
     attributes,
@@ -99,6 +101,7 @@ function LineRow({
         currency,
       });
       if (result.ok) onChange({ catalogItemId: result.id, priceCurrency: currency });
+      else if (result.expired) onExpired();
       else setCatalogError(result.error);
     } catch {
       setCatalogError(T.network);
@@ -131,6 +134,7 @@ function LineRow({
           <div className="flex min-w-0 flex-col gap-2 sm:col-span-6">
             <Label htmlFor={id("name")}>{L.name}</Label>
             <CatalogPicker
+              onExpired={onExpired}
               id={id("name")}
               value={line.name}
               onChange={(name) => onChange({ name })}
@@ -257,7 +261,9 @@ export function LineEditor({
   defaultUnit,
   invalid,
   onChange,
+  onExpired,
 }: {
+  onExpired: () => void;
   lines: FormLine[];
   currency: Currency;
   nets: ReadonlyMap<string, number>;
@@ -323,6 +329,7 @@ export function LineEditor({
           <ul className="flex flex-col gap-3">
             {lines.map((line, index) => (
               <LineRow
+                onExpired={onExpired}
                 key={line.key}
                 line={line}
                 position={index + 1}

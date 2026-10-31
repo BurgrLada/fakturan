@@ -6,6 +6,8 @@ import { unzipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { isOverdue, MAX_BULK_DOCUMENTS, type InvoiceStatus } from "@/lib/invoice";
 import { setClockForTests } from "@/server/clock";
+import { checkRateLimit, RATE_RULES } from "@/server/rate-limit";
+import { RateLimitError, ServiceError } from "@/server/services/access";
 import { auditLog, invoice, user } from "@/server/db/schema";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { saveCustomer } from "@/server/services/customers";
@@ -15,7 +17,11 @@ import {
   markSent,
   markSentMany,
 } from "@/server/services/invoice-lifecycle";
-import { invoicesZip, uniqueFileNames } from "@/server/services/invoice-pdf";
+import {
+  InvoicePdfNotFoundError,
+  invoicesZip,
+  uniqueFileNames,
+} from "@/server/services/invoice-pdf";
 import {
   customerInvoiceStats,
   getInvoice,
@@ -375,7 +381,7 @@ describe("seznam faktur", () => {
     expect(customerInvoiceStats(other.owner, o.alfa).sums).toEqual([]);
   });
 
-  test("[INV-032] karta zákazníka má součty po měnách a poslední doklady", () => {
+  test("[INV-001] karta zákazníka nezapočítá koncept a má součty po měnách", () => {
     const o = newOwner();
     const first = issued(o, { price: 100_000 });
     const second = issued(o, { price: 50_000 });
@@ -396,6 +402,15 @@ describe("seznam faktur", () => {
   });
 });
 
+const downloads = (owner: string) =>
+  db
+    .select()
+    .from(auditLog)
+    .where(eq(auditLog.action, "invoice.pdf_download"))
+    .all()
+    .filter((row) => row.ownerId === owner)
+    .map((row) => row.entityId);
+
 // INV-024 stays pending until sending and payment arrive, so these name the ids they do cover.
 describe("hromadné akce", () => {
   test("[PDF-009] hromadné PDF dá ZIP vybraných dokladů s unikátními názvy", async () => {
@@ -413,13 +428,7 @@ describe("hromadné akce", () => {
     }
     expect(zip.fileName).toBe("faktury-2026-03-10.zip");
 
-    const audited = db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.action, "invoice.pdf_download"))
-      .all()
-      .filter((row) => row.ownerId === o.owner);
-    expect(audited.map((row) => row.entityId).toSorted()).toEqual([a, b].toSorted());
+    expect(downloads(o.owner).toSorted()).toEqual([a, b].toSorted());
   });
 
   test("[PDF-009] unikátní název přeskočí i jméno, které už existuje", () => {
@@ -438,10 +447,26 @@ describe("hromadné akce", () => {
     const foreign = issued(other);
     const concept = draft(o).id;
 
-    await expect(invoicesZip(actor(o.owner), [mine, foreign])).rejects.toThrow();
-    await expect(invoicesZip(actor(o.owner), [mine, concept])).rejects.toThrow();
-    const many = Array.from({ length: MAX_BULK_DOCUMENTS + 1 }, (_, i) => `id-${i}`);
-    await expect(invoicesZip(actor(o.owner), many)).rejects.toThrow();
+    await expect(invoicesZip(actor(o.owner), [mine, foreign])).rejects.toThrow(
+      InvoicePdfNotFoundError,
+    );
+    await expect(invoicesZip(actor(o.owner), [mine, concept])).rejects.toThrow(
+      InvoicePdfNotFoundError,
+    );
+    const many = Array.from({ length: MAX_BULK_DOCUMENTS }, () => issued(o));
+    await expect(invoicesZip(actor(o.owner), [...many, mine])).rejects.toThrow(ServiceError);
+    expect(downloads(o.owner)).toEqual([]);
+  });
+
+  test("[SEC-001] vyčerpaný limit exportu hromadné PDF odmítne a nic nezapíše", async () => {
+    const o = newOwner();
+    const mine = issued(o);
+    for (let i = 0; i < RATE_RULES.exportUser.limit; i += 1) {
+      checkRateLimit(o.owner, RATE_RULES.exportUser);
+    }
+
+    await expect(invoicesZip(actor(o.owner), [mine])).rejects.toThrow(RateLimitError);
+    expect(downloads(o.owner)).toEqual([]);
   });
 
   test("[INV-005] hromadné označení změní jen vystavené a vlastní doklady", () => {

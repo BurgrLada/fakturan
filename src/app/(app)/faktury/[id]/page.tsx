@@ -7,6 +7,7 @@ import { InvoiceActions } from "@/components/invoices/invoice-actions";
 import { InvoiceStatusBadge } from "@/components/invoices/invoice-status";
 import { VersionList } from "@/components/invoices/version-list";
 import { PageLoading } from "@/components/page-loading";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
@@ -27,11 +28,20 @@ const T = TEXTS.invoices.detail;
 export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
 
 function StatusSteps({ row }: { row: InvoiceDetail }) {
+  const left = row.totalMinor - row.paidMinor;
+  const settled = row.status === "cancelled" || row.status === "credited";
   const steps = [
     { label: T.steps.issued, value: formatDateTime(row.issuedAt) },
     { label: T.steps.sent, value: formatDateTime(row.sentAt) },
     { label: T.steps.paid, value: formatMoney(row.paidMinor, row.currency) },
-    { label: T.steps.left, value: formatMoney(row.totalMinor - row.paidMinor, row.currency) },
+    ...(settled && left >= 0
+      ? []
+      : [
+          {
+            label: left < 0 ? T.steps.overpaid : T.steps.left,
+            value: formatMoney(Math.abs(left), row.currency),
+          },
+        ]),
   ];
   return (
     <dl
@@ -48,8 +58,20 @@ function StatusSteps({ row }: { row: InvoiceDetail }) {
   );
 }
 
-async function DetailContent({ params }: { params: Promise<{ id: string }> }) {
+function restoredNotices(query: Record<string, string | string[] | undefined>): string[] {
+  if (query.obnoveno !== "1") return [];
+  const F = TEXTS.invoices.form;
+  return [
+    TEXTS.invoices.versions.restored,
+    ...(query.odeslat === "1" ? [F.resend] : []),
+    ...(query.zustatek === "overpaid" ? [F.overpaid] : []),
+    ...(query.zustatek === "underpaid" ? [F.underpaid] : []),
+  ];
+}
+
+async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]">) {
   const { id } = await params;
+  const notices = restoredNotices(await searchParams);
   const { user } = await requireSession();
   const row = getInvoice(user.id, id);
   if (!row) notFound();
@@ -91,6 +113,11 @@ async function DetailContent({ params }: { params: Promise<{ id: string }> }) {
           ))}
         </div>
       )}
+      {notices.length > 0 && (
+        <Alert role="status" data-testid="restored-notice">
+          <AlertDescription>{notices.join(" ")}</AlertDescription>
+        </Alert>
+      )}
       <InvoiceActions
         id={id}
         editable={editable}
@@ -118,7 +145,7 @@ async function DetailContent({ params }: { params: Promise<{ id: string }> }) {
   );
 }
 
-export default function InvoiceDetailPage({ params }: PageProps<"/faktury/[id]">) {
+export default function InvoiceDetailPage({ params, searchParams }: PageProps<"/faktury/[id]">) {
   return (
     <>
       <Link
@@ -128,7 +155,7 @@ export default function InvoiceDetailPage({ params }: PageProps<"/faktury/[id]">
         {T.back}
       </Link>
       <Suspense fallback={<PageLoading />}>
-        <DetailContent params={params} />
+        <DetailContent params={params} searchParams={searchParams} />
       </Suspense>
     </>
   );

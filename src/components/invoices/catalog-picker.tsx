@@ -14,24 +14,28 @@ export type CatalogChoice = {
   currency: Currency;
 };
 
-async function search(q: string): Promise<CatalogChoice[]> {
-  const result = await searchCatalogAction({ q });
-  return result.ok ? result.items : [];
-}
-
 export function CatalogPicker({
   id,
   value,
   invalid,
   onChange,
   onPick,
+  onExpired,
 }: {
   id: string;
   value: string;
   invalid?: boolean;
   onChange: (value: string) => void;
   onPick: (item: CatalogChoice) => void;
+  onExpired: () => void;
 }) {
+  async function search(q: string): Promise<CatalogChoice[]> {
+    const result = await searchCatalogAction({ q });
+    if (result.ok) return result.items;
+    if (result.expired) onExpired();
+    return [];
+  }
+
   return (
     <Combobox
       id={id}

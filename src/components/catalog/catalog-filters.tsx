@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { FilterField } from "@/components/filter-field";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { TEXTS } from "@/lib/texts";
 import type { CatalogFilter } from "@/server/services/catalog";
@@ -24,19 +24,16 @@ export function CatalogFilters({
       aria-label={T.filters}
       className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-5"
     >
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="f-q">{T.search}</Label>
+      <FilterField label={T.search}>
         <Input
-          id="f-q"
           name="q"
           type="search"
           defaultValue={filter.q ?? ""}
           placeholder={T.searchPlaceholder}
         />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="f-kategorie">{T.category}</Label>
-        <NativeSelect id="f-kategorie" name="kategorie" defaultValue={filter.category ?? ""}>
+      </FilterField>
+      <FilterField label={T.category}>
+        <NativeSelect name="kategorie" defaultValue={filter.category ?? ""}>
           <option value="">{T.allCategories}</option>
           {categories.map((category) => (
             <option key={category} value={category}>
@@ -44,30 +41,20 @@ export function CatalogFilters({
             </option>
           ))}
         </NativeSelect>
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="f-stav">{T.status}</Label>
-        <NativeSelect
-          id="f-stav"
-          name="stav"
-          defaultValue={STATUS_PARAM[filter.status ?? "active"]}
-        >
+      </FilterField>
+      <FilterField label={T.status}>
+        <NativeSelect name="stav" defaultValue={STATUS_PARAM[filter.status ?? "active"]}>
           <option value="">{T.statuses.active}</option>
           <option value="archivovane">{T.statuses.archived}</option>
           <option value="vsechny">{T.statuses.all}</option>
         </NativeSelect>
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="f-razeni">{T.sort}</Label>
-        <NativeSelect
-          id="f-razeni"
-          name="razeni"
-          defaultValue={filter.sort === "usage" ? "pouziti" : ""}
-        >
+      </FilterField>
+      <FilterField label={T.sort}>
+        <NativeSelect name="razeni" defaultValue={filter.sort === "usage" ? "pouziti" : ""}>
           <option value="">{T.sorts.name}</option>
           <option value="pouziti">{T.sorts.usage}</option>
         </NativeSelect>
-      </div>
+      </FilterField>
       <div className="flex gap-2">
         <Button type="submit">{T.apply}</Button>
         <Link href="/cenik" className={buttonVariants({ variant: "outline" })}>

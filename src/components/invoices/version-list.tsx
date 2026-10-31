@@ -38,6 +38,13 @@ export function VersionList({
   );
 }
 
+function restoredQuery(reply: { resendSuggested: boolean; balanceWarning: string }): string {
+  const params = new URLSearchParams({ obnoveno: "1" });
+  if (reply.resendSuggested) params.set("odeslat", "1");
+  if (reply.balanceWarning !== "none") params.set("zustatek", reply.balanceWarning);
+  return `?${params}`;
+}
+
 export function RestoreVersion({ invoiceId, versionId }: { invoiceId: string; versionId: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -48,7 +55,7 @@ export function RestoreVersion({ invoiceId, versionId }: { invoiceId: string; ve
     startTransition(async () => {
       try {
         const reply = await restoreVersionAction({ id: versionId });
-        if (reply.ok) router.push(`/faktury/${invoiceId}`);
+        if (reply.ok) router.push(`/faktury/${invoiceId}${restoredQuery(reply)}`);
         else setError(reply.error);
       } catch {
         setError(T.failed);

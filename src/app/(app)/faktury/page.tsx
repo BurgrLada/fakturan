@@ -40,6 +40,7 @@ async function InvoicesContent({ searchParams }: Pick<PageProps<"/faktury">, "se
   const filter = parseInvoiceFilter(await searchParams);
   const result = listInvoices(user.id, filter);
   const filtered = isFiltered(filter);
+  const pastEnd = result.rows.length === 0 && result.page > 1;
   return (
     <>
       <Remount on={invoiceQuery(filter)}>
@@ -49,10 +50,17 @@ async function InvoicesContent({ searchParams }: Pick<PageProps<"/faktury">, "se
       {result.rows.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title={filtered ? T.emptyFiltered : T.empty}
-          description={filtered ? "" : T.emptyBody}
+          title={pastEnd ? T.emptyPage : filtered ? T.emptyFiltered : T.empty}
+          description={filtered || pastEnd ? "" : T.emptyBody}
           action={
-            filtered ? (
+            pastEnd ? (
+              <Link
+                href={`/faktury${invoiceQuery({ ...filter, page: 1 })}`}
+                className={buttonVariants({ variant: "outline" })}
+              >
+                {T.firstPage}
+              </Link>
+            ) : filtered ? (
               <Link href="/faktury" className={buttonVariants({ variant: "outline" })}>
                 {T.reset}
               </Link>

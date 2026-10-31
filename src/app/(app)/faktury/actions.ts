@@ -125,7 +125,7 @@ export async function issuePreviewAction(raw: unknown) {
 export async function issueAction(raw: unknown) {
   return run(issueInput, raw, ({ id: invoiceId, revision, variableSymbol }, actor) => {
     const issued = issueInvoice(actor, invoiceId, { revision, variableSymbol });
-    revalidatePath("/faktury", "layout");
+    changedInvoices();
     return issued;
   });
 }
@@ -135,7 +135,7 @@ export async function updateIssuedAction(raw: unknown) {
     assertTagNames(names);
     const result = updateIssuedInvoice(actor, invoiceId, document);
     setInvoiceTags(actor, invoiceId, names);
-    revalidatePath("/faktury", "layout");
+    changedInvoices();
     return result;
   });
 }

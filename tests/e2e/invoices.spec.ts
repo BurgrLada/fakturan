@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
+import Database from "better-sqlite3";
 import { unzipSync } from "fflate";
 import { decodeQr, pdfPagePng, pdfText } from "../helpers/pdf";
 import { expect, test } from "./fixtures";
@@ -142,7 +144,7 @@ test("[INV-021] verze ukáže rozdíl a jde obnovit", async ({ page, freshApp })
   await page.getByRole("link", { name: "Verze 1" }).click();
   await expect(page.getByTestId("version-diff")).toContainText("Opravená poznámka");
   await page.getByRole("button", { name: "Obnovit tuto verzi" }).click();
-  await page.waitForURL(detail);
+  await page.waitForURL(/obnoveno=1/);
   await expect(page.getByRole("link", { name: "Verze 2" })).toBeVisible();
 });
 
@@ -228,7 +230,10 @@ test("[INV-005] hromadně označené faktury jsou odeslané", async ({ page, fre
   await expect(rows(page).filter({ hasText: "Odeslaná" })).toHaveCount(2);
 });
 
-test("[EXP-004] hromadné PDF se spouští jen ze stejného původu", async ({ page, freshApp }) => {
+test("[AUD-002] hromadné PDF, které se audituje, se spouští jen ze stejného původu", async ({
+  page,
+  freshApp,
+}) => {
   const { baseURL } = freshApp;
   await register(page, baseURL);
   const foreign = await page.request.post(`${baseURL}/faktury/hromadne-pdf`, {
@@ -312,7 +317,7 @@ test("[INV-017] druhé kliknutí na Nová faktura dá prázdný formulář", asy
   await expect(page.getByRole("combobox", { name: "Zákazník" })).toHaveValue("");
 });
 
-test("[INV-032] karta zákazníka ukáže doklady a součty", async ({ page, freshApp }) => {
+test("[INV-001] karta zákazníka ukáže doklady a koncept nezapočítá", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
   await ready(page, baseURL);
   await addCustomer(page, baseURL, "Beta s.r.o.");
@@ -325,6 +330,135 @@ test("[INV-032] karta zákazníka ukáže doklady a součty", async ({ page, fre
   const alfa = page.url();
   expect(alfa).not.toBe(card);
   await cashIssued(page, baseURL);
+  await openForm(page, baseURL);
+  await chooseCustomer(page);
+  await fillLine(page, 0, "Rozepsané", "7000");
+  await settled(page);
   await page.goto(alfa);
+  await expect(page.getByRole("link", { name: "Koncept" })).toBeVisible();
   await expect(page.getByTestId("customer-sum-CZK")).toContainText("1 000,00");
+});
+
+test("[INV-017] nový koncept je v seznamu i po návratu odkazem", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await page.goto(`${baseURL}/faktury`);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("link", { name: "Nová faktura" }).first().click();
+  await page.waitForURL(/upravit$/);
+  await page.waitForLoadState("networkidle");
+  await cashInvoice(page);
+  await settled(page);
+  const form = page.url();
+
+  await page.getByRole("link", { name: "Zpět na faktury" }).click();
+  await page.waitForURL(/\/faktury$/);
+  await expect(page.getByRole("link", { name: "Koncept" })).toHaveCount(1);
+  await expect(rows(page)).toHaveCount(2);
+  await expect(rows(page).nth(1)).toContainText("1 000,00");
+
+  await page.getByRole("link", { name: "Koncept" }).click();
+  await page.waitForURL(form);
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByLabel("Cena za jednotku")).toHaveValue(/1\s?000/);
+  await page.getByLabel("Cena za jednotku").fill("2000");
+  await settled(page);
+  await page.getByRole("link", { name: "Zpět na faktury" }).click();
+  await page.waitForURL(/\/faktury$/);
+  await expect(rows(page).nth(1)).toContainText("2 000,00");
+});
+
+test("[INV-021] po obnovení verze detail upozorní na odeslání a přeplatek", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL, dataDir } = freshApp;
+  await ready(page, baseURL);
+  const detail = await cashIssued(page, baseURL);
+  const id = detail.split("/").at(-1)!;
+  await page.goto(`${detail}/upravit`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Cena za jednotku").fill("2000");
+  await page.getByRole("button", { name: "Uložit změny" }).click();
+  await expect(page.getByText("Změny jsou uložené.")).toBeVisible();
+
+  await page.goto(detail);
+  await page.getByRole("button", { name: "Označit jako odeslanou" }).click();
+  await expect(page.getByText("Odeslaná", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Verze 1" }).click();
+  await expect(page.getByTestId("version-diff")).toContainText("cena");
+  await page.getByRole("button", { name: "Obnovit tuto verzi" }).click();
+  await expect(page.getByTestId("restored-notice")).toContainText("zvažte opětovné odeslání");
+
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  sqlite
+    .prepare("UPDATE invoice SET paid_minor = 150000, status = 'partially_paid' WHERE id = ?")
+    .run(id);
+  sqlite.close();
+  await page.goto(detail);
+  await expect(page.getByTestId("invoice-steps")).toContainText("Přeplatek");
+  await expect(page.getByTestId("invoice-steps")).not.toContainText("Zbývá uhradit");
+  await page.getByRole("link", { name: "Verze 2" }).click();
+  await page.getByRole("button", { name: "Obnovit tuto verzi" }).click();
+  await page.waitForURL(/obnoveno=1/);
+  await page.getByRole("link", { name: "Verze 3" }).click();
+  await page.getByRole("button", { name: "Obnovit tuto verzi" }).click();
+  await expect(page.getByTestId("restored-notice")).toContainText("Přijaté platby jsou vyšší");
+});
+
+test("[INV-004] storno neukáže Zbývá uhradit", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await cashIssued(page, baseURL);
+  await expect(page.getByTestId("invoice-steps")).toContainText("Zbývá uhradit");
+  await page.getByRole("button", { name: "Stornovat" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Stornovat fakturu" }).click();
+  await expect(page.getByText("Stornovaná", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("invoice-steps")).not.toContainText("Zbývá uhradit");
+});
+
+test("[UI-009] stránka za koncem seznamu netvrdí, že faktury nejsou", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await cashIssued(page, baseURL);
+  await page.goto(`${baseURL}/faktury?strana=999`);
+  await expect(page.getByText("Na této stránce už nic není")).toBeVisible();
+  await expect(page.getByText("Zatím tu není žádná faktura")).toHaveCount(0);
+  await page.getByRole("link", { name: "Na první stránku" }).click();
+  await expect(rows(page)).toHaveCount(2);
+});
+
+test("[INV-017] vypršená relace v ceníku u položky ukáže zámek", async ({ page, freshApp }) => {
+  const { baseURL, dataDir } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Poznámka").fill("rozepsáno");
+  await settled(page);
+  const form = page.url();
+  await page.getByRole("combobox", { name: "Název položky" }).fill("Bez relace");
+  await page.getByLabel("Cena za jednotku").fill("100");
+  await settled(page);
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  sqlite.prepare("DELETE FROM session").run();
+  sqlite.close();
+
+  await page.getByRole("button", { name: "Uložit do ceníku" }).click();
+  await expect(page.getByRole("link", { name: "Přihlásit se" })).toBeVisible();
+  expect(page.url()).toBe(form);
+  await expect(page.getByLabel("Poznámka")).toHaveValue("rozepsáno");
+});
+
+test("[INV-017] vypršená relace při hledání v ceníku ukáže zámek", async ({ page, freshApp }) => {
+  const { baseURL, dataDir } = freshApp;
+  await register(page, baseURL);
+  await openForm(page, baseURL);
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  sqlite.prepare("DELETE FROM session").run();
+  sqlite.close();
+
+  await page.getByRole("combobox", { name: "Název položky" }).fill("Hle");
+  await expect(page.getByRole("link", { name: "Přihlásit se" })).toBeVisible();
 });
