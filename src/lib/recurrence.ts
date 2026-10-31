@@ -50,6 +50,8 @@ const MONTHS_PER_UNIT = { monthly: 1, quarterly: 3, half_yearly: 6, yearly: 12, 
 
 const MAX_PERIOD_OFFSET = 12;
 
+const LAST_DATE: CalendarDate = "2100-12-31";
+
 function isWeekBased(frequency: RecurrenceFrequency): frequency is "weekly" | "every_weeks" {
   return frequency === "weekly" || frequency === "every_weeks";
 }
@@ -63,27 +65,37 @@ function isValidIssueDay({ frequency, issueRule, issueDay }: RecurrenceRule) {
   return issueDay !== null && isIntegerBetween(issueDay, 1, isWeekBased(frequency) ? 7 : 31);
 }
 
+function isDateInRange(date: CalendarDate) {
+  return isCalendarDate(date) && date <= LAST_DATE;
+}
+
 // Returns the names of invalid fields. The bounds also guarantee that every computation below ends.
 export function validateRule(rule: RecurrenceRule): string[] {
   const { frequency, every, issueRule, startsOn, endsOn, maxCount, periodOffset } = rule;
   const validFrequency = RECURRENCE_FREQUENCIES.includes(frequency);
-  const validStart = isCalendarDate(startsOn);
+  const validStart = isDateInRange(startsOn);
   const invalid: [string, boolean][] = [
     ["frequency", !validFrequency],
     ["every", validFrequency && !isIntegerBetween(every, 1, MAX_EVERY[frequency])],
     ["issueRule", !ISSUE_RULES.includes(issueRule)],
     ["issueDay", ISSUE_RULES.includes(issueRule) && !isValidIssueDay(rule)],
     ["startsOn", !validStart],
-    ["endsOn", endsOn !== null && (!isCalendarDate(endsOn) || (validStart && endsOn < startsOn))],
+    ["endsOn", endsOn !== null && (!isDateInRange(endsOn) || (validStart && endsOn < startsOn))],
     ["maxCount", maxCount !== null && !isIntegerBetween(maxCount, 1, Number.MAX_SAFE_INTEGER)],
     ["periodOffset", !isIntegerBetween(periodOffset, -MAX_PERIOD_OFFSET, MAX_PERIOD_OFFSET)],
   ];
-  return invalid.filter(([, isInvalid]) => isInvalid).map(([field]) => field);
+  const fields = invalid.filter(([, isInvalid]) => isInvalid).map(([field]) => field);
+  if (fields.length === 0 && endsOn !== null && firstIssueDate(rule) > endsOn) return ["endsOn"];
+  return fields;
 }
 
-function firstOfMonth(absoluteMonth: number): CalendarDate {
-  const year = String(Math.floor(absoluteMonth / 12)).padStart(4, "0");
-  const month = String((absoluteMonth % 12) + 1).padStart(2, "0");
+function absoluteMonth(date: CalendarDate) {
+  return Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7)) - 1;
+}
+
+function firstOfMonth(monthIndex: number): CalendarDate {
+  const year = String(Math.floor(monthIndex / 12)).padStart(4, "0");
+  const month = String((monthIndex % 12) + 1).padStart(2, "0");
   return `${year}-${month}-01`;
 }
 
@@ -97,16 +109,21 @@ function periodAt({ frequency, every, startsOn }: RecurrenceRule, n: number): Va
   }
   const unit = MONTHS_PER_UNIT[frequency];
   const months = unit * every;
-  const startMonth = Number(startsOn.slice(0, 4)) * 12 + Number(startsOn.slice(5, 7)) - 1;
-  const first = Math.floor(startMonth / unit) * unit + n * months;
+  const first = Math.floor(absoluteMonth(startsOn) / unit) * unit + n * months;
   return { from: firstOfMonth(first), to: monthPeriod(firstOfMonth(first + months - 1)).to };
 }
 
-function dayInPeriod({ frequency }: RecurrenceRule, issueDay: number, period: VariablePeriod) {
-  if (isWeekBased(frequency)) return addDays(period.from, issueDay - 1);
-  const monthEnd = monthPeriod(period.from).to;
-  const day = Math.min(issueDay, Number(monthEnd.slice(8)));
-  return `${period.from.slice(0, 8)}${String(day).padStart(2, "0")}`;
+// The month, or week for week-based frequencies, at `position` inside a period.
+function partOfPeriod(
+  { frequency }: RecurrenceRule,
+  period: VariablePeriod,
+  position: number,
+): VariablePeriod {
+  if (isWeekBased(frequency)) {
+    const from = addDays(period.from, 7 * position);
+    return { from, to: addDays(from, 6) };
+  }
+  return monthPeriod(firstOfMonth(absoluteMonth(period.from) + position));
 }
 
 // The shortest period is a week and no Czech week is free of working days, so the scans stop inside it.
@@ -116,20 +133,46 @@ function scanForWorkingDay(start: CalendarDate, step: 1 | -1): CalendarDate {
   return date;
 }
 
-function issueDateIn(rule: RecurrenceRule, period: VariablePeriod): CalendarDate {
-  if (rule.issueRule === "day") return dayInPeriod(rule, rule.issueDay!, period);
+function dateInPart(rule: RecurrenceRule, part: VariablePeriod): CalendarDate {
+  if (rule.issueRule === "first_working_day") return scanForWorkingDay(part.from, 1);
+  if (isWeekBased(rule.frequency)) return addDays(part.from, rule.issueDay! - 1);
+  const day = Math.min(rule.issueDay!, Number(part.to.slice(8)));
+  return `${part.from.slice(0, 8)}${String(day).padStart(2, "0")}`;
+}
+
+// Anchors the issue month to the start: the first part of period 0 whose date is not before
+// `startsOn`, repeated in every period. Without one, the plan begins in the next period's first part.
+// period_end and last_working_day count from the period end, so they have no position to anchor.
+function anchorPosition(rule: RecurrenceRule): number {
+  if (rule.issueRule === "period_end" || rule.issueRule === "last_working_day") return 0;
+  const period = periodAt(rule, 0);
+  for (let position = 0; ; position++) {
+    const part = partOfPeriod(rule, period, position);
+    if (part.from > period.to) return 0;
+    if (dateInPart(rule, part) >= rule.startsOn) return position;
+  }
+}
+
+function issueDateIn(rule: RecurrenceRule, period: VariablePeriod, position: number): CalendarDate {
   if (rule.issueRule === "period_end") return period.to;
-  if (rule.issueRule === "first_working_day") return scanForWorkingDay(period.from, 1);
-  return scanForWorkingDay(period.to, -1);
+  if (rule.issueRule === "last_working_day") return scanForWorkingDay(period.to, -1);
+  return dateInPart(rule, partOfPeriod(rule, period, position));
+}
+
+function firstIssueDate(rule: RecurrenceRule): CalendarDate {
+  const position = anchorPosition(rule);
+  const date = issueDateIn(rule, periodAt(rule, 0), position);
+  return date >= rule.startsOn ? date : issueDateIn(rule, periodAt(rule, 1), position);
 }
 
 function* occurrences(rule: RecurrenceRule): Generator<Occurrence> {
   const invalid = validateRule(rule);
   if (invalid.length > 0) throw new Error(`Invalid recurrence rule: ${invalid.join(", ")}`);
+  const position = anchorPosition(rule);
   let index = 0;
   for (let n = 0; rule.maxCount === null || index < rule.maxCount; n++) {
     const schedulePeriod = periodAt(rule, n);
-    const issueDate = issueDateIn(rule, schedulePeriod);
+    const issueDate = issueDateIn(rule, schedulePeriod, position);
     if (issueDate < rule.startsOn) continue;
     if (rule.endsOn !== null && issueDate > rule.endsOn) return;
     yield {

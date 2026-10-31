@@ -38,7 +38,8 @@ const arbitraryRule: fc.Arbitrary<RecurrenceRule> = fc
     startsOn,
     endsOn: span === null ? null : addDays(startsOn, span),
     ...rest,
-  }));
+  }))
+  .filter((rule) => validateRule(rule).length === 0);
 
 const horizon = fc.integer({ min: 0, max: 1500 });
 
@@ -46,7 +47,6 @@ describe("vlastnosti plánů", () => {
   test("[TST-012] termíny rostou, periodKey je unikátní a datum leží v období", () => {
     fc.assert(
       fc.property(arbitraryRule, horizon, (rule, days) => {
-        expect(validateRule(rule)).toEqual([]);
         const list = occurrencesBetween(rule, null, addDays(rule.startsOn, days));
         expect(new Set(list.map((o) => o.periodKey)).size).toBe(list.length);
         list.forEach((occurrence, position) => {
@@ -80,6 +80,22 @@ describe("vlastnosti plánů", () => {
           const next = list[position + 1];
           if (next) expect(addDays(to, 1)).toBe(next.schedulePeriod.from);
         }
+      }),
+      { numRuns: 300 },
+    );
+  });
+
+  test("[TST-012] měsíc vystavení drží stejnou pozici v každém období", () => {
+    const monthIndex = (date: string) => Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7));
+    fc.assert(
+      fc.property(arbitraryRule, (rule) => {
+        fc.pre(rule.issueRule === "day" || rule.issueRule === "first_working_day");
+        fc.pre(!isWeekBased(rule.frequency));
+        const list = nextOccurrences({ ...rule, endsOn: null, maxCount: null }, null, 6);
+        const positions = list.map(
+          (o) => monthIndex(o.issueDate) - monthIndex(o.schedulePeriod.from),
+        );
+        expect(new Set(positions).size).toBe(1);
       }),
       { numRuns: 300 },
     );

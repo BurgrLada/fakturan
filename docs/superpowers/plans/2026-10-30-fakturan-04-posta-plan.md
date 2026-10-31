@@ -56,7 +56,7 @@ Uživatel chtěl plány bez čekání, proto je plán rozhodl sám. Na `[R-n]` s
 - **[R-13] `reminder_sent` spotřebuje stupeň při zařazení,** ve stejné transakci jako fronta. Selhání odeslání se nezkouší novým stupněm, ale upozorněním. Ruční upomínka vyžaduje potvrzení, když už stupeň odešel, a automatika pak tento stupeň přeskočí.
 - **[R-14] Plán drží vlastní kopii dokumentu** ve tvaru `TemplateDocument`. Vytvoření ze šablony ji zkopíruje, takže úprava nebo smazání šablony nezmění, co automaticky odchází klientovi.
 - **[R-15] Období je uložené na faktuře** (`period_from`, `period_to`). Koncept z plánu tak v náhledu i při pozdním vystavení dá období z plánu a `variablesFor` padá na `monthPeriod` jen bez uloženého období.
-- **[R-16] Definice období:** měsíc, čtvrtletí, pololetí a rok jsou kalendářní, týden je pondělí až neděle. „Každých N“ jsou bloky od měsíce nebo týdne začátku. „Konkrétní den“ je den v prvním měsíci období, s oříznutím na konec měsíce, u týdne den v týdnu 1 až 7. `period_key` je první den plánovacího období.
+- **[R-16] Definice období:** měsíc, čtvrtletí, pololetí a rok jsou kalendářní, týden je pondělí až neděle. „Každých N“ jsou bloky od měsíce nebo týdne začátku. „Konkrétní den“ D se kotví na začátek plánu: rozhoduje první datum se dnem D (s oříznutím na konec měsíce, u týdne den v týdnu 1 až 7), které je ≥ `startsOn`, a jeho pozice v období, měsíc nebo týden, se opakuje v každém dalším. Od 14. 2. s dnem 20 je to ročně 20. 2., čtvrtletně 20. 2., 20. 5., 20. 8., 20. 11.; od 25. 2. ročně 20. 3. Když datum vypadne z období 0 (start 25. 12. ročně), plán začíná v prvním měsíci dalšího období. Stejně se kotví první pracovní den. Poslední pracovní den a poslední den období se počítají od konce období a kotvení nemají. Plány se startem na začátku období to nemění. `period_key` je první den plánovacího období, období zůstávají kalendářní.
 - **[R-17] Pracovní den** je pondělí až pátek bez českých státních svátků včetně Velkého pátku a Velikonočního pondělí.
 - **[R-18] Vznik plánu nedohání minulost.** Termíny před dnem založení nevznikají ani jako zmeškané. Počet v REC-003 počítá termíny plánu, ne úspěšné běhy.
 - **[R-19] Doběh:** termín starý přesně 3 dny ještě doběhne, starší je `missed`. Po pauze a reaktivaci je každý minulý termín `missed`, dnešní běží. Zmeškaný termín jde vytvořit jako koncept nebo přeskočit, nikdy neodešle.
@@ -563,6 +563,9 @@ Pravidla:
 - `saveRecurring` odmítne `mode: 'send'` bez zapnuté `recurringSend` a bez `confirmSend: true`, potvrzení uloží do `send_confirmed_at` (REC-011). Validuje `validateRule` a `validateVariables` všech textů. `{{cislo_faktury}}` a `{{zakaznik}}` jsou povolené. Nový plán dostane `cursor_date = max(startsOn, dnes) − 1 den` **[R-18]**, úprava kurzor nemění.
 - `variablesFor` čte `periodFrom` a `periodTo` z řádku **[R-15]**, stejně náhled, `issuedTexts` i `composeMail`. `duplicateInvoice` a `saveDraft` je nekopírují ani nepřepisují. Úprava data konceptu období nezmění, REC-023.
 - **Pauza a reaktivace:** `pauseRecurring` kurzor nechá. `resumeRecurring` a `reactivateUser` (pro každý aktivní plán účtu) volají `markMissed`, který minulé termíny zapíše jako `missed` a kurzor nastaví na včerejšek. Upozornění je jedno na plán s počtem.
+- **Změna `startsOn`** u „každých N“ posouvá bloky a tím `period_key`, takže unikátní index duplicitu nezachytí. `saveRecurring` nesmí dovolit, aby vznikl termín pro období překrývající se s už existujícím `recurring_run`.
+- **`maxCount` se počítá od prvního termínu po založení plánu**, ne od `startsOn`: `index` z výpočtu počítá od začátku plánu, takže plán se začátkem v minulosti musí odečíst termíny před založením **[R-18]**.
+- Proměnné čtou měsíc, čtvrtletí, pololetí a rok z `billedPeriod.from`. U bloku přes hranici čtvrtletí nebo roku tedy platí začátek bloku; Task 10 to řekne v nápovědě formuláře.
 - `resolveMissed('draft')` jde přes `processOccurrence` s vynuceným konceptem a stejným `recurring_run`, status přepíše. Automatika k němu nikdy nesáhne.
 - REC-012: `notify_days_before` u `send` založí upozornění a úlohu `user.notice` s klíčem `notice:<id>:<periodKey>`, zpráva jde jen na e-mail účtu **[R-27]**.
 - `assertConsistent` přidá: `recurring_run.invoice_id` vede na vlastní doklad, na jeden `(recurring_id, period_key)` nejvýš jedna faktura.
@@ -587,6 +590,8 @@ test('[REC-013] selhání odeslání nechá fakturu vystavenou a run queued s up
 test('[REC-014] faktura odkazuje na plán a plán ji má v seznamu', ...)
 test('[REC-004] náhled 12 termínů s vygenerovanými popisy', ...)
 test('[REC-022] neznámá proměnná je chyba při uložení', ...)
+test('[REC-003] počet se u plánu se začátkem v minulosti počítá od prvního termínu po založení', ...)
+test('[REC-030] změna začátku u každých N nevytvoří druhou fakturu za stejné období', ...)
 test('[ADM-005] deaktivovaný účet nic nevytvoří, po reaktivaci jsou termíny missed', ...)
 test('[TST-007] tick těsně před a po send_time v den přechodu času', ...)
 test('chybějící zákazník a cizí měna bez kurzu spadnou na koncept bez spotřeby čísla', ...)
@@ -619,6 +624,7 @@ Pravidla:
 - Formulář: zákazník, položky, texty, měna, splatnost, četnost, den, začátek a konec, posun období, režim, upozornění předem. Volby „Každých N“ a „Konkrétní den“ se zobrazí jen pro relevantní četnost.
 - Volba „vystavit a odeslat“ je bez zapnuté automatiky vypnutá s odkazem na Automatizaci. Výběr otevře potvrzení, co a komu odejde.
 - Náhled 12 termínů se obnovuje při změně s odstupem, přes `previewRecurringAction`, data počítá jen server.
+- Nápověda u proměnných říká, že měsíc, čtvrtletí, pololetí a rok se berou ze začátku fakturovaného období.
 - Vkládání proměnných tlačítky do naposledy aktivního textového pole na pozici kurzoru, ovladatelné klávesnicí. Serverová chyba ukáže neznámou proměnnou.
 - Seznam ukazuje další termín, režim a stav. Detail ukazuje vydané faktury, běhy a sekci „Ke kontrole“ se zmeškanými termíny.
 - Šablona má akci „Vytvořit pravidelnou“. Detail faktury odkazuje na plán.

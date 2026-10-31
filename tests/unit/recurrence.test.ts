@@ -81,12 +81,12 @@ describe("četnosti", () => {
     [
       "every_weeks",
       { frequency: "every_weeks", every: 2, issueDay: 1, startsOn: "2026-03-04" },
-      ["2026-03-16", "2026-03-30", "2026-04-13", "2026-04-27", "2026-05-11", "2026-05-25"],
+      ["2026-03-09", "2026-03-23", "2026-04-06", "2026-04-20", "2026-05-04", "2026-05-18"],
     ],
     [
       "every_months",
       { frequency: "every_months", every: 2, issueDay: 5, startsOn: "2026-11-20" },
-      ["2027-01-05", "2027-03-05", "2027-05-05", "2027-07-05", "2027-09-05", "2027-11-05"],
+      ["2026-12-05", "2027-02-05", "2027-04-05", "2027-06-05", "2027-08-05", "2027-10-05"],
     ],
   ])("[REC-001] %s dá očekávaných 6 termínů", (_name, overrides, expected) => {
     expect(dates(rule(overrides), 6)).toEqual(expected);
@@ -95,24 +95,24 @@ describe("četnosti", () => {
   test.each<[string, Partial<RecurrenceRule>, VariablePeriod]>([
     ["měsíc", {}, { from: "2026-01-01", to: "2026-01-31" }],
     [
-      "čtvrtletí po přeskočeném termínu",
+      "druhé čtvrtletí",
       { frequency: "quarterly", startsOn: "2026-05-01", issueDay: 1 },
-      { from: "2026-07-01", to: "2026-09-30" },
+      { from: "2026-04-01", to: "2026-06-30" },
     ],
     [
-      "druhé pololetí po přeskočeném termínu",
+      "první pololetí",
       { frequency: "half_yearly", startsOn: "2026-03-01", issueDay: 1 },
-      { from: "2026-07-01", to: "2026-12-31" },
+      { from: "2026-01-01", to: "2026-06-30" },
     ],
     [
-      "první pololetí příštího roku",
+      "druhé pololetí",
       { frequency: "half_yearly", startsOn: "2026-08-01", issueDay: 1 },
-      { from: "2027-01-01", to: "2027-06-30" },
+      { from: "2026-07-01", to: "2026-12-31" },
     ],
     [
       "kalendářní rok",
       { frequency: "yearly", startsOn: "2026-06-01", issueDay: 1 },
-      { from: "2027-01-01", to: "2027-12-31" },
+      { from: "2026-01-01", to: "2026-12-31" },
     ],
     [
       "týden od pondělí do neděle",
@@ -239,6 +239,108 @@ describe("den vystavení", () => {
     expect(
       dates(rule({ ...weekly, issueRule: "last_working_day", startsOn: "2026-03-30" }), 1),
     ).toEqual(["2026-04-02"]);
+  });
+});
+
+describe("kotvení na začátek plánu", () => {
+  const anchored = { startsOn: "2026-02-14", issueDay: 20 };
+
+  test("[REC-002] ročně od 14. 2. s dnem 20 vystaví 20. 2. a období zůstane kalendářní", () => {
+    const list = nextOccurrences(rule({ ...anchored, frequency: "yearly" }), null, 2);
+    expect(list.map((o) => o.issueDate)).toEqual(["2026-02-20", "2027-02-20"]);
+    expect(list.map((o) => o.periodKey)).toEqual(["2026-01-01", "2027-01-01"]);
+    expect(list[0]!.schedulePeriod).toEqual({ from: "2026-01-01", to: "2026-12-31" });
+  });
+
+  test("[REC-002] čtvrtletně od 14. 2. drží druhý měsíc období", () => {
+    const r = rule({ ...anchored, frequency: "quarterly" });
+    expect(dates(r, 4)).toEqual(["2026-02-20", "2026-05-20", "2026-08-20", "2026-11-20"]);
+    expect(first(r).schedulePeriod).toEqual({ from: "2026-01-01", to: "2026-03-31" });
+  });
+
+  test("[REC-002] ročně od 25. 2. je první datum v březnu", () => {
+    const r = rule({ frequency: "yearly", issueDay: 20, startsOn: "2026-02-25" });
+    expect(dates(r, 2)).toEqual(["2026-03-20", "2027-03-20"]);
+  });
+
+  test("[REC-002] datum v den začátku se počítá", () => {
+    const r = rule({ frequency: "yearly", issueDay: 20, startsOn: "2026-02-20" });
+    expect(dates(r, 1)).toEqual(["2026-02-20"]);
+  });
+
+  test("[REC-002] když datum vypadne z období, platí první měsíc dalšího", () => {
+    const start = { issueDay: 20, startsOn: "2026-12-25" };
+    expect(dates(rule({ ...start, frequency: "yearly" }), 2)).toEqual(["2027-01-20", "2028-01-20"]);
+    expect(dates(rule({ ...start, frequency: "quarterly" }), 2)).toEqual([
+      "2027-01-20",
+      "2027-04-20",
+    ]);
+  });
+
+  test("[REC-002] začátek na začátku období nic nemění", () => {
+    expect(dates(rule({ frequency: "yearly", issueDay: 20 }), 1)).toEqual(["2026-01-20"]);
+    const r = rule({ frequency: "quarterly", issueDay: 15, startsOn: "2026-04-01" });
+    expect(dates(r, 2)).toEqual(["2026-04-15", "2026-07-15"]);
+  });
+
+  test("[REC-002] oříznutí na konec měsíce se počítá jako datum dne", () => {
+    const r = rule({ frequency: "half_yearly", issueDay: 31, startsOn: "2026-02-14" });
+    expect(dates(r, 5)).toEqual([
+      "2026-02-28",
+      "2026-08-31",
+      "2027-02-28",
+      "2027-08-31",
+      "2028-02-29",
+    ]);
+  });
+
+  test("[REC-002] bloky měsíců a týdnů se kotví stejně", () => {
+    const months = rule({
+      frequency: "every_months",
+      every: 3,
+      issueDay: 5,
+      startsOn: "2026-02-20",
+    });
+    expect(dates(months, 3)).toEqual(["2026-03-05", "2026-06-05", "2026-09-05"]);
+    expect(first(months).schedulePeriod).toEqual({ from: "2026-02-01", to: "2026-04-30" });
+    const weeks = rule({
+      frequency: "every_weeks",
+      every: 2,
+      issueRule: "first_working_day",
+      issueDay: null,
+      startsOn: "2026-03-04",
+    });
+    expect(dates(weeks, 2)).toEqual(["2026-03-09", "2026-03-23"]);
+  });
+
+  test("[REC-002] první pracovní den se kotví na první měsíc, jehož den neprošel", () => {
+    const working = { issueRule: "first_working_day", issueDay: null } as const;
+    const from = (frequency: RecurrenceRule["frequency"], startsOn: string) =>
+      rule({ ...working, frequency, startsOn });
+    expect(dates(from("yearly", "2026-02-14"), 3)).toEqual([
+      "2026-03-02",
+      "2027-03-01",
+      "2028-03-01",
+    ]);
+    expect(dates(from("quarterly", "2026-02-14"), 4)).toEqual([
+      "2026-03-02",
+      "2026-06-01",
+      "2026-09-01",
+      "2026-12-01",
+    ]);
+    expect(dates(from("yearly", "2026-02-02"), 1)).toEqual(["2026-02-02"]);
+    expect(dates(from("yearly", "2026-01-01"), 1)).toEqual(["2026-01-02"]);
+    expect(dates(from("quarterly", "2026-12-14"), 2)).toEqual(["2027-01-04", "2027-04-01"]);
+  });
+
+  test("[REC-002] poslední pracovní den zůstává poslední v období", () => {
+    const working = { issueRule: "last_working_day", issueDay: null } as const;
+    const from = (frequency: RecurrenceRule["frequency"], startsOn: string) =>
+      rule({ ...working, frequency, startsOn });
+    expect(dates(from("yearly", "2026-02-14"), 2)).toEqual(["2026-12-31", "2027-12-31"]);
+    expect(dates(from("yearly", "2026-01-01"), 1)).toEqual(["2026-12-31"]);
+    expect(dates(from("quarterly", "2026-02-14"), 2)).toEqual(["2026-03-31", "2026-06-30"]);
+    expect(dates(from("monthly", "2026-01-31"), 1)).toEqual(["2026-02-27"]);
   });
 });
 
@@ -454,6 +556,9 @@ describe("validateRule", () => {
       rule({ periodOffset: 12 }),
       rule({ endsOn: "2026-01-01" }),
       rule({ maxCount: 1 }),
+      rule({ startsOn: "2100-12-01", endsOn: "2100-12-31" }),
+      rule({ startsOn: "2026-01-15", endsOn: "2026-02-01" }),
+      rule({ frequency: "yearly", startsOn: "2026-02-14", issueDay: 20, endsOn: "2026-02-20" }),
     ]) {
       expect(validateRule(r)).toEqual([]);
     }
@@ -483,6 +588,12 @@ describe("validateRule", () => {
     ["startsOn", { startsOn: "2026-02-30" }],
     ["endsOn", { endsOn: "nikdy" }],
     ["endsOn", { endsOn: "2025-12-31" }],
+    ["startsOn", { startsOn: "9999-12-20" }],
+    ["startsOn", { startsOn: "2101-01-01" }],
+    ["endsOn", { endsOn: "9999-12-20" }],
+    ["endsOn", { endsOn: "2101-01-01" }],
+    ["endsOn", { startsOn: "2026-01-15", endsOn: "2026-01-31" }],
+    ["endsOn", { frequency: "yearly", startsOn: "2026-02-14", issueDay: 20, endsOn: "2026-02-19" }],
     ["maxCount", { maxCount: 0 }],
     ["maxCount", { maxCount: 1.5 }],
     ["periodOffset", { periodOffset: -13 }],
@@ -490,6 +601,21 @@ describe("validateRule", () => {
     ["periodOffset", { periodOffset: 0.5 }],
   ])("vrátí vadné pole %s: %j", (field, overrides) => {
     expect(validateRule(rule(overrides))).toEqual([field]);
+  });
+
+  test("první termín za koncem se u neplatného pravidla nepočítá", () => {
+    expect(validateRule(rule({ every: 0, endsOn: "2026-01-01" }))).toEqual(["every"]);
+    expect(validateRule(rule({ every: 0, endsOn: "2025-12-31" }))).toEqual(["every", "endsOn"]);
+    expect(validateRule(rule({ startsOn: "9999-12-20", endsOn: "9999-12-31" }))).toEqual([
+      "startsOn",
+      "endsOn",
+    ]);
+  });
+
+  test("datum mimo rozsah se nepočítá, smyčka by přes rok 9999 neskončila", () => {
+    expect(() => nextOccurrences(rule({ startsOn: "9999-12-20" }), null, 3)).toThrow(
+      "Invalid recurrence rule: startsOn",
+    );
   });
 
   test("vrátí všechna vadná pole", () => {
