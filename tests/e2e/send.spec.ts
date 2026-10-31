@@ -225,6 +225,127 @@ test.describe("se SMTP", () => {
     await expect(page.getByTestId("send-problem")).toHaveCount(0);
   });
 
+  test("Odeslat ručně u unknown žádá potvrzení a pošle stejný text", async ({
+    page,
+    freshApp,
+    smtp,
+  }) => {
+    const { baseURL } = freshApp;
+    await connected(page, baseURL, smtp);
+    await issued(page, baseURL);
+
+    smtp.dropDuringData();
+    await openDialog(page);
+    await dialog(page).getByLabel("Předmět").fill("Ruční pokus");
+    await submit(page).click();
+    const problem = page.getByTestId("send-problem");
+    await expect(problem).toContainText("Nevíme, zda odešlo", { timeout: 20_000 });
+
+    await problem.getByRole("button", { name: "Odeslat ručně" }).click();
+    await expect(page.getByTestId("resend-summary")).toContainText("Ruční pokus");
+    await expect(submit(page)).toBeDisabled();
+    await dialog(page).getByLabel("Rozumím, klient může dostat zprávu dvakrát").check();
+    await submit(page).click();
+    await delivered(page);
+    expect(smtp.messages).toHaveLength(1);
+    expect(smtp.messages[0].raw).toContain("Ru");
+  });
+
+  test("po změně dokladu nabídne znovu odeslání čerstvou zprávu a dvě karty nepustí starý text", async ({
+    page,
+    context,
+    freshApp,
+    smtp,
+  }) => {
+    const { baseURL } = freshApp;
+    await connected(page, baseURL, smtp);
+    const detail = await issued(page, baseURL);
+    smtp.rejectNext(550);
+    await openDialog(page);
+    await dialog(page).getByLabel("Předmět").fill("Starý předmět");
+    await submit(page).click();
+    await expect(page.getByTestId("send-problem")).toContainText("Neodesláno", {
+      timeout: 20_000,
+    });
+
+    await openDialog(page);
+    const other = await context.newPage();
+    await other.goto(`${detail}/upravit`);
+    await other.waitForLoadState("networkidle");
+    await other.getByLabel("Poznámka").fill("Změna");
+    await other.getByRole("button", { name: "Uložit změny" }).click();
+    await expect(other.getByText("Změny jsou uložené.")).toBeVisible();
+    await other.close();
+
+    await submit(page).click();
+    await expect(dialog(page).getByRole("alert")).toContainText("Doklad se mezitím změnil");
+    await expect(dialog(page)).toBeVisible();
+    await dialog(page).getByRole("button", { name: "Zpět" }).click();
+
+    await page.reload();
+    await page.getByTestId("email-history").getByRole("button", { name: "Odeslat znovu" }).click();
+    await expect(dialog(page)).toContainText("sestavená znovu");
+    await expect(dialog(page).getByLabel("Předmět")).not.toHaveValue("Starý předmět");
+    await submit(page).click();
+    await delivered(page);
+    expect(smtp.messages[0].raw).not.toContain("Star");
+  });
+
+  test("pozdní unknown z jiné karty ukáže v otevřeném dialogu potvrzení", async ({
+    page,
+    context,
+    freshApp,
+    smtp,
+  }) => {
+    const { baseURL } = freshApp;
+    await connected(page, baseURL, smtp);
+    const detail = await issued(page, baseURL);
+    await openDialog(page);
+
+    smtp.dropDuringData();
+    const other = await context.newPage();
+    await other.goto(detail);
+    await other.waitForLoadState("networkidle");
+    await openDialog(other);
+    await submit(other).click();
+    await expect(other.getByTestId("send-problem")).toContainText("Nevíme, zda odešlo", {
+      timeout: 20_000,
+    });
+    await other.close();
+
+    await submit(page).click();
+    const confirm = dialog(page).getByLabel("Rozumím, klient může dostat zprávu dvakrát");
+    await expect(confirm).toBeVisible();
+    await expect(submit(page)).toBeDisabled();
+    await confirm.check();
+    await submit(page).click();
+    await delivered(page);
+    expect(smtp.messages).toHaveLength(1);
+  });
+
+  test("chyba předvyplnění se ukáže místo věčného načítání", async ({
+    page,
+    context,
+    freshApp,
+    smtp,
+  }) => {
+    const { baseURL } = freshApp;
+    await connected(page, baseURL, smtp);
+    const detail = await issued(page, baseURL);
+
+    const other = await context.newPage();
+    await other.goto(detail);
+    await other.waitForLoadState("networkidle");
+    await other.getByRole("button", { name: "Stornovat" }).click();
+    await dialog(other).getByRole("button", { name: "Stornovat fakturu" }).click();
+    await expect(other.getByText("Stornovaná", { exact: true })).toBeVisible();
+    await other.close();
+
+    await sendButton(page).click();
+    await expect(dialog(page).getByRole("alert")).toContainText("Tento doklad nejde odeslat");
+    await expect(dialog(page)).not.toContainText("Připravuji zprávu");
+  });
+
   test("znovu odeslání z historie jde přes dialog a nic neodejde bez potvrzení", async ({
     page,
     freshApp,

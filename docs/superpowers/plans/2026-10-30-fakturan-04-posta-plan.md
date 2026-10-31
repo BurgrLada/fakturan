@@ -434,7 +434,7 @@ test('jedno odeslání dodrží celkový strop času i na zablokovaném serveru'
 Spec: MAIL-001 **[částečně]** **[R-31]**, MAIL-008, INV-020, INV-024 **[částečně]**, SET-053, SEC-001, SEC-002, UI-009.
 
 Pravidla:
-- Tlačítko „Odeslat klientovi“ je v `InvoiceActions` pro každý stav ze `SENDABLE_STATUSES`. Dialog má příjemce, kopii, skrytou kopii, předmět, text a název přílohy, předvyplněné z `composeMail`. `requestId` vzniká při otevření dialogu.
+- Tlačítko „Odeslat klientovi“ je v `InvoiceActions` pro každý stav ze `SENDABLE_STATUSES`. Dialog má příjemce, kopii, skrytou kopii, předmět, text a název přílohy, předvyplněné z `composeMail`. Název přílohy je jen ke čtení, určuje ho `invoicePdf` při doručení. `requestId` vzniká při otevření dialogu.
 - Po vystavení `invoice-form.tsx:330` přejde na `/faktury/<id>?vystaveno=1` a detail ukáže nabídku s tlačítkem. Parametr jen otevírá nabídku, nikdy neodesílá. Stejně `?odeslat=1` po úpravě nebo obnovení verze a `resendSuggested` ve formuláři.
 - Odeslání je jen ve frontě, UI ukáže „Odesílá se“ a po doručení `router.refresh`. Detail ukáže poslední selhání, `held` a `unknown` s důvodem. `unknown` nabízí ruční odeslání až po potvrzení, že uživatel ví o riziku duplicity.
 - `sendInvoice` odmítne doklad s nevyřešeným `unknown` stejného druhu textem `E.unknownPending`, dokud nepřijde `confirmedUnknown: true`. Dialog to zjistí přes `hasUnresolvedUnknown` už při otevření a nabídne výslovné potvrzení rizika duplicity. Bez potvrzení neodesílá.

@@ -56,12 +56,15 @@ function Summary({
         const reply = await bulkSendAction({
           ids: preview.ready.map((row) => row.id),
           requestId: preview.requestId,
+          previewed: Object.fromEntries(
+            preview.ready.map(({ id, to, copies }) => [id, { to, copies }]),
+          ),
         });
         if (!reply.ok) {
           setError(reply.error);
           return;
         }
-        onDone(T.done(reply.queued, reply.skipped + preview.skipped.length));
+        onDone(T.done(reply.queued, reply.skipped + preview.skipped.length, reply.reasons));
       } catch {
         setError(T.failed);
       }
@@ -69,14 +72,17 @@ function Summary({
   }
 
   const copies = preview?.ready[0]?.copies ?? [];
+  const loadFailed = !preview && error !== null;
 
   return (
     <>
       <AlertDialogHeader>
         <AlertDialogTitle>{T.title}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {preview ? (preview.ready.length > 0 ? T.templateNote : T.nothing) : T.loading}
-        </AlertDialogDescription>
+        {!loadFailed && (
+          <AlertDialogDescription>
+            {preview ? (preview.ready.length > 0 ? T.templateNote : T.nothing) : T.loading}
+          </AlertDialogDescription>
+        )}
       </AlertDialogHeader>
       {preview && preview.ready.length > 0 && (
         <section className="flex flex-col gap-1 text-sm">

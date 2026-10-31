@@ -12,6 +12,7 @@ import { checkIssuable } from "@/server/services/invoice-lifecycle";
 import { EDITABLE_STATUSES } from "@/server/services/invoice-versions";
 import { designChoices } from "@/server/pdf/designs";
 import { getInvoice, isFreeDraftId, newDraftDefaults } from "@/server/services/invoices";
+import { mailAvailability } from "@/server/services/mail-settings";
 import { formChoices } from "../../form-data";
 
 const T = TEXTS.invoices.form;
@@ -54,6 +55,7 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
       <InvoiceForm
         id={id}
         saved={row !== null}
+        mailAvailable={mailAvailability(user.id).available}
         type={row?.type ?? "invoice"}
         mode={isDraft ? "draft" : "issued"}
         status={row?.status ?? "draft"}

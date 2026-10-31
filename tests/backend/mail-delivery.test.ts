@@ -133,8 +133,16 @@ const message = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const revisionOf = (invoiceId: string) =>
+  db.select({ revision: invoice.revision }).from(invoice).where(eq(invoice.id, invoiceId)).get()!
+    .revision;
+
 const send = (owner: string, invoiceId: string, over: Record<string, unknown> = {}) =>
-  sendInvoice(webActor(owner), invoiceId, { requestId: randomUUID(), ...message(over) }).logId;
+  sendInvoice(webActor(owner), invoiceId, {
+    requestId: randomUUID(),
+    revision: revisionOf(invoiceId),
+    ...message(over),
+  }).logId;
 
 const logOf = (id: string) => db.select().from(emailLog).where(eq(emailLog.id, id)).get()!;
 const jobOf = (id: string) =>
@@ -246,6 +254,7 @@ describe("doručení", () => {
     const invoiceId = issuedInvoice(owner);
     const draft = composeMail(owner, invoiceId, "invoice");
     const { logId } = sendInvoice(webActor(owner), invoiceId, {
+      revision: revisionOf(invoiceId),
       requestId: randomUUID(),
       to: draft.to,
       cc: draft.cc,

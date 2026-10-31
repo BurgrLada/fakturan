@@ -24,6 +24,7 @@ import { TEXTS } from "@/lib/texts";
 import type { SendPrefill } from "@/server/services/invoice-mail";
 
 const T = TEXTS.invoiceMail.dialog;
+const E = TEXTS.invoiceMail.errors;
 
 function Field({
   label,
@@ -61,13 +62,14 @@ function RecordedMessage({ draft }: { draft: SendPrefill }) {
     [T.copies, draft.cc.join(", ")],
     [T.hiddenCopies, draft.bcc.join(", ")],
     [T.subject, draft.subject],
+    [T.body, draft.body],
   ].filter(([, value]) => value !== "");
   return (
     <dl data-testid="resend-summary" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
       {rows.map(([label, value]) => (
         <div key={label} className="contents">
           <dt className="text-muted-foreground">{label}</dt>
-          <dd className="break-words">{value}</dd>
+          <dd className="break-words whitespace-pre-line">{value}</dd>
         </div>
       ))}
     </dl>
@@ -122,20 +124,23 @@ function Composer({
   }, [invoiceId, logId]);
 
   const blocked = !draft || (draft.unknownPending && !confirmed);
+  const recorded = Boolean(logId && draft?.log?.current);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!draft || blocked) return;
-    const { requestId } = draft;
+    const { requestId, revision, kind } = draft;
     setError(null);
     startTransition(async () => {
       try {
-        const reply = logId
+        const reply = recorded
           ? await resendFromLogAction({ id: logId, requestId, confirmedUnknown: confirmed })
           : await sendInvoiceAction({
               id: invoiceId,
               message: {
                 requestId,
+                revision,
+                kind,
                 to: splitAddresses(to),
                 cc: splitAddresses(cc),
                 bcc: splitAddresses(bcc),
@@ -145,7 +150,9 @@ function Composer({
               },
             });
         if (reply.ok) onSent();
-        else setError(reply.error);
+        else if (reply.error === E.unknownPending) {
+          setDraft({ ...draft, unknownPending: true });
+        } else setError(reply.error);
       } catch {
         setError(T.failed);
       }
@@ -158,17 +165,15 @@ function Composer({
     <form onSubmit={submit} className="contents">
       <AlertDialogHeader>
         <AlertDialogTitle>{logId ? T.resendTitle : T.title}</AlertDialogTitle>
-        {(!draft || logId) && (
-          <AlertDialogDescription>
-            {draft ? draft.attachmentName : T.loading}
-          </AlertDialogDescription>
-        )}
+        {!draft && !error && <AlertDialogDescription>{T.loading}</AlertDialogDescription>}
+        {recorded && <AlertDialogDescription>{draft?.attachmentName}</AlertDialogDescription>}
       </AlertDialogHeader>
-      {draft && logId && <RecordedMessage draft={draft} />}
+      {draft && recorded && <RecordedMessage draft={draft} />}
+      {draft && logId && !recorded && <p className="text-sm">{T.rebuilt}</p>}
       {draft?.log?.reason && (
         <p className="text-sm text-muted-foreground">{T.previousReason(draft.log.reason)}</p>
       )}
-      {draft && !logId && (
+      {draft && !recorded && (
         <div className="flex flex-col gap-3">
           <Field label={T.to} hint={T.addressHint} value={to} onChange={setTo} />
           <Field

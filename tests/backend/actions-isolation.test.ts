@@ -38,7 +38,7 @@ import { emailLog, user } from "@/server/db/schema";
 import { issuedInvoice, ownSmtp, seedCustomer, seedOwner } from "../helpers/fixtures-mail";
 import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accounts";
 import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
-import { listInvoices, newDraftDefaults, saveDraft } from "@/server/services/invoices";
+import { getInvoice, listInvoices, newDraftDefaults, saveDraft } from "@/server/services/invoices";
 import { getEmailTemplate } from "@/server/services/email-templates";
 import { getMailSettings } from "@/server/services/mail-settings";
 import { listSeries, saveSeries } from "@/server/services/number-series";
@@ -81,6 +81,7 @@ const account = {
 const REQUEST = "11111111-1111-4111-8111-111111111111";
 const message = {
   requestId: REQUEST,
+  revision: 1,
   to: ["alfa@example.cz"],
   cc: [],
   bcc: [],
@@ -100,7 +101,8 @@ describe("akce pošty", () => {
     const mine = mailAccount();
     const stranger = mailAccount();
     session.userId = mine.owner;
-    const sent = await sendInvoiceAction({ id: mine.invoiceId, message });
+    const { revision } = getInvoice(mine.owner, mine.invoiceId)!;
+    const sent = await sendInvoiceAction({ id: mine.invoiceId, message: { ...message, revision } });
     if (!sent.ok) throw new Error(sent.error);
 
     session.userId = stranger.owner;
@@ -124,7 +126,9 @@ describe("akce pošty", () => {
       ready: [],
       skipped: [{ id: mine.invoiceId, number: "" }],
     });
-    expect(await bulkSendAction({ ids: [mine.invoiceId], requestId: REQUEST })).toEqual({
+    expect(
+      await bulkSendAction({ ids: [mine.invoiceId], requestId: REQUEST, previewed: {} }),
+    ).toMatchObject({
       ok: true,
       queued: 0,
       skipped: 1,
@@ -147,7 +151,7 @@ describe("akce pošty", () => {
       }),
       await sendInvoiceAction({ id: invoiceId, message: { ...message, requestId: "x" } }),
       await resendFromLogAction({ id: "x", requestId: "x", confirmedUnknown: false }),
-      await bulkSendAction({ ids: [invoiceId], requestId: "x" }),
+      await bulkSendAction({ ids: [invoiceId], requestId: "x", previewed: {} }),
     ];
 
     for (const reply of replies) expect(reply).toMatchObject({ ok: false });

@@ -795,6 +795,7 @@ export const TEXTS = {
       notPdf: "Soubor není PDF",
       archiveLocked: "Archiv odeslaného dokladu nejde smazat",
       notFound: "Doklad neexistuje",
+      staleDraft: "Doklad se mezitím změnil. Zavřete dialog a otevřete ho znovu.",
     },
     statuses: {
       queued: "Odesílá se",
@@ -823,6 +824,7 @@ export const TEXTS = {
         "U předchozí zprávy nevíme, zda odešla. Nové odeslání může klient dostat dvakrát.",
       unknownConfirm: "Rozumím, klient může dostat zprávu dvakrát",
       previousReason: (reason: string) => `Předchozí výsledek: ${reason}`,
+      rebuilt: "Doklad se od tohoto pokusu změnil, proto je zpráva sestavená znovu.",
       recipients: "Příjemci",
       copies: "Kopie",
       hiddenCopies: "Skrytá kopie",
@@ -859,9 +861,9 @@ export const TEXTS = {
       nothing: "Žádný z vybraných dokladů teď nejde odeslat.",
       confirm: (count: number) => `Odeslat ${count}`,
       cancel: "Zpět",
-      done: (queued: number, skipped: number) =>
+      done: (queued: number, skipped: number, reasons: string[] = []) =>
         skipped > 0
-          ? `Zařazeno k odeslání ${queued}, přeskočeno ${skipped}.`
+          ? `Zařazeno k odeslání ${queued}, přeskočeno ${skipped}.${reasons.length > 0 ? ` ${reasons.join(". ")}.` : ""}`
           : `Zařazeno k odeslání ${queued}.`,
       failed: "Hromadné odeslání se nezdařilo. Zkuste to znovu.",
       unavailable: "Hromadné odeslání potřebuje nastavené SMTP.",
@@ -871,6 +873,7 @@ export const TEXTS = {
         sending: "Už se odesílá",
         unknown: "Nejasný výsledek předchozího odeslání, vyřešte ho na detailu faktury",
         notFound: "Doklad neexistuje",
+        recipientsChanged: "Příjemci se od souhrnu změnili, zkontrolujte je a odešlete znovu",
       },
     },
     reasons: {

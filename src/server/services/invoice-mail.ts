@@ -183,7 +183,7 @@ function queueClicked(
   invoiceId: string,
   requestId: string,
   message: Message,
-  opts: { confirmedUnknown: boolean; kind?: MessageKind },
+  opts: { confirmedUnknown: boolean; kind?: MessageKind; revision: number },
 ): { logId: string } {
   const key = requestKey(userId, requestId);
   const logged = loggedRequest(userId, key);
@@ -193,6 +193,8 @@ function queueClicked(
   const queued = mutate(actor, "invoice.send", (tx, audit) => {
     const row = findOwned(tx, userId, invoiceId);
     if (!isSendable(row.status)) throw new ServiceError(E.notSendable);
+    // The text was written for one version of the document and the PDF is rendered from the latest.
+    if (row.revision !== opts.revision) throw new ServiceError(E.staleDraft);
     const kind = opts.kind ?? kindForInvoice(row.type);
     if (!opts.confirmedUnknown && hasUnresolvedUnknown(userId, invoiceId, kind)) {
       throw new ServiceError(E.unknownPending);
@@ -217,8 +219,12 @@ export function sendInvoice(actor: Actor, invoiceId: string, raw: SendInput): { 
   enforceRateLimit(actor, RATE_RULES.sendUser);
   const parsed = sendInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
-  const { requestId, confirmedUnknown = false, ...message } = parsed.data;
-  return queueClicked(actor, userId, invoiceId, requestId, message, { confirmedUnknown });
+  const { requestId, confirmedUnknown = false, revision, kind, ...message } = parsed.data;
+  return queueClicked(actor, userId, invoiceId, requestId, message, {
+    confirmedUnknown,
+    revision,
+    kind,
+  });
 }
 
 function readLog(userId: string, logId: string): EmailLog | undefined {
@@ -270,7 +276,7 @@ export function resendFromLog(
     log.invoiceId,
     opts.requestId,
     { to, cc, bcc, subject, body },
-    { confirmedUnknown: opts.confirmedUnknown, kind: log.kind },
+    { confirmedUnknown: opts.confirmedUnknown, kind: log.kind, revision: log.invoiceRevision },
   );
 }
 
@@ -298,20 +304,29 @@ export type EmailLogRow = ReturnType<typeof listEmailLog>[number];
 // An unknown outranks a newer failure: the client may hold that message, and only a person can tell.
 export function mailStateOf(rows: EmailLogRow[]): {
   sending: boolean;
+  retrying: boolean;
   problem: EmailLogRow | null;
 } {
   const open = rows.filter((row) => row.resendable);
   return {
     sending: rows.some((row) => row.status === "queued" || row.status === "sending"),
+    retrying: rows.some((row) => row.status === "queued" && row.attempts > 0),
     problem: open.find((row) => row.status === "unknown") ?? open[0] ?? null,
   };
 }
 
 export type SendPrefill = MailDraft & {
   requestId: string;
+  revision: number;
+  kind: MessageKind;
   unknownPending: boolean;
   paused: boolean;
-  log: { id: string; status: EmailLog["status"]; reason: string | null } | null;
+  log: {
+    id: string;
+    status: EmailLog["status"];
+    reason: string | null;
+    current: boolean;
+  } | null;
 };
 
 // The request id is born here, so reopening the dialog is a new send and a double click is not.
@@ -323,19 +338,24 @@ export function sendPrefill(ownerId: string, invoiceId: string, logId?: string):
   if (logId && log?.invoiceId !== invoiceId) throw new ServiceError(E.logNotFound);
   const kind = log?.kind ?? kindForInvoice(row.type);
   const draft = composeMail(ownerId, invoiceId, kind);
+  // After a change the recorded text describes a document the attachment no longer matches.
+  const current = log?.invoiceRevision === row.revision;
   return {
     ...draft,
-    ...(log && {
-      to: log.to,
-      cc: log.cc,
-      bcc: log.bcc,
-      subject: log.subject,
-      body: log.body,
-    }),
+    ...(log &&
+      current && {
+        to: log.to,
+        cc: log.cc,
+        bcc: log.bcc,
+        subject: log.subject,
+        body: log.body,
+      }),
     requestId: randomUUID(),
+    revision: row.revision,
+    kind,
     unknownPending: log?.status === "unknown" || hasUnresolvedUnknown(ownerId, invoiceId, kind),
     paused: getAutomation(ownerId).paused,
-    log: log ? { id: log.id, status: log.status, reason: log.reason } : null,
+    log: log ? { id: log.id, status: log.status, reason: log.reason, current } : null,
   };
 }
 
@@ -373,7 +393,11 @@ function judgeBulk(ownerId: string, invoiceId: string): BulkVerdict {
     throw error;
   }
   if (draft.to.length === 0) return { number, reason: B.noAddress };
-  const checked = sendInputSchema.safeParse({ ...draft, requestId: randomUUID() });
+  const checked = sendInputSchema.safeParse({
+    ...draft,
+    requestId: randomUUID(),
+    revision: row.revision,
+  });
   if (!checked.success) {
     return { number, reason: checked.error.issues[0]?.message ?? E.invalid };
   }
@@ -396,11 +420,18 @@ export function bulkSendPreview(ownerId: string, ids: string[]) {
   return { ready, skipped };
 }
 
+export type BulkPreviewed = Record<string, { to: string[]; copies: string[] }>;
+
+const sameRecipients = (a: BulkPreviewed[string], b: BulkPreviewed[string]) =>
+  JSON.stringify([a.to, a.copies]) === JSON.stringify([b.to, b.copies]);
+
+// `previewed` holds what the person confirmed: a changed recipient is a skip, not a silent send.
 export function bulkSend(
   actor: Actor,
   ids: string[],
   requestId: string,
-): { queued: number; skipped: number } {
+  previewed?: BulkPreviewed,
+): { queued: number; skipped: number; reasons: string[] } {
   const userId = ownerOf(actor);
   const unique = [...new Set(ids)];
   if (unique.length > MAX_BULK_DOCUMENTS) {
@@ -411,6 +442,7 @@ export function bulkSend(
   if (!mailAvailability(userId).available) throw new ServiceError(E.unavailable);
 
   let queued = 0;
+  const reasons = new Set<string>();
   for (const invoiceId of unique) {
     const key = `${requestKey(userId, requestId)}:${invoiceId}`;
     if (loggedRequest(userId, key)) {
@@ -422,6 +454,13 @@ export function bulkSend(
         const verdict = judgeBulk(userId, invoiceId);
         if (verdict.reason !== undefined) throw new ServiceError(verdict.reason);
         const { to, cc, bcc, subject, body } = verdict.draft;
+        const confirmed = previewed?.[invoiceId];
+        if (
+          previewed &&
+          !(confirmed && sameRecipients(confirmed, { to, copies: [...cc, ...bcc] }))
+        ) {
+          throw new ServiceError(B.recipientsChanged);
+        }
         const message = { to, cc, bcc, subject, body };
         const { kind } = verdict;
         const result = queueMail(tx, audit, {
@@ -436,11 +475,15 @@ export function bulkSend(
       });
       queued += 1;
     } catch (error) {
-      if (!(error instanceof ServiceError)) Sentry.captureException(error);
+      if (error instanceof ServiceError) reasons.add(error.message);
+      else {
+        Sentry.captureException(error);
+        reasons.add(E.invalid);
+      }
     }
   }
   if (queued > 0) kickWorker();
-  return { queued, skipped: unique.length - queued };
+  return { queued, skipped: unique.length - queued, reasons: [...reasons] };
 }
 
 export function archivedPdf(

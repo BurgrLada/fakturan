@@ -17,7 +17,7 @@ import {
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { RATE_RULES } from "@/server/rate-limit";
-import { RateLimitError, ServiceError } from "@/server/services/access";
+import { enforceRateLimit, RateLimitError, ServiceError } from "@/server/services/access";
 import { archiveSentPdf, deleteFile } from "@/server/services/files";
 import { cancelInvoice, markSent } from "@/server/services/invoice-lifecycle";
 import { getInvoice } from "@/server/services/invoices";
@@ -31,7 +31,7 @@ import {
   mailStateOf,
   queueMail,
   resendFromLog,
-  sendInvoice,
+  sendInvoice as sendInvoiceRaw,
   sendPrefill,
 } from "@/server/services/invoice-mail";
 import { InvoicePdfNotFoundError } from "@/server/services/invoice-pdf";
@@ -53,9 +53,12 @@ import { startSmtp, type TestSmtp } from "../helpers/smtp";
 import { TEXTS } from "@/lib/texts";
 
 const session = vi.hoisted(() => ({ userId: null as string | null }));
+const mocks = vi.hoisted(() => ({ captureException: vi.fn() }));
 vi.mock("@/server/auth/session", () => ({
   actorFromRequest: async () => ({ userId: session.userId, source: "web" }),
 }));
+
+vi.mock("@sentry/nextjs", () => ({ captureException: mocks.captureException }));
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -90,6 +93,17 @@ function account() {
   ownSmtp(db, owner, smtp.port);
   return { owner, invoiceId: issuedInvoice(owner) };
 }
+
+const revisionOf = (invoiceId: string) =>
+  db.select({ revision: invoice.revision }).from(invoice).where(eq(invoice.id, invoiceId)).get()
+    ?.revision ?? 0;
+
+// Tests of the rest of the flow stand for a dialog opened on the current revision.
+const sendInvoice = (
+  actor: Parameters<typeof sendInvoiceRaw>[0],
+  invoiceId: string,
+  raw: Omit<Parameters<typeof sendInvoiceRaw>[2], "revision">,
+) => sendInvoiceRaw(actor, invoiceId, { ...raw, revision: revisionOf(invoiceId) });
 
 const input = (over: Record<string, unknown> = {}) => ({
   requestId: randomUUID(),
@@ -547,6 +561,73 @@ describe("sendPrefill", () => {
   });
 });
 
+describe("text a doklad jsou v souladu", () => {
+  const editNote = (_owner: string, invoiceId: string) =>
+    db
+      .update(invoice)
+      .set({ revision: sql`${invoice.revision} + 1` })
+      .where(eq(invoice.id, invoiceId))
+      .run();
+
+  test("po změně revize předvyplní čerstvou zprávu místo záznamu", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(550);
+    const { logId } = sendInvoice(webActor(owner), invoiceId, input({ subject: "Starý text" }));
+    await drainJobs(WORKER);
+    expect(sendPrefill(owner, invoiceId, logId)).toMatchObject({
+      subject: "Starý text",
+      log: { current: true },
+    });
+
+    editNote(owner, invoiceId);
+    const fresh = sendPrefill(owner, invoiceId, logId);
+    expect(fresh.subject).not.toBe("Starý text");
+    expect(fresh.log).toMatchObject({ current: false });
+    expect(fresh.revision).toBe(revisionOf(invoiceId));
+  });
+
+  test("resendFromLog po změně revize starý text neodešle", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(550);
+    const { logId } = sendInvoice(webActor(owner), invoiceId, input());
+    await drainJobs(WORKER);
+    editNote(owner, invoiceId);
+    expect(
+      fail(() =>
+        resendFromLog(webActor(owner), logId, { confirmedUnknown: false, requestId: randomUUID() }),
+      ),
+    ).toBe(TEXTS.invoiceMail.errors.staleDraft);
+  });
+
+  test("dvě karty: dialog otevřený před úpravou odmítne odeslat a nic nezařadí", () => {
+    const { owner, invoiceId } = account();
+    const { to, cc, bcc, subject, body, requestId, revision } = sendPrefill(owner, invoiceId);
+    editNote(owner, invoiceId);
+    expect(
+      fail(() =>
+        sendInvoiceRaw(webActor(owner), invoiceId, {
+          to,
+          cc,
+          bcc,
+          subject,
+          body,
+          requestId,
+          revision,
+        }),
+      ),
+    ).toBe(TEXTS.invoiceMail.errors.staleDraft);
+    expect(logsOf(owner)).toEqual([]);
+  });
+
+  test("zpráva bez revize neprojde", () => {
+    const { owner, invoiceId } = account();
+    const raw = { ...input(), revision: undefined } as unknown as Parameters<
+      typeof sendInvoiceRaw
+    >[2];
+    expect(() => sendInvoiceRaw(webActor(owner), invoiceId, raw)).toThrow(ServiceError);
+  });
+});
+
 describe("stav pošty na dokladu", () => {
   test("[MAIL-005] selhání je vidět s důvodem a záznam jde poslat znovu", async () => {
     const { owner, invoiceId } = account();
@@ -574,7 +655,20 @@ describe("stav pošty na dokladu", () => {
       { status: "sent", resendable: false },
       { status: "failed", resendable: false },
     ]);
-    expect(mailStateOf(rows)).toEqual({ sending: false, problem: null });
+    expect(mailStateOf(rows)).toEqual({ sending: false, retrying: false, problem: null });
+  });
+
+  test("čekání na opakování se pozná, aby detail mohl zpomalit obnovování", async () => {
+    const { owner, invoiceId } = account();
+    sendInvoice(webActor(owner), invoiceId, input());
+    expect(mailStateOf(listEmailLog(owner, invoiceId))).toMatchObject({ retrying: false });
+
+    smtp.rejectNext(421);
+    await drainJobs(WORKER);
+    expect(mailStateOf(listEmailLog(owner, invoiceId))).toMatchObject({
+      sending: true,
+      retrying: true,
+    });
   });
 
   test("unknown má přednost před novějším selháním, klient zprávu možná má", async () => {
@@ -643,7 +737,7 @@ describe("hromadné odeslání", () => {
     const { owner, ids } = batch(3, ["ucetni@example.cz"], ["archiv@example.cz"]);
     const draft = draftFor(owner, seedCustomer(owner)).id;
 
-    expect(bulkSend(webActor(owner), [...ids, draft], randomUUID())).toEqual({
+    expect(bulkSend(webActor(owner), [...ids, draft], randomUUID())).toMatchObject({
       queued: 3,
       skipped: 1,
     });
@@ -676,7 +770,10 @@ describe("hromadné odeslání", () => {
     const { owner, ids } = batch(2);
     await leaveUnknown(owner, ids[0]);
 
-    expect(bulkSend(webActor(owner), ids, randomUUID())).toEqual({ queued: 1, skipped: 1 });
+    expect(bulkSend(webActor(owner), ids, randomUUID())).toMatchObject({
+      queued: 1,
+      skipped: 1,
+    });
     await drainJobs(WORKER);
     expect(logsOf(owner).filter((log) => log.invoiceId === ids[0])).toMatchObject([
       { status: "unknown" },
@@ -687,7 +784,10 @@ describe("hromadné odeslání", () => {
     const { owner, ids } = batch(2);
     bulkSendPreview(owner, ids);
     cancelInvoice(webActor(owner), ids[0]);
-    expect(bulkSend(webActor(owner), ids, randomUUID())).toEqual({ queued: 1, skipped: 1 });
+    expect(bulkSend(webActor(owner), ids, randomUUID())).toMatchObject({
+      queued: 1,
+      skipped: 1,
+    });
   });
 
   test("selhání jednoho dokladu nezastaví ostatní", () => {
@@ -697,17 +797,55 @@ describe("hromadné odeslání", () => {
     const badInvoice = issuedInvoice(owner, badCustomer);
     db.run(sql`UPDATE customer SET email = 'neplatna' WHERE id = ${badCustomer}`);
 
-    expect(bulkSend(webActor(owner), [badInvoice, broken, ...ids], randomUUID())).toEqual({
+    expect(bulkSend(webActor(owner), [badInvoice, broken, ...ids], randomUUID())).toMatchObject({
       queued: 2,
       skipped: 2,
     });
+  });
+
+  test("[MAIL-008] změna příjemců proti souhrnu doklad přeskočí s důvodem", () => {
+    const { owner, ids } = batch(2);
+    const previewed = Object.fromEntries(
+      bulkSendPreview(owner, ids).ready.map(({ id, to, copies }) => [id, { to, copies }]),
+    );
+    previewed[ids[0]] = { to: ["jiny@example.cz"], copies: [] };
+
+    expect(bulkSend(webActor(owner), ids, randomUUID(), previewed)).toEqual({
+      queued: 1,
+      skipped: 1,
+      reasons: [B.recipientsChanged],
+    });
+    expect(logsOf(owner).map((log) => log.invoiceId)).toEqual([ids[1]]);
+  });
+
+  test("neočekávaná chyba jednoho dokladu jde do monitoringu a ostatní odejdou", () => {
+    mocks.captureException.mockClear();
+    const { owner, ids } = batch(2);
+    db.$client.exec(`CREATE TEMP TRIGGER refuse_mail BEFORE INSERT ON email_log
+      WHEN new.invoice_id = '${ids[0]}' BEGIN SELECT RAISE(ABORT, 'disk spadl'); END`);
+    try {
+      expect(bulkSend(webActor(owner), ids, randomUUID())).toMatchObject({ queued: 1, skipped: 1 });
+    } finally {
+      db.$client.exec("DROP TRIGGER refuse_mail");
+    }
+    expect(mocks.captureException).toHaveBeenCalledOnce();
+    expect(logsOf(owner).map((log) => log.invoiceId)).toEqual([ids[1]]);
+  });
+
+  test("hromadné odeslání respektuje i limit sendUser", () => {
+    const { owner, ids } = batch(1);
+    for (let i = 0; i < RATE_RULES.sendUser.limit; i += 1) {
+      enforceRateLimit(webActor(owner), RATE_RULES.sendUser);
+    }
+    expect(() => bulkSend(webActor(owner), ids, randomUUID())).toThrow(RateLimitError);
+    expect(logsOf(owner)).toEqual([]);
   });
 
   test("opakovaný stejný požadavek nic nezdvojí", async () => {
     const { owner, ids } = batch(2);
     const requestId = randomUUID();
     bulkSend(webActor(owner), ids, requestId);
-    expect(bulkSend(webActor(owner), [...ids, ...ids], requestId)).toEqual({
+    expect(bulkSend(webActor(owner), [...ids, ...ids], requestId)).toMatchObject({
       queued: 2,
       skipped: 0,
     });

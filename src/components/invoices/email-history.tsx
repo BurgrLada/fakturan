@@ -10,17 +10,19 @@ import { SendDialog } from "./send-dialog";
 
 const T = TEXTS.invoiceMail;
 const REFRESH_MS = 2_000;
+const RETRY_REFRESH_MS = 30_000;
 
 // Delivery happens in the worker, so nothing else tells this page that a message left.
-function RefreshWhileSending({ sending }: { sending: boolean }) {
+function RefreshWhileSending({ sending, retrying }: { sending: boolean; retrying: boolean }) {
   const router = useRouter();
+  const every = retrying ? RETRY_REFRESH_MS : REFRESH_MS;
   useEffect(() => {
     if (!sending) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") router.refresh();
-    }, REFRESH_MS);
+    }, every);
     return () => clearInterval(timer);
-  }, [router, sending]);
+  }, [router, sending, every]);
   return null;
 }
 
@@ -28,11 +30,13 @@ export function EmailHistory({
   invoiceId,
   rows,
   sending,
+  retrying,
   canResend,
 }: {
   invoiceId: string;
   rows: EmailLogRow[];
   sending: boolean;
+  retrying: boolean;
   canResend: boolean;
 }) {
   const router = useRouter();
@@ -40,7 +44,7 @@ export function EmailHistory({
 
   return (
     <>
-      <RefreshWhileSending sending={sending} />
+      <RefreshWhileSending sending={sending} retrying={retrying} />
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">{T.history.empty}</p>
       ) : (

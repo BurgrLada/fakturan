@@ -94,7 +94,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
   const editable = EDITABLE_STATUSES.has(row.status);
   const qr = qrStateOf(invoiceDocument(row));
   const emails = listEmailLog(user.id, id);
-  const { sending, problem } = mailStateOf(emails);
+  const { sending, retrying, problem } = mailStateOf(emails);
   const sendable = isSendable(row.status);
   const { available } = mailAvailability(user.id);
   return (
@@ -161,6 +161,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           invoiceId={id}
           rows={emails}
           sending={sending}
+          retrying={retrying}
           canResend={sendable && available}
         />
       </section>

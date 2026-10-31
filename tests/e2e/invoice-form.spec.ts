@@ -556,6 +556,7 @@ test("[INV-020] úprava odeslané faktury upozorní", async ({ page, freshApp })
   await page.getByLabel("Poznámka").fill("Znovu");
   await page.getByRole("button", { name: "Uložit změny" }).click();
   await expect(page.getByText("zvažte opětovné odeslání")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Odeslat klientovi" })).toHaveCount(0);
 
   await page.goto(detail);
   await expect(page.getByRole("heading", { name: `Faktura ${number}-A` })).toBeVisible();

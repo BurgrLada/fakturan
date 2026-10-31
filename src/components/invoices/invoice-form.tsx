@@ -80,6 +80,7 @@ type Payload = { draft: Record<string, unknown>; tags: string[] };
 export type InvoiceFormProps = {
   id: string;
   saved: boolean;
+  mailAvailable: boolean;
   type: string;
   mode: "draft" | "issued";
   status: string;
@@ -561,9 +562,11 @@ function Form(props: InvoiceFormProps) {
           <Alert role="status" data-testid="send-offer">
             <AlertDescription className="flex flex-col items-start gap-2">
               {T.resend}
-              <a className="underline underline-offset-4" href={`/faktury/${id}?odeslat=1`}>
-                {TEXTS.invoiceMail.detail.offerSend}
-              </a>
+              {props.mailAvailable && (
+                <a className="underline underline-offset-4" href={`/faktury/${id}?odeslat=1`}>
+                  {TEXTS.invoiceMail.detail.offerSend}
+                </a>
+              )}
             </AlertDescription>
           </Alert>
         )}

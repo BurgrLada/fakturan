@@ -80,7 +80,11 @@ const requestId = z.uuid(TEXTS.invoiceMail.errors.invalid);
 const prefillInput = z.object({ id, logId: id.optional() });
 const sendInput = z.object({ id, message: sendInputSchema });
 const resendInput = z.object({ id, requestId, confirmedUnknown: z.boolean(V.invalid) });
-const bulkInput = idsInput.extend({ requestId });
+const addressList = z.array(z.string(V.invalid), V.invalid);
+const bulkInput = idsInput.extend({
+  requestId,
+  previewed: z.record(z.string(V.invalid), z.object({ to: addressList, copies: addressList })),
+});
 const lineInput = z.object({
   name: z.string(V.invalid),
   description: z.string(V.invalid).optional(),
@@ -308,8 +312,8 @@ export async function bulkSendPreviewAction(raw: unknown) {
 }
 
 export async function bulkSendAction(raw: unknown) {
-  return run(bulkInput, raw, ({ ids, requestId: request }, actor) => {
-    const result = bulkSend(actor, ids, request);
+  return run(bulkInput, raw, ({ ids, requestId: request, previewed }, actor) => {
+    const result = bulkSend(actor, ids, request, previewed);
     changedInvoices();
     return result;
   });
