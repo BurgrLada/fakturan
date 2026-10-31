@@ -14,5 +14,5 @@ SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 UI-011	Chybí nespárované platby a nerozpoznaná avíza (plán 5) a blížící se limity, spec je nedefinuje (plán 8)	plán 5, plán 8
-INV-024	Chybí hromadné označení jako uhrazené (plán 5) a export (plán 8)	plán 5, plán 8
+INV-024	Chybí export (plán 8)	plán 8
 TST-016	Matice kryje jen pravidelné odeslání a upomínky, potvrzení platby a faktura po záloze přijdou s automatikami	plán 5, plán 6

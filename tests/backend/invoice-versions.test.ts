@@ -245,6 +245,7 @@ describe("úprava vystaveného dokladu", () => {
       variableSymbol: "2026001",
       resendSuggested: false,
       balanceWarning: "none",
+      status: "issued",
     });
     expect(detail(owner, id).revision).toBe(revision + 1);
   });

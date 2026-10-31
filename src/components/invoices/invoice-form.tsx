@@ -81,6 +81,7 @@ export type InvoiceFormProps = {
   id: string;
   saved: boolean;
   mailAvailable: boolean;
+  hasPayments: boolean;
   type: string;
   mode: "draft" | "issued";
   status: string;
@@ -471,6 +472,9 @@ function Form(props: InvoiceFormProps) {
       setNotices([
         ...(reply.balanceWarning === "overpaid" ? [T.overpaid] : []),
         ...(reply.balanceWarning === "underpaid" ? [T.underpaid] : []),
+        ...(reply.balanceWarning !== "none"
+          ? [T.statusAfter(TEXTS.invoices.statuses[reply.status])]
+          : []),
       ]);
     } catch {
       setMessage({ ok: false, text: T.network });
@@ -705,6 +709,8 @@ function Form(props: InvoiceFormProps) {
               <Field id="field-currency" label={F.currency}>
                 <NativeSelect
                   id="field-currency"
+                  disabled={props.hasPayments}
+                  aria-describedby={props.hasPayments ? "field-currency-locked" : undefined}
                   value={values.currency}
                   onChange={(event) => {
                     const currency = event.target.value as Currency;
@@ -720,6 +726,11 @@ function Form(props: InvoiceFormProps) {
                     </option>
                   ))}
                 </NativeSelect>
+                {props.hasPayments && (
+                  <p id="field-currency-locked" className="text-xs text-muted-foreground">
+                    {T.currencyLocked}
+                  </p>
+                )}
               </Field>
               {showRate && (
                 <Field id="field-exchangeRate" label={F.exchangeRate}>

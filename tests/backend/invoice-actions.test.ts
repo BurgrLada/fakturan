@@ -5,8 +5,15 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  addPaymentAction,
+  cancelInvoiceAction,
+  closeDifferenceAction,
   customerDefaultsAction,
   deleteDraftAction,
+  deletePaymentAction,
+  markPaidAction,
+  markPaidManyAction,
+  updatePaymentAction,
   issueAction,
   issuePreviewAction,
   saveDraftAction,
@@ -16,12 +23,13 @@ import {
   updateIssuedAction,
 } from "@/app/(app)/faktury/actions";
 import { TEXTS } from "@/lib/texts";
-import { catalogItem, invoice, user } from "@/server/db/schema";
+import { catalogItem, invoice, payment, user } from "@/server/db/schema";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { getCatalogItem, saveCatalogItem } from "@/server/services/catalog";
 import { saveCustomer } from "@/server/services/customers";
 import { getInvoice, newDraftDefaults, type DraftInput } from "@/server/services/invoices";
 import { markSent } from "@/server/services/invoice-lifecycle";
+import { listPayments } from "@/server/services/payments";
 import { listSeries } from "@/server/services/number-series";
 import { saveSupplier } from "@/server/services/supplier";
 import { createTestDb } from "../helpers/db";
@@ -437,5 +445,111 @@ describe("akce formuláře faktury", () => {
 
     seed();
     expect(await searchCatalogAction({ q: "moje" })).toEqual({ ok: true, items: [] });
+  });
+});
+
+describe("akce plateb", () => {
+  const paymentFor = (revision: number, over: Record<string, unknown> = {}) => ({
+    revision,
+    paidOn: "2026-01-10",
+    amountMinor: 100_000,
+    currency: "CZK",
+    method: "transfer",
+    note: "",
+    ...over,
+  });
+
+  async function payable() {
+    const owner = session.userId;
+    const { customerId } = issuable(owner);
+    const made = await issued(owner, customerId);
+    return { owner, ...made };
+  }
+
+  test("[SEC-006] akce plateb odmítnou nulovou částku a budoucí datum", async () => {
+    const { owner, id, revision } = await payable();
+
+    const bad = [
+      await addPaymentAction({ id, payment: paymentFor(revision, { amountMinor: 0 }) }),
+      await addPaymentAction({ id, payment: paymentFor(revision, { amountMinor: -5 }) }),
+      await addPaymentAction({ id, payment: paymentFor(revision, { amountMinor: 1.5 }) }),
+      await addPaymentAction({ id, payment: paymentFor(revision, { paidOn: "2999-01-01" }) }),
+      await addPaymentAction({ id, payment: paymentFor(revision, { paidOn: "nesmysl" }) }),
+      await addPaymentAction({ id, payment: paymentFor(revision, { method: "bitcoin" }) }),
+      await addPaymentAction({ id, payment: paymentFor(revision, { currency: "EUR" }) }),
+      await addPaymentAction({ id, payment: { ...paymentFor(revision), revision: "1" } }),
+      await markPaidAction({ id, revision, paidOn: "2999-01-01" }),
+      await markPaidAction({ id }),
+      await markPaidManyAction({ ids: [] }),
+      await closeDifferenceAction({ id, revision }),
+    ];
+    for (const result of bad) expect(result).toMatchObject({ ok: false });
+    expect(listPayments(owner, id)).toEqual([]);
+    expect(getInvoice(owner, id)).toMatchObject({ status: "issued", paidMinor: 0 });
+  });
+
+  test("[PAY-002] dílčí platba, úprava a smazání přepočtou stav a vrátí revizi", async () => {
+    const { owner, id, revision } = await payable();
+
+    const added = await addPaymentAction({ id, payment: paymentFor(revision) });
+    if (!added.ok) throw new Error(added.error);
+    expect(getInvoice(owner, id)).toMatchObject({ status: "partially_paid", paidMinor: 100_000 });
+
+    const stale = await addPaymentAction({ id, payment: paymentFor(revision) });
+    expect(stale).toMatchObject({ ok: false, stale: true });
+
+    const current = getInvoice(owner, id)!.revision;
+    const edited = await updatePaymentAction({
+      id: added.id,
+      payment: paymentFor(current, { amountMinor: 300_000 }),
+    });
+    expect(edited).toMatchObject({ ok: true });
+    expect(getInvoice(owner, id)).toMatchObject({ status: "paid", paidMinor: 300_000 });
+
+    const removed = await deletePaymentAction({
+      id: added.id,
+      revision: getInvoice(owner, id)!.revision,
+    });
+    expect(removed).toMatchObject({ ok: true });
+    expect(getInvoice(owner, id)).toMatchObject({ status: "issued", paidMinor: 0 });
+  });
+
+  test("[PAY-007] uzavření rozdílu bez potvrzení nic nezapíše", async () => {
+    const { owner, id, revision } = await payable();
+    const added = await addPaymentAction({ id, payment: paymentFor(revision) });
+    expect(added).toMatchObject({ ok: true });
+    const current = getInvoice(owner, id)!.revision;
+
+    expect(await closeDifferenceAction({ id, revision: current, confirmed: false })).toMatchObject({
+      ok: false,
+    });
+    expect(getInvoice(owner, id)!.status).toBe("partially_paid");
+
+    expect(await closeDifferenceAction({ id, revision: current, confirmed: true })).toMatchObject({
+      ok: true,
+      differenceMinor: 200_000,
+    });
+    expect(getInvoice(owner, id)).toMatchObject({ status: "paid", paidMinor: 300_000 });
+  });
+
+  test("[INV-024] hromadné označení přeskočí koncept a storno a nic neodešle", async () => {
+    const owner = session.userId;
+    const { customerId } = issuable(owner);
+    const open = await issued(owner, customerId);
+    const second = await issued(owner, customerId);
+    const cancelled = await issued(owner, customerId);
+    expect(await cancelInvoiceAction({ id: cancelled.id })).toMatchObject({ ok: true });
+    const concept = await savedDraft(owner, { customerId });
+
+    const result = await markPaidManyAction({
+      ids: [open.id, second.id, cancelled.id, concept.id, open.id],
+    });
+
+    expect(result).toEqual({ ok: true, done: 2, skipped: 2 });
+    expect(getInvoice(owner, open.id)!.status).toBe("paid");
+    expect(getInvoice(owner, second.id)!.status).toBe("paid");
+    expect(getInvoice(owner, cancelled.id)!.status).toBe("cancelled");
+    expect(getInvoice(owner, concept.id)!.status).toBe("draft");
+    expect(db.select().from(payment).where(eq(payment.userId, owner)).all()).toHaveLength(2);
   });
 });

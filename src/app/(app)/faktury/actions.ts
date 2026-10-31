@@ -7,6 +7,8 @@ import { CURRENCIES } from "@/lib/currency";
 import { daysBetween, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import type { CustomerDefaults } from "@/lib/invoice-form";
 import { sendInputSchema } from "@/lib/mail-send";
+import { isCalendarDate } from "@/lib/number-format";
+import { paymentInputSchema } from "@/lib/payments";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
@@ -47,6 +49,14 @@ import {
   saveDraft,
 } from "@/server/services/invoices";
 import { ensureDefaultSeries } from "@/server/services/number-series";
+import {
+  addPayment,
+  closeDifference,
+  deletePayment,
+  markPaid,
+  markPaidMany,
+  updatePayment,
+} from "@/server/services/payments";
 import {
   reminderPrefill,
   sendManualReminder,
@@ -103,6 +113,15 @@ const reminderInput = z.object({
 });
 const snoozeInput = z.object({ id, until: z.string(V.invalid).nullable() });
 const flagInput = z.object({ id, on: z.boolean(V.invalid) });
+const revision = z.number(V.invalid).int(V.invalid);
+const addPaymentInput = z.object({ id, payment: paymentInputSchema });
+const markPaidInput = z.object({
+  id,
+  revision,
+  paidOn: z.string(V.date).refine(isCalendarDate, V.date).optional(),
+});
+const deletePaymentInput = z.object({ id, revision });
+const closeDifferenceInput = z.object({ id, revision, confirmed: z.boolean(V.invalid) });
 const lineInput = z.object({
   name: z.string(V.invalid),
   description: z.string(V.invalid).optional(),
@@ -380,5 +399,53 @@ export async function setPartialRemindersAction(raw: unknown) {
     setPartialReminders(actor, invoiceId, on);
     changedInvoices();
     return {};
+  });
+}
+
+export async function addPaymentAction(raw: unknown) {
+  return run(addPaymentInput, raw, ({ id: invoiceId, payment }, actor) => {
+    const added = addPayment(actor, invoiceId, payment);
+    changedInvoices();
+    return added;
+  });
+}
+
+export async function updatePaymentAction(raw: unknown) {
+  return run(addPaymentInput, raw, ({ id: paymentId, payment }, actor) => {
+    const saved = updatePayment(actor, paymentId, payment);
+    changedInvoices();
+    return saved;
+  });
+}
+
+export async function deletePaymentAction(raw: unknown) {
+  return run(deletePaymentInput, raw, ({ id: paymentId, revision: current }, actor) => {
+    deletePayment(actor, paymentId, current);
+    changedInvoices();
+    return {};
+  });
+}
+
+export async function markPaidAction(raw: unknown) {
+  return run(markPaidInput, raw, ({ id: invoiceId, ...opts }, actor) => {
+    const paid = markPaid(actor, invoiceId, opts);
+    changedInvoices();
+    return paid;
+  });
+}
+
+export async function markPaidManyAction(raw: unknown) {
+  return run(idsInput, raw, ({ ids }, actor) => {
+    const result = markPaidMany(actor, ids);
+    changedInvoices();
+    return result;
+  });
+}
+
+export async function closeDifferenceAction(raw: unknown) {
+  return run(closeDifferenceInput, raw, ({ id: invoiceId, ...opts }, actor) => {
+    const closed = closeDifference(actor, invoiceId, opts);
+    changedInvoices();
+    return closed;
   });
 }

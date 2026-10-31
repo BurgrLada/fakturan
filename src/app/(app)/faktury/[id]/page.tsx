@@ -8,6 +8,7 @@ import { InvoiceActions } from "@/components/invoices/invoice-actions";
 import { InvoiceStatusBadge } from "@/components/invoices/invoice-status";
 import { ReminderPanel } from "@/components/invoices/reminder-panel";
 import { VersionList } from "@/components/invoices/version-list";
+import { PaymentPanel } from "@/components/invoices/payment-panel";
 import { PageLoading } from "@/components/page-loading";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,7 @@ import { isSendable } from "@/lib/mail-send";
 import { invoiceDocument } from "@/lib/invoice-document";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague } from "@/lib/number-format";
+import { canTakePayment } from "@/lib/payments";
 import { amountDue, qrStateOf } from "@/lib/qr-payload";
 import { MAX_SNOOZE_DAYS } from "@/lib/reminders";
 import { formatCalendarDate } from "@/lib/template-vars";
@@ -28,6 +30,7 @@ import { EDITABLE_STATUSES, listVersions } from "@/server/services/invoice-versi
 import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
 import { mailAvailability } from "@/server/services/mail-settings";
+import { listPayments } from "@/server/services/payments";
 import { getRecurring } from "@/server/services/recurring";
 import { getPreferences } from "@/server/services/preferences";
 import {
@@ -40,13 +43,21 @@ const T = TEXTS.invoices.detail;
 
 export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
 
-function StatusSteps({ row }: { row: InvoiceDetail }) {
+function StatusSteps({ row, closedMinor }: { row: InvoiceDetail; closedMinor: number }) {
   const left = row.totalMinor - row.paidMinor;
   const settled = row.status === "cancelled" || row.status === "credited";
   const steps = [
     { label: T.steps.issued, value: formatDateTime(row.issuedAt) },
     { label: T.steps.sent, value: formatDateTime(row.sentAt) },
     { label: T.steps.paid, value: formatMoney(row.paidMinor, row.currency) },
+    ...(closedMinor > 0
+      ? [
+          {
+            label: TEXTS.payments.panel.closedDifference,
+            value: formatMoney(closedMinor, row.currency),
+          },
+        ]
+      : []),
     ...(settled && left >= 0
       ? []
       : [
@@ -104,6 +115,11 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
   const qr = qrStateOf(invoiceDocument(row));
   const emails = listEmailLog(user.id, id);
   const { sending, retrying, problem } = mailStateOf(emails);
+  const payments = listPayments(user.id, id);
+  const closedMinor = payments
+    .filter((item) => item.kind === "difference")
+    .reduce((sum, item) => sum + item.creditedMinor, 0);
+  const takesPayment = canTakePayment(row.status) && row.type !== "credit_note";
   const plan = row.recurringId ? getRecurring(user.id, row.recurringId) : null;
   const sendable = isSendable(row.status);
   const { available } = mailAvailability(user.id);
@@ -157,14 +173,18 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         id={id}
         editable={editable}
         cancellable={row.status === "issued" || row.status === "sent"}
+        hasPayments={takesPayment && payments.length > 0}
         restorable={row.status === "cancelled" && row.cancelledFrom !== null}
-        markable={row.status === "issued"}
+        markable={
+          row.status === "issued" ||
+          ((row.status === "partially_paid" || row.status === "paid") && row.sentAt === null)
+        }
         refreshable={editable && row.customerId !== null}
         mail={{ sendable, available, sending, problem, offer: sendOffer(query, available) }}
       />
       <section className="flex flex-col gap-3">
         <h2 className="text-lg">{T.statusTitle}</h2>
-        <StatusSteps row={row} />
+        <StatusSteps row={row} closedMinor={closedMinor} />
         <p data-testid="invoice-qr" className="text-sm text-muted-foreground">
           {TEXTS.invoices.qr[qr]}
         </p>
@@ -185,6 +205,28 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           today={today}
           latestSnooze={addDays(today, MAX_SNOOZE_DAYS)}
           canSend={available && !sending}
+        />
+      )}
+      {takesPayment && (
+        <PaymentPanel
+          invoiceId={id}
+          revision={row.revision}
+          status={row.status}
+          currency={row.currency}
+          totalMinor={row.totalMinor}
+          paidMinor={row.paidMinor}
+          today={today}
+          payments={payments.map((item) => ({
+            id: item.id,
+            kind: item.kind,
+            source: item.source,
+            paidOn: item.paidOn,
+            amountMinor: item.amountMinor,
+            currency: item.currency,
+            creditedMinor: item.creditedMinor,
+            method: item.method,
+            note: item.note,
+          }))}
         />
       )}
       <section className="flex flex-col gap-3 sm:max-w-xl">

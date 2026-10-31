@@ -41,7 +41,13 @@ import {
   saveReminderRuleAction,
 } from "@/app/(app)/nastaveni/automatizace/actions";
 import {
+  addPaymentAction,
   bulkSendAction,
+  closeDifferenceAction,
+  deletePaymentAction,
+  markPaidAction,
+  markPaidManyAction,
+  updatePaymentAction,
   bulkSendPreviewAction,
   reminderPrefillAction,
   resendFromLogAction,
@@ -63,6 +69,7 @@ import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
 import { nextOccurrences } from "@/lib/recurrence";
 import { getRecurring } from "@/server/services/recurring";
+import { listPayments } from "@/server/services/payments";
 import { listReminderRules, saveReminderRule } from "@/server/services/reminders";
 import { pauseRecurring, processOccurrence } from "@/server/services/recurring-run";
 import { createTestDb } from "../helpers/db";
@@ -119,6 +126,46 @@ describe("akce pošty", () => {
     const invoiceId = issuedInvoice(owner, seedCustomer(owner));
     return { owner, invoiceId };
   }
+
+  test("[SEC-002] akce plateb odmítnou cizí ID", async () => {
+    const mine = mailAccount();
+    const stranger = mailAccount();
+    session.userId = mine.owner;
+    const before = getInvoice(mine.owner, mine.invoiceId)!;
+    const input = {
+      revision: before.revision,
+      paidOn: "2026-01-10",
+      amountMinor: 1000,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    };
+    const added = await addPaymentAction({ id: mine.invoiceId, payment: input });
+    if (!added.ok) throw new Error(added.error);
+    const revision = getInvoice(mine.owner, mine.invoiceId)!.revision;
+
+    session.userId = stranger.owner;
+    const replies = [
+      await addPaymentAction({ id: mine.invoiceId, payment: { ...input, revision } }),
+      await updatePaymentAction({ id: added.id, payment: { ...input, revision, amountMinor: 5 } }),
+      await deletePaymentAction({ id: added.id, revision }),
+      await markPaidAction({ id: mine.invoiceId, revision }),
+      await markPaidManyAction({ ids: [mine.invoiceId] }),
+      await closeDifferenceAction({ id: mine.invoiceId, revision, confirmed: true }),
+    ];
+
+    expect(replies.slice(0, 4)).toEqual(
+      replies.slice(0, 4).map(() => expect.objectContaining({ ok: false })),
+    );
+    expect(replies[4]).toMatchObject({ ok: true, done: 0, skipped: 1 });
+    expect(replies[5]).toMatchObject({ ok: false });
+    expect(listPayments(mine.owner, mine.invoiceId)).toMatchObject([{ amountMinor: 1000 }]);
+    expect(getInvoice(mine.owner, mine.invoiceId)).toMatchObject({
+      status: "partially_paid",
+      paidMinor: 1000,
+    });
+    expect(listPayments(stranger.owner, stranger.invoiceId)).toEqual([]);
+  });
 
   test("[SEC-002] akce upomínek odmítnou cizí ID", async () => {
     const mine = mailAccount();

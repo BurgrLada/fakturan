@@ -45,6 +45,7 @@ export function InvoiceActions({
   id,
   editable,
   cancellable,
+  hasPayments,
   restorable,
   markable,
   refreshable,
@@ -53,6 +54,7 @@ export function InvoiceActions({
   id: string;
   editable: boolean;
   cancellable: boolean;
+  hasPayments: boolean;
   restorable: boolean;
   markable: boolean;
   refreshable: boolean;
@@ -150,7 +152,7 @@ export function InvoiceActions({
             {T.restore}
           </Button>
         )}
-        {cancellable && (
+        {cancellable && !hasPayments && (
           <AlertDialog open={confirming} onOpenChange={setConfirming}>
             <AlertDialogTrigger render={<Button variant="destructive" disabled={pending} />}>
               {T.cancel}
@@ -192,6 +194,11 @@ export function InvoiceActions({
           onSent={sent}
         />
       </div>
+      {hasPayments && (
+        <p data-testid="cancel-blocked" className="text-sm text-muted-foreground">
+          {T.cancelBlocked}
+        </p>
+      )}
       {mail.sendable && !mail.available && (
         <p id={hintId} data-testid="send-unavailable" className="text-sm text-muted-foreground">
           {M.detail.unavailable}{" "}

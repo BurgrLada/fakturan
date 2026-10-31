@@ -66,6 +66,7 @@ export type EditResult = {
   variableSymbol: string | null;
   resendSuggested: boolean;
   balanceWarning: BalanceWarning;
+  status: InvoiceStatus;
 };
 export type InvoiceVersion = typeof invoiceVersion.$inferSelect;
 export type InvoiceVersionSummary = Omit<InvoiceVersion, "document" | "userId">;
@@ -94,6 +95,7 @@ function resultOf(row: Invoice, changed: boolean, statusBefore = row.status): Ed
     variableSymbol: row.variableSymbol,
     resendSuggested: changed && row.sentAt !== null,
     balanceWarning: balanceWarningOf(row, statusBefore),
+    status: row.status,
   };
 }
 

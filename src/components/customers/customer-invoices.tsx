@@ -7,10 +7,14 @@ import { customerInvoiceStats } from "@/server/services/invoices";
 const T = TEXTS.customers.invoices;
 
 export function CustomerInvoices({ ownerId, customerId }: { ownerId: string; customerId: string }) {
-  const { sums, rows, hasMore } = customerInvoiceStats(ownerId, customerId);
+  const { sums, rows, hasMore, averageDays } = customerInvoiceStats(ownerId, customerId);
   return (
     <section className="flex flex-col gap-3 sm:max-w-xl">
       <h2 className="text-lg">{T.title}</h2>
+      <p className="text-sm" data-testid="customer-average-days">
+        <span className="text-muted-foreground">{T.averageDays}: </span>
+        {averageDays === null ? T.noAverage : T.days(Math.round(averageDays))}
+      </p>
       {sums.map((sum) => (
         <dl
           key={sum.currency}

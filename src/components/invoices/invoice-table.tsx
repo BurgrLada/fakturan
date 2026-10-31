@@ -3,7 +3,11 @@
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { deleteDraftAction, markSentManyAction } from "@/app/(app)/faktury/actions";
+import {
+  deleteDraftAction,
+  markPaidManyAction,
+  markSentManyAction,
+} from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -23,7 +27,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AWAITING_PAYMENT } from "@/lib/invoice";
 import { formatMoney } from "@/lib/money";
+import { amountDue } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import type { InvoiceRow, InvoiceSort, SortLink } from "@/server/services/invoices";
@@ -42,6 +48,21 @@ const COLUMNS: { sort: InvoiceSort; label: string; className?: string }[] = [
   { sort: "total", label: T.columns.total, className: "text-right" },
   { sort: "status", label: T.columns.status },
 ];
+
+function payableSummary(rows: InvoiceRow[]): { count: number; sums: string } {
+  const payable = rows.filter(
+    (row) => (AWAITING_PAYMENT as readonly string[]).includes(row.status) && amountDue(row) > 0,
+  );
+  const byCurrency = new Map<InvoiceRow["currency"], number>();
+  for (const row of payable) {
+    byCurrency.set(row.currency, (byCurrency.get(row.currency) ?? 0) + amountDue(row));
+  }
+  const sums = [...byCurrency]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, minor]) => formatMoney(minor, currency))
+    .join(", ");
+  return { count: payable.length, sums };
+}
 
 const SORT_STATE = { asc: "ascending", desc: "descending" } as const;
 
@@ -86,10 +107,12 @@ export function InvoiceTable({
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
   const [sending, setSending] = useState<string[] | null>(null);
+  const [paying, setPaying] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const selectable = rows.filter((row) => row.status !== "draft");
   const chosen = selectable.filter((row) => selected.has(row.id)).map((row) => row.id);
+  const summary = payableSummary(selectable.filter((row) => selected.has(row.id)));
   const allChosen = selectable.length > 0 && chosen.length === selectable.length;
 
   function toggle(id: string, on: boolean) {
@@ -131,6 +154,25 @@ export function InvoiceTable({
     });
   }
 
+  function markPaid() {
+    setPaying(false);
+    setMessage(null);
+    startTransition(async () => {
+      try {
+        const result = await markPaidManyAction({ ids: chosen });
+        if (!result.ok) {
+          if (result.expired) setExpired(true);
+          else setMessage({ ok: false, text: result.error });
+          return;
+        }
+        setSelected(new Set());
+        setMessage({ ok: true, text: TEXTS.payments.bulk.done(result.done, result.skipped) });
+      } catch {
+        setMessage({ ok: false, text: T.bulk.failed });
+      }
+    });
+  }
+
   function removeDraft() {
     const id = deleting;
     if (!id) return;
@@ -166,6 +208,14 @@ export function InvoiceTable({
           <Button
             variant="outline"
             size="sm"
+            disabled={pending || expired}
+            onClick={() => setPaying(true)}
+          >
+            {TEXTS.payments.bulk.action}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             disabled={pending || expired || !mailAvailable}
             onClick={() => setSending(chosen)}
           >
@@ -188,6 +238,24 @@ export function InvoiceTable({
           setMessage({ ok: true, text });
         }}
       />
+      <AlertDialog open={paying} onOpenChange={setPaying}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{TEXTS.payments.bulk.title}</AlertDialogTitle>
+            <AlertDialogDescription data-testid="bulk-paid-summary">
+              {summary.count > 0
+                ? TEXTS.payments.bulk.body(summary.count, summary.sums)
+                : TEXTS.payments.bulk.nothing}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{TEXTS.payments.bulk.back}</AlertDialogCancel>
+            <Button disabled={summary.count === 0} onClick={markPaid}>
+              {TEXTS.payments.bulk.confirm}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {expired && (
         <Alert variant="destructive" role="alert">
           <AlertDescription className="flex flex-col items-start gap-2">
