@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { daysBetween, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
@@ -163,6 +163,21 @@ export function undoNoticeIn(tx: Tx, audit: Audit, userId: string, noticeId: str
     .from(payment)
     .where(scoped(userId).where(payment, (t, { eq }) => eq(t.notificationId, noticeId)))
     .all();
+  const touched = [...new Set(removed.map((row) => row.invoiceId))];
+  // A closed difference was computed from the money this notice brought: removing the payment
+  // would leave a paid document whose difference no longer matches.
+  const closed = tx
+    .select({ id: payment.id })
+    .from(payment)
+    .where(
+      scoped(userId).where(payment, (t, { and, eq }) =>
+        and(eq(t.kind, "difference"), inArray(t.invoiceId, touched)),
+      ),
+    )
+    .limit(1)
+    .get();
+  if (closed) throw new ServiceError(TEXTS.bankQueue.errors.differenceClosed);
+
   tx.delete(payment)
     .where(scoped(userId).where(payment, (t, { eq }) => eq(t.notificationId, noticeId)))
     .run();
@@ -195,7 +210,7 @@ export function undoNoticeIn(tx: Tx, audit: Audit, userId: string, noticeId: str
       amountMinor: notice.amountMinor,
       currency: notice.currency,
       reason: "undone",
-      invoiceIds: [...new Set(removed.map((row) => row.invoiceId))],
+      invoiceIds: touched,
     },
   });
 }

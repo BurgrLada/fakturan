@@ -13,7 +13,7 @@ import { NoticeSplitDialog } from "./notice-split-dialog";
 const T = TEXTS.bankQueue;
 const TOUCH = "max-sm:h-11 max-sm:min-w-11";
 
-export function NoticeQueue({ rows }: { rows: NoticeItem[] }) {
+export function NoticeQueue({ rows, total }: { rows: NoticeItem[]; total: number }) {
   const router = useRouter();
   const { pending, error, run } = useNoticeRunner();
   const [assigning, setAssigning] = useState<NoticeItem | null>(null);
@@ -65,6 +65,11 @@ export function NoticeQueue({ rows }: { rows: NoticeItem[] }) {
           </li>
         ))}
       </ul>
+      {total > rows.length && (
+        <p className="text-sm text-muted-foreground" data-testid="queue-truncated">
+          {T.queue.truncated(rows.length, total)}
+        </p>
+      )}
       {error && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error}</AlertDescription>

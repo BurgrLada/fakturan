@@ -488,6 +488,7 @@ export type NoticeRow = {
   counterpartyMasked: string | null;
   message: string | null;
   accountMasked: string | null;
+  text: string | null;
   receivedAt: Date;
   purged: boolean;
   invoices: { id: string; number: string | null }[];
@@ -547,6 +548,7 @@ export function listNotices(ownerId: string, filter: NoticeFilter): NoticeRow[] 
       counterpartyMasked: row.counterpartyMasked,
       message: row.message,
       accountMasked: row.accountMasked,
+      text: row.status === "unrecognized" ? row.textMasked : null,
       receivedAt: row.receivedAt,
       purged: row.purgedAt !== null,
       invoices,
@@ -581,7 +583,11 @@ export type NoticeCandidate = {
 
 // Same-symbol documents come first, then the other documents waiting for money: a notice with
 // no or a wrong symbol still has to be assignable by hand.
-export function noticeCandidates(ownerId: string, noticeId: string): NoticeCandidate[] {
+export function noticeCandidates(
+  ownerId: string,
+  noticeId: string,
+  search = "",
+): { candidates: NoticeCandidate[]; more: boolean } {
   const notice = readNotice(db, ownerId, noticeId);
   const symbol = normalizeSymbol(notice.variableSymbol);
   const rows = db
@@ -616,15 +622,20 @@ export function noticeCandidates(ownerId: string, noticeId: string): NoticeCandi
     dueMinor: amountDue(row),
     suggested,
   });
+  const term = search.trim().toLowerCase();
+  const matches = (row: (typeof rows)[number]) =>
+    `${row.number ?? ""} ${row.customerName}`.toLowerCase().includes(term);
   const same = symbol ? rows.filter((row) => normalizeSymbol(row.variableSymbol) === symbol) : [];
   const others = rows
-    .filter((row) => (AWAITING_PAYMENT as readonly string[]).includes(row.status))
-    .filter((row) => !same.includes(row))
-    .slice(0, OTHER_CANDIDATES);
-  return [
-    ...same.map((row) => toCandidate(row, true)),
-    ...others.map((row) => toCandidate(row, false)),
-  ];
+    .filter((row) => term !== "" || (AWAITING_PAYMENT as readonly string[]).includes(row.status))
+    .filter((row) => !same.includes(row) && matches(row));
+  return {
+    candidates: [
+      ...same.filter(matches).map((row) => toCandidate(row, true)),
+      ...others.slice(0, OTHER_CANDIDATES).map((row) => toCandidate(row, false)),
+    ],
+    more: others.length > OTHER_CANDIDATES,
+  };
 }
 
 function readNotice(q: Reader, ownerId: string, id: string): BankNotification {

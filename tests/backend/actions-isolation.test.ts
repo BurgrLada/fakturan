@@ -573,6 +573,7 @@ describe("cizí id přes server actions", () => {
     session.userId = mine.owner;
     expect(await noticeCandidatesAction({ id: noticeId })).toMatchObject({
       ok: true,
+      more: false,
       candidates: [{ id: mine.invoiceId, suggested: true }],
     });
     expect(await dismissNoticeAction({ id: noticeId })).toEqual({ ok: true });

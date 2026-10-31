@@ -6,7 +6,12 @@ import { NoticeQueue } from "@/components/payments/notice-queue";
 import { PageLoading } from "@/components/page-loading";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
-import { bankStatus, listNotices, type NoticeRow } from "@/server/services/bank-notices";
+import {
+  bankStatus,
+  listNotices,
+  noticeCounts,
+  type NoticeRow,
+} from "@/server/services/bank-notices";
 
 export const metadata: Metadata = { title: `${TEXTS.bankQueue.title} | ${TEXTS.appName}` };
 
@@ -18,6 +23,7 @@ const view = (row: NoticeRow): NoticeItem => ({ ...row, receivedAt: row.received
 async function PaymentsContent() {
   const { user } = await requireSession();
   const status = bankStatus(user.id);
+  const counts = noticeCounts(user.id);
   const queue = listNotices(user.id, { statuses: ["pending"] }).map(view);
   const unrecognized = listNotices(user.id, { statuses: ["unrecognized"] }).map(view);
   const history = listNotices(user.id, {
@@ -42,7 +48,7 @@ async function PaymentsContent() {
         <h2 id="queue-title" className="text-lg">
           {T.queue.title}
         </h2>
-        <NoticeQueue rows={queue} />
+        <NoticeQueue rows={queue} total={counts.pending} />
       </section>
       <section className="flex flex-col gap-2" aria-labelledby="unrecognized-title">
         <h2 id="unrecognized-title" className="text-lg">

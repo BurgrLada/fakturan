@@ -43,6 +43,7 @@ export type NoticeItem = {
   counterpartyMasked: string | null;
   message: string | null;
   accountMasked: string | null;
+  text: string | null;
   receivedAt: string;
   purged: boolean;
   invoices: { id: string; number: string | null }[];
@@ -160,6 +161,17 @@ export function NoticeSummary({ item }: { item: NoticeItem }) {
         <p className="text-xs text-muted-foreground">
           {S.received}: {formatDateTime(new Date(item.receivedAt))}
         </p>
+      )}
+      {!recognized && item.text && (
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">{TEXTS.bankQueue.unrecognized.text}</span>
+          <pre
+            data-testid="notice-text"
+            className="max-h-64 overflow-y-auto rounded-md bg-muted p-2 text-xs break-words whitespace-pre-wrap"
+          >
+            {item.text}
+          </pre>
+        </div>
       )}
       {reason && <p className="text-xs text-muted-foreground">{reason}</p>}
       {item.purged && <p className="text-xs text-muted-foreground">{S.purged}</p>}

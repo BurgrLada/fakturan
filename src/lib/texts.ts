@@ -1409,6 +1409,8 @@ export const TEXTS = {
       notFound: "Avízo neexistuje",
       notPending: "Avízo už je vyřízené, obnovte stránku",
       notMatched: "Vrátit jde jen spárované avízo",
+      differenceClosed:
+        "Na dokladu je uzavřený rozdíl. Nejdřív ho smažte u faktury, potom jde avízo vrátit.",
       notDismissable: "Zahodit jde jen avízo ve frontě nebo nerozpoznané",
       notRestorable: "Obnovit jde jen zahozené avízo",
       splitSum: "Rozdělené částky musí dát dohromady celou částku avíza",
@@ -1436,6 +1438,8 @@ export const TEXTS = {
       title: "Ke zpracování",
       empty: "Žádná platba nečeká na vyřízení.",
       list: "Nespárované platby",
+      truncated: (shown: number, total: number) =>
+        `Zobrazeno prvních ${shown} z ${total} avíz. Zbytek se ukáže po vyřízení těchto.`,
     },
     unrecognized: {
       title: "Nerozpoznaná avíza",
@@ -1443,6 +1447,7 @@ export const TEXTS = {
       body: "Zpráva přišla ze schránky, ale nepodařilo se z ní přečíst platbu. Platbu zapište ručně u faktury, zprávu pak zahoďte.",
       list: "Nerozpoznaná avíza",
       noPayment: "Nerozpoznaný formát",
+      text: "Text zprávy (maskovaný)",
     },
     history: { title: "Historie", empty: "Zatím tu nic není.", list: "Historie avíz" },
     provisional: "Prozatímní formát",
@@ -1500,6 +1505,10 @@ export const TEXTS = {
       others: "Ostatní doklady čekající na platbu",
       choose: "Vyberte doklad",
       none: "Není co přiřadit, nemáte žádný doklad čekající na platbu.",
+      search: "Hledat doklad (číslo nebo zákazník)",
+      noMatch: "Hledání nic nenašlo.",
+      truncated: (shown: number) =>
+        `Zobrazeno prvních ${shown} dokladů. Zpřesněte hledání, ostatní doklady najdete podle čísla nebo zákazníka.`,
       due: (amount: string) => `zbývá ${amount}`,
       credited: "Připsáno na doklad",
       creditedHint: (currency: string, notice: string) =>

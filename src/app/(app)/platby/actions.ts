@@ -27,6 +27,10 @@ const id = z.string(E.invalid).min(1, E.invalid);
 const idInput = z.object({ id }, E.invalid);
 const assignInput = z.object({ id, assign: assignInputSchema }, E.invalid);
 const splitInput = z.object({ id, split: splitInputSchema }, E.invalid);
+const candidatesInput = z.object(
+  { id, search: z.string(E.invalid).max(100, E.invalid).optional() },
+  E.invalid,
+);
 const checkInput = z.object({ requestId: z.uuid(E.invalid) }, E.invalid);
 
 // An expired session is reported instead of redirected, so the open dialog keeps what was typed.
@@ -87,9 +91,9 @@ export async function undoNoticeAction(raw: unknown): Promise<Reply> {
 }
 
 export async function noticeCandidatesAction(raw: unknown) {
-  return run(idInput, raw, ({ id: noticeId }, actor) => ({
-    candidates: noticeCandidates(ownerOf(actor), noticeId),
-  }));
+  return run(candidatesInput, raw, ({ id: noticeId, search }, actor) =>
+    noticeCandidates(ownerOf(actor), noticeId, search),
+  );
 }
 
 export async function checkMailboxNowAction(raw: unknown): Promise<Reply> {

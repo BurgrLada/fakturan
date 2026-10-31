@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogContent,
+  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -17,7 +18,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { MAX_SPLIT_PARTS } from "@/lib/notice-queue";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { TEXTS } from "@/lib/texts";
-import { CandidateOptions, useCandidates } from "./notice-assign-dialog";
+import { CandidateOptions, CandidateSearch, useCandidates } from "./notice-assign-dialog";
 import { NoticeSummary, type NoticeItem } from "./notice-list";
 
 const T = TEXTS.bankQueue.split;
@@ -37,7 +38,7 @@ function Form({
   onDone: () => void;
 }) {
   const key = useId();
-  const { candidates, error: loadError } = useCandidates(notice.id);
+  const { candidates, more, error: loadError, search, setSearch, known } = useCandidates(notice.id);
   const [pending, startTransition] = useTransition();
   const [parts, setParts] = useState<Part[]>([EMPTY, EMPTY]);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +57,7 @@ function Form({
       const amountMinor = parseMoney(part.amount);
       if (!part.invoiceId) return setError(A.choose);
       if (amountMinor === null || amountMinor <= 0) return setError(T.badAmount);
-      const target = candidates?.find((row) => row.id === part.invoiceId);
+      const target = known.get(part.invoiceId);
       let creditedMinor: number | null = null;
       if (target && target.currency !== currency) {
         creditedMinor = parseMoney(part.credited);
@@ -80,6 +81,7 @@ function Form({
     <form onSubmit={submit} className="flex flex-col gap-3">
       <AlertDialogHeader>
         <AlertDialogTitle>{T.title}</AlertDialogTitle>
+        <AlertDialogDescription>{A.noMail}</AlertDialogDescription>
       </AlertDialogHeader>
       {notice.provisional && (
         <p className="text-xs text-muted-foreground" data-testid="provisional-notice">
@@ -87,8 +89,15 @@ function Form({
         </p>
       )}
       <NoticeSummary item={notice} />
+      <CandidateSearch
+        id={`${key}-search`}
+        search={search}
+        setSearch={setSearch}
+        more={more}
+        shown={candidates?.length ?? 0}
+      />
       {parts.map((part, index) => {
-        const target = candidates?.find((row) => row.id === part.invoiceId);
+        const target = known.get(part.invoiceId);
         const foreign = target !== undefined && target.currency !== currency;
         return (
           <fieldset key={index} className="flex flex-col gap-2 rounded-md border p-2">
@@ -99,7 +108,15 @@ function Form({
               value={part.invoiceId}
               onChange={(event) => update(index, { invoiceId: event.target.value })}
             >
-              {candidates && <CandidateOptions candidates={candidates} />}
+              {candidates && (
+                <CandidateOptions
+                  candidates={
+                    target && !candidates.some((row) => row.id === target.id)
+                      ? [target, ...candidates]
+                      : candidates
+                  }
+                />
+              )}
             </NativeSelect>
             <div className="flex flex-col gap-1">
               <Label htmlFor={`${key}-amount-${index}`}>{`${T.amount} (${currency})`}</Label>
@@ -128,7 +145,7 @@ function Form({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="self-start"
+                className="self-start max-sm:h-11"
                 onClick={() => setParts((current) => current.filter((_, i) => i !== index))}
               >
                 {T.removePart}
@@ -142,7 +159,7 @@ function Form({
           type="button"
           variant="outline"
           size="sm"
-          className="self-start"
+          className="self-start max-sm:h-11"
           onClick={() => setParts((current) => [...current, EMPTY])}
         >
           {T.addPart}

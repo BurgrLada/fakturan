@@ -13,6 +13,7 @@ type NoticeSeed = {
   variant?: string | null;
   reason?: string | null;
   amountMinor?: number | null;
+  text?: string;
 };
 
 function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
@@ -27,9 +28,9 @@ function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
       .prepare(
         `INSERT INTO bank_notification (id, user_id, dedupe_key, bank, variant, status, reason, auth_result,
           amount_minor, currency, paid_on, paid_time, variable_symbol, counterparty_name, message,
-          instruction_id, received_at, created_at, updated_at)
+          instruction_id, text_masked, received_at, created_at, updated_at)
          VALUES (@id, @owner, @key, 'fio', @variant, @status, @reason, 'none', @amount, @currency,
-          @paidOn, @paidTime, @vs, @name, @message, @instruction, @now, @now, @now)`,
+          @paidOn, @paidTime, @vs, @name, @message, @instruction, @text, @now, @now, @now)`,
       )
       .run({
         id,
@@ -46,6 +47,7 @@ function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
         name: recognized ? "Ukázková firma" : null,
         message: recognized ? "Za konzultaci" : null,
         instruction: recognized ? id : null,
+        text: seed.text ?? null,
         now,
       });
     return id;
@@ -73,7 +75,8 @@ test("[UI-011] [BNK-012] nespárované a nerozpoznané jsou v centru i na zvonku
   const { baseURL, dataDir } = freshApp;
   await register(page, baseURL);
   seedNotice(dataDir);
-  seedNotice(dataDir, { status: "unrecognized" });
+  const longText = `Fio banka - nová zpráva\nÚčet ******9999/2010 ${"x".repeat(300)}`;
+  seedNotice(dataDir, { status: "unrecognized", text: longText });
 
   await page.goto(`${baseURL}/upozorneni`);
   await expect(page.getByText("Platby z avíz čekající na spárování: 1")).toBeVisible();
@@ -84,6 +87,10 @@ test("[UI-011] [BNK-012] nespárované a nerozpoznané jsou v centru i na zvonku
   const rows = page.getByTestId("notice-row");
   await expect(rows).toHaveCount(2);
   await expect(page.getByText("Nerozpoznaný formát").first()).toBeVisible();
+  const text = page.getByTestId("notice-text");
+  await expect(text).toContainText("Fio banka - nová zpráva");
+  await expect(text).toContainText("******9999/2010");
+  expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expect(page.getByText("Variabilní symbol neodpovídá žádnému dokladu.")).toBeVisible();
   for (let left = 2; left > 0; left--) {
     await rows.first().getByRole("button", { name: "Zahodit" }).click();
@@ -185,7 +192,7 @@ test.describe("vlastní schránka", () => {
 
     await page.goto(`${baseURL}/platby`);
     await page.getByRole("button", { name: "Přiřadit" }).click();
-    await dialog(page).getByLabel("Doklad").selectOption({ index: 1 });
+    await dialog(page).getByLabel("Doklad", { exact: true }).selectOption({ index: 1 });
     await expect(dialog(page)).toContainText("nic neodešle klientovi");
     await dialog(page).getByRole("button", { name: "Přiřadit platbu" }).click();
     await expect(dialog(page)).toBeHidden();

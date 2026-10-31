@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useId, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type FormEvent } from "react";
 import { assignNoticeAction, noticeCandidatesAction } from "@/app/(app)/platby/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogContent,
+  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -32,24 +33,63 @@ export type Candidate = {
   suggested: boolean;
 };
 
+const SEARCH_DELAY_MS = 250;
+
 export function useCandidates(noticeId: string) {
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  // Kept across searches, so an already chosen document keeps its currency when it drops out of the list.
+  const known = useRef(new Map<string, Candidate>());
   useEffect(() => {
     let current = true;
-    noticeCandidatesAction({ id: noticeId }).then(
-      (reply) => {
-        if (!current) return;
-        if (reply.ok) setCandidates(reply.candidates);
-        else setError(reply.error);
+    const timer = setTimeout(
+      () => {
+        noticeCandidatesAction({ id: noticeId, search }).then(
+          (reply) => {
+            if (!current) return;
+            if (reply.ok) {
+              for (const row of reply.candidates) known.current.set(row.id, row);
+              setCandidates(reply.candidates);
+              setMore(reply.more);
+              setError(null);
+            } else setError(reply.error);
+          },
+          () => current && setError(E.failed),
+        );
       },
-      () => current && setError(E.failed),
+      search ? SEARCH_DELAY_MS : 0,
     );
     return () => {
       current = false;
+      clearTimeout(timer);
     };
-  }, [noticeId]);
-  return { candidates, error };
+  }, [noticeId, search]);
+  return { candidates, more, error, search, setSearch, known: known.current };
+}
+
+export function CandidateSearch({
+  id,
+  search,
+  setSearch,
+  more,
+  shown,
+}: {
+  id: string;
+  search: string;
+  setSearch: (value: string) => void;
+  more: boolean;
+  shown: number;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Label htmlFor={id}>{T.search}</Label>
+      <Input id={id} value={search} onChange={(event) => setSearch(event.target.value)} />
+      {search && shown === 0 && <p className="text-xs text-muted-foreground">{T.noMatch}</p>}
+      {more && <p className="text-xs text-muted-foreground">{T.truncated(shown)}</p>}
+    </div>
+  );
 }
 
 export function candidateLabel(candidate: Candidate): string {
@@ -84,15 +124,15 @@ function Form({
   onDone: () => void;
 }) {
   const key = useId();
-  const { candidates, error: loadError } = useCandidates(notice.id);
+  const { candidates, more, error: loadError, search, setSearch, known } = useCandidates(notice.id);
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<string | null>(null);
   const [credited, setCredited] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const chosen =
-    candidates?.find((row) => row.id === (selected ?? candidates.find((c) => c.suggested)?.id)) ??
-    null;
+  const suggested = candidates?.filter((row) => row.suggested) ?? [];
+  const chosenId = selected ?? (suggested.length === 1 ? suggested[0]!.id : "");
+  const chosen = known.get(chosenId) ?? null;
   const noticeCurrency = notice.currency!;
   const amountMinor = notice.amountMinor!;
   const foreign = chosen !== null && chosen.currency !== noticeCurrency;
@@ -126,6 +166,7 @@ function Form({
     <form onSubmit={submit} className="flex flex-col gap-3">
       <AlertDialogHeader>
         <AlertDialogTitle>{T.title}</AlertDialogTitle>
+        <AlertDialogDescription>{T.noMail}</AlertDialogDescription>
       </AlertDialogHeader>
       {notice.provisional && (
         <p className="text-xs text-muted-foreground" data-testid="provisional-notice">
@@ -133,9 +174,16 @@ function Form({
         </p>
       )}
       <NoticeSummary item={notice} />
+      <CandidateSearch
+        id={`${key}-search`}
+        search={search}
+        setSearch={setSearch}
+        more={more}
+        shown={candidates?.length ?? 0}
+      />
       <div className="flex flex-col gap-1">
         <Label htmlFor={`${key}-invoice`}>{T.invoice}</Label>
-        {candidates && candidates.length === 0 ? (
+        {candidates && candidates.length === 0 && !search ? (
           <p className="text-sm text-muted-foreground">{T.none}</p>
         ) : (
           <NativeSelect
@@ -144,7 +192,15 @@ function Form({
             value={chosen?.id ?? ""}
             onChange={(event) => setSelected(event.target.value)}
           >
-            {candidates && <CandidateOptions candidates={candidates} />}
+            {candidates && (
+              <CandidateOptions
+                candidates={
+                  chosen && !candidates.some((row) => row.id === chosen.id)
+                    ? [chosen, ...candidates]
+                    : candidates
+                }
+              />
+            )}
           </NativeSelect>
         )}
       </div>
@@ -171,7 +227,6 @@ function Form({
           {T.overpaid(formatMoney(overpaid, noticeCurrency))}
         </p>
       )}
-      <p className="text-xs text-muted-foreground">{T.noMail}</p>
       {(error ?? loadError) && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error ?? loadError}</AlertDescription>

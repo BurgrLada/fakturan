@@ -25,6 +25,7 @@ import {
 import { getInvoice } from "@/server/services/invoices";
 import {
   addPayment,
+  closeDifference,
   deletePayment,
   insertPayment,
   updatePayment,
@@ -685,8 +686,9 @@ describe("fronta", () => {
     const other = issuedInvoice(owner, customerId);
     const stranger = seedAccount(db, NOW);
 
-    const offered = noticeCandidates(owner, noticeId);
+    const { candidates: offered, more } = noticeCandidates(owner, noticeId);
 
+    expect(more).toBe(false);
     expect(offered[0]).toMatchObject({ id: invoiceId, suggested: true });
     expect(offered.slice(1).map((row) => row.id)).toEqual([other]);
     expect(() => noticeCandidates(stranger.owner, noticeId)).toThrow(ServiceError);
@@ -950,6 +952,86 @@ describe("fronta", () => {
     expect(stored).not.toContain("Ukazkova");
     expect(stored).not.toContain("1111111116");
     expect(stored).not.toContain("Fiktivni");
+  });
+
+  test("vrácení odmítne doklad s uzavřeným rozdílem, ručně i smazáním platby, a projde po jeho smazání", () => {
+    const { owner, invoiceId, noticeId } = queued({ amountMinor: 100_000 });
+    addPayment(actor(owner), invoiceId, {
+      revision: getInvoice(owner, invoiceId)!.revision,
+      paidOn: "2026-10-20",
+      amountMinor: 100_000,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+    assignNotice(actor(owner), noticeId, { invoiceId });
+    closeDifference(actor(owner), invoiceId, {
+      revision: getInvoice(owner, invoiceId)!.revision,
+      confirmed: true,
+    });
+    const notice = payments(owner).find((row) => row.notificationId === noticeId)!;
+
+    expect(() => undoNotice(actor(owner), noticeId)).toThrow(/uzavřený rozdíl/);
+    expect(() =>
+      deletePayment(actor(owner), notice.id, getInvoice(owner, invoiceId)!.revision),
+    ).toThrow(/uzavřený rozdíl/);
+    expect(payments(owner)).toHaveLength(3);
+    expect(rows(owner)[0]!.status).toBe("matched");
+    assertConsistent(db, owner);
+
+    const difference = payments(owner).find((row) => row.kind === "difference")!;
+    deletePayment(actor(owner), difference.id, getInvoice(owner, invoiceId)!.revision);
+    undoNotice(actor(owner), noticeId);
+
+    expect(payments(owner)).toMatchObject([{ source: "manual", amountMinor: 100_000 }]);
+    expect(getInvoice(owner, invoiceId)).toMatchObject({
+      status: "partially_paid",
+      paidMinor: 100_000,
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("dvě části na týž doklad se vrátí společně", () => {
+    const { owner, invoiceId, noticeId } = queued();
+
+    splitNotice(actor(owner), noticeId, {
+      parts: [
+        { invoiceId, amountMinor: 100_000 },
+        { invoiceId, amountMinor: 200_000 },
+      ],
+    });
+    expect(getInvoice(owner, invoiceId)).toMatchObject({
+      status: "paid",
+      paidMinor: INVOICE_TOTAL,
+    });
+
+    undoNotice(actor(owner), noticeId);
+
+    expect(payments(owner)).toEqual([]);
+    expect(getInvoice(owner, invoiceId)).toMatchObject({ status: "issued", paidMinor: 0 });
+    assertConsistent(db, owner);
+  });
+
+  test("kandidáti nad limit se dají dohledat hledáním", () => {
+    const { owner, noticeId, customerId } = queued();
+    for (let i = 0; i < 52; i++) issuedInvoice(owner, customerId);
+
+    const all = noticeCandidates(owner, noticeId);
+    expect(all.more).toBe(true);
+    expect(all.candidates).toHaveLength(51);
+
+    const last = db
+      .select()
+      .from(invoice)
+      .where(eq(invoice.userId, owner))
+      .all()
+      .filter((row) => row.number)
+      .map((row) => row.number!)
+      .sort()
+      .at(-1)!;
+    const found = noticeCandidates(owner, noticeId, last);
+    expect(found.candidates.map((row) => row.number)).toContain(last);
+    expect(found.more).toBe(false);
   });
 
   test("seznam ukáže prozatímní variantu a doklady spárovaných avíz", () => {
