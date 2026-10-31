@@ -814,7 +814,8 @@ export const TEXTS = {
       portHint: "Povolené porty jsou 25, 465, 587 a 2525. Spojení je vždy šifrované.",
       user: "Uživatel",
       password: "Heslo",
-      passwordStored: "Heslo je uložené. Pole nechte prázdné, nebo zadejte nové.",
+      passwordStored:
+        "Heslo je uložené. Pole nechte prázdné, nebo zadejte nové. Při změně serveru, portu nebo uživatele je nové heslo povinné.",
       fromEmail: "Adresa odesílatele",
     },
     save: "Uložit",
@@ -840,6 +841,7 @@ export const TEXTS = {
       list: "Kopie musí být platné e-mailové adresy, nejvýš 10",
       singleLine: "Hodnota nesmí obsahovat konec řádku",
       passwordRequired: "K uživateli zadejte heslo",
+      passwordChanged: "Při změně serveru, portu nebo uživatele zadejte heslo znovu",
       blockedHost: "Tento server pošty není povolený",
       unavailable: "Odesílání e-mailů není dostupné",
       testFailed: "Zkušební e-mail se nepodařilo odeslat, zkontrolujte nastavení serveru",

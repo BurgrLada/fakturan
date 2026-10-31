@@ -173,6 +173,26 @@ describe("ukládání", () => {
     expect(getMailSettings(id).hasCredentials).toBe(false);
   });
 
+  test.each([
+    ["hostitele", { smtpHost: "localhost" }],
+    ["portu", { smtpPort: "2525" }],
+    ["uživatele", { smtpUser: "jiny" }],
+  ])("[SEC-003] změna %s bez nového hesla je odmítnutá a heslo zůstane", async (_name, change) => {
+    const id = seed();
+    const env = allowPrivate();
+    const login = { smtpUser: "jan", smtpPassword: PASSWORD };
+    await saveMailSettings(actor(id), own(login), env);
+    const before = row(id);
+
+    await expect(
+      saveMailSettings(actor(id), own({ smtpUser: "jan", ...change }), env),
+    ).rejects.toThrow("Při změně serveru, portu nebo uživatele zadejte heslo znovu");
+    expect(row(id)).toEqual(before);
+
+    await saveMailSettings(actor(id), own({ ...login, ...change }), env);
+    expect(row(id)?.smtpPasswordEnc).not.toBe(before?.smtpPasswordEnc);
+  });
+
   test("uživatel bez hesla a bez uloženého hesla je odmítnutý", async () => {
     const id = seed();
     await expect(

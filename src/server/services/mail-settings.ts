@@ -183,6 +183,11 @@ export async function saveMailSettings(
   mutate(actor, "mail_settings.save", (tx, audit) => {
     const row = tx.select().from(mailSettings).where(scoped(userId).where(mailSettings)).get();
     const login = host ? input.smtpUser || null : null;
+    // A hijacked session must not be able to point the stored password at another server.
+    const redirected = row?.smtpHost !== host || row?.smtpPort !== port || row?.smtpUser !== login;
+    if (login && row?.smtpPasswordEnc && redirected && !input.smtpPassword) {
+      throw new ServiceError(E.passwordChanged);
+    }
     const passwordEnc = !login
       ? null
       : input.smtpPassword
