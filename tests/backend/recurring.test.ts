@@ -1,12 +1,19 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, invoice, recurringInvoice, recurringRun } from "@/server/db/schema";
+import {
+  auditLog,
+  invoice,
+  numberSeries,
+  recurringInvoice,
+  recurringRun,
+} from "@/server/db/schema";
 import { ServiceError } from "@/server/services/access";
-import { setAutomation } from "@/server/services/automation";
+import { automationImpact, setAutomation } from "@/server/services/automation";
 import { deleteCustomer } from "@/server/services/customers";
 import { getInvoice } from "@/server/services/invoices";
 import { saveTemplate } from "@/server/services/invoice-templates";
@@ -19,7 +26,13 @@ import {
   recurringFromTemplate,
   saveRecurring,
 } from "@/server/services/recurring";
-import { processOccurrence } from "@/server/services/recurring-run";
+import {
+  pauseRecurring,
+  planRecurringRuns,
+  processOccurrence,
+  resolveMissed,
+  resumeRecurring,
+} from "@/server/services/recurring-run";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
 import { user } from "@/server/db/schema";
 import { nextOccurrences } from "@/lib/recurrence";
@@ -46,6 +59,14 @@ const firstOccurrence = (owner: string, id: string) => {
   const plan = getRecurring(owner, id)!;
   return nextOccurrences(plan, plan.cursorDate, 1)[0]!;
 };
+
+// A paused plan turns its queued occurrence into a missed run, which is what resolveMissed takes.
+function missedRun(owner: string) {
+  const id = savePlan(owner, null);
+  const occurrence = firstOccurrence(owner, id);
+  pauseRecurring(webActor(owner), id);
+  return { id, runId: processOccurrence(owner, id, occurrence)!.runId };
+}
 
 beforeEach(() => setClockForTests({ now: () => T0 }));
 afterEach(() => setClockForTests(null));
@@ -145,6 +166,19 @@ describe("uložení plánu", () => {
     assertConsistent(db, owner);
   });
 
+  test("[REC-030] zařazený termín bez běhu také brání překryvu období", () => {
+    const { owner, customerId } = owned();
+    const rule = { frequency: "every_months", every: 2, startsOn: "2026-03-01" } as const;
+    const id = savePlan(owner, customerId, rule);
+    planRecurringRuns(T0);
+    expect(() =>
+      saveRecurring(
+        webActor(owner),
+        planInput(customerId, { ...rule, id, startsOn: "2026-04-01" }),
+      ),
+    ).toThrow(/období/);
+  });
+
   test("[REC-004] náhled 12 termínů s vygenerovanými popisy", () => {
     const { owner, customerId } = owned();
     const preview = previewRecurring(owner, planInput(customerId, { periodOffset: -1 }));
@@ -173,17 +207,39 @@ describe("uložení plánu", () => {
         return 1;
       },
     });
+    const planOfRun = (runId: string) =>
+      db.select().from(recurringRun).where(eq(recurringRun.id, runId)).get()?.recurringId;
     await assertIsolated<string>({
       owners: [seedOwner(db, T0), seedOwner(db, T0)],
-      create: (ownerId) => {
-        const id = savePlan(ownerId, null);
-        return processOccurrence(ownerId, id, firstOccurrence(ownerId, id))!.runId;
-      },
+      create: (ownerId) => missedRun(ownerId).runId,
       find: (ownerId, runId) => {
-        const row = db.select().from(recurringRun).where(eq(recurringRun.id, runId)).get();
-        return row && listRuns(ownerId, row.recurringId).find((run) => run.id === runId);
+        const planId = planOfRun(runId);
+        return planId && listRuns(ownerId, planId).find((run) => run.id === runId);
+      },
+      update: (ownerId, runId) => {
+        resolveMissed(webActor(ownerId), runId, "skip");
+        return 1;
+      },
+      remove: (ownerId, runId) => {
+        deleteRecurring(webActor(ownerId), planOfRun(runId)!);
+        return 1;
       },
     });
+  });
+
+  test("[TST-009] cizí aktér plán nepozastaví, neobnoví ani nevyřídí jeho termín", () => {
+    const { owner, customerId } = owned();
+    const stranger = webActor(seedOwner(db, T0));
+    const active = savePlan(owner, customerId);
+    expect(() => pauseRecurring(stranger, active)).toThrow(/neexistuje/);
+    expect(getRecurring(owner, active)?.status).toBe("active");
+
+    const { id, runId } = missedRun(owner);
+    expect(() => resumeRecurring(stranger, id)).toThrow(/neexistuje/);
+    expect(getRecurring(owner, id)?.status).toBe("paused");
+    expect(() => resolveMissed(stranger, runId, "draft")).toThrow(/vyřízený/);
+    expect(() => resolveMissed(stranger, runId, "skip")).toThrow(/vyřízený/);
+    expect(listRuns(owner, id)[0]).toMatchObject({ status: "missed", invoiceId: null });
   });
 
   test("[REC-014] plán ukazuje své faktury a smazání plánu fakturu nechá", () => {
@@ -211,6 +267,32 @@ describe("uložení plánu", () => {
       .all()
       .map((row) => row.action);
     expect(actions).toEqual(["recurring.save", "recurring.delete"]);
+  });
+
+  test("[SET-040] dopad automatiky počítá aktivní plány s odesíláním", () => {
+    const { owner, customerId } = owned();
+    setAutomation(webActor(owner), "recurringSend", true, { confirmed: true });
+    const send = { mode: "send" as const, confirmSend: true };
+    savePlan(owner, customerId, send);
+    pauseRecurring(webActor(owner), savePlan(owner, customerId, send));
+    savePlan(owner, customerId, { mode: "issue" });
+    expect(automationImpact(owner).plans).toBe(1);
+  });
+
+  test("výchozí řady vzniknou jen tehdy, když se bude vystavovat", () => {
+    const owner = randomUUID();
+    const row = { id: owner, name: "x", email: `${owner}@x.cz`, createdAt: T0, updatedAt: T0 };
+    db.insert(user).values(row).run();
+    const seriesOf = () =>
+      db.select().from(numberSeries).where(eq(numberSeries.userId, owner)).all();
+
+    const draft = savePlan(owner, null);
+    processOccurrence(owner, draft, firstOccurrence(owner, draft));
+    expect(seriesOf()).toEqual([]);
+
+    const issue = savePlan(owner, null, { mode: "issue" });
+    processOccurrence(owner, issue, firstOccurrence(owner, issue));
+    expect(seriesOf().length).toBeGreaterThan(0);
   });
 
   test("úprava šablony nezmění plán", () => {

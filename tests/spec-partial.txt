@@ -27,3 +27,5 @@ REC-010	Režimy hotové ve službě, chybí volba v rozhraní	plán 4
 REC-011	Odmítnutí hotové ve službě, chybí potvrzovací dialog	plán 4
 REC-014	Vazba a seznam hotové ve službě, chybí zobrazení v rozhraní	plán 4
 REC-022	Kontrola při uložení hotová, chybí klikatelné vložení v editoru	plán 4
+REC-012	Upozornění předem hotové ve službě, chybí nastavení počtu dnů v rozhraní	plán 4
+REC-031	Doběh a zápis zmeškaných hotové, chybí nabídka ke kontrole v rozhraní	plán 4

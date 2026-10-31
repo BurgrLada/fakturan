@@ -774,8 +774,12 @@ export const TEXTS = {
         `Automatika je vypnutá, pravidelná faktura „${p.plan ?? ""}“ zůstala jako koncept.`,
       recurring_no_address: (p: Record<string, unknown>) =>
         `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale zákazník nemá e-mail, takže neodešla.`,
+      recurring_bad_mail: (p: Record<string, unknown>) =>
+        `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale e-mail nešlo odeslat. ${p.problems ?? ""}`.trim(),
       recurring_upcoming: (p: Record<string, unknown>) =>
-        `Pravidelná faktura „${p.plan ?? ""}“ se odešle ${p.date ?? ""}.`,
+        p.sends
+          ? `Pravidelná faktura „${p.plan ?? ""}“ se odešle ${p.date ?? ""}.`
+          : `Pravidelná faktura „${p.plan ?? ""}“ má termín ${p.date ?? ""}. Automatika je vypnutá, vznikne jen koncept.`,
       reminder_failed: (p: Record<string, unknown>) =>
         `Upomínku k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,
       reminder_missed: (p: Record<string, unknown>) =>
@@ -813,11 +817,14 @@ export const TEXTS = {
       paused: "Plán v termínu neběžel",
       tooOld: "Termín je starší než 3 dny",
       noAddress: "Zákazník nemá e-mail",
+      failed: "Běh se nepodařil",
     },
     upcomingMail: {
-      subject: "Blíží se odeslání pravidelné faktury",
-      body: (plan: string, date: string) =>
-        `Pravidelná faktura „${plan}“ se automaticky vystaví a odešle ${date}. Pokud s tím nesouhlasíte, plán ve Fakturanu včas upravte nebo pozastavte.`,
+      subject: "Blíží se termín pravidelné faktury",
+      body: (plan: string, date: string, sends: boolean) =>
+        sends
+          ? `Pravidelná faktura „${plan}“ se automaticky vystaví a odešle ${date}. Pokud s tím nesouhlasíte, plán ve Fakturanu včas upravte nebo pozastavte.`
+          : `Pravidelná faktura „${plan}“ má termín ${date}. Automatika je vypnutá, takže vznikne jen koncept a nic neodejde.`,
     },
   },
   invoiceMail: {
@@ -918,6 +925,7 @@ export const TEXTS = {
       reasons: {
         status: "Hromadně jde odeslat jen vystavená faktura",
         noAddress: "Zákazník nemá e-mail",
+        failed: "Běh se nepodařil",
         sending: "Už se odesílá",
         unknown: "Nejasný výsledek předchozího odeslání, vyřešte ho na detailu faktury",
         notFound: "Doklad neexistuje",

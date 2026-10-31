@@ -15,6 +15,7 @@ import {
   planRecurringNotices,
   planRecurringRuns,
   runRecurringJob,
+  settleDeadRuns,
 } from "../services/recurring-run";
 import { backupTask } from "./backup";
 import { releaseLease } from "./lease";
@@ -44,6 +45,8 @@ export const jobCleanupTask: TickTask = {
 };
 
 export const deadMailTask: TickTask = { name: "dead-mail", run: () => settleDeadMail() };
+
+export const deadRecurringTask: TickTask = { name: "dead-recurring", run: () => settleDeadRuns() };
 
 export const recurringPlanTask: TickTask = { name: "recurring-plan", run: planRecurringRuns };
 
@@ -84,6 +87,7 @@ export function startScheduler(): void {
   registerJob("recurring.run", { run: runRecurringJob });
   registerJob("user.notice", { run: deliverUserNotice });
   registerTickTask(deadMailTask);
+  registerTickTask(deadRecurringTask);
   registerTickTask(recurringPlanTask);
   registerTickTask(recurringNoticeTask);
   registerTickTask(jobCleanupTask);

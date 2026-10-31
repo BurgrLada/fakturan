@@ -3,13 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
-import { invoice, job, notification, schedulerState, user } from "@/server/db/schema";
+import {
+  invoice,
+  job,
+  notification,
+  recurringInvoice,
+  schedulerState,
+  user,
+} from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { setAutomation, setSendTime } from "@/server/services/automation";
 import { getInvoice } from "@/server/services/invoices";
-import { getRecurring, listRecurring, listRuns } from "@/server/services/recurring";
+import { getRecurring, listRecurring, listRuns, saveRecurring } from "@/server/services/recurring";
 import {
   pauseRecurring,
   planRecurringRuns,
@@ -17,12 +25,13 @@ import {
   resolveMissed,
   resumeRecurring,
   runRecurringJob,
+  settleDeadRuns,
 } from "@/server/services/recurring-run";
 import { deactivateUser, reactivateUser } from "@/server/services/users";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
-import { savePlan } from "../helpers/fixtures-recurring";
+import { planDocument, planInput, savePlan } from "../helpers/fixtures-recurring";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -55,6 +64,12 @@ afterEach(() => {
   setClockForTests(null);
   vi.restoreAllMocks();
 });
+
+function admin() {
+  const id = seedOwner(db, T0);
+  db.update(user).set({ role: "admin" }).where(eq(user.id, id)).run();
+  return webActor(id);
+}
 
 function account() {
   const owner = seedOwner(db, T0);
@@ -147,6 +162,124 @@ describe("výpadek", () => {
   });
 });
 
+describe("termín se neztratí", () => {
+  const SIX_HOURS = 6 * 3_600_000;
+
+  async function exhaustAttempts() {
+    registerJob("recurring.run", {
+      run: async () => {
+        throw new Error("spadlo");
+      },
+    });
+    await tickAt("2026-03-10T10:00:00Z");
+    for (let attempt = 1; attempt < 3; attempt += 1) {
+      current = new Date(current.getTime() + SIX_HOURS);
+      await drainJobs("w");
+    }
+    registerJob("recurring.run", { run: runRecurringJob });
+    expect(
+      db
+        .select()
+        .from(job)
+        .all()
+        .map((row) => row.status),
+    ).toEqual(["dead"]);
+  }
+
+  test("[REC-031] vyčerpané pokusy zapíšou termín jako zmeškaný a uvolní klíč", async () => {
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId);
+    await exhaustAttempts();
+    settleDeadRuns();
+    expect(statuses(owner, id)).toEqual([["2026-03-10", "missed"]]);
+    expect(listRuns(owner, id)[0]?.reason).toBe(TEXTS.recurring.reasons.failed);
+    expect(missedNotices(owner)).toHaveLength(1);
+    expect(db.select().from(job).all()).toEqual([]);
+    settleDeadRuns();
+    expect(missedNotices(owner)).toHaveLength(1);
+
+    const { invoiceId } = resolveMissed(webActor(owner), listRuns(owner, id)[0]!.id, "draft");
+    expect(getInvoice(owner, invoiceId!)?.issueDate).toBe("2026-03-10");
+  });
+
+  test("[REC-030] změna dne se stejným period_key nedá druhou fakturu", async () => {
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId);
+    await exhaustAttempts();
+    settleDeadRuns();
+    saveRecurring(webActor(owner), planInput(customerId, { id, issueDay: 20 }));
+    await tickAt("2026-03-20T10:00:00Z");
+    expect(statuses(owner, id)).toEqual([["2026-03-10", "missed"]]);
+    expect(invoicesOf(owner)).toEqual([]);
+    expect(missedNotices(owner)).toHaveLength(1);
+    await tickAt("2026-04-20T10:00:00Z");
+    expect(statuses(owner, id)).toEqual([
+      ["2026-03-10", "missed"],
+      ["2026-04-20", "created"],
+    ]);
+  });
+
+  test("[REC-031] koncept, který nejde založit, je zmeškaný termín a úloha se neopakuje", async () => {
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId);
+    const document = planDocument({ textBefore: "x".repeat(3000) });
+    db.update(recurringInvoice).set({ document }).where(eq(recurringInvoice.id, id)).run();
+    await tickAt("2026-03-10T10:00:00Z");
+    const [run] = listRuns(owner, id);
+    expect(run).toMatchObject({ status: "missed", invoiceId: null });
+    expect(run!.reason).toBeTruthy();
+    expect(missedNotices(owner)).toHaveLength(1);
+    expect(invoicesOf(owner)).toEqual([]);
+    expect(
+      db
+        .select()
+        .from(job)
+        .all()
+        .map((row) => row.status),
+    ).toEqual(["done"]);
+  });
+
+  test("[ADM-005] poslední termín hotového plánu po deaktivaci je zmeškaný", async () => {
+    const boss = admin();
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId, { maxCount: 1 });
+    at("2026-03-10T10:00:00Z");
+    planRecurringRuns(current);
+    expect(getRecurring(owner, id)?.status).toBe("finished");
+    deactivateUser(boss, owner);
+    at("2026-03-12T10:00:00Z");
+    reactivateUser(boss, owner);
+    expect(statuses(owner, id)).toEqual([["2026-03-10", "missed"]]);
+    expect(getRecurring(owner, id)?.status).toBe("finished");
+  });
+
+  test("[ADM-005] dnešní poslední termín hotového plánu po reaktivaci doběhne", async () => {
+    const boss = admin();
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId, { maxCount: 1 });
+    at("2026-03-10T10:00:00Z");
+    planRecurringRuns(current);
+    deactivateUser(boss, owner);
+    reactivateUser(boss, owner);
+    expect(getRecurring(owner, id)?.status).toBe("active");
+    await tickAt("2026-03-10T10:01:00Z");
+    expect(statuses(owner, id)).toEqual([["2026-03-10", "created"]]);
+    expect(getRecurring(owner, id)?.status).toBe("finished");
+  });
+
+  test("[ADM-005] reaktivace se hotového plánu bez čekající úlohy nedotkne", async () => {
+    const boss = admin();
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId, { maxCount: 1 });
+    await tickAt("2026-03-10T10:00:00Z");
+    const before = getRecurring(owner, id);
+    deactivateUser(boss, owner);
+    at("2026-05-01T10:00:00Z");
+    reactivateUser(boss, owner);
+    expect(getRecurring(owner, id)).toEqual(before);
+  });
+});
+
 describe("pauza", () => {
   test("[REC-005] obnovení ukáže zmeškané ke kontrole a nic nevytvoří", async () => {
     const { owner, customerId } = account();
@@ -207,12 +340,6 @@ describe("pauza", () => {
 });
 
 describe("deaktivace", () => {
-  function admin() {
-    const id = seedOwner(db, T0);
-    db.update(user).set({ role: "admin" }).where(eq(user.id, id)).run();
-    return webActor(id);
-  }
-
   test("[ADM-005] deaktivovaný účet nic nevytvoří, po reaktivaci jsou termíny missed", async () => {
     const boss = admin();
     const { owner, customerId } = account();

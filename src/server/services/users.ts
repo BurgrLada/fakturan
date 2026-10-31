@@ -46,7 +46,7 @@ import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
 import { cancelQueuedMail } from "./invoice-mail";
 import { mutate } from "./mutation";
-import { markMissed, activePlansOf } from "./recurring-run";
+import { markMissed, reviewablePlansOf } from "./recurring-run";
 
 export type Role = "admin" | "user";
 
@@ -194,7 +194,7 @@ export function reactivateUser(actor: Actor, userId: string): void {
     const target = targetUser(tx, userId);
     tx.update(user).set({ banned: false, updatedAt: clock.now() }).where(eq(user.id, userId)).run();
     const today = calendarDateInPrague(clock.now());
-    for (const plan of activePlansOf(tx, userId)) markMissed(tx, audit, plan, today);
+    for (const plan of reviewablePlansOf(tx, userId)) markMissed(tx, audit, plan, today);
     audit({
       entity: "user",
       entityId: userId,

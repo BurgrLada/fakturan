@@ -5,10 +5,12 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { nextOccurrences } from "@/lib/recurrence";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { createDb, runMigrations } from "@/server/db";
 import {
   auditLog,
+  customer,
   emailLog,
   invoice,
   job,
@@ -26,7 +28,8 @@ import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { issueInvoice } from "@/server/services/invoice-lifecycle";
 import { duplicateInvoice, getInvoice, saveDraft } from "@/server/services/invoices";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
-import { getRecurring, listRuns } from "@/server/services/recurring";
+import { defaultSeriesFor, peekNumber } from "@/server/services/number-series";
+import { getRecurring, listRecurring, listRuns } from "@/server/services/recurring";
 import {
   deliverUserNotice,
   planRecurringNotices,
@@ -53,6 +56,7 @@ vi.stubEnv("SMTP_FROM", "");
 
 const db = createTestDb();
 const T0 = new Date("2026-03-10T10:00:00Z");
+const T = TEXTS.notifications;
 const ENABLED = { confirmed: true };
 const SEND = { mode: "send" as const, confirmSend: true };
 
@@ -265,6 +269,30 @@ describe("běh termínu", () => {
   });
 });
 
+describe("savepoint", () => {
+  test("text přes limit po dosazení spadne na koncept a číslo se nespotřebuje", () => {
+    const { owner, customerId } = account();
+    db.update(customer)
+      .set({ name: "K".repeat(195) })
+      .where(eq(customer.id, customerId))
+      .run();
+    const series = defaultSeriesFor(owner, "invoice")!;
+    const expected = peekNumber(db, owner, series, "2026-03-10");
+    const before = counters(owner);
+    const document = planDocument({ reference: `{{zakaznik}}${"x".repeat(188)}` });
+
+    const failed = runOnce(owner, savePlan(owner, customerId, { mode: "issue", document }));
+    expect(failed.status).toBe("fallback");
+    expect(getInvoice(owner, failed.invoiceId!)).toMatchObject({ status: "draft", number: null });
+    expect(counters(owner)).toEqual(before);
+
+    const next = runOnce(owner, savePlan(owner, customerId, { mode: "issue" }));
+    expect(next.status).toBe("issued");
+    expect(getInvoice(owner, next.invoiceId!)?.number).toBe(expected);
+    assertConsistent(db, owner);
+  });
+});
+
 describe("automatika", () => {
   test("[REC-007] vypnutá automatika v termínu dá koncept bez čísla a upozornění", () => {
     const { owner, customerId } = sendingAccount();
@@ -340,6 +368,23 @@ describe("automatika", () => {
     expect(noticesOf(owner).map((row) => row.kind)).toEqual(["recurring_no_address"]);
   });
 
+  test("zpráva, která neprojde kontrolou, nechá fakturu vystavenou s upozorněním", () => {
+    const owner = seedOwner(db, T0);
+    const cc = Array.from({ length: 20 }, (_, i) => `kopie${i}@example.cz`);
+    ownSmtp(db, owner, smtp.port, { cc });
+    const customerId = seedCustomer(owner);
+    setAutomation(webActor(owner), "recurringSend", true, ENABLED);
+
+    const result = runOnce(owner, savePlan(owner, customerId, SEND));
+    expect(result.status).toBe("issued");
+    expect(getInvoice(owner, result.invoiceId!)?.status).toBe("issued");
+    expect(mailOf(owner)).toEqual([]);
+    const [notice] = noticesOf(owner);
+    expect(notice?.kind).toBe("recurring_bad_mail");
+    expect(String(notice?.params.problems)).toMatch(/20 příjemců/);
+    expect(listRuns(owner, listRecurring(owner)[0]!.id)[0]?.reason).toMatch(/20 příjemců/);
+  });
+
   test("[REC-013] selhání odeslání nechá fakturu vystavenou a run queued s upozorněním", async () => {
     const owner = seedOwner(db, T0);
     ownSmtp(db, owner, 1);
@@ -378,10 +423,38 @@ describe("automatika", () => {
     await drainJobs("w");
 
     expect(noticesOf(owner).map((row) => row.kind)).toEqual(["recurring_upcoming"]);
+    expect(noticesOf(owner)[0]?.params.sends).toBe(false);
     expect(smtp.messages).toHaveLength(1);
     expect(smtp.messages[0]!.to).toEqual([`${owner}@example.cz`]);
+    expect(smtp.messages[0]!.body).toMatch(/jen koncept/);
+    expect(smtp.messages[0]!.body).not.toMatch(/vystaví a odešle/);
     expect(smtp.messages[0]!.raw).not.toContain("alfa@example.cz");
     expect(mailOf(owner)).toEqual([]);
+  });
+});
+
+describe("upozornění předem", () => {
+  const upcoming = (owner: string) => T.kinds.recurring_upcoming(noticesOf(owner)[0]!.params);
+
+  test("[REC-012] slibuje odeslání, jen když opravdu proběhne", async () => {
+    const { owner, customerId } = sendingAccount();
+    savePlan(owner, customerId, { ...SEND, notifyDaysBefore: 3 });
+    at("2026-03-07T10:00:00Z");
+    planRecurringNotices(current);
+    await drainJobs("w");
+    expect(upcoming(owner)).toMatch(/se odešle/);
+    const mail = smtp.messages.find((item) => item.to.includes(`${owner}@example.cz`));
+    expect(mail?.body).toMatch(/vystaví a odešle/);
+  });
+
+  test("[REC-012] s vypnutou automatikou odeslání neslibuje", () => {
+    const { owner, customerId } = sendingAccount();
+    savePlan(owner, customerId, { ...SEND, notifyDaysBefore: 3 });
+    setAutomation(webActor(owner), "recurringSend", false, ENABLED);
+    at("2026-03-07T10:00:00Z");
+    planRecurringNotices(current);
+    expect(upcoming(owner)).toMatch(/jen koncept/);
+    expect(upcoming(owner)).not.toMatch(/se odešle/);
   });
 });
 

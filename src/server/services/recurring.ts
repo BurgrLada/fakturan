@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
 import { z } from "zod";
 import { addDays } from "@/lib/invoice";
 import type { TemplateDocument } from "@/lib/invoice-template";
@@ -23,6 +23,7 @@ import { czech } from "../db/collation";
 import {
   customer,
   invoice,
+  job,
   recurringInvoice,
   recurringRun,
   type RecurringInvoice,
@@ -94,6 +95,8 @@ function firstCursor(startsOn: CalendarDate, today: CalendarDate): CalendarDate 
   return addDays(startsOn > today ? startsOn : today, -1);
 }
 
+export const runKeyPrefix = (planId: string) => `recurring:${planId}:`;
+
 export function readPlan(q: Reader, ownerId: string, id: string): RecurringInvoice | null {
   return (
     q
@@ -123,6 +126,8 @@ function parseInput(raw: RecurringInput): ParsedInput {
   return parsed.data;
 }
 
+type BilledPeriod = Pick<RecurringRun, "periodKey" | "periodFrom" | "periodTo">;
+
 function assertNoOverlap(
   q: Reader,
   ownerId: string,
@@ -130,18 +135,34 @@ function assertNoOverlap(
   rule: RecurrenceRule,
   cursor: CalendarDate,
 ): void {
-  const runs = q
+  const runs: BilledPeriod[] = q
     .select()
     .from(recurringRun)
     .where(scoped(ownerId).where(recurringRun, (t, { eq }) => eq(t.recurringId, planId)))
     .all();
-  const lastBilled = runs.reduce((last, run) => (run.periodTo > last ? run.periodTo : last), "");
+  // A queued occurrence has no run yet, but it will bill its period just the same.
+  const queued = q
+    .select({ payload: job.payload })
+    .from(job)
+    .where(
+      scoped(ownerId).where(job, (t, { and }) =>
+        and(inArray(t.status, ["pending", "running"]), like(t.key, `${runKeyPrefix(planId)}%`)),
+      ),
+    )
+    .all()
+    .map(({ payload }) => ({
+      periodKey: String(payload.periodKey),
+      periodFrom: String(payload.periodFrom),
+      periodTo: String(payload.periodTo),
+    }));
+  const taken = [...runs, ...queued];
+  const lastBilled = taken.reduce((last, run) => (run.periodTo > last ? run.periodTo : last), "");
   for (let after = cursor; ;) {
     const next = nextOccurrences(rule, after, 1)[0];
     if (!next || next.billedPeriod.from > lastBilled) return;
     const { from, to } = next.billedPeriod;
     // The same key meets the unique index, so that occurrence cannot produce a second invoice.
-    const clash = runs.some(
+    const clash = taken.some(
       (run) => run.periodKey !== next.periodKey && run.periodFrom <= to && run.periodTo >= from,
     );
     if (clash) throw new ServiceError(V.periodOverlap);

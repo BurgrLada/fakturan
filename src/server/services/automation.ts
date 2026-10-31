@@ -12,7 +12,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { automationSettings, customer, user } from "../db/schema";
+import { automationSettings, customer, recurringInvoice, user } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
@@ -63,7 +63,16 @@ export function automationImpact(ownerId: string): { plans: number; customers: n
       ),
     )
     .get();
-  return { plans: 0, customers: row?.n ?? 0 };
+  const plans = db
+    .select({ n: count() })
+    .from(recurringInvoice)
+    .where(
+      scoped(ownerId).where(recurringInvoice, (t, { and, eq }) =>
+        and(eq(t.mode, "send"), eq(t.status, "active")),
+      ),
+    )
+    .get();
+  return { plans: plans?.n ?? 0, customers: row?.n ?? 0 };
 }
 
 type Change = {

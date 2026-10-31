@@ -134,6 +134,15 @@ export function takeIdleJobs(tx: Tx, userId: string, keyPrefix: string): Job[] {
     .all();
 }
 
+// False when the job is no longer dead, so two settlers cannot both act on it.
+export function removeDeadJob(tx: Tx, userId: string, id: string): boolean {
+  const removed = tx
+    .delete(job)
+    .where(scoped(userId).where(job, (t, { and, eq }) => and(eq(t.id, id), eq(t.status, "dead"))))
+    .run();
+  return removed.changes > 0;
+}
+
 // Dead jobs stay for diagnosis. Past this age recurring_run, reminder_sent and email_log hold idempotency.
 export function purgeFinishedJobs(now: Date): void {
   db.delete(job)
