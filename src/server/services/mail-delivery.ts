@@ -418,7 +418,7 @@ export function recoverMail(row: Job): void {
 // A dead job has no further run or recovery, and its record would block the partial index for good.
 export function settleDeadMail(): void {
   const stranded = db
-    .select({ log: emailLog })
+    .select({ log: emailLog, row: job })
     .from(job)
     .innerJoin(emailLog, sql`${emailLog.id} = json_extract(${job.payload}, '$.logId')`)
     .where(
@@ -429,8 +429,12 @@ export function settleDeadMail(): void {
       ),
     )
     .all();
-  for (const { log } of stranded) {
-    if (log.status === "sending") settle(log, "sending", "unknown", R.interrupted);
-    else settle(log, "queued", "failed", log.reason ?? R.notStarted);
+  for (const { log, row } of stranded) {
+    try {
+      if (log.status === "sending") settle(log, "sending", "unknown", R.interrupted);
+      else settle(log, "queued", "failed", log.reason ?? R.notStarted);
+    } catch (error) {
+      reportFailure(error, { ...failureContext(row), task: "dead-mail" });
+    }
   }
 }

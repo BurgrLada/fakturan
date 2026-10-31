@@ -44,6 +44,9 @@ import {
 } from "../helpers/fixtures-mail";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
 
+import { deadMailTask } from "@/server/scheduler/start";
+import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
+
 const mocks = vi.hoisted(() => ({
   captureException: vi.fn(),
   failRender: { on: false },
@@ -56,13 +59,14 @@ vi.mock("@/server/pdf/render", async (original) => {
   return {
     ...real,
     renderInvoicePdf: async (view: Parameters<typeof real.renderInvoicePdf>[0]) => {
-      if (mocks.failRender.on) throw new Error("render spadl");
       const { gate } = mocks.hold;
       if (gate) {
         mocks.hold.gate = null;
         mocks.hold.entered = true;
         await gate;
       }
+      // Read after the gate: a stalled attempt must see what changed while it waited.
+      if (mocks.failRender.on) throw new Error("render spadl");
       return real.renderInvoicePdf(view);
     },
   };
@@ -183,11 +187,12 @@ async function duringRender(action: () => void) {
 }
 
 // Attempt A stalls in the render long enough to lose its lease, then B recovers the job.
-async function stalledAttempt() {
+async function stalledAttempt(beforeTakeover?: () => void) {
   const release = holdRender();
   acquireLease("A");
   const attempt = deliverMail(claimNext("A")!);
   await vi.waitFor(() => expect(mocks.hold.entered).toBe(true));
+  beforeTakeover?.();
   later(121_000);
   expect(acquireLease("B")).toBe("taken_over");
   recoverInterrupted("B");
@@ -833,6 +838,48 @@ describe("obnova po přerušení", () => {
     expect(smtp.connections()).toBe(0);
   });
 
+  test("výjimka u jednoho mrtvého záznamu nezastaví ostatní a jde do monitoringu", () => {
+    const first = account();
+    const second = account();
+    const broken = send(first.owner, first.invoiceId);
+    const healthy = send(second.owner, second.invoiceId);
+    db.update(job).set({ status: "dead" }).run();
+    db.$client.exec(`CREATE TEMP TRIGGER refuse_settle BEFORE UPDATE ON email_log
+      WHEN old.id = '${broken}' BEGIN SELECT RAISE(ABORT, 'disk spadl'); END`);
+    try {
+      expect(() => settleDeadMail()).not.toThrow();
+    } finally {
+      db.$client.exec("DROP TRIGGER refuse_settle");
+    }
+    expect(logOf(broken).status).toBe("queued");
+    expect(logOf(healthy).status).toBe("failed");
+    expect(mocks.captureException).toHaveBeenCalledOnce();
+    expect(mocks.captureException.mock.calls[0][1]).toMatchObject({
+      tags: { task: "dead-mail", job_id: jobOf(broken).id, kind: "mail.send" },
+      user: { id: first.owner },
+    });
+
+    settleDeadMail();
+    expect(logOf(broken).status).toBe("failed");
+  });
+
+  test("tick spustí úkol mrtvých záznamů", async () => {
+    const { owner, invoiceId } = account();
+    const id = send(owner, invoiceId);
+    db.update(job)
+      .set({ status: "dead" })
+      .where(eq(job.id, jobOf(id).id))
+      .run();
+    resetTickTasksForTests();
+    registerTickTask(deadMailTask);
+    try {
+      await tick("tick-holder");
+    } finally {
+      resetTickTasksForTests();
+    }
+    expect(logOf(id).status).toBe("failed");
+  });
+
   test("recover hotového záznamu jen ukončí úlohu", async () => {
     const { owner, invoiceId } = account();
     const id = send(owner, invoiceId);
@@ -886,17 +933,31 @@ describe("převzetí úlohy za běhu", () => {
 
   test("pozdní pokus se spadlým renderem nového držitele nepřebije", async () => {
     const { owner, invoiceId } = account();
+    smtp.rejectNext(421);
     const id = send(owner, invoiceId);
-    const { attempt, release } = await stalledAttempt();
-    db.update(job)
-      .set({ attempts: 4 })
-      .where(eq(job.id, jobOf(id).id))
-      .run();
+    const setAttempts = (attempts: number) =>
+      db
+        .update(job)
+        .set({ attempts })
+        .where(eq(job.id, jobOf(id).id))
+        .run();
+    // A claims its last attempt and keeps that snapshot, while B still has attempts left.
+    setAttempts(3);
+    const { attempt, release } = await stalledAttempt(() => setAttempts(1));
     await drainJobs("B");
+    expect(logOf(id).status).toBe("queued");
+
     mocks.failRender.on = true;
     release();
-    await attempt.catch(() => {});
+    await expect(attempt).rejects.toThrow("render spadl");
+    expect(logOf(id).status).toBe("queued");
+    expect(jobOf(id).status).toBe("pending");
+
+    mocks.failRender.on = false;
+    later(30 * MINUTE);
+    await drainJobs("B");
     expect(logOf(id).status).toBe("sent");
+    expect(smtp.messages).toHaveLength(1);
   });
 });
 
