@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -18,6 +17,7 @@ import {
 import { formatMoney } from "@/lib/money";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
+import { designChoices } from "@/server/pdf/designs";
 import { requireSession } from "@/server/auth/session";
 import { getAutomation } from "@/server/services/automation";
 import { getCustomer } from "@/server/services/customers";
@@ -25,8 +25,6 @@ import { getRecurring, listPlanInvoices, listRuns } from "@/server/services/recu
 import { formChoices } from "../../faktury/form-data";
 
 const T = TEXTS.recurring;
-
-export const metadata: Metadata = { title: `${T.editTitle} | ${TEXTS.appName}` };
 
 const date = (value: string | null) => (value ? formatCalendarDate(value, "d. M. yyyy") : "–");
 
@@ -50,6 +48,8 @@ async function PlanContent({ params }: { params: Promise<{ id: string }> }) {
   const invoices = listPlanInvoices(user.id, id);
   return (
     <>
+      <title>{`${plan.name} | ${TEXTS.appName}`}</title>
+      <h1 className="font-brand text-2xl">{plan.name}</h1>
       <MissedReview rows={runs.filter((run) => run.status === "missed")} />
       <RecurringForm
         planId={plan.id}
@@ -58,6 +58,7 @@ async function PlanContent({ params }: { params: Promise<{ id: string }> }) {
         units={choices.units}
         defaultUnit={choices.defaultUnit}
         recurringSend={getAutomation(user.id).recurringSend}
+        designs={designChoices()}
         initial={{
           name: plan.name,
           customerId: plan.customerId,
@@ -135,7 +136,6 @@ export default function RecurringDetailPage({ params }: PageProps<"/pravidelne/[
       >
         {T.back}
       </Link>
-      <h1 className="font-brand text-2xl">{T.editTitle}</h1>
       <Suspense fallback={<PageLoading />}>
         <PlanContent params={params} />
       </Suspense>

@@ -13,13 +13,3 @@ FOR-005	Upozornění v UI nemá e2e test, ověřený je jen backend	plán 6
 CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán 4
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
-REC-001	Hotové výpočet, uložení i běh, chybí volba četnosti v rozhraní	plán 4
-REC-002	Hotové výpočet, uložení i běh, chybí volba dne vystavení v rozhraní	plán 4
-REC-003	Hotové uložení a ukončení plánu při běhu, chybí volba v rozhraní	plán 4
-REC-021	Hotové uložení období a běh, chybí nastavení posunu v rozhraní	plán 4
-REC-004	Náhled hotový ve službě, chybí zobrazení v rozhraní	plán 4
-REC-005	Služba hotová, chybí tlačítka a sekce Ke kontrole	plán 4
-REC-010	Režimy hotové ve službě, chybí volba v rozhraní	plán 4
-REC-011	Odmítnutí hotové ve službě, chybí potvrzovací dialog	plán 4
-REC-014	Vazba a seznam hotové ve službě, chybí zobrazení v rozhraní	plán 4
-REC-022	Kontrola při uložení hotová, chybí klikatelné vložení v editoru	plán 4

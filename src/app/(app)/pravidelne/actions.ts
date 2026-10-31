@@ -12,6 +12,8 @@ import {
   recurringInputSchema,
   saveRecurring,
 } from "@/server/services/recurring";
+import { getAutomation } from "@/server/services/automation";
+import { getCustomer } from "@/server/services/customers";
 import { pauseRecurring, resolveMissed, resumeRecurring } from "@/server/services/recurring-run";
 
 type Failure = { ok: false; error: string };
@@ -106,5 +108,15 @@ export async function recurringFromTemplateAction(raw: unknown) {
     const created = recurringFromTemplate(actor, templateId);
     refresh();
     return created;
+  });
+}
+
+// What the confirmation dialog tells the person before an invoice leaves without a click.
+export async function sendSummaryAction(raw: unknown) {
+  return run(z.object({ customerId: id }), raw, ({ customerId }, actor) => {
+    const owner = actor.userId!;
+    const customer = getCustomer(owner, customerId);
+    if (!customer) throw new ServiceError(V.invalid);
+    return { email: customer.email.trim(), sendTime: getAutomation(owner).sendTime };
   });
 }

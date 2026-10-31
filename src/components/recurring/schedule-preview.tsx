@@ -55,23 +55,38 @@ export function useSchedulePreview(input: RecurringInput | null): PreviewState {
   return state;
 }
 
-export function SchedulePreview({ state }: { state: PreviewState }) {
+export function SchedulePreview({
+  state,
+  blocked,
+}: {
+  state: PreviewState;
+  blocked: string | null;
+}) {
   return (
     <section className="flex flex-col gap-3" aria-labelledby="schedule-preview-title">
       <h2 id="schedule-preview-title" className="text-lg">
         {T.title}
       </h2>
-      <div aria-live="polite" data-testid="schedule-preview">
-        {state.kind === "error" && (
+      <div data-testid="schedule-preview">
+        {blocked && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {T.blocked(blocked)}
+          </p>
+        )}
+        {!blocked && state.kind === "error" && (
           <p role="alert" className="text-sm text-destructive">
             {state.message}
           </p>
         )}
-        {state.kind === "loading" && <p className="text-sm text-muted-foreground">{T.loading}</p>}
-        {state.kind === "ready" && state.rows.length === 0 && (
+        {!blocked && state.kind === "loading" && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {T.loading}
+          </p>
+        )}
+        {!blocked && state.kind === "ready" && state.rows.length === 0 && (
           <p className="text-sm text-muted-foreground">{T.empty}</p>
         )}
-        {state.kind === "ready" && state.rows.length > 0 && (
+        {!blocked && state.kind === "ready" && state.rows.length > 0 && (
           <Table>
             <TableHeader>
               <TableRow>
@@ -92,7 +107,18 @@ export function SchedulePreview({ state }: { state: PreviewState }) {
                     {formatCalendarDate(row.billedPeriod.to, "d. M. yyyy")}
                   </TableCell>
                   <TableCell className="whitespace-normal">
-                    {row.texts.lines[0]?.name || row.texts.textBefore}
+                    <ul className="flex flex-col gap-0.5">
+                      {[
+                        row.texts.textBefore,
+                        ...row.texts.lines.map((line) => line.name),
+                        row.texts.textAfter,
+                        row.texts.note,
+                      ]
+                        .filter(Boolean)
+                        .map((text, index) => (
+                          <li key={index}>{text}</li>
+                        ))}
+                    </ul>
                   </TableCell>
                 </TableRow>
               ))}

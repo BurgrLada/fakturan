@@ -6,6 +6,7 @@ import { RecurringForm } from "@/components/recurring/recurring-form";
 import { buttonVariants } from "@/components/ui/button";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
+import { designChoices } from "@/server/pdf/designs";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
 import { getAutomation } from "@/server/services/automation";
@@ -30,6 +31,7 @@ async function NewPlan() {
       units={choices.units}
       defaultUnit={choices.defaultUnit}
       recurringSend={getAutomation(user.id).recurringSend}
+      designs={designChoices()}
       initial={{
         name: "",
         customerId: null,

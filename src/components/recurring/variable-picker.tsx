@@ -44,7 +44,8 @@ export function useVariableTarget() {
         return;
       }
       insertAt(field, `{{${name}}}`);
-      setMessage(null);
+      field.focus();
+      setMessage(T.inserted(name));
     },
   };
 }
@@ -60,23 +61,23 @@ export function VariablePicker({
     <div className="flex flex-col gap-2" data-testid="variable-picker">
       <h3 className="text-sm font-medium">{T.title}</h3>
       <p className="text-sm text-muted-foreground">{T.hint}</p>
-      <ul className="flex flex-wrap gap-2">
+      <ul className="grid gap-2 sm:grid-cols-2">
         {VARIABLE_NAMES.map((name) => (
-          <li key={name}>
+          <li key={name} className="flex items-center gap-2">
             <Button
               type="button"
               size="sm"
               variant="outline"
               aria-label={T.insert(name)}
-              title={T.labels[name]}
               onClick={() => onInsert(name)}
             >
               {`{{${name}}}`}
             </Button>
+            <span className="text-sm text-muted-foreground">{T.labels[name]}</span>
           </li>
         ))}
       </ul>
-      <p role="status" className="min-h-4 text-sm text-muted-foreground">
+      <p role="status" aria-live="polite" className="min-h-4 text-sm text-muted-foreground">
         {message}
       </p>
     </div>

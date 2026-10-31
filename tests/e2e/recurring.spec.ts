@@ -99,6 +99,10 @@ test("[REC-004] změna četnosti obnoví náhled 12 termínů", async ({ page, f
   await expect(page.getByLabel("Každých (měsíců)")).toHaveCount(0);
   await page.getByLabel("Den vystavení").selectOption({ label: "Poslední den období" });
   await expect(page.getByLabel("Konkrétní den")).toHaveCount(0);
+
+  await page.getByLabel("Začátek", { exact: true }).fill("");
+  await expect(page.getByTestId("schedule-preview")).toContainText("Zadejte začátek plánu");
+  await expect(rows).toHaveCount(0);
 });
 
 test("[REC-005] [REC-031] pozastavení, obnovení a kontrola zmeškaného termínu", async ({
@@ -192,14 +196,16 @@ test("[REC-011] výběr vystavit a odeslat vyžaduje potvrzení", async ({ page,
 
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toContainText(`zákazníkovi ${CUSTOMER}`);
+  await expect(dialog).toContainText("alfa@example.cz");
+  await expect(dialog).toContainText("po 09:00");
   await expect(page).toHaveURL(/\/pravidelne\/nova$/);
   await dialog.getByRole("button", { name: "Potvrdit a uložit" }).click();
   await page.waitForURL(/\/pravidelne\/(?!nova)[\w-]+$/);
-  await expect(page.getByLabel("Vystavit a odeslat", { exact: true })).toBeChecked();
+  await expect(page.getByRole("radio", { name: "Vystavit a odeslat" })).toBeChecked();
 
   await page.getByRole("combobox", { name: "Zákazník" }).fill("");
   await page.getByRole("button", { name: "Uložit plán" }).click();
-  await expect(page.getByRole("alertdialog")).toContainText("bez zákazníka");
+  await expect(page.getByRole("alert").filter({ hasText: "musí mít zákazníka" })).toBeVisible();
 });
 
 test("[REC-012] počet dnů upozornění předem se uloží", async ({ page, freshApp }) => {
@@ -231,17 +237,17 @@ test("[REC-022] proměnná jde vložit klikem i klávesnicí", async ({ page, fr
   const before = page.getByLabel("Text před položkami");
   await before.fill("Za  práce");
   await before.evaluate((field: HTMLTextAreaElement) => field.setSelectionRange(3, 3));
-  await page.getByRole("button", { name: "Vložit proměnnou rok" }).click();
+  await page.getByRole("button", { name: "Vložit proměnnou {{rok}}" }).click();
   await expect(before).toHaveValue("Za {{rok}} práce");
 
-  const picker = page.getByRole("button", { name: "Vložit proměnnou mesic_nazev" });
+  const picker = page.getByRole("button", { name: "Vložit proměnnou {{mesic_nazev}}" });
   await picker.focus();
   await page.keyboard.press("Enter");
   await expect(before).toHaveValue("Za {{rok}}{{mesic_nazev}} práce");
 
   const line = page.getByRole("combobox", { name: "Název položky" }).first();
   await line.fill("Správa za ");
-  await page.getByRole("button", { name: "Vložit proměnnou mesic", exact: true }).click();
+  await page.getByRole("button", { name: "Vložit proměnnou {{mesic}}", exact: true }).click();
   await expect(line).toHaveValue("Správa za {{mesic}}");
 
   await page.getByLabel("Poznámka").fill("{{cena}}");
@@ -369,4 +375,140 @@ smtpTest("vypnutá automatika nepošle pravidelnou fakturu", async ({ page, fres
   await expect(page.getByTestId("run-row")).toContainText("Automatika byla vypnutá");
   await page.waitForTimeout(2000);
   expect(smtp.messages).toHaveLength(0);
+});
+
+const pragueDate = () =>
+  new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Prague" }).format(new Date());
+
+test("plán bez názvu se neuloží, pole je označené a dostane fokus", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/pravidelne/nova`);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await expect(page.getByLabel("Název plánu")).toBeFocused();
+  await expect(page.getByLabel("Název plánu")).toHaveAttribute("aria-invalid", "true");
+  await page.getByLabel("Název plánu").fill("Už s názvem");
+  await page.getByLabel("Splatnost ve dnech").fill("");
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await expect(page.getByLabel("Splatnost ve dnech")).toBeFocused();
+  await expect(page.getByRole("alert").filter({ hasText: "Zadejte splatnost" })).toBeVisible();
+});
+
+test("[REC-001] [REC-002] četnost a den vystavení se uloží a vrátí v detailu", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/pravidelne/nova`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název plánu").fill("Roční");
+  await fillLine(page, 0, "Správa webu", "1000");
+  await page.getByLabel("Četnost").selectOption({ label: "Ročně" });
+  await page.getByLabel("Den vystavení").selectOption({ label: "První pracovní den" });
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await page.waitForURL(/\/pravidelne\/(?!nova)[\w-]+$/);
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await expect(page.getByLabel("Četnost")).toHaveValue("yearly");
+  await expect(page.getByLabel("Den vystavení")).toHaveValue("first_working_day");
+
+  await page.getByLabel("Četnost").selectOption({ label: "Týdně" });
+  await page.getByLabel("Den vystavení").selectOption({ label: "Konkrétní den" });
+  await page.getByLabel("Konkrétní den").fill("3");
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await expect(page.getByText("Plán je uložený.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Četnost")).toHaveValue("weekly");
+  await expect(page.getByLabel("Konkrétní den")).toHaveValue("3");
+});
+
+test("[REC-010] [REC-021] režim a posun období se uloží, cizí měna upozorní na koncept", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/pravidelne/nova`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název plánu").fill("Režim a období");
+  await fillLine(page, 0, "Správa webu", "1000");
+  await page.getByLabel("Vystavit", { exact: true }).check();
+  await page.getByLabel("Posun fakturovaného období").fill("-1");
+  const { year, month } = prague(-1);
+  await expect(page.getByTestId("preview-row").first()).toContainText(`1. ${month}. ${year} – `);
+
+  await page.getByLabel("Měna").selectOption("EUR");
+  await expect(page.getByTestId("foreign-currency")).toContainText("jen koncept");
+  await page.getByLabel("Měna").selectOption("CZK");
+  await expect(page.getByTestId("foreign-currency")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await page.waitForURL(/\/pravidelne\/(?!nova)[\w-]+$/);
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await expect(page.getByLabel("Vystavit", { exact: true })).toBeChecked();
+  await expect(page.getByLabel("Posun fakturovaného období")).toHaveValue("-1");
+});
+
+test("[REC-003] plán skončí podle konce a po prodloužení jde znovu aktivovat", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await setSendTime(page, baseURL, "23:59");
+  await page.goto(`${baseURL}/pravidelne/nova`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název plánu").fill("Krátký plán");
+  await fillLine(page, 0, "Správa webu", "1000");
+  await page.getByLabel("Konec").fill(pragueDate());
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await page.waitForURL(/\/pravidelne\/(?!nova)[\w-]+$/);
+  await page.waitForLoadState("networkidle");
+  const plan = page.url();
+
+  await setSendTime(page, baseURL, "00:00");
+  await waitForRun(page, plan);
+  await expect(page.getByTestId("plan-status")).toHaveText("Hotový");
+  await expect(page.getByTestId("reactivate-offer")).toHaveCount(0);
+
+  await page.getByLabel("Konec").fill("2099-12-31");
+  await expect(page.getByTestId("reactivate-offer")).toBeVisible();
+  await page.getByRole("button", { name: "Znovu aktivovat" }).click();
+  await expect(page.getByTestId("plan-status")).toHaveText("Aktivní");
+  await page.reload();
+  await expect(page.getByTestId("plan-status")).toHaveText("Aktivní");
+  await expect(page.getByTestId("reactivate-offer")).toHaveCount(0);
+});
+
+test("[REC-024] plán v angličtině vystaví fakturu s anglickým názvem měsíce", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await setSendTime(page, baseURL, "23:59");
+  await page.goto(`${baseURL}/pravidelne/nova`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název plánu").fill("English plan");
+  await page.getByRole("combobox", { name: "Zákazník" }).fill("Alf");
+  await page.getByRole("option", { name: CUSTOMER }).click();
+  await fillLine(page, 0, "Hosting", "1000");
+  await page.getByLabel("Text před položkami").fill("Invoice for {{mesic_nazev}}");
+  await page.getByLabel("Jazyk faktury").selectOption("en");
+  await page.getByLabel("Způsob platby").selectOption("cash");
+  await page.getByLabel("Vystavit", { exact: true }).check();
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await page.waitForURL(/\/pravidelne\/(?!nova)[\w-]+$/);
+  await page.waitForLoadState("networkidle");
+  const plan = page.url();
+
+  await setSendTime(page, baseURL, "00:00");
+  await waitForRun(page, plan);
+  await page.getByTestId("plan-invoice").getByRole("link").click();
+  await page.waitForURL(/\/faktury\/[^/?]+$/);
+  const monthName = new Date().toLocaleString("en-US", {
+    month: "long",
+    timeZone: "Europe/Prague",
+  });
+  expect(await issuedPdf(page)).toContain(`Invoice for ${monthName}`);
 });

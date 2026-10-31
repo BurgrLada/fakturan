@@ -798,6 +798,13 @@ export const TEXTS = {
       name: "Vyplňte název plánu",
       tooLong: "Text je příliš dlouhý",
       notifyDays: "Upozornění předem musí být celý počet dnů od 1 do 30",
+      startsOn: "Zadejte začátek plánu",
+      dueDays: "Zadejte splatnost ve dnech",
+      every: "Zadejte, po kolika týdnech nebo měsících se plán opakuje",
+      issueDay: "Zadejte konkrétní den vystavení",
+      periodOffset: "Zadejte posun období, například 0 nebo -1",
+      maxCount: "Nejvyšší počet termínů musí být celé číslo",
+      lines: "Zkontrolujte položky, množství a ceny",
       rule: (fields: string[]) => `Zkontrolujte nastavení termínů: ${fields.join(", ")}`,
       sendDisabled: "Režim vystavit a odeslat vyžaduje zapnutou automatiku v Automatizaci",
       sendNotConfirmed: "Automatické odesílání této faktury musíte potvrdit",
@@ -829,7 +836,6 @@ export const TEXTS = {
       "Plán sám v zadané dny připraví fakturu. Podle režimu z ní zůstane koncept, vystavený doklad, nebo se i odešle zákazníkovi.",
     newPlan: "Nový plán",
     newTitle: "Nový plán pravidelné faktury",
-    editTitle: "Plán pravidelné faktury",
     back: "Zpět na pravidelné faktury",
     empty: "Zatím tu není žádný plán",
     emptyBody: "Vytvořte plán, nebo z uložené šablony faktury plán odvoďte jedním kliknutím.",
@@ -852,6 +858,8 @@ export const TEXTS = {
       issue: "V termínu se faktura vystaví a dostane číslo. Nic se neodešle.",
       send: "V termínu se faktura vystaví a odešle zákazníkovi e-mailem.",
     },
+    foreignCurrency:
+      "Faktura v cizí měně zatím nemá v plánu kurz, proto z ní v režimu Vystavit i Vystavit a odeslat vznikne jen koncept. Kurz přibude později.",
     sendNeedsAutomation: "Odesílání je vypnuté.",
     sendNeedsAutomationLink: "Zapněte ho v Automatizaci",
     statuses: { active: "Aktivní", paused: "Pozastavený", finished: "Hotový" },
@@ -912,8 +920,9 @@ export const TEXTS = {
     variables: {
       title: "Proměnné v textech",
       hint: "Vložíte je do pole, které jste naposledy upravovali. Měsíc, čtvrtletí, pololetí a rok se berou ze začátku fakturovaného období, ne z data vystavení. U bloku „Každých N“, který přesahuje hranici čtvrtletí nebo roku, platí začátek bloku.",
-      insert: (name: string) => `Vložit proměnnou ${name}`,
-      noField: "Nejdřív klikněte do textu, kam se má proměnná vložit.",
+      insert: (name: string) => `Vložit proměnnou {{${name}}}`,
+      inserted: (name: string) => `Vloženo {{${name}}}`,
+      noField: "Nejdřív klikněte do textu nebo názvu položky, kam se má proměnná vložit.",
       labels: {
         ctvrtleti: "čtvrtletí",
         pololeti: "pololetí",
@@ -931,6 +940,7 @@ export const TEXTS = {
       loading: "Počítám termíny…",
       empty: "Plán nemá žádný další termín.",
       failed: "Náhled se nepodařilo spočítat.",
+      blocked: (why: string) => `Náhled se ukáže po opravě. ${why}`,
       columns: { issue: "Vystavení", period: "Fakturované období", text: "Text" },
     },
     actions: {
@@ -948,19 +958,22 @@ export const TEXTS = {
       deleteBack: "Zpět",
       deleteConfirm: "Smazat plán",
       failed: "Akce se nezdařila. Zkuste to znovu.",
+      saveFirst: "Nejdřív plán uložte, potom ho jde znovu aktivovat.",
       useTemplate: "Vytvořit pravidelnou",
     },
     confirmSend: {
       title: "Potvrdit automatické odesílání",
       body: (customer: string) =>
         `V termínech plánu se faktura sama vystaví a odešle e-mailem zákazníkovi ${customer}. Odejde bez dalšího kliknutí.`,
-      noCustomer: "bez zákazníka",
+      needCustomer: "Plán s automatickým odesíláním musí mít zákazníka. Vyberte ho.",
+      noEmail: "Zákazník nemá e-mail pro fakturaci, automaticky odeslat nejde.",
+      details: (email: string, time: string) =>
+        `Adresa: ${email}. Odešle se v termínu plánu po ${time} (pražský čas).`,
       what: "Odešle se PDF faktury s textem z e-mailové šablony na adresu z karty zákazníka.",
       confirm: "Potvrdit a uložit",
       back: "Zpět",
     },
     detail: {
-      plan: "Plán",
       invoices: "Vystavené faktury",
       noInvoices: "Z plánu zatím žádná faktura nevznikla.",
       runs: "Běhy",
@@ -972,7 +985,6 @@ export const TEXTS = {
         invoice: "Faktura",
         reason: "Poznámka",
       },
-      openInvoice: "Otevřít fakturu",
       openDraft: "Otevřít koncept",
       review: "Ke kontrole",
       reviewBody:
@@ -981,7 +993,6 @@ export const TEXTS = {
       skip: "Přeskočit",
       draftCreated: "Koncept je vytvořený.",
       skipped: "Termín je přeskočený.",
-      nextDate: "Další termín",
     },
     runStatuses: {
       created: "Koncept",
@@ -991,7 +1002,7 @@ export const TEXTS = {
       missed: "Zmeškáno",
       skipped: "Přeskočeno",
     },
-    fromInvoice: { link: "Pravidelná faktura", label: "Vznikla z plánu" },
+    fromInvoice: { label: "Vznikla z plánu" },
     upcomingMail: {
       subject: "Blíží se termín pravidelné faktury",
       body: (plan: string, date: string, sends: boolean) =>

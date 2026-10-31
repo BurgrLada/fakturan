@@ -8,7 +8,9 @@ import {
   pauseRecurringAction,
   resumeRecurringAction,
   saveRecurringAction,
+  sendSummaryAction,
 } from "@/app/(app)/pravidelne/actions";
+import { AppearanceSection } from "@/components/invoices/appearance-section";
 import { CustomerPicker } from "@/components/invoices/customer-picker";
 import { LineEditor } from "@/components/invoices/line-editor";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,6 +29,8 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { CURRENCIES, type Currency } from "@/lib/currency";
+import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
+import { LANGUAGES, PAYMENT_METHODS, type DesignChoice } from "@/lib/preferences";
 import {
   changeCurrency,
   computeFormTotals,
@@ -56,6 +60,7 @@ import { useVariableTarget, VariablePicker } from "./variable-picker";
 const T = TEXTS.recurring;
 const F = T.fields;
 const INVOICE = TEXTS.invoices.form;
+const P = TEXTS.preferences;
 
 export type RecurringFormInitial = {
   name: string;
@@ -83,6 +88,7 @@ export type RecurringFormProps = {
   units: string[];
   defaultUnit: string;
   recurringSend: boolean;
+  designs: DesignChoice[];
 };
 
 const EVERY_FREQUENCIES: readonly RecurrenceFrequency[] = ["every_weeks", "every_months"];
@@ -129,14 +135,16 @@ function formValuesOf(document: TemplateDocument, defaultUnit: string): FormValu
 }
 
 const optionalNumber = (text: string): number | null => (text.trim() === "" ? null : Number(text));
+// Number("") is 0, which would pass a blank required field off as a value.
+const requiredNumber = (text: string): number => (text.trim() === "" ? Number.NaN : Number(text));
 
 export function RecurringForm(props: RecurringFormProps) {
-  const { planId, initial, accounts, units, defaultUnit, recurringSend } = props;
+  const { planId, initial, accounts, units, defaultUnit, recurringSend, designs } = props;
+  const { status } = props;
   const router = useRouter();
   const { shown, root } = useRouteShown<HTMLFormElement>();
   const variables = useVariableTarget();
 
-  const [status, setStatus] = useState(props.status);
   const [name, setName] = useState(initial.name);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [customerName, setCustomerName] = useState(initial.customerName);
@@ -164,7 +172,8 @@ export function RecurringForm(props: RecurringFormProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [offerReactivate, setOfferReactivate] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [summary, setSummary] = useState<{ email: string; sendTime: string } | null>(null);
 
   const fields = useMemo(() => toDocumentFields(values), [values]);
   const invalid = useMemo(() => new Set(fields.ok ? [] : fields.invalid), [fields]);
@@ -177,18 +186,51 @@ export function RecurringForm(props: RecurringFormProps) {
   const hasEvery = EVERY_FREQUENCIES.includes(frequency);
   const weekBased = WEEK_FREQUENCIES.includes(frequency);
 
+  const problems = useMemo(() => {
+    const list: { id: string; message: string }[] = [];
+    const bad = (id: string, message: string) => list.push({ id, message });
+    if (!name.trim()) bad("field-name", T.validation.name);
+    if (!fields.ok) bad("field-lines", T.validation.lines);
+    if (Number.isNaN(requiredNumber(dueDays))) bad("field-dueDays", T.validation.dueDays);
+    if (!startsOn) bad("field-startsOn", T.validation.startsOn);
+    if (hasEvery && Number.isNaN(requiredNumber(every))) bad("field-every", T.validation.every);
+    if (issueRule === "day" && Number.isNaN(requiredNumber(issueDay))) {
+      bad("field-issueDay", T.validation.issueDay);
+    }
+    if (Number.isNaN(requiredNumber(periodOffset))) {
+      bad("field-periodOffset", T.validation.periodOffset);
+    }
+    if (Number.isNaN(optionalNumber(maxCount) ?? 0)) bad("field-maxCount", T.validation.maxCount);
+    if (Number.isNaN(optionalNumber(notify) ?? 0)) bad("field-notify", T.validation.notifyDays);
+    return list;
+  }, [
+    name,
+    fields,
+    dueDays,
+    startsOn,
+    hasEvery,
+    every,
+    issueRule,
+    issueDay,
+    periodOffset,
+    maxCount,
+    notify,
+  ]);
+  // The name is not needed to compute dates.
+  const blocking = problems.find((problem) => problem.id !== "field-name");
+  const invalidField = (id: string) =>
+    (submitted && problems.some((p) => p.id === id)) || undefined;
+
   const payload = useMemo<RecurringInput | null>(() => {
-    if (!fields.ok || !startsOn) return null;
+    if (blocking || !fields.ok) return null;
     const numbers = {
-      dueDays: Number(dueDays),
-      every: hasEvery ? Number(every) : 1,
-      issueDay: issueRule === "day" ? Number(issueDay) : null,
+      dueDays: requiredNumber(dueDays),
+      every: hasEvery ? requiredNumber(every) : 1,
+      issueDay: issueRule === "day" ? requiredNumber(issueDay) : null,
       maxCount: optionalNumber(maxCount),
-      periodOffset: Number(periodOffset),
+      periodOffset: requiredNumber(periodOffset),
       notifyDaysBefore: optionalNumber(notify),
     };
-    if (Object.values(numbers).some((value) => value !== null && Number.isNaN(value))) return null;
-    if (issueRule === "day" && issueDay.trim() === "") return null;
     const f = fields.fields;
     return {
       ...(planId && { id: planId }),
@@ -224,6 +266,7 @@ export function RecurringForm(props: RecurringFormProps) {
       notifyDaysBefore: numbers.notifyDaysBefore,
     } satisfies RecurringInput;
   }, [
+    blocking,
     fields,
     startsOn,
     dueDays,
@@ -250,6 +293,7 @@ export function RecurringForm(props: RecurringFormProps) {
       [payload, name],
     ),
   );
+  const foreignCurrency = values.currency !== "CZK" && mode !== "draft";
   const nextDate = preview.kind === "ready" ? (preview.rows[0]?.issueDate ?? null) : null;
 
   const impacts = [
@@ -266,8 +310,8 @@ export function RecurringForm(props: RecurringFormProps) {
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>
     setValues((current) => ({ ...current, [key]: value }));
 
-  async function save(confirmSend: boolean) {
-    if (!payload) return;
+  async function save(confirmSend: boolean): Promise<boolean> {
+    if (!payload) return false;
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -275,15 +319,52 @@ export function RecurringForm(props: RecurringFormProps) {
       const reply = await saveRecurringAction(confirmSend ? { ...payload, confirmSend } : payload);
       if (!reply.ok) {
         setError(reply.error);
-        return;
+        return false;
       }
       if (!planId) {
         router.push(`/pravidelne/${reply.id}`);
-        return;
+        return true;
       }
       setMessage(T.actions.saved);
-      setOfferReactivate(status === "finished");
       router.refresh();
+      return true;
+    } catch {
+      setError(T.actions.failed);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setSubmitted(true);
+    const first = problems[0];
+    if (first) {
+      setError(first.message);
+      document.getElementById(first.id)?.focus();
+      return;
+    }
+    if (!needsConfirmation) {
+      void save(false);
+      return;
+    }
+    if (!customerId) {
+      setError(T.confirmSend.needCustomer);
+      document.getElementById("field-customerId")?.focus();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const reply = await sendSummaryAction({ customerId });
+      if (!reply.ok) setError(reply.error);
+      else if (!reply.email) setError(T.confirmSend.noEmail);
+      else {
+        setSummary({ email: reply.email, sendTime: reply.sendTime });
+        setConfirming(true);
+      }
     } catch {
       setError(T.actions.failed);
     } finally {
@@ -291,24 +372,18 @@ export function RecurringForm(props: RecurringFormProps) {
     }
   }
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (busy) return;
-    if (!name.trim()) {
-      setError(T.validation.name);
+  // The service resumes the saved rule, so edits made on the page are saved first.
+  async function reactivate() {
+    if (needsConfirmation) {
+      setError(T.actions.saveFirst);
       return;
     }
-    if (!payload) {
-      setError(T.validation.invalid);
-      return;
-    }
-    if (needsConfirmation) setConfirming(true);
-    else void save(false);
+    if (!(await save(false))) return;
+    await change(resumeRecurringAction);
   }
 
   async function change(
     action: (raw: unknown) => Promise<{ ok: true } | { ok: false; error: string }>,
-    next: RecurringStatus | null,
   ) {
     if (!planId) return;
     setBusy(true);
@@ -320,8 +395,6 @@ export function RecurringForm(props: RecurringFormProps) {
         setError(reply.error);
         return;
       }
-      if (next) setStatus(next);
-      setOfferReactivate(false);
       router.refresh();
     } catch {
       setError(T.actions.failed);
@@ -360,7 +433,7 @@ export function RecurringForm(props: RecurringFormProps) {
               variant="outline"
               size="sm"
               disabled={busy}
-              onClick={() => change(pauseRecurringAction, "paused")}
+              onClick={() => change(pauseRecurringAction)}
             >
               {T.actions.pause}
             </Button>
@@ -371,7 +444,7 @@ export function RecurringForm(props: RecurringFormProps) {
               variant="outline"
               size="sm"
               disabled={busy}
-              onClick={() => change(resumeRecurringAction, "active")}
+              onClick={() => change(resumeRecurringAction)}
             >
               {T.actions.resume}
             </Button>
@@ -388,16 +461,11 @@ export function RecurringForm(props: RecurringFormProps) {
         </div>
       )}
 
-      {offerReactivate && status === "finished" && preview.kind === "ready" && nextDate && (
+      {status === "finished" && nextDate && (
         <Alert role="status" data-testid="reactivate-offer">
           <AlertDescription className="flex flex-col items-start gap-2">
             <span>{T.actions.reactivateOffer}</span>
-            <Button
-              type="button"
-              size="sm"
-              disabled={busy}
-              onClick={() => change(resumeRecurringAction, "active")}
-            >
+            <Button type="button" size="sm" disabled={busy} onClick={reactivate}>
               {T.actions.reactivate}
             </Button>
           </AlertDescription>
@@ -406,7 +474,12 @@ export function RecurringForm(props: RecurringFormProps) {
 
       <section className="flex flex-col gap-4">
         <Field id="field-name" label={F.name}>
-          <Input id="field-name" value={name} onChange={(event) => setName(event.target.value)} />
+          <Input
+            id="field-name"
+            aria-invalid={invalidField("field-name")}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
         </Field>
         <CustomerPicker
           name={customerName}
@@ -519,13 +592,94 @@ export function RecurringForm(props: RecurringFormProps) {
         <Field id="field-dueDays" label={F.dueDays}>
           <Input
             id="field-dueDays"
+            aria-invalid={invalidField("field-dueDays")}
             type="number"
             min={0}
             value={dueDays}
             onChange={(event) => setDueDays(event.target.value)}
           />
         </Field>
+        <Field id="field-language" label={INVOICE.fields.language}>
+          <NativeSelect
+            id="field-language"
+            value={values.language}
+            onChange={(event) => set("language", event.target.value as FormValues["language"])}
+          >
+            {LANGUAGES.map((language) => (
+              <option key={language} value={language}>
+                {P.languages[language]}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field id="field-paymentMethod" label={INVOICE.fields.paymentMethod}>
+          <NativeSelect
+            id="field-paymentMethod"
+            value={values.paymentMethod}
+            onChange={(event) =>
+              set("paymentMethod", event.target.value as FormValues["paymentMethod"])
+            }
+          >
+            {PAYMENT_METHODS.map((method) => (
+              <option key={method} value={method}>
+                {P.paymentMethods[method]}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field id="field-discountKind" label={INVOICE.fields.discountKind}>
+          <NativeSelect
+            id="field-discountKind"
+            value={values.discountKind}
+            onChange={(event) =>
+              set("discountKind", event.target.value as FormValues["discountKind"])
+            }
+          >
+            {DISCOUNT_KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {INVOICE.discounts[kind]}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        {values.discountKind !== "none" && (
+          <Field id="field-discount" label={INVOICE.fields.discountValue}>
+            <Input
+              id="field-discount"
+              inputMode="decimal"
+              aria-invalid={invalid.has("field-discount") || undefined}
+              value={values.discount}
+              onChange={(event) => set("discount", event.target.value)}
+            />
+          </Field>
+        )}
+        <Field id="field-rounding" label={INVOICE.fields.rounding}>
+          <NativeSelect
+            id="field-rounding"
+            value={values.rounding}
+            onChange={(event) => set("rounding", event.target.value as FormValues["rounding"])}
+          >
+            {ROUNDING_MODES.map((option) => (
+              <option key={option} value={option}>
+                {P.roundings[option]}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
       </section>
+
+      {foreignCurrency && (
+        <Alert role="status" data-testid="foreign-currency">
+          <AlertDescription>{T.foreignCurrency}</AlertDescription>
+        </Alert>
+      )}
+
+      <AppearanceSection
+        value={values.appearance}
+        designs={designs}
+        invalid={invalid}
+        onChange={(patch) => set("appearance", { ...values.appearance, ...patch })}
+      />
 
       <section className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-3">
@@ -545,6 +699,7 @@ export function RecurringForm(props: RecurringFormProps) {
           {hasEvery && (
             <Field
               id="field-every"
+              aria-invalid={invalidField("field-every")}
               label={`${F.every} (${T.everyUnit[frequency as "every_weeks"]})`}
             >
               <Input
@@ -572,6 +727,7 @@ export function RecurringForm(props: RecurringFormProps) {
           {issueRule === "day" && (
             <Field
               id="field-issueDay"
+              aria-invalid={invalidField("field-issueDay")}
               label={F.issueDay}
               hint={weekBased ? T.issueDayWeek : T.issueDayMonth}
             >
@@ -589,6 +745,7 @@ export function RecurringForm(props: RecurringFormProps) {
           <Field id="field-startsOn" label={F.startsOn}>
             <Input
               id="field-startsOn"
+              aria-invalid={invalidField("field-startsOn")}
               type="date"
               aria-describedby="field-startsOn-hint"
               value={startsOn}
@@ -606,6 +763,7 @@ export function RecurringForm(props: RecurringFormProps) {
           <Field id="field-maxCount" label={F.maxCount}>
             <Input
               id="field-maxCount"
+              aria-invalid={invalidField("field-maxCount")}
               type="number"
               min={1}
               aria-describedby="field-maxCount-hint"
@@ -616,6 +774,7 @@ export function RecurringForm(props: RecurringFormProps) {
           <Field id="field-periodOffset" label={F.periodOffset}>
             <Input
               id="field-periodOffset"
+              aria-invalid={invalidField("field-periodOffset")}
               type="number"
               min={-12}
               max={12}
@@ -642,7 +801,7 @@ export function RecurringForm(props: RecurringFormProps) {
         )}
       </section>
 
-      <SchedulePreview state={preview} />
+      <SchedulePreview state={preview} blocked={blocking?.message ?? null} />
 
       <fieldset className="flex flex-col gap-3">
         <legend className="text-lg">{F.mode}</legend>
@@ -681,6 +840,7 @@ export function RecurringForm(props: RecurringFormProps) {
           <Field id="field-notify" label={F.notifyDaysBefore} hint={T.notifyHint}>
             <Input
               id="field-notify"
+              aria-invalid={invalidField("field-notify")}
               type="number"
               min={1}
               max={30}
@@ -713,8 +873,8 @@ export function RecurringForm(props: RecurringFormProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>{T.confirmSend.title}</AlertDialogTitle>
             <AlertDialogDescription>
-              {T.confirmSend.body(customerName.trim() || T.confirmSend.noCustomer)}{" "}
-              {T.confirmSend.what}
+              {T.confirmSend.body(customerName.trim())} {T.confirmSend.what}{" "}
+              {summary && T.confirmSend.details(summary.email, summary.sendTime)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
