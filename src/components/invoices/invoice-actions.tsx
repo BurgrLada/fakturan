@@ -10,6 +10,7 @@ import {
   refreshCustomerAction,
   restoreInvoiceAction,
 } from "@/app/(app)/faktury/actions";
+import { saveInvoiceAsTemplateAction } from "@/app/(app)/faktury/sablony/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -22,9 +23,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.invoices.detail;
+const TPL = TEXTS.invoices.templates.save;
 
 type Reply = { ok: boolean; error?: string };
 
@@ -47,6 +51,8 @@ export function InvoiceActions({
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [templateName, setTemplateName] = useState("");
 
   function perform(work: () => Promise<Reply>, done?: string) {
     setMessage(null);
@@ -74,6 +80,24 @@ export function InvoiceActions({
     });
   }
 
+  function saveTemplate() {
+    setNaming(false);
+    setMessage(null);
+    startTransition(async () => {
+      try {
+        const reply = await saveInvoiceAsTemplateAction({ id, name: templateName });
+        if (reply.ok) {
+          setTemplateName("");
+          setMessage({ ok: true, text: TPL.saved });
+        } else {
+          setMessage({ ok: false, text: reply.error });
+        }
+      } catch {
+        setMessage({ ok: false, text: T.failed });
+      }
+    });
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -88,6 +112,38 @@ export function InvoiceActions({
         <Button variant="outline" disabled={pending} onClick={duplicate}>
           {T.duplicate}
         </Button>
+        <AlertDialog open={naming} onOpenChange={setNaming}>
+          <AlertDialogTrigger render={<Button variant="outline" disabled={pending} />}>
+            {TPL.trigger}
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveTemplate();
+              }}
+            >
+              <AlertDialogHeader>
+                <AlertDialogTitle>{TPL.title}</AlertDialogTitle>
+                <AlertDialogDescription>{TPL.body}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor={`template-name-${id}`}>{TPL.name}</Label>
+                <Input
+                  id={`template-name-${id}`}
+                  value={templateName}
+                  maxLength={100}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                />
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{TPL.cancel}</AlertDialogCancel>
+                <Button type="submit">{TPL.confirm}</Button>
+              </AlertDialogFooter>
+            </form>
+          </AlertDialogContent>
+        </AlertDialog>
         {markable && (
           <Button
             variant="outline"
@@ -149,7 +205,17 @@ export function InvoiceActions({
       </p>
       {message && (
         <Alert variant={message.ok ? "default" : "destructive"} role="status">
-          <AlertDescription>{message.text}</AlertDescription>
+          <AlertDescription>
+            {message.text}
+            {message.ok && message.text === TPL.saved && (
+              <>
+                {" "}
+                <Link href="/faktury/sablony" className="underline underline-offset-4">
+                  {TPL.open}
+                </Link>
+              </>
+            )}
+          </AlertDescription>
         </Alert>
       )}
     </div>

@@ -9,7 +9,7 @@ import { getInvoice, isFreeDraftId } from "@/server/services/invoices";
 
 const DETAIL = /^\/(?:(zakaznici|cenik)\/([^/]+)|(faktury)\/([^/]+)(?:\/upravit)?)$/;
 const VERSION = /^\/faktury\/([^/]+)\/verze\/([^/]+)$/;
-const NEW_PAGES = new Set(["/zakaznici/novy", "/cenik/novy"]);
+const FIXED_PAGES = new Set(["/zakaznici/novy", "/cenik/novy", "/faktury/sablony"]);
 const NEW_INVOICE = "/faktury/nova";
 const FINDERS = {
   zakaznici: getCustomer,
@@ -64,7 +64,7 @@ export async function proxy(request: NextRequest) {
     id &&
     session &&
     request.method === "GET" &&
-    !NEW_PAGES.has(pathname) &&
+    !FIXED_PAGES.has(pathname) &&
     pathname !== NEW_INVOICE
   ) {
     let key: string;

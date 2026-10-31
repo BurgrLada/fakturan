@@ -127,6 +127,13 @@
       "when": 1793388092808,
       "tag": "0017_invoice_version",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1793440282425,
+      "tag": "0018_invoice_template",
+      "breakpoints": true
     }
   ]
 }

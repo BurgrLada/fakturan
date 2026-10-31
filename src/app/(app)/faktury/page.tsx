@@ -103,7 +103,12 @@ export default function InvoicesPage({ searchParams }: PageProps<"/faktury">) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-brand text-2xl">{T.title}</h1>
-        <NewInvoiceLink />
+        <div className="flex gap-2">
+          <Link href="/faktury/sablony" className={buttonVariants({ variant: "outline" })}>
+            {T.templates}
+          </Link>
+          <NewInvoiceLink />
+        </div>
       </div>
       <Suspense fallback={<PageLoading />}>
         <InvoicesContent searchParams={searchParams} />

@@ -94,7 +94,7 @@ const discountFields = {
   discountValue: z.number(V.discount).int(V.discount).min(0, V.discount),
 };
 
-function checkDiscount(
+export function checkDiscount(
   value: { discountKind: DiscountKind; discountValue: number },
   ctx: z.RefinementCtx,
 ): void {
@@ -107,9 +107,9 @@ function checkDiscount(
   }
 }
 
-function withoutStrayDiscount<T extends { discountKind: DiscountKind; discountValue: number }>(
-  value: T,
-): T {
+export function withoutStrayDiscount<
+  T extends { discountKind: DiscountKind; discountValue: number },
+>(value: T): T {
   return value.discountKind === "none" ? { ...value, discountValue: 0 } : value;
 }
 
@@ -147,7 +147,7 @@ const appearanceSchema = z.object({
   showDuzp: z.boolean(V.invalid),
 });
 
-const documentFields = {
+export const documentFields = {
   bankAccountId: reference,
   issueDate: date,
   dueDate: date,
