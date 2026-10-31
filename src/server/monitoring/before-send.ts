@@ -27,7 +27,12 @@ function clean(text: string): string {
     .replace(QUERY_TOKEN, "$1[token]");
 }
 
-export const scrubText = clean;
+// A mail server's reply (`550 5.1.1 ...`) can quote addresses and content (R-30).
+const SERVER_REPLY = /\b[245]\d{2}(?:[ -]\d\.\d{1,3}\.\d{1,3})?[ -]\S[^\r\n]*/g;
+
+export function scrubText(text: string): string {
+  return clean(text).replace(SERVER_REPLY, "[odpověď serveru]");
+}
 
 function cleanUrl(raw: string): string {
   return clean(raw.split(/[?#]/)[0]);
@@ -72,7 +77,7 @@ export function scrubEvent<T extends Event>(event: T): T {
   const tags = JOB_TAGS.filter((key) => event.tags?.[key] !== undefined);
   if (tags.length) out.tags = Object.fromEntries(tags.map((key) => [key, event.tags?.[key]]));
   if (event.user?.id !== undefined) out.user = { id: event.user.id };
-  if (event.message) out.message = clean(event.message);
+  if (event.message) out.message = scrubText(event.message);
   if (event.transaction) out.transaction = cleanUrl(event.transaction);
   if (event.request) {
     const { method, url } = event.request;
@@ -90,7 +95,7 @@ export function scrubEvent<T extends Event>(event: T): T {
     out.exception = {
       values: event.exception.values.map(({ type, value, mechanism, stacktrace }) => ({
         type,
-        value: value === undefined ? undefined : clean(value),
+        value: value === undefined ? undefined : scrubText(value),
         mechanism,
         stacktrace: stacktrace && { frames: cleanFrames(stacktrace.frames) },
       })),

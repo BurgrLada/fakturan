@@ -87,8 +87,8 @@ Uživatel chtěl plány bez čekání, proto je plán rozhodl sám. Na `[R-n]` s
 - Produces:
   - `JOB_KINDS`, `type Job`, `type JobPayload`
   - `enqueue(tx: Tx, input: { kind; key: string; userId: string | null; payload; runAt?: Date; maxAttempts?: number }): { id: string; created: boolean }`
-  - `claimNext(worker: string): Job | null`, `completeJob(id)`, `retryJob(id, { runAt, reason })`, `failJob(id, reason)`, `cancelUserJobs(tx: Tx, userId: string): string[]`
-  - `registerJob(kind, { run: (job: Job) => Promise<void>; recover?: (job: Job) => void })`, `class RetryLater extends Error { delayMs }`
+  - `claimNext(worker: string): Job | null`, `completeJob(id, worker)`, `retryJob(id, worker, { runAt, reason })`, `failJob(id, worker, reason)`, `cancelUserJobs(tx: Tx, userId: string): string[]`
+  - `registerJob(kind, { run: (job: Job) => Promise<void>; recover?: (job: Job) => void })`, `class RetryLater extends Error { delayMs; report }`
   - `drainJobs(worker: string): Promise<number>`, `kickWorker(): void`
   - `acquireLease(holder: string): 'held' | 'taken_over' | 'busy'`, `releaseLease(holder)`
   - `type TickTask = { name: string; run: (now: Date) => void | Promise<void> }`, `registerTickTask(task)`, `tick(holder: string): Promise<{ ran: boolean }>`
@@ -362,6 +362,8 @@ test('[TST-009] izolace šablon e-mailů', ...)
 `email_log`: `id`, `user_id`, `invoice_id` (cascade), `kind`, `trigger`, `to`, `cc`, `bcc` (JSON), `subject`, `body`, `status`, `reason`, `file_id` (set null), `invoice_revision`, `planned_for`, `automation`, `attempts`, `message_id`, `created_at`, `sent_at`, `updated_at`. Index `(user_id, invoice_id, created_at)`. Unikátní částečný `(invoice_id, kind) WHERE status IN ('queued','sending')`, ruční SQL v migraci, pokud ho `drizzle-kit` nevygeneruje. `email_log` je v `USER_OWNED_TABLES` před `invoice` a `file`.
 
 Spec: MAIL-004, 005, 006, 007, PDF-010, INV-005, REC-013, REC-032, TST-005, SEC-001, AUD-001, MON-003. Viz **[R-1]**, **[R-2]**, **[R-3]**, **[R-4]**, **[R-30]**.
+
+Jeden pokus doručení má tvrdý limit pod 120 s (timeouty SMTP i renderu PDF), aby nepřečkal lease a obnova nesáhla na běžící úlohu.
 
 Doručení, kroky jdou v tomto pořadí a každý je samostatná transakce:
 

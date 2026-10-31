@@ -17,6 +17,7 @@ CREATE TABLE `job` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `job_key_unique` ON `job` (`key`);--> statement-breakpoint
 CREATE INDEX `job_status_run_at_idx` ON `job` (`status`,`run_at`);--> statement-breakpoint
+CREATE INDEX `job_user_idx` ON `job` (`user_id`);--> statement-breakpoint
 CREATE TABLE `scheduler_state` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`holder` text,

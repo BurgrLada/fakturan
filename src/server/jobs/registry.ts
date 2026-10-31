@@ -8,11 +8,14 @@ export type JobDefinition = {
 
 export class RetryLater extends Error {
   delayMs: number;
+  // Off by default: a failing provider is an operational state, not a code failure (R-30).
+  report: boolean;
 
-  constructor(message: string, delayMs: number) {
+  constructor(message: string, delayMs: number, options: { report?: boolean } = {}) {
     super(message);
     this.name = "RetryLater";
     this.delayMs = delayMs;
+    this.report = options.report ?? false;
   }
 }
 

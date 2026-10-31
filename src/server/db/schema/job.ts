@@ -26,7 +26,7 @@ export const job = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
-  (t) => [index("job_status_run_at_idx").on(t.status, t.runAt)],
+  (t) => [index("job_status_run_at_idx").on(t.status, t.runAt), index("job_user_idx").on(t.userId)],
 );
 
 export type Job = typeof job.$inferSelect;

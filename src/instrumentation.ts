@@ -9,6 +9,9 @@ export async function register() {
     parseEnv(process.env);
     const { db, runMigrations } = await import("./server/db");
     runMigrations(db);
+    // Before the scheduler, whose first failure must already reach monitoring.
+    const { initMonitoring } = await import("../sentry.server.config");
+    initMonitoring(process.env);
     const { startScheduler } = await import("./server/scheduler/start");
     startScheduler();
   } catch (err) {
@@ -17,8 +20,6 @@ export async function register() {
     if (process.env.NODE_ENV === "production") process.exit(1);
     throw err;
   }
-  const { initMonitoring } = await import("../sentry.server.config");
-  initMonitoring(process.env);
   const trusted = ["1", "true"].includes(process.env.TRUST_PROXY ?? "");
   if (process.env.NODE_ENV === "production" && !trusted) {
     logger.warn(

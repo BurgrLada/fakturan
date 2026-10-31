@@ -22,6 +22,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.doUnmock("@/server/db");
   vi.doUnmock("@/server/scheduler/start");
+  vi.doUnmock("../../sentry.server.config");
   vi.resetModules();
 });
 
@@ -95,12 +96,15 @@ describe("start", () => {
   test("[OPS-002] plánovač startuje až za migracemi", async () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const order: string[] = [];
+    vi.doMock("../../sentry.server.config", () => ({
+      initMonitoring: () => order.push("monitoring"),
+    }));
     const register = await loadRegister(
       () => order.push("migrace"),
       () => order.push("plánovač"),
     );
     await register();
-    expect(order).toEqual(["migrace", "plánovač"]);
+    expect(order).toEqual(["migrace", "monitoring", "plánovač"]);
   });
 
   test("[OPS-002] selhání startu plánovače zastaví start", async () => {

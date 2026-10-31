@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bc9be9c4-1c78-4fee-aaec-ca710ce46046",
+  "id": "5aafd01c-d70d-4473-8eb0-2c92fd36385c",
   "prevId": "d1007cc1-4fe5-44f3-92bb-acfd885deece",
   "tables": {
     "audit_log": {
@@ -3146,6 +3146,13 @@
           "columns": [
             "status",
             "run_at"
+          ],
+          "isUnique": false
+        },
+        "job_user_idx": {
+          "name": "job_user_idx",
+          "columns": [
+            "user_id"
           ],
           "isUnique": false
         }

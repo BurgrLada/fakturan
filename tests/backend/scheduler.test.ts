@@ -8,7 +8,7 @@ import { job, schedulerState } from "@/server/db/schema";
 import { checkHealth } from "@/server/health";
 import { claimNext, completeJob, enqueue } from "@/server/jobs/queue";
 import { registerJob } from "@/server/jobs/registry";
-import { kickWorker } from "@/server/jobs/worker";
+import { drainJobs, kickWorker } from "@/server/jobs/worker";
 import { acquireLease, releaseLease } from "@/server/scheduler/lease";
 import { reportFailure } from "@/server/scheduler/report";
 import {
@@ -136,7 +136,7 @@ describe("lease", () => {
     expect(acquireLease("b")).toBe("taken_over");
   });
 
-  test("[ARC-008] lease se obnovuje před každou úlohou, cizí převzetí práci zastaví", async () => {
+  test("[ARC-008] lease se obnovuje před každou úlohou", async () => {
     const seen: (Date | null | undefined)[] = [];
     registerJob(KIND, {
       run: async () => {
@@ -147,12 +147,48 @@ describe("lease", () => {
     put(undefined, "1");
     put(undefined, "2");
     put(undefined, "3");
-    await tick("a");
+    await drainJobs("a");
     expect(seen).toEqual([
       new Date(T0.getTime() + 120_000),
       new Date(T0.getTime() + 220_000),
       new Date(T0.getTime() + 320_000),
     ]);
+  });
+
+  test("[ARC-008] cizí převzetí během úlohy zastaví další práci", async () => {
+    const run = vi.fn(async () => {
+      advance(3 * MINUTE);
+      acquireLease("b");
+    });
+    registerJob(KIND, { run });
+    put(undefined, "1");
+    put(undefined, "2");
+    await drainJobs("a");
+    expect(run).toHaveBeenCalledOnce();
+    expect(db.select().from(job).where(eq(job.key, "2")).get()?.status).toBe("pending");
+  });
+
+  test("[ARC-008] lease se obnovuje mezi tick úlohami a ztráta zastaví další", async () => {
+    const next = vi.fn();
+    registerTickTask({
+      name: "pomalá",
+      run: () => {
+        advance(3 * MINUTE);
+        acquireLease("b");
+      },
+    });
+    registerTickTask({ name: "další", run: next });
+    await tick("a");
+    expect(next).not.toHaveBeenCalled();
+    expect(state()?.lastOkAt).toBeNull();
+
+    const seen: unknown[] = [];
+    resetTickTasksForTests();
+    advance(3 * MINUTE);
+    registerTickTask({ name: "první", run: () => advance(100_000) });
+    registerTickTask({ name: "druhá", run: () => void seen.push(state()?.leaseUntil) });
+    await tick("c");
+    expect(seen).toEqual([new Date(at.getTime() + 120_000)]);
   });
 });
 
@@ -176,6 +212,45 @@ describe("tick", () => {
     await tick("a");
     expect(seen).toEqual([T0, null, null]);
     expect(state()?.lastOkAt).toEqual(new Date(T0.getTime() + 2_000));
+  });
+
+  test("[OPS-004] pomalá fronta nechá zbytek dalšímu ticku a health neshodí", async () => {
+    db.insert(schedulerState).values({ id: 1, startedAt: at }).run();
+    const run = vi.fn(async () => advance(20_000));
+    registerJob(KIND, { run });
+    for (let i = 0; i < 6; i += 1) put(undefined, String(i));
+
+    await tick("a");
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(state()?.lastOkAt).toEqual(at);
+    expect(schedulerHealth(db)).toBe("running");
+
+    await tick("a");
+    expect(run).toHaveBeenCalledTimes(6);
+  });
+
+  test("last_ok_at nepřibude po selhané úloze ani když frontu drží jiný běh", async () => {
+    registerTickTask({
+      name: "padá",
+      run: () => {
+        throw new Error("pád");
+      },
+    });
+    await tick("a");
+    expect(state()?.lastTickAt).toEqual(at);
+    expect(state()?.lastOkAt).toBeNull();
+
+    resetTickTasksForTests();
+    let finish = () => {};
+    registerJob(KIND, { run: () => new Promise<void>((resolve) => (finish = resolve)) });
+    put();
+    const draining = drainJobs("a");
+    await tick("a");
+    expect(state()?.lastOkAt).toBeNull();
+    finish();
+    await draining;
+    await tick("a");
+    expect(state()?.lastOkAt).toEqual(at);
   });
 
   test("[MON-003] selhání jedné tick úlohy nezastaví další", async () => {
@@ -203,10 +278,10 @@ describe("tick", () => {
   test("denní údržba smaže hotovou úlohu po 90 dnech jednou za den", async () => {
     const { id } = put();
     claimNext("w");
-    completeJob(id);
+    completeJob(id, "w");
     const fresh = put(undefined, "dnes");
     claimNext("w");
-    completeJob(fresh.id);
+    completeJob(fresh.id, "w");
     const later = new Date(T0.getTime() + 91 * 86_400_000);
     const tooEarly = new Date("2027-02-01T01:00:00Z");
     jobCleanupTask.run(tooEarly);
@@ -217,7 +292,7 @@ describe("tick", () => {
 
     const again = put(new Date(later.getTime() - 100 * 86_400_000), "znovu");
     claimNext("w");
-    completeJob(again.id);
+    completeJob(again.id, "w");
     db.update(job)
       .set({ updatedAt: new Date(later.getTime() - 100 * 86_400_000) })
       .where(eq(job.id, again.id))
@@ -231,7 +306,7 @@ describe("hlášení", () => {
   test("[MON-003] selhání úlohy zavolá Sentry s druhem a ID, bez adres a textu odpovědi", async () => {
     vi.stubEnv("SENTRY_DSN", "https://k@errors.example.cz/1");
     const write = vi.mocked(process.stdout.write);
-    const failure = Object.assign(new Error("Doručení pro jan@example.cz selhalo"), {
+    const failure = Object.assign(new Error("Doručení pro jan@example.cz: 550 mailbox full"), {
       response: "550 mailbox full",
     });
     registerJob(KIND, {
@@ -248,7 +323,7 @@ describe("hlášení", () => {
     const log = write.mock.calls.map(([line]) => String(line)).join("");
     expect(log).toContain(id);
     expect(log).not.toContain("jan@example.cz");
-    expect(log).not.toContain("550 mailbox full");
+    expect(log).not.toContain("mailbox full");
 
     const sent = scrubEvent({
       tags: context.tags,
@@ -256,6 +331,7 @@ describe("hlášení", () => {
     });
     expect(sent.tags).toEqual(context.tags);
     expect(JSON.stringify(sent)).not.toContain("jan@example.cz");
+    expect(JSON.stringify(sent)).not.toContain("mailbox full");
   });
 
   test("[MON-003] bez SENTRY_DSN jde selhání jen do logu, s ID účtu v události", () => {
@@ -324,6 +400,24 @@ describe("start", () => {
     expect(state()?.startedAt).toEqual(first);
   });
 
+  test("[R-5] SIGTERM s běžící úlohou lease neuvolní a nechá ho vypršet", async () => {
+    stubEnv();
+    let finish = () => {};
+    registerJob(KIND, { run: () => new Promise<void>((resolve) => (finish = resolve)) });
+    startScheduler();
+    put();
+    kickWorker();
+    const holder = state()?.holder;
+    expect(holder).toEqual(expect.any(String));
+
+    stopScheduler();
+    expect(state()?.holder).toBe(holder);
+    expect(acquireLease("nový")).toBe("busy");
+
+    finish();
+    await vi.waitFor(() => expect(db.select().from(job).get()?.status).toBe("done"));
+  });
+
   test("[OPS-004] stopScheduler uvolní lease a kickWorker pak nic nedělá", async () => {
     stubEnv();
     const run = vi.fn(async () => {});
@@ -331,7 +425,7 @@ describe("start", () => {
     startScheduler();
     put();
     kickWorker();
-    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(db.select().from(job).get()?.status).toBe("done"));
     expect(state()?.holder).toEqual(expect.any(String));
     stopScheduler();
     expect(state()?.holder).toBeNull();

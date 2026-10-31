@@ -42,10 +42,16 @@ describe("souběh", () => {
       Array.from({ length: 8 }, (_, i) => ({ mode: "tick", worker: `h${i}`, ticks: 3 })),
       databasePath,
     );
-    expect(results.flat().filter((r) => r.ran).length).toBeGreaterThanOrEqual(1);
+    const winners = results.filter((ticks) => ticks.some((r) => r.ran));
+    expect(winners).toHaveLength(1);
+    expect(winners[0].every((r) => r.ran)).toBe(true);
+
     const rows = shared.select().from(job).all();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].key).toBe("daily:2026-11-02");
-    expect(rows[0].status).toBe("done");
+    const daily = rows.filter((row) => row.key.startsWith("daily:"));
+    expect(daily).toHaveLength(1);
+    const runs = rows.filter((row) => row.key.startsWith("run:"));
+    expect(runs).toHaveLength(3);
+    expect(new Set(runs.map((row) => row.key.split(":")[1])).size).toBe(1);
+    expect(rows.every((row) => row.status === "done")).toBe(true);
   }, 60_000);
 });

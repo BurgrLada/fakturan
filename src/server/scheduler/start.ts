@@ -7,7 +7,7 @@ import { db, type Db } from "../db";
 import { schedulerState } from "../db/schema";
 import { env } from "../env";
 import { purgeFinishedJobs } from "../jobs/queue";
-import { bindWorker, haltWorker } from "../jobs/worker";
+import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
 import { releaseLease } from "./lease";
 import { reportFailure } from "./report";
 import { registerTickTask, tick, type TickTask } from "./tick";
@@ -80,5 +80,6 @@ export function stopScheduler(): void {
   running.cron.stop();
   process.off("SIGTERM", running.onTerm);
   haltWorker(running.holder);
-  releaseLease(running.holder);
+  // A job still running must not be recovered while it runs: the lease expires once this process exits.
+  if (!jobInFlight()) releaseLease(running.holder);
 }

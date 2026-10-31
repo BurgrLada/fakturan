@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
 import { job, user, type Job, type JobKind, type JobPayload } from "../db/schema";
@@ -77,24 +77,37 @@ export function claimNext(worker: string): Job | null {
   return claimed ?? null;
 }
 
-// Guarded on `running`, so a result arriving after recovery took the job over changes nothing.
-function finishRunning(id: string, fields: Partial<Pick<Job, "status" | "runAt" | "reason">>) {
+// Guarded on the holder, so a result arriving after recovery took the job over changes nothing.
+function finishRunning(
+  id: string,
+  worker: string,
+  fields: { status: Job["status"] | SQL; runAt?: Date; reason?: string | SQL },
+) {
   db.update(job)
     .set({ ...fields, lockedBy: null, updatedAt: clock.now() })
-    .where(and(eq(job.id, id), eq(job.status, "running")))
+    .where(and(eq(job.id, id), eq(job.status, "running"), eq(job.lockedBy, worker)))
     .run();
 }
 
-export function completeJob(id: string): void {
-  finishRunning(id, { status: "done" });
+export function completeJob(id: string, worker: string): void {
+  finishRunning(id, worker, { status: "done" });
 }
 
-export function retryJob(id: string, input: { runAt: Date; reason: string }): void {
-  finishRunning(id, { status: "pending", ...input });
+const OWNER_BANNED = sql`EXISTS (
+  SELECT 1 FROM "user" WHERE "user"."id" = "job"."user_id" AND coalesce("user"."banned", 0) = 1
+)`;
+
+// One statement, so a deactivation cannot slip between the check and the write (R-21).
+export function retryJob(id: string, worker: string, input: { runAt: Date; reason: string }): void {
+  finishRunning(id, worker, {
+    status: sql`CASE WHEN ${OWNER_BANNED} THEN 'cancelled' ELSE 'pending' END`,
+    runAt: input.runAt,
+    reason: sql`CASE WHEN ${OWNER_BANNED} THEN 'deactivated' ELSE ${input.reason} END`,
+  });
 }
 
-export function failJob(id: string, reason: string): void {
-  finishRunning(id, { status: "dead", reason });
+export function failJob(id: string, worker: string, reason: string): void {
+  finishRunning(id, worker, { status: "dead", reason });
 }
 
 // A running attempt is left alone: it cannot be taken back (R-21).

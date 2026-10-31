@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { job, schedulerState, user } from "@/server/db/schema";
+import { job, schedulerState, user, type Job } from "@/server/db/schema";
 import { scoped } from "@/server/db/scoped";
 import { setClockForTests } from "@/server/clock";
 import {
@@ -95,13 +95,13 @@ describe("fronta", () => {
   test("completeJob, retryJob a failJob nastaví koncový stav a uvolní držitele", () => {
     const a = put();
     claimNext("w");
-    completeJob(a.id);
+    completeJob(a.id, "w");
     expect(row(a.id)).toMatchObject({ status: "done", lockedBy: null });
 
     const b = put();
     claimNext("w");
     const runAt = new Date(T0.getTime() + 60_000);
-    retryJob(b.id, { runAt, reason: "později" });
+    retryJob(b.id, "w", { runAt, reason: "později" });
     expect(row(b.id)).toMatchObject({
       status: "pending",
       lockedBy: null,
@@ -111,16 +111,28 @@ describe("fronta", () => {
 
     now(runAt);
     claimNext("w");
-    failJob(b.id, "konec");
+    failJob(b.id, "w", "konec");
     expect(row(b.id)).toMatchObject({ status: "dead", lockedBy: null, reason: "konec" });
   });
 
-  test("zpožděný výsledek neoživí úlohu, kterou mezitím převzala obnova", () => {
+  test("[ARC-007] po převzetí a novém claimu opožděný výsledek starého držitele nic nezmění", () => {
     const { id } = put();
-    claimNext("w");
-    retryJob(id, { runAt: T0, reason: "obnova" });
-    completeJob(id);
-    expect(row(id).status).toBe("pending");
+    claimNext("starý");
+    recoverInterrupted("nový");
+    claimNext("nový");
+
+    completeJob(id, "starý");
+    retryJob(id, "starý", { runAt: T0, reason: "pozdě" });
+    failJob(id, "starý", "pozdě");
+    expect(row(id)).toMatchObject({
+      status: "running",
+      lockedBy: "nový",
+      attempts: 2,
+      reason: "přerušený běh",
+    });
+
+    completeJob(id, "nový");
+    expect(row(id).status).toBe("done");
   });
 });
 
@@ -139,7 +151,7 @@ describe("obnova", () => {
   });
 
   test("[ARC-007] vlastní recover rozhodne místo výchozího návratu do fronty", () => {
-    const recover = vi.fn((running: { id: string }) => failJob(running.id, "nejisté"));
+    const recover = vi.fn((running: Job) => failJob(running.id, running.lockedBy!, "nejisté"));
     registerJob(KIND, { run: async () => {}, recover });
     const { id } = put();
     claimNext("mrtvý");
@@ -211,7 +223,48 @@ describe("selhání", () => {
     now(row(id).runAt);
     await drainJobs("w");
     expect(row(id)).toMatchObject({ status: "dead", attempts: 2 });
+    expect(report.captureException).not.toHaveBeenCalled();
+  });
+
+  test("RetryLater s příznakem report je hlášený až při vyčerpání pokusů", async () => {
+    vi.stubEnv("SENTRY_DSN", "https://k@errors.example.cz/1");
+    registerJob(KIND, {
+      run: async () => {
+        throw new RetryLater("chyba kódu", 1_000, { report: true });
+      },
+    });
+    const { id } = put({ maxAttempts: 2 });
+    await drainJobs("w");
+    expect(report.captureException).not.toHaveBeenCalled();
+    now(row(id).runAt);
+    await drainJobs("w");
     expect(report.captureException).toHaveBeenCalledOnce();
+  });
+
+  test("selhaný zápis výsledku úspěšnou úlohu nevrátí do fronty", async () => {
+    const run = vi.fn(async () => {});
+    registerJob(KIND, { run });
+    const { id } = put();
+    db.$client.exec(`CREATE TRIGGER no_done BEFORE UPDATE ON job WHEN NEW.status = 'done'
+      BEGIN SELECT RAISE(ABORT, 'disk plný'); END`);
+    try {
+      await drainJobs("w");
+    } finally {
+      db.$client.exec("DROP TRIGGER no_done");
+    }
+    expect(run).toHaveBeenCalledOnce();
+    expect(row(id)).toMatchObject({ status: "running", attempts: 1 });
+  });
+
+  test("důvod úlohy neobsahuje adresu ani text odpovědi serveru", async () => {
+    registerJob(KIND, {
+      run: async () => {
+        throw new Error("Odmítnuto pro jan@example.cz: 550 5.1.1 mailbox full");
+      },
+    });
+    const { id } = put();
+    await drainJobs("w");
+    expect(row(id).reason).not.toMatch(/jan@example|mailbox full/);
   });
 
   test("druh bez registrace selže jako kterákoli jiná úloha", async () => {
@@ -225,10 +278,10 @@ describe("údržba", () => {
   test("po 90 dnech zmizí hotové a zrušené úlohy, mrtvé a čekající zůstanou", () => {
     const done = put();
     claimNext("w");
-    completeJob(done.id);
+    completeJob(done.id, "w");
     const dead = put();
     claimNext("w");
-    failJob(dead.id, "x");
+    failJob(dead.id, "w", "x");
     const waiting = put({ runAt: new Date(T0.getTime() + 1_000) });
 
     const day = 86_400_000;
@@ -265,6 +318,35 @@ describe("účty", () => {
     expect(claimNext("w")!.id).toBe(instance.id);
     expect(claimNext("w")).toBeNull();
     expect(row(skipped.id).status).toBe("pending");
+  });
+
+  test("[ADM-005] návrat z running u deaktivovaného účtu je cancelled, ne pending", async () => {
+    const owner = createUser();
+    const ban = () => db.update(user).set({ banned: true }).where(eq(user.id, owner)).run();
+
+    const retried = put({ userId: owner });
+    claimNext("w");
+    ban();
+    retryJob(retried.id, "w", { runAt: T0, reason: "později" });
+    expect(row(retried.id)).toMatchObject({ status: "cancelled", lockedBy: null });
+
+    db.update(user).set({ banned: false }).where(eq(user.id, owner)).run();
+    const recovered = put({ userId: owner });
+    claimNext("mrtvý");
+    ban();
+    recoverInterrupted("nový");
+    expect(row(recovered.id).status).toBe("cancelled");
+
+    db.update(user).set({ banned: false }).where(eq(user.id, owner)).run();
+    registerJob(KIND, {
+      run: async () => {
+        ban();
+        throw new Error("pád");
+      },
+    });
+    const failed = put({ userId: owner });
+    await drainJobs("w");
+    expect(row(failed.id).status).toBe("cancelled");
   });
 
   test("cancelUserJobs vrátí ID zrušených a běžící pokus nechá doběhnout", () => {

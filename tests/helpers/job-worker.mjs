@@ -37,13 +37,16 @@ const { registerTickTask, tick } = await import("@/server/scheduler/tick");
 
 setDbForTests(createDb(databasePath));
 
+let runs = 0;
 registerJob("mail.send", { run: async () => {} });
 registerTickTask({
   name: "denní",
   run: () => {
-    db.transaction((tx) =>
-      enqueue(tx, { kind: "mail.send", key: "daily:2026-11-02", userId: null, payload: {} }),
-    );
+    runs += 1;
+    db.transaction((tx) => {
+      enqueue(tx, { kind: "mail.send", key: "daily:2026-11-02", userId: null, payload: {} });
+      enqueue(tx, { kind: "mail.send", key: `run:${worker}:${runs}`, userId: null, payload: {} });
+    });
   },
 });
 
@@ -55,7 +58,7 @@ function claimAll() {
   const ids = [];
   for (let next = claimNext(worker); next; next = claimNext(worker)) {
     ids.push(next.id);
-    completeJob(next.id);
+    completeJob(next.id, worker);
   }
   return ids;
 }

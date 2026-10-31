@@ -3,11 +3,14 @@ import { eq } from "drizzle-orm";
 import { clock } from "../clock";
 import { db } from "../db";
 import { schedulerState } from "../db/schema";
-import { drainJobs, recoverInterrupted } from "../jobs/worker";
+import { drainQueue, recoverInterrupted } from "../jobs/worker";
 import { acquireLease } from "./lease";
 import { reportFailure } from "./report";
 
 export type TickTask = { name: string; run: (now: Date) => void | Promise<void> };
+
+// Under the default 60 s interval, so a long queue cannot hold back the next tick and health.
+const DRAIN_BUDGET_MS = 45_000;
 
 const tasks = new Map<string, TickTask>();
 
@@ -23,20 +26,27 @@ function stamp(fields: { lastTickAt: Date } | { lastOkAt: Date }): void {
   db.update(schedulerState).set(fields).where(eq(schedulerState.id, 1)).run();
 }
 
-export async function tick(holder: string): Promise<{ ran: boolean }> {
+function renewLease(holder: string): boolean {
   const lease = acquireLease(holder);
-  if (lease === "busy") return { ran: false };
   if (lease === "taken_over") recoverInterrupted(holder);
+  return lease !== "busy";
+}
+
+export async function tick(holder: string): Promise<{ ran: boolean }> {
+  if (!renewLease(holder)) return { ran: false };
   const now = clock.now();
   stamp({ lastTickAt: now });
+  let ok = true;
   for (const task of tasks.values()) {
+    if (!renewLease(holder)) return { ran: true };
     try {
       await task.run(now);
     } catch (error) {
+      ok = false;
       reportFailure(error, { task: task.name });
     }
   }
-  await drainJobs(holder);
-  stamp({ lastOkAt: clock.now() });
+  const queue = await drainQueue(holder, DRAIN_BUDGET_MS);
+  if (ok && queue.ok) stamp({ lastOkAt: clock.now() });
   return { ran: true };
 }
