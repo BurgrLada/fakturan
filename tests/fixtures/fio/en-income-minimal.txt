@@ -1,0 +1,6 @@
+# SYNTETICKÉ: smyšlené údaje sestavené z popisků spec, nejde o reálné avízo
+Account: 9999999999
+Amount: 500
+Currency: EUR
+Date: 1/2/2026
+Instruction ID: 10000000002

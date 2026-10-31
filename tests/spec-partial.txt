@@ -16,3 +16,9 @@ MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 UI-011	Chybí nespárované platby a nerozpoznaná avíza (plán 5) a blížící se limity, spec je nedefinuje (plán 8)	plán 5, plán 8
 INV-024	Chybí export (plán 8)	plán 8
 TST-016	Matice kryje jen pravidelné odeslání a upomínky, potvrzení platby a faktura po záloze přijdou s automatikami	plán 5, plán 6
+BNK-004	Parser třídí, stahování jen těchto zpráv ze schránky chybí	plán 5
+BNK-005	Česká varianta je prozatímní bez reálného vzorku, automaticky se nepáruje	dodání vzorku zadavatelem
+BNK-012	Uložení a zobrazení jako Nerozpoznaný formát chybí, parser vrací jen null	plán 5
+BNK-013	Přesun do fronty a nastavení vyžadovat potvrzení chybí, hotové je čtení hlavičky	plán 5
+BNK-017	Hotové je jen maskování, ukládání a 90denní retence chybí	plán 5
+TST-006	Chybí tok přes testovací IMAP server a skutečný český vzorek	plán 5, dodání vzorku zadavatelem

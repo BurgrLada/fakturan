@@ -1,0 +1,15 @@
+# SYNTETICKÉ: smyšlené údaje sestavené z popisků spec, nejde o reálné avízo
+Dear client,
+
+Account: 9999999999/2010
+Amount: 12 345.60
+Currency: CZK
+Date: 10/30/2026 14:05
+Variable symbol: 20260042
+Constant symbol: 0308
+Counterparty account: 1111111116/0800
+Counterparty: Ukazkova Firma s.r.o.
+Message: Fiktivni platba
+Instruction ID: 10000000001
+
+This is an automated message.

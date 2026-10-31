@@ -1,0 +1,6 @@
+# SYNTETICKÉ: smyšlené údaje sestavené z popisků spec, nejde o reálné avízo
+Account: 9999999999/2010
+Amount: 100.00
+Currency: CZK
+Date: 10/30/2026 14:05
+Instruction ID: 10000000005

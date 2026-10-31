@@ -1,0 +1,12 @@
+# PROZATÍMNÍ: nesestaveno z reálného vzorku
+# SYNTETICKÉ: smyšlené údaje sestavené z popisků spec, nejde o reálné avízo
+Příjem na kontě: 9999999999/2010
+Částka: 12 345,60
+Měna: CZK
+Datum: 30.10.2026 14:05
+VS: 20260042
+KS: 0308
+Protiúčet: 1111111116/0800
+Protistrana: Ukázková Firma s.r.o.
+Zpráva příjemci: Fiktivní platba
+ID pokynu: 10000000003
