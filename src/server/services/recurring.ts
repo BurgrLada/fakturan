@@ -192,7 +192,9 @@ function persist(actor: Actor, action: AuditAction, raw: RecurringInput): { id: 
       lines: document.lines,
     });
     const now = clock.now();
-    const confirmedBefore = before?.mode === "send" ? before.sendConfirmedAt : null;
+    // The confirmation named a recipient, so a different customer needs a new one.
+    const confirmedBefore =
+      before?.mode === "send" && before.customerId === customerId ? before.sendConfirmedAt : null;
     if (mode === "send" && !confirmedBefore) {
       if (!getAutomation(userId).recurringSend) throw new ServiceError(V.sendDisabled);
       if (!confirmSend) throw new ServiceError(V.sendNotConfirmed);
@@ -342,4 +344,22 @@ export function previewRecurring(ownerId: string, raw: RecurringInput, count = 1
       customer: customerName,
     }),
   }));
+}
+
+export function listPlanInvoices(ownerId: string, planId: string) {
+  return db
+    .select({
+      id: invoice.id,
+      number: invoice.number,
+      status: invoice.status,
+      issueDate: invoice.issueDate,
+      currency: invoice.currency,
+      totalMinor: invoice.totalMinor,
+      periodFrom: invoice.periodFrom,
+      periodTo: invoice.periodTo,
+    })
+    .from(invoice)
+    .where(scoped(ownerId).where(invoice, (t, { eq }) => eq(t.recurringId, planId)))
+    .orderBy(desc(invoice.periodFrom), desc(invoice.id))
+    .all();
 }

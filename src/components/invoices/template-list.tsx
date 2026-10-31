@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { deleteTemplateAction, draftFromTemplateAction } from "@/app/(app)/faktury/sablony/actions";
+import { recurringFromTemplateAction } from "@/app/(app)/pravidelne/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -48,6 +49,19 @@ export function TemplateList({ rows }: { rows: TemplateListRow[] }) {
       try {
         const reply = await draftFromTemplateAction({ id });
         if (reply.ok) router.push(`/faktury/${reply.id}/upravit`);
+        else setError(reply.error);
+      } catch {
+        setError(T.failed);
+      }
+    });
+  }
+
+  function recur(id: string) {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const reply = await recurringFromTemplateAction({ id });
+        if (reply.ok) router.push(`/pravidelne/${reply.id}`);
         else setError(reply.error);
       } catch {
         setError(T.failed);
@@ -103,6 +117,15 @@ export function TemplateList({ rows }: { rows: TemplateListRow[] }) {
                     onClick={() => use(row.id)}
                   >
                     {T.use}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pending}
+                    aria-label={`${TEXTS.recurring.actions.useTemplate}: ${row.name}`}
+                    onClick={() => recur(row.id)}
+                  >
+                    {TEXTS.recurring.actions.useTemplate}
                   </Button>
                   <AlertDialog
                     open={deleting === row.id}

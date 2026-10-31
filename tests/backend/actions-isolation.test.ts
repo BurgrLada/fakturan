@@ -23,6 +23,15 @@ import {
 } from "@/app/(app)/nastaveni/posta/sablony/actions";
 import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
 import {
+  deleteRecurringAction,
+  pauseRecurringAction,
+  previewRecurringAction,
+  recurringFromTemplateAction,
+  resolveMissedAction,
+  resumeRecurringAction,
+  saveRecurringAction,
+} from "@/app/(app)/pravidelne/actions";
+import {
   deleteTemplateAction,
   draftFromTemplateAction,
   saveInvoiceAsTemplateAction,
@@ -34,7 +43,7 @@ import {
   sendInvoiceAction,
   sendPrefillAction,
 } from "@/app/(app)/faktury/actions";
-import { emailLog, user } from "@/server/db/schema";
+import { emailLog, recurringInvoice, user } from "@/server/db/schema";
 import { issuedInvoice, ownSmtp, seedCustomer, seedOwner } from "../helpers/fixtures-mail";
 import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accounts";
 import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
@@ -43,7 +52,11 @@ import { getEmailTemplate } from "@/server/services/email-templates";
 import { getMailSettings } from "@/server/services/mail-settings";
 import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
+import { nextOccurrences } from "@/lib/recurrence";
+import { getRecurring } from "@/server/services/recurring";
+import { pauseRecurring, processOccurrence } from "@/server/services/recurring-run";
 import { createTestDb } from "../helpers/db";
+import { planInput, savePlan } from "../helpers/fixtures-recurring";
 
 const session = vi.hoisted(() => ({ userId: "a1" }));
 
@@ -255,6 +268,44 @@ describe("cizí id přes server actions", () => {
 
     expect(draft).toMatchObject({ ok: true });
     expect(removed).toMatchObject({ ok: true });
+  });
+
+  test("[TST-009] cizí plán pravidelné faktury nejde změnit, pozastavit, smazat ani použít přes server action", async () => {
+    const mine = seedOwner(db, new Date());
+    const stranger = seedOwner(db, new Date());
+    const customerId = seedCustomer(mine);
+    const id = savePlan(mine, customerId);
+    const plan = getRecurring(mine, id)!;
+    pauseRecurring(actor(mine), id);
+    const { runId } = processOccurrence(mine, id, nextOccurrences(plan, plan.cursorDate, 1)[0]!)!;
+    const { id: templateId } = saveTemplate(actor(mine), {
+      name: "Moje šablona",
+      customerId,
+      document: { ...newDraftDefaults(mine, null), type: "invoice", dueDays: 14, lines: [] },
+    });
+    session.userId = stranger;
+
+    const replies = [
+      await saveRecurringAction(planInput(null, { id, name: "Přepsáno" })),
+      await previewRecurringAction(planInput(null, { id })),
+      await pauseRecurringAction({ id }),
+      await resumeRecurringAction({ id }),
+      await resolveMissedAction({ runId, action: "draft" }),
+      await recurringFromTemplateAction({ id: templateId }),
+      await deleteRecurringAction({ id }),
+    ];
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: false });
+    expect(getRecurring(mine, id)).toMatchObject({ name: "Správa webu", status: "paused" });
+    expect(
+      db.select().from(recurringInvoice).where(eq(recurringInvoice.userId, stranger)).all(),
+    ).toEqual([]);
+
+    session.userId = mine;
+    const preview = await previewRecurringAction(planInput(customerId, { id }));
+    expect(preview).toMatchObject({ ok: true });
+    expect(preview.ok && preview.rows).toHaveLength(12);
+    expect(await resolveMissedAction({ runId, action: "skip" })).toMatchObject({ ok: true });
   });
 
   test("[SEC-002] cizí bankovní účet nejde změnit, skrýt, nastavit ani smazat přes server action", async () => {

@@ -229,7 +229,13 @@ export function resumeRecurring(actor: Actor, id: string): void {
   const userId = ownerOf(actor);
   mutate(actor, "recurring.resume", (tx, audit) => {
     const plan = findPlan(tx, userId, id);
-    if (plan.status !== "paused") throw new ServiceError(V.notPaused);
+    if (plan.status === "finished") {
+      if (nextOccurrences(ruleOf(plan), plan.cursorDate, 1).length === 0) {
+        throw new ServiceError(V.nothingLeft);
+      }
+    } else if (plan.status !== "paused") {
+      throw new ServiceError(V.notPaused);
+    }
     tx.update(recurringInvoice)
       .set({ status: "active", updatedAt: clock.now() })
       .where(scoped(userId).where(recurringInvoice, (t, { eq }) => eq(t.id, id)))

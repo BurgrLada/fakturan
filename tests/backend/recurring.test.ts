@@ -20,6 +20,7 @@ import { saveTemplate } from "@/server/services/invoice-templates";
 import {
   deleteRecurring,
   getRecurring,
+  listPlanInvoices,
   listRecurring,
   listRuns,
   previewRecurring,
@@ -98,6 +99,18 @@ describe("uložení plánu", () => {
     expect(() =>
       saveRecurring(webActor(owner), planInput(customerId, { id, mode: "send" })),
     ).toThrow(/potvrdit/);
+  });
+
+  test("[REC-011] změna zákazníka u plánu odeslat vyžádá nové potvrzení", () => {
+    const { owner, customerId } = owned();
+    const other = seedCustomer(owner);
+    setAutomation(webActor(owner), "recurringSend", true, { confirmed: true });
+    const id = savePlan(owner, customerId, { mode: "send", confirmSend: true });
+    const move = { id, mode: "send" as const };
+    expect(() => saveRecurring(webActor(owner), planInput(other, move))).toThrow(/potvrdit/);
+    expect(getRecurring(owner, id)?.customerId).toBe(customerId);
+    saveRecurring(webActor(owner), planInput(other, { ...move, confirmSend: true }));
+    expect(getRecurring(owner, id)).toMatchObject({ customerId: other, sendConfirmedAt: T0 });
   });
 
   test("[REC-022] neznámá proměnná je chyba při uložení", () => {
@@ -248,6 +261,10 @@ describe("uložení plánu", () => {
     const result = processOccurrence(owner, id, firstOccurrence(owner, id))!;
     expect(getInvoice(owner, result.invoiceId!)?.recurringId).toBe(id);
     expect(listRuns(owner, id).map((run) => run.invoiceId)).toEqual([result.invoiceId]);
+    expect(listPlanInvoices(owner, id)).toMatchObject([
+      { id: result.invoiceId, status: "draft", periodFrom: "2026-03-01", periodTo: "2026-03-31" },
+    ]);
+    expect(listPlanInvoices(seedOwner(db, T0), id)).toEqual([]);
 
     deleteRecurring(webActor(owner), id);
     expect(getInvoice(owner, result.invoiceId!)?.recurringId).toBeNull();

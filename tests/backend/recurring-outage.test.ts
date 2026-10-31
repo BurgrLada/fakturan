@@ -162,6 +162,26 @@ describe("výpadek", () => {
   });
 });
 
+describe("hotový plán", () => {
+  test("[REC-003] hotový plán po prodloužení jde znovu aktivovat a minulé termíny jsou ke kontrole", async () => {
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId, { maxCount: 1 });
+    await tickAt("2026-03-10T10:00:00Z");
+    expect(getRecurring(owner, id)?.status).toBe("finished");
+    expect(() => resumeRecurring(webActor(owner), id)).toThrow(/nemá další termín/);
+
+    saveRecurring(webActor(owner), planInput(customerId, { id, maxCount: 4 }));
+    at("2026-04-12T10:00:00Z");
+    resumeRecurring(webActor(owner), id);
+
+    expect(getRecurring(owner, id)?.status).toBe("active");
+    expect(statuses(owner, id)).toEqual([
+      ["2026-03-10", "created"],
+      ["2026-04-10", "missed"],
+    ]);
+  });
+});
+
 describe("termín se neztratí", () => {
   const SIX_HOURS = 6 * 3_600_000;
 

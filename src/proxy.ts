@@ -6,15 +6,22 @@ import { getCatalogItem } from "@/server/services/catalog";
 import { getCustomer } from "@/server/services/customers";
 import { getVersion } from "@/server/services/invoice-versions";
 import { getInvoice, isFreeDraftId } from "@/server/services/invoices";
+import { getRecurring } from "@/server/services/recurring";
 
-const DETAIL = /^\/(?:(zakaznici|cenik)\/([^/]+)|(faktury)\/([^/]+)(?:\/upravit)?)$/;
+const DETAIL = /^\/(?:(zakaznici|cenik|pravidelne)\/([^/]+)|(faktury)\/([^/]+)(?:\/upravit)?)$/;
 const VERSION = /^\/faktury\/([^/]+)\/verze\/([^/]+)$/;
-const FIXED_PAGES = new Set(["/zakaznici/novy", "/cenik/novy", "/faktury/sablony"]);
+const FIXED_PAGES = new Set([
+  "/zakaznici/novy",
+  "/cenik/novy",
+  "/faktury/sablony",
+  "/pravidelne/nova",
+]);
 const NEW_INVOICE = "/faktury/nova";
 const FINDERS = {
   zakaznici: getCustomer,
   cenik: getCatalogItem,
   faktury: getInvoice,
+  pravidelne: getRecurring,
 };
 
 // The pages sit behind Suspense, where notFound() can no longer change a status already sent as 200,
@@ -84,6 +91,7 @@ export const config = {
     "/administrace",
     "/zakaznici/:id",
     "/cenik/:id",
+    "/pravidelne/:id",
     "/faktury/:id",
     "/faktury/:id/upravit",
     "/faktury/:id/verze/:versionId",

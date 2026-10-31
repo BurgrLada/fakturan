@@ -35,9 +35,9 @@ test("[UI-009] nehotová sekce ukáže prázdný stav Připravujeme, neznámá a
   await registerAdmin(page, freshApp.baseURL);
   await page
     .getByRole("navigation", { name: "Hlavní navigace" })
-    .getByRole("link", { name: "Pravidelné" })
+    .getByRole("link", { name: "Platby" })
     .click();
-  await expect(page.getByRole("heading", { name: "Pravidelné" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Platby" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Připravujeme" })).toBeVisible();
   const missing = await page.goto(`${freshApp.baseURL}/neexistuje`);
   expect(missing?.status()).toBe(404);

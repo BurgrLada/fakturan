@@ -45,7 +45,7 @@ function item(
 export const NAV_ITEMS: readonly NavItem[] = [
   item("overview", "/", LayoutDashboard),
   item("invoices", "/faktury", FileText),
-  item("recurring", "/pravidelne", Repeat, { planned: true }),
+  item("recurring", "/pravidelne", Repeat),
   item("customers", "/zakaznici", Users),
   item("catalog", "/cenik", Tag),
   item("payments", "/platby", CreditCard, { planned: true }),

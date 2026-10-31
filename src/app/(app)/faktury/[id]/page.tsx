@@ -26,6 +26,7 @@ import { EDITABLE_STATUSES, listVersions } from "@/server/services/invoice-versi
 import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
 import { mailAvailability } from "@/server/services/mail-settings";
+import { getRecurring } from "@/server/services/recurring";
 
 const T = TEXTS.invoices.detail;
 
@@ -95,6 +96,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
   const qr = qrStateOf(invoiceDocument(row));
   const emails = listEmailLog(user.id, id);
   const { sending, retrying, problem } = mailStateOf(emails);
+  const plan = row.recurringId ? getRecurring(user.id, row.recurringId) : null;
   const sendable = isSendable(row.status);
   const { available } = mailAvailability(user.id);
   return (
@@ -121,6 +123,14 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         <span className="text-muted-foreground">{T.dueDate}: </span>
         {row.dueDate ? formatCalendarDate(row.dueDate, "d. M. yyyy") : "–"}
       </p>
+      {plan && (
+        <p className="text-sm" data-testid="invoice-plan">
+          <span className="text-muted-foreground">{TEXTS.recurring.fromInvoice.label}: </span>
+          <Link href={`/pravidelne/${plan.id}`} className="underline underline-offset-4">
+            {plan.name}
+          </Link>
+        </p>
+      )}
       {row.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {row.tags.map((tag) => (
