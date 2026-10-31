@@ -51,6 +51,10 @@ function auditSnapshot(row: Row | undefined) {
   return {
     host: row?.smtpHost ?? null,
     port: row?.smtpPort ?? null,
+    smtpUser: row?.smtpUser ?? null,
+    fromEmail: row?.fromEmail ?? null,
+    cc: row?.cc ?? [],
+    bcc: row?.bcc ?? [],
     hasCredentials: hasCredentials(row),
   };
 }
@@ -175,6 +179,7 @@ export async function saveMailSettings(
   env: Env = defaultEnv,
 ): Promise<void> {
   const userId = ownerOf(actor);
+  enforceRateLimit(actor, RATE_RULES.mailSaveUser);
   const input = parseInput(raw);
   const host = input.smtpHost || null;
   const port = host ? input.smtpPort : null;
@@ -225,7 +230,11 @@ export async function saveMailSettings(
       ownerId: userId,
       scope: "user",
       before: auditSnapshot(row),
-      after: auditSnapshot({ ...next, userId }),
+      // Named so that audit redaction, which masks every key containing "pass", keeps the flag.
+      after: {
+        ...auditSnapshot({ ...next, userId }),
+        credentialsChanged: Boolean(login && input.smtpPassword),
+      },
     });
   });
 }
@@ -278,7 +287,7 @@ function markVerified(actor: Actor, userId: string): void {
 // One generic failure on purpose: distinct errors would turn this page into a network scanner.
 export async function sendTestMail(actor: Actor, env: Env = defaultEnv): Promise<void> {
   const userId = ownerOf(actor);
-  enforceRateLimit(actor, RATE_RULES.sendUser);
+  enforceRateLimit(actor, RATE_RULES.mailTestUser);
   const transport = await resolveTransport(userId, env);
   if (!transport) throw new ServiceError(E.unavailable);
   const { from, replyTo } = transport.identity;

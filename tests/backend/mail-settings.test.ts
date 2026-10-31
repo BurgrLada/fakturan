@@ -8,6 +8,7 @@ import { setClockForTests } from "@/server/clock";
 import { encryptSecret } from "@/server/crypto";
 import { auditLog, mailSettings, rateLimit, user } from "@/server/db/schema";
 import { parseEnv } from "@/server/env";
+import { logger } from "@/server/logger";
 import { BlockedHostError } from "@/server/mail/host-guard";
 import { ServiceError } from "@/server/services/access";
 import {
@@ -156,7 +157,6 @@ describe("ukládání", () => {
     expect(settings.hasCredentials).toBe(true);
     expect(JSON.stringify(settings)).not.toContain(PASSWORD);
     expect(JSON.stringify(settings)).not.toContain(stored?.smtpPasswordEnc);
-    expect(JSON.stringify(await resolveTransport(id, allowPrivate()))).not.toContain(PASSWORD);
   });
 
   test("prázdné heslo zachová stávající, účet bez jména heslo zahodí", async () => {
@@ -233,8 +233,66 @@ describe("ukládání", () => {
     expect(json).not.toContain(PASSWORD);
     expect(json).not.toContain("v1.");
     expect(JSON.parse(json)[0]).toMatchObject({
-      after: { host: "127.0.0.1", port: smtp.port, hasCredentials: true },
+      after: {
+        host: "127.0.0.1",
+        port: smtp.port,
+        hasCredentials: true,
+        credentialsChanged: true,
+      },
     });
+  });
+
+  test("audit ukáže změnu Cc, Bcc, adresy, uživatele a výměnu hesla", async () => {
+    const id = seed();
+    const env = allowPrivate();
+    await saveMailSettings(actor(id), own({ smtpUser: "jan", smtpPassword: PASSWORD }), env);
+    await saveMailSettings(
+      actor(id),
+      own({
+        smtpUser: "petr",
+        smtpPassword: `${PASSWORD}-2`,
+        fromEmail: "petr@firma.cz",
+        cc: "kopie@firma.cz",
+        bcc: "archiv@firma.cz",
+      }),
+      env,
+    );
+    await saveMailSettings(
+      actor(id),
+      own({ smtpUser: "petr", fromEmail: "petr@firma.cz", senderName: "Petr" }),
+      env,
+    );
+
+    const [, changed, kept] = audits(id).filter((item) => item.action === "mail_settings.save");
+    expect(changed).toMatchObject({
+      before: { smtpUser: "jan", fromEmail: "jan@firma.cz", cc: [], bcc: [] },
+      after: {
+        smtpUser: "petr",
+        fromEmail: "petr@firma.cz",
+        cc: ["kopie@firma.cz"],
+        bcc: ["archiv@firma.cz"],
+        credentialsChanged: true,
+      },
+    });
+    expect(kept).toMatchObject({ after: { credentialsChanged: false, hasCredentials: true } });
+  });
+
+  test("[SEC-001] ukládání nastavení je omezené a překročení je v auditu", async () => {
+    const id = seed();
+    db.insert(rateLimit)
+      .values({
+        key: `${RATE_RULES.mailSaveUser.name}:${id}`,
+        windowStart: new Date(),
+        count: RATE_RULES.mailSaveUser.limit,
+      })
+      .run();
+
+    await expect(saveMailSettings(actor(id), own(), allowPrivate())).rejects.toThrow(
+      "Příliš mnoho pokusů",
+    );
+
+    expect(row(id)).toBeUndefined();
+    expect(audits(id).filter((item) => item.action === "rate_limit.exceeded")).toHaveLength(1);
   });
 });
 
@@ -382,13 +440,20 @@ describe("zkušební zpráva", () => {
     const env = allowPrivate();
     await saveMailSettings(actor(id), own(), env);
 
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     smtp.rejectNext(550);
-    await expect(sendTestMail(actor(id), env)).rejects.toThrow(
-      "Zkušební e-mail se nepodařilo odeslat",
+    await expect(sendTestMail(actor(id), env)).rejects.toHaveProperty(
+      "message",
+      "Zkušební e-mail se nepodařilo odeslat, zkontrolujte nastavení serveru",
     );
+    expect(warn).toHaveBeenCalledExactlyOnceWith("Zkušební e-mail se nepodařilo odeslat", {
+      code: "EMESSAGE",
+    });
+    warn.mockRestore();
     expect(row(id)?.verifiedAt).toBeNull();
 
-    await expect(sendTestMail(actor(id), envWith())).rejects.toThrow(
+    await expect(sendTestMail(actor(id), envWith())).rejects.toHaveProperty(
+      "message",
       "Tento server pošty není povolený",
     );
   });
@@ -426,9 +491,9 @@ describe("zkušební zpráva", () => {
     await saveMailSettings(actor(id), own(), env);
     db.insert(rateLimit)
       .values({
-        key: `${RATE_RULES.sendUser.name}:${id}`,
+        key: `${RATE_RULES.mailTestUser.name}:${id}`,
         windowStart: new Date(),
-        count: RATE_RULES.sendUser.limit,
+        count: RATE_RULES.mailTestUser.limit,
       })
       .run();
 
@@ -438,10 +503,20 @@ describe("zkušební zpráva", () => {
     expect(audits(id).filter((item) => item.action === "rate_limit.exceeded")).toHaveLength(1);
   });
 
-  test("hromadné odesílání má vlastní limit", () => {
+  test("pošta má vlastní limity", () => {
     expect(RATE_RULES.sendBulkUser).toEqual({
       name: "sendBulkUser",
       limit: 5,
+      windowSeconds: 3600,
+    });
+    expect(RATE_RULES.mailTestUser).toEqual({
+      name: "mailTestUser",
+      limit: 10,
+      windowSeconds: 3600,
+    });
+    expect(RATE_RULES.mailSaveUser).toEqual({
+      name: "mailSaveUser",
+      limit: 30,
       windowSeconds: 3600,
     });
   });

@@ -406,6 +406,8 @@ test('[SEC-001] odesílání je omezené a překročení je v auditu', ...)
 test('[SEC-001] cizí uživatel dostane na archiv 404', ...)
 test('[TST-009] izolace historie odeslání', ...)
 test('[MON-003] pád při skládání PDF je hlášený, selhání SMTP klienta ne', ...)
+test('skutečný tok doručí Cc a Bcc z transport.identity', ...) // send identitu sám nepřidává
+test('jedno odeslání dodrží celkový strop času i na zablokovaném serveru', ...) // instanční transport nemá limity vlastního SMTP
 ```
 
 - [ ] **Step 2: Ověř selhání:** `timeout 170 pnpm exec vitest run tests/backend/mail-delivery.test.ts tests/backend/invoice-mail.test.ts tests/unit/smtp-errors.test.ts`, FAIL.

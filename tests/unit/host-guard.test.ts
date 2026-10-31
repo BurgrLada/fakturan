@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { assertPublicHost, BlockedHostError, isPrivateAddress } from "@/server/mail/host-guard";
 import { smtpOptions } from "@/server/mail/transport";
 
-const dns = vi.hoisted(() => ({ records: [] as string[] }));
+const dns = vi.hoisted(() => ({ records: [] as string[], code: "ENOTFOUND" }));
 
 vi.mock("node:dns/promises", () => ({
   lookup: async (_host: string, opts: { all: boolean }) => {
     if (!opts.all) throw new Error("kontrola musí vidět všechny záznamy");
-    if (dns.records.length === 0) throw new Error("ENOTFOUND");
+    if (dns.records.length === 0) throw Object.assign(new Error("DNS"), { code: dns.code });
     return dns.records.map((address) => ({ address, family: address.includes(":") ? 6 : 4 }));
   },
 }));
@@ -38,6 +38,18 @@ const PRIVATE_ADDRESSES = [
   "::ffff:127.0.0.1",
   "::ffff:7f00:1",
   "::ffff:10.0.0.1",
+  "::ffff:8.8.8.8",
+  "::808:808",
+  "::7f00:1",
+  "64:ff9b::7f00:1",
+  "64:ff9b::808:808",
+  "64:ff9b:1::1",
+  "2001::1",
+  "2001:0:ffff::1",
+  "2002:7f00:1::1",
+  "2002:808:808::1",
+  "fec0::1",
+  "feff::1",
   "0:0:0:0:0:ffff:a9fe:a9fe",
   "nesmysl",
   "",
@@ -54,7 +66,11 @@ const PUBLIC_ADDRESSES = [
   "198.20.0.1",
   "223.255.255.255",
   "2a00:1450:4001::1",
-  "::ffff:8.8.8.8",
+  "2001:1::1",
+  "2001:4860:4860::8888",
+  "2003::1",
+  "64:ff9b:2::1",
+  "::1:0:0:1",
 ];
 
 const open = { allowPrivate: false };
@@ -62,6 +78,7 @@ const allowed = { allowPrivate: true };
 
 beforeEach(() => {
   dns.records = ["8.8.8.8"];
+  dns.code = "ENOTFOUND";
 });
 
 describe("isPrivateAddress", () => {
@@ -94,6 +111,23 @@ describe("assertPublicHost", () => {
     await expect(assertPublicHost("neni.example.cz", 587, open)).rejects.toBeInstanceOf(
       BlockedHostError,
     );
+  });
+
+  test("trvale neexistující hostitel není dočasné selhání, EAI_AGAIN ano", async () => {
+    dns.records = [];
+    await expect(assertPublicHost("neni.example.cz", 587, open)).rejects.toMatchObject({
+      temporary: false,
+    });
+
+    dns.code = "EAI_AGAIN";
+    const error = await assertPublicHost("smtp.example.cz", 587, open).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BlockedHostError);
+    expect(error).toMatchObject({ temporary: true, message: "Hostitel pošty není povolený" });
+
+    dns.records = ["10.0.0.5"];
+    await expect(assertPublicHost("smtp.example.cz", 587, open)).rejects.toMatchObject({
+      temporary: false,
+    });
   });
 
   test("[SEC-007] port 22 je odmítnutý, 587 projde", async () => {

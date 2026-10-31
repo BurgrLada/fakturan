@@ -19,48 +19,45 @@ const V4_RANGES: [string, number][] = [
 ];
 
 const V6_RANGES: [string, number][] = [
+  ["::", 96],
+  ["::ffff:0:0", 96],
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
+  ["2001::", 32],
+  ["2002::", 16],
   ["fc00::", 7],
   ["fe80::", 10],
+  ["fec0::", 10],
   ["ff00::", 8],
 ];
 
-const blocked = new BlockList();
-for (const [network, prefix] of V4_RANGES) blocked.addSubnet(network, prefix, "ipv4");
-for (const [network, prefix] of V6_RANGES) blocked.addSubnet(network, prefix, "ipv6");
-blocked.addAddress("::1", "ipv6");
-blocked.addAddress("::", "ipv6");
+// Two lists: one BlockList would match plain IPv4 addresses against ::ffff:0:0/96.
+const blockedV4 = new BlockList();
+const blockedV6 = new BlockList();
+for (const [network, prefix] of V4_RANGES) blockedV4.addSubnet(network, prefix, "ipv4");
+for (const [network, prefix] of V6_RANGES) blockedV6.addSubnet(network, prefix, "ipv6");
 
 export class BlockedHostError extends Error {
-  constructor() {
+  // A DNS outage may pass, so delivery can retry; users see the same refusal either way.
+  constructor(readonly temporary = false) {
     super("Hostitel pošty není povolený");
     this.name = "BlockedHostError";
   }
 }
 
-function unwrapMapped(address: string): string {
-  const canonical = new URL(`http://[${address}]/`).hostname.slice(1, -1);
-  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canonical);
-  if (!mapped) return canonical;
-  const high = parseInt(mapped[1], 16);
-  const low = parseInt(mapped[2], 16);
-  return [high >> 8, high & 255, low >> 8, low & 255].join(".");
-}
-
 export function isPrivateAddress(ip: string): boolean {
   const address = ip.split("%")[0];
   const family = isIP(address);
-  if (family === 4) return blocked.check(address, "ipv4");
-  if (family !== 6) return true;
-  const plain = unwrapMapped(address);
-  return isIP(plain) === 4 ? blocked.check(plain, "ipv4") : blocked.check(plain, "ipv6");
+  if (family === 4) return blockedV4.check(address, "ipv4");
+  return family === 6 ? blockedV6.check(address, "ipv6") : true;
 }
 
 async function resolveAll(host: string): Promise<string[]> {
   try {
     const records = await lookup(host, { all: true });
     return records.map((record) => record.address);
-  } catch {
-    throw new BlockedHostError();
+  } catch (error) {
+    throw new BlockedHostError((error as { code?: string }).code === "EAI_AGAIN");
   }
 }
 
