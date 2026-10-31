@@ -82,7 +82,17 @@ function InstanceStatus({ status }: { status: ReturnType<typeof getInstanceStatu
     ["Verze", status.version],
     ["Velikost databáze", formatBytes(status.databaseBytes)],
     ["Plánovač", TEXTS.instanceStatus.scheduler[status.scheduler]],
-    ["Poslední záloha", status.lastBackupAt ? formatDateTime(status.lastBackupAt) : "žádná"],
+    [
+      "Poslední záloha",
+      [
+        status.lastBackupAt ? formatDateTime(status.lastBackupAt) : "žádná",
+        status.lastBackupFailedAt
+          ? `${TEXTS.instanceStatus.backupFailed} (${formatDateTime(status.lastBackupFailedAt)})`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", "),
+    ],
     ["SMTP", status.smtpConfigured ? "nastaveno" : "nenastaveno"],
     ["Monitoring chyb", status.monitoringConfigured ? "nastaveno" : "nenastaveno"],
   ];

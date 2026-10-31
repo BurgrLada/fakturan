@@ -28,6 +28,10 @@ export function getInstanceStatus(actor: Actor) {
     databaseBytes: fileSize(path) + fileSize(`${path}-wal`),
     scheduler: schedulerHealth(db),
     lastBackupAt: state?.lastBackupAt ?? null,
+    lastBackupFailedAt:
+      state?.lastBackupTryAt && (!state.lastBackupAt || state.lastBackupTryAt > state.lastBackupAt)
+        ? state.lastBackupTryAt
+        : null,
     smtpConfigured: isInstanceMailConfigured(env),
     monitoringConfigured: Boolean(env.SENTRY_DSN),
   };

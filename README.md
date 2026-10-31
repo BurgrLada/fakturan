@@ -53,7 +53,8 @@ Content-Security-Policy nemění. Odesílá se jen ID uživatele, ne e-mail, IP 
 Aplikace jednou denně po 2:30 (Praha) uloží konzistentní kopii databáze do `backups/` ve složce
 dat: soubor `fakturan-RRRR-MM-DD.db`, oprávnění `0600`, posledních 14 kopií. Kopie se ověří
 (`integrity_check`) a teprve potom se přejmenuje, takže poškozená záloha nikdy nenahradí dobrou.
-Po selhání se pokus opakuje nejdříve za hodinu a starší kopie zůstanou. Stav a čas poslední zálohy
+Záloha potřebuje na svazku volné místo alespoň dvojnásobek velikosti databáze, jinak se nezapíše
+a selhání ukáže Administrace. Po selhání se pokus opakuje nejdříve za hodinu a starší kopie zůstanou. Stav a čas poslední zálohy
 ukazuje Administrace. Tajemství (SMTP hesla klientů apod.) jsou v záloze šifrovaná, takže k obnově
 potřebujete stejný `ENCRYPTION_KEY`.
 

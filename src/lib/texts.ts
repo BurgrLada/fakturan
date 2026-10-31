@@ -1061,5 +1061,6 @@ export const TEXTS = {
       running: "běží",
       stale: "neodpovídá",
     },
+    backupFailed: "poslední pokus o zálohu selhal",
   },
 } as const;

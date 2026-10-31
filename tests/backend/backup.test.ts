@@ -1,5 +1,6 @@
 import {
   existsSync,
+  utimesSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -23,6 +24,12 @@ import {
 } from "@/server/scheduler/backup";
 import { getInstanceStatus } from "@/server/services/instance-status";
 import { createTestDb } from "../helpers/db";
+
+const space = vi.hoisted(() => ({ free: null as null | { bsize: number; bavail: number } }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, statfsSync: (path: string) => space.free ?? actual.statfsSync(path) };
+});
 
 const report = vi.hoisted(() => ({ captureException: vi.fn() }));
 vi.mock("@sentry/nextjs", () => ({ captureException: report.captureException }));
@@ -62,6 +69,7 @@ beforeEach(() => {
   vi.stubEnv("SENTRY_DSN", "https://klic@errors.example.cz/1");
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   report.captureException.mockClear();
+  space.free = null;
 });
 
 afterEach(() => {
@@ -105,7 +113,9 @@ describe("denní záloha", () => {
   test("[OPS-005] selhání nechá staré kopie, žádné .tmp a je hlášené, další pokus po hodině", async () => {
     await backupTask.run(new Date("2026-11-01T10:00:00Z"));
     mkdirSync(backups, { recursive: true });
-    writeFileSync(join(backups, "fakturan-2026-10-01.db.tmp"), "napůl");
+    const stale = join(backups, "fakturan-2026-10-01.db.tmp");
+    writeFileSync(stale, "napůl");
+    utimesSync(stale, new Date("2026-10-01T00:00:00Z"), new Date("2026-10-01T00:00:00Z"));
     const vacuum = failVacuum();
     const failedAt = new Date("2026-11-02T10:00:00Z");
     await backupTask.run(failedAt);
@@ -141,6 +151,80 @@ describe("denní záloha", () => {
     writeFileSync(join(backups, "poznamka.txt"), "x");
     pruneBackups(2);
     expect(names()).toEqual(["fakturan-2026-09-02.db", "fakturan-2026-09-03.db", "poznamka.txt"]);
+  });
+
+  test("[OPS-005] cizí čerstvé .tmp zůstane, staré se uklidí", () => {
+    mkdirSync(backups, { recursive: true });
+    const now = new Date("2026-11-04T10:00:00Z");
+    const fresh = join(backups, "fakturan-2026-11-04.db.1-a.tmp");
+    const old = join(backups, "fakturan-2026-11-03.db.1-b.tmp");
+    writeFileSync(fresh, "x");
+    writeFileSync(old, "x");
+    utimesSync(fresh, new Date(now.getTime() - 600_000), new Date(now.getTime() - 600_000));
+    utimesSync(old, new Date(now.getTime() - 2 * HOUR), new Date(now.getTime() - 2 * HOUR));
+    createBackup(now);
+    expect(names()).toEqual(["fakturan-2026-11-04.db", "fakturan-2026-11-04.db.1-a.tmp"]);
+  });
+
+  test("[OPS-005] neprojitá kontrola integrity nenechá soubor pod finálním jménem", async () => {
+    const original = db.$client.prepare.bind(db.$client);
+    vi.spyOn(db.$client, "prepare").mockImplementation(((sql: string) =>
+      sql.startsWith("VACUUM")
+        ? { run: (tmp: string) => writeFileSync(tmp, Buffer.alloc(8192, 1)) }
+        : original(sql)) as typeof db.$client.prepare);
+    await backupTask.run(new Date("2026-11-05T10:00:00Z"));
+    expect(names().filter((n) => n.includes("2026-11-05"))).toEqual([]);
+    expect(report.captureException).toHaveBeenCalledTimes(1);
+  });
+
+  test("[OPS-005] při nedostatku místa se nezapíše nic a selhání je vidět ve stavu", async () => {
+    space.free = { bsize: 1, bavail: 1 };
+    const at = new Date("2026-11-06T10:00:00Z");
+    await backupTask.run(at);
+    expect(names().filter((n) => n.includes("2026-11-06"))).toEqual([]);
+    expect(report.captureException).toHaveBeenCalledTimes(1);
+    const status = getInstanceStatus({ userId: "adm", source: "web" });
+    expect(status.lastBackupFailedAt).toEqual(at);
+  });
+
+  test("[OPS-005] záloha obsahuje všechny řádky", () => {
+    const stamp = new Date("2026-01-01T00:00:00Z");
+    for (let i = 0; i < 300; i += 1) {
+      db.insert(user)
+        .values({
+          id: `u${i}`,
+          name: "N",
+          email: `u${i}@x.cz`,
+          role: "user",
+          createdAt: stamp,
+          updatedAt: stamp,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+    const total = (db.$client.prepare("SELECT count(*) AS n FROM user").get() as { n: number }).n;
+    const copy = createBackup(new Date("2026-11-07T10:00:00Z"));
+    const restored = new Database(copy.path, { readonly: true });
+    try {
+      expect(restored.prepare("SELECT count(*) AS n FROM user").get()).toEqual({ n: total });
+    } finally {
+      restored.close();
+    }
+  });
+
+  test("[OPS-005] selhaný zápis stavu po záloze se další tick doplní a neblokuje úklid", async () => {
+    const at = new Date("2026-11-08T10:00:00Z");
+    createBackup(at);
+    await backupTask.run(new Date("2026-11-08T11:00:00Z"));
+    const rows = db
+      .select()
+      .from(auditLog)
+      .all()
+      .filter((r) => r.entityId === "2026-11-08");
+    expect(rows.map((r) => r.action)).toEqual(["backup.create"]);
+    expect(getInstanceStatus({ userId: "adm", source: "web" }).lastBackupAt).toEqual(
+      new Date("2026-11-08T11:00:00Z"),
+    );
   });
 
   test("[ADM-008] stav instance ukáže čas poslední zálohy", async () => {
