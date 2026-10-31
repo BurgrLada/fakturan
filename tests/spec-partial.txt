@@ -2,8 +2,8 @@
 TST-014	Referenční PNG designů zatím neschválil člověk	schválení uživatelem
 PDF-007	Vizuální reference pokrývají jen první stranu	po schválení TST-014
 TST-009	Matice nemá roli administrátora ani entity dalších plánů	plány 4 až 8
-TST-012	Chybí přepočty měn a výpočet plánů	plán 4, plán 6
-TST-013	Stryker neběžel na párování a plánovači, skóre 90 % není ověřené; test s tímto ID jen zkouší pomůcky PDF	plán 4, plán 5
+TST-012	Chybí přepočty měn	plán 6
+TST-013	Stryker neběžel na párování, skóre 90 % celého jádra není ověřené; test s tímto ID jen zkouší pomůcky PDF	plán 5
 TST-015	Chybí zpětné čtení ISDOC proti schématu	plán 8
 TST-018	Kontrola nepokrývá platby a přehledy	plán 5, plán 7
 QR-005	Stav uhrazená vzniká jen v testech, skutečné platby chybí	plán 5
@@ -19,3 +19,11 @@ SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
 REC-013	Selhání a opakování odeslání hotové, běh pravidelné faktury chybí	plán 4
 REC-032	Stráž při doručení hotová, doběh termínů pravidelných faktur chybí	plán 4
 TST-005	Ověřené odeslání a zadržení ve frontě, chybí pravidelné faktury a upomínky	plán 4
+REC-001	Hotový výpočet, chybí uložení a volba četnosti v rozhraní	plán 4
+REC-002	Hotový výpočet, chybí uložení a volba dne vystavení v rozhraní	plán 4
+REC-003	Hotový výpočet, chybí uložení a ukončení plánu při běhu	plán 4
+REC-006	Výpočet z kalendářních dat hotový, chybí hranice tick úlohy v Europe/Prague	plán 4
+REC-020	Vykreslení z období termínu hotové, chybí použití při vzniku faktury	plán 4
+REC-021	Výpočet posunu hotový, chybí nastavení na plánu a uložení období na faktuře	plán 4
+REC-023	Occurrence nese období termínu, chybí důkaz na opožděném běhu úlohy	plán 4
+TST-007	Kalendářní hrany pokryté čistým výpočtem, chybí posun injektovaných hodin	plán 4

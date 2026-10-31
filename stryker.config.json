@@ -6,7 +6,9 @@
     "src/lib/money.ts",
     "src/lib/number-format.ts",
     "src/lib/invoice-totals.ts",
-    "src/lib/qr-payload.ts"
+    "src/lib/qr-payload.ts",
+    "src/lib/recurrence.ts",
+    "src/lib/czech-holidays.ts"
   ],
   "vitest": { "configFile": "vitest.config.ts" },
   "coverageAnalysis": "perTest",
