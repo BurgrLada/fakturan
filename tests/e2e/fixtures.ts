@@ -96,8 +96,10 @@ export const test = base.extend<{
   freshApp: App;
   dockerApp: { baseURL: string };
   withSmtp: boolean;
+  allowPrivateMail: boolean;
 }>({
   withSmtp: [false, { option: true }],
+  allowPrivateMail: [false, { option: true }],
 
   // oxlint-disable-next-line no-empty-pattern
   dockerApp: async ({}, use) => {
@@ -131,7 +133,7 @@ export const test = base.extend<{
     }
   },
 
-  freshApp: async ({ withSmtp }, use) => {
+  freshApp: async ({ withSmtp, allowPrivateMail }, use) => {
     const ares = await startAresStub();
     const smtp = withSmtp ? await startSmtp() : null;
     const dataDir = mkdtempSync(join(tmpdir(), "fakturan-e2e-"));
@@ -148,6 +150,7 @@ export const test = base.extend<{
         ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         ARES_BASE_URL: ares.url,
         SCHEDULER_TICK_SECONDS: "1",
+        ...(allowPrivateMail && { ALLOW_PRIVATE_MAIL_HOSTS: "true" }),
         ...(smtp && {
           SMTP_HOST: "127.0.0.1",
           SMTP_PORT: String(smtp.port),

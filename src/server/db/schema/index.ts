@@ -15,3 +15,4 @@ export * from "./invoice-template";
 export * from "./job";
 export * from "./automation";
 export * from "./notification";
+export * from "./mail";

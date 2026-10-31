@@ -15,6 +15,7 @@ import {
   setDefaultSeriesAction,
   setNextNumberAction,
 } from "@/app/(app)/nastaveni/rady/actions";
+import { saveMailSettingsAction } from "@/app/(app)/nastaveni/posta/actions";
 import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
 import {
   deleteTemplateAction,
@@ -25,6 +26,7 @@ import { user } from "@/server/db/schema";
 import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accounts";
 import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
 import { listInvoices, newDraftDefaults, saveDraft } from "@/server/services/invoices";
+import { getMailSettings } from "@/server/services/mail-settings";
 import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
 import { createTestDb } from "../helpers/db";
@@ -62,6 +64,29 @@ const account = {
 };
 
 describe("cizí id přes server actions", () => {
+  test("[TST-009] nastavení pošty platí jen pro přihlášený účet, cizí id se ignoruje", async () => {
+    seed("m1");
+    seed("m2");
+    session.userId = "m1";
+
+    const result = await saveMailSettingsAction({
+      userId: "m2",
+      smtpHost: "",
+      smtpPort: "",
+      smtpUser: "",
+      smtpPassword: "",
+      fromEmail: "",
+      senderName: "Jméno m1",
+      replyTo: "",
+      cc: "",
+      bcc: "",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(getMailSettings("m1").senderName).toBe("Jméno m1");
+    expect(getMailSettings("m2").senderName).toBeNull();
+  });
+
   test("[TST-009] cizí šablonu ani fakturu nejde použít ani smazat přes server action", async () => {
     seed("t1");
     seed("t2");

@@ -29,6 +29,7 @@ export const RATE_RULES = {
   invitationsUser: rule("invitationsUser", 20, 3600),
   accountDeleteUser: rule("accountDeleteUser", 5, 3600),
   sendUser: rule("sendUser", 60, 60),
+  sendBulkUser: rule("sendBulkUser", 5, 3600),
   importUser: rule("importUser", 60, 60),
   exportUser: rule("exportUser", 60, 60),
   aresLookup: rule("aresLookup", 30, 60),

@@ -15,3 +15,5 @@ CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 ARC-007	Fronta stojí, ale odeslání a automatika ji zatím nepoužívají	plán 4
 ADM-005	Zastavení úloh hotové, chybí nabídka zmeškaných pravidelných faktur po reaktivaci	plán 4
+SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
+SET-053	Dialog odeslání a jeho nedostupnost bez SMTP chybí, ukazuje to jen stránka Pošta	plán 4

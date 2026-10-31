@@ -14,6 +14,7 @@ export type CapturedMail = {
 export type TestSmtp = {
   port: number;
   messages: CapturedMail[];
+  logins: { username: string | undefined; password: string | null | undefined }[];
   waitFor(to: string): Promise<CapturedMail>;
   // Each of these applies to the next message only.
   rejectNext(code: number): void;
@@ -32,10 +33,16 @@ function decodeQuotedPrintable(raw: string): string {
 
 export async function startSmtp(): Promise<TestSmtp> {
   const messages: CapturedMail[] = [];
+  const logins: TestSmtp["logins"] = [];
   let next: NextData = {};
   const server = new SMTPServer({
     authOptional: true,
+    allowInsecureAuth: true,
     disabledCommands: ["STARTTLS"],
+    onAuth({ username, password }, _session, callback) {
+      logins.push({ username, password });
+      callback(null, { user: username });
+    },
     onData(stream, session, callback) {
       const { reject, drop, hold } = next;
       next = {};
@@ -80,6 +87,7 @@ export async function startSmtp(): Promise<TestSmtp> {
   return {
     port,
     messages,
+    logins,
     async waitFor(to) {
       const deadline = Date.now() + 5_000;
       while (Date.now() < deadline) {
