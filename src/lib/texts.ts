@@ -834,7 +834,6 @@ export const TEXTS = {
     errors: {
       forbidden: "Na tuto akci nemáte oprávnění",
       invalid: "Neplatné údaje",
-      host: "Zadejte adresu serveru",
       port: "Zadejte port od 1 do 65535",
       fromEmail: "Zadejte platnou adresu odesílatele",
       replyTo: "Zadejte platnou adresu pro odpovědi",
