@@ -57,6 +57,7 @@ Hlavní zásady:
 - podání přímo na daňový portál,
 - platební brány a online platba z odkazu,
 - veřejný odkaz na fakturu pro klienta,
+- veřejná registrace pro kohokoli; vyžádala by zásady ochrany osobních údajů, obchodní podmínky a další právní texty,
 - sdílení dat mezi uživateli, týmy, více firem pod jedním účtem,
 - mobilní aplikace,
 - rozhraní v jiném jazyce než v češtině.
@@ -603,6 +604,7 @@ Pravidla:
 - **UI-009** Prázdné stavy s jasnou další akcí. Stavy načítání a chyb u každé stránky.
 - **UI-010** Rychlé hledání napříč aplikací (Ctrl+K).
 - **UI-011** Centrum upozornění v aplikaci: selhání odeslání, faktury po splatnosti, nespárované platby, nerozpoznaná avíza, blížící se limity.
+- **UI-012** Záložka Nápověda s návodem k hlavním úkonům a odpověďmi na časté otázky. Obsah vzniká až po dokončení ostatních funkcí.
 
 Navigace: Přehled, Faktury, Pravidelné, Zákazníci, Ceník, Platby, Statistiky, Nastavení, Administrace.
 
