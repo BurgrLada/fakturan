@@ -342,7 +342,8 @@ function Form(props: InvoiceFormProps) {
         return;
       }
       saver.resume();
-      setMessage({ ok: false, text: reply.error });
+      if (reply.expired) setLock("expired");
+      else setMessage({ ok: false, text: reply.error });
     } catch {
       saver.resume();
       setMessage({ ok: false, text: T.network });

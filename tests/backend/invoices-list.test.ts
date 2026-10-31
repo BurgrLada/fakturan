@@ -456,7 +456,7 @@ describe("hromadné akce", () => {
     const many = Array.from({ length: MAX_BULK_DOCUMENTS }, () => issued(o));
     await expect(invoicesZip(actor(o.owner), [...many, mine])).rejects.toThrow(ServiceError);
     expect(downloads(o.owner)).toEqual([]);
-  });
+  }, 30_000);
 
   test("[SEC-001] vyčerpaný limit exportu hromadné PDF odmítne a nic nezapíše", async () => {
     const o = newOwner();

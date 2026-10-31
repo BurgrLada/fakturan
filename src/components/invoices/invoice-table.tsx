@@ -81,6 +81,7 @@ export function InvoiceTable({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const selectable = rows.filter((row) => row.status !== "draft");
@@ -114,7 +115,8 @@ export function InvoiceTable({
       try {
         const result = await markSentManyAction({ ids: chosen });
         if (!result.ok) {
-          setMessage({ ok: false, text: result.error });
+          if (result.expired) setExpired(true);
+          else setMessage({ ok: false, text: result.error });
           return;
         }
         setSelected(new Set());
@@ -133,7 +135,9 @@ export function InvoiceTable({
     startTransition(async () => {
       try {
         const reply = await deleteDraftAction({ id });
-        if (!reply.ok) setMessage({ ok: false, text: reply.error });
+        if (reply.ok) return;
+        if (reply.expired) setExpired(true);
+        else setMessage({ ok: false, text: reply.error });
       } catch {
         setMessage({ ok: false, text: F.network });
       }
@@ -149,13 +153,23 @@ export function InvoiceTable({
           className="flex flex-wrap items-center gap-2 rounded-md border p-2"
         >
           <span className="text-sm">{T.bulk.count(chosen.length)}</span>
-          <Button variant="outline" size="sm" disabled={pending} onClick={download}>
+          <Button variant="outline" size="sm" disabled={pending || expired} onClick={download}>
             {T.bulk.download}
           </Button>
-          <Button variant="outline" size="sm" disabled={pending} onClick={markSent}>
+          <Button variant="outline" size="sm" disabled={pending || expired} onClick={markSent}>
             {T.bulk.markSent}
           </Button>
         </div>
+      )}
+      {expired && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="flex flex-col items-start gap-2">
+            {F.sessionExpired}
+            <a className="underline" href="/prihlaseni">
+              {F.login}
+            </a>
+          </AlertDescription>
+        </Alert>
       )}
       {message && (
         <Alert variant={message.ok ? "default" : "destructive"} role="status">
@@ -232,7 +246,7 @@ export function InvoiceTable({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    disabled={pending}
+                    disabled={pending || expired}
                     aria-label={T.deleteDraft(row.customerName)}
                     onClick={() => setDeleting(row.id)}
                   >

@@ -594,7 +594,7 @@ export const TEXTS = {
       supplier: (label: string) => `Doplňte u dodavatele: ${label}`,
       notVatPayer: (label: string) => `Doplňte v Nastavení, sekce Dodavatel: ${label}`,
       notVatPayerFrozen: (label: string) =>
-        `Údaj „${label}“ nebyl při vystavení vyplněný, doklad v tomto jazyce vést nejde`,
+        `Údaj „${label}“ nebyl při vystavení vyplněný, doklad v tomto jazyce vést nejde. Duplikujte doklad a doplňte údaj v kopii, případně doklad stornujte`,
       customer: "Vyberte zákazníka",
       noLines: "Přidejte aspoň jednu položku",
       lineName: (position: number) => `Položka ${position}: vyplňte název`,
