@@ -1,8 +1,8 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, like, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, like, sql } from "drizzle-orm";
 import { addDays } from "@/lib/invoice";
-import { mailMessageSchema, type SendInput } from "@/lib/mail-send";
+import { isSendable, mailMessageSchema, type SendInput } from "@/lib/mail-send";
 import {
   calendarDateInPrague,
   isCalendarDate,
@@ -28,6 +28,7 @@ import { db, type Tx } from "../db";
 import {
   automationSettings,
   customer,
+  emailLog,
   invoice,
   notification,
   reminderRule,
@@ -43,7 +44,7 @@ import { composeMail } from "./email-templates";
 import { queueMail, queueReminder, sendPrefill, type SendPrefill } from "./invoice-mail";
 import { findOwned, getInvoice, unlessUnchanged, Unchanged } from "./invoices";
 import { mutate, type Audit } from "./mutation";
-import { notify } from "./notifications";
+import { notify, resolveNotification } from "./notifications";
 
 const E = TEXTS.reminders.errors;
 
@@ -60,6 +61,7 @@ const REMINDER_COLUMNS = {
   remindersOff: invoice.remindersOff,
   remindersPartial: invoice.remindersPartial,
   remindersSnoozeUntil: invoice.remindersSnoozeUntil,
+  sentAt: invoice.sentAt,
   remindersEnabled: customer.remindersEnabled,
 };
 
@@ -72,7 +74,12 @@ const schedulerActor = (userId: string): Actor => ({ userId, source: "scheduler"
 
 export function listReminderRules(ownerId: string, q: Reader = db): ReminderRule[] {
   return q
-    .select({ id: reminderRule.id, offsetDays: reminderRule.offsetDays, texts: reminderRule.texts })
+    .select({
+      id: reminderRule.id,
+      offsetDays: reminderRule.offsetDays,
+      activeSince: reminderRule.activeSince,
+      texts: reminderRule.texts,
+    })
     .from(reminderRule)
     .where(scoped(ownerId).where(reminderRule))
     .orderBy(reminderRule.position)
@@ -126,9 +133,16 @@ export function saveReminderRule(actor: Actor, raw: unknown): { id: string } {
     assertOffsetFree(tx, userId, offsetDays, existingId);
     const now = clock.now();
     const id = existingId ?? randomUUID();
+    const today = calendarDateInPrague(now);
     if (before) {
+      const moved = before.offsetDays !== offsetDays;
       tx.update(reminderRule)
-        .set({ offsetDays, texts, updatedAt: now })
+        .set({
+          offsetDays,
+          texts,
+          updatedAt: now,
+          activeSince: moved ? today : before.activeSince,
+        })
         .where(scoped(userId).where(reminderRule, (t, ops) => ops.eq(t.id, id)))
         .run();
     } else {
@@ -136,7 +150,16 @@ export function saveReminderRule(actor: Actor, raw: unknown): { id: string } {
         throw new ServiceError(E.tooMany);
       }
       tx.insert(reminderRule)
-        .values({ id, userId, position: 0, offsetDays, texts, createdAt: now, updatedAt: now })
+        .values({
+          id,
+          userId,
+          position: 0,
+          offsetDays,
+          activeSince: today,
+          texts,
+          createdAt: now,
+          updatedAt: now,
+        })
         .run();
     }
     renumberRules(tx, userId);
@@ -171,20 +194,39 @@ export function deleteReminderRule(actor: Actor, id: string): void {
   });
 }
 
-function sentStagesOf(q: Reader, userId: string, invoiceId: string): string[] {
+function sentRows(q: Reader, userId: string, invoiceId?: string) {
   return q
-    .select({ stageKey: reminderSent.stageKey })
+    .select({
+      invoiceId: reminderSent.invoiceId,
+      stageKey: reminderSent.stageKey,
+      offsetDays: reminderSent.offsetDays,
+    })
     .from(reminderSent)
-    .where(scoped(userId).where(reminderSent, (t, ops) => ops.eq(t.invoiceId, invoiceId)))
-    .all()
-    .map((row) => row.stageKey);
+    .where(
+      scoped(userId).where(reminderSent, (t, ops) =>
+        invoiceId ? ops.eq(t.invoiceId, invoiceId) : undefined,
+      ),
+    )
+    .all();
+}
+
+const offsetsOf = (rows: { offsetDays: number | null }[]) =>
+  rows.flatMap(({ offsetDays }) => (offsetDays === null ? [] : [offsetDays]));
+
+type Stage = { key: string; offsetDays: number | null };
+
+function alreadyUsed(q: Reader, userId: string, invoiceId: string, stage: Stage): boolean {
+  const rows = sentRows(q, userId, invoiceId);
+  return stage.offsetDays === null
+    ? rows.some((row) => row.stageKey === stage.key)
+    : offsetsOf(rows).includes(stage.offsetDays);
 }
 
 function insertSent(
   tx: Tx,
   userId: string,
   invoiceId: string,
-  stageKey: string,
+  stage: Stage,
   trigger: "automatic" | "manual",
   emailLogId: string,
 ): boolean {
@@ -194,7 +236,8 @@ function insertSent(
       id: randomUUID(),
       userId,
       invoiceId,
-      stageKey,
+      stageKey: stage.key,
+      offsetDays: stage.offsetDays,
       trigger,
       emailLogId,
       createdAt: clock.now(),
@@ -212,6 +255,9 @@ function chosenRule(q: Reader, userId: string, stageKey: string | null) {
   return rule;
 }
 
+const stageOf = (rule: { id: string; offsetDays: number } | null): Stage =>
+  rule ? { key: rule.id, offsetDays: rule.offsetDays } : { key: MANUAL_STAGE, offsetDays: null };
+
 export function reminderPrefill(
   ownerId: string,
   invoiceId: string,
@@ -225,8 +271,7 @@ export function reminderPrefill(
     kind: "reminder",
     texts: rule?.texts ?? null,
   });
-  const repeat = sentStagesOf(db, ownerId, invoiceId).includes(stageKey ?? MANUAL_STAGE);
-  return { ...prefill, repeat };
+  return { ...prefill, repeat: alreadyUsed(db, ownerId, invoiceId, stageOf(rule)) };
 }
 
 export function sendManualReminder(
@@ -239,12 +284,19 @@ export function sendManualReminder(
   const { stageKey, confirmedRepeat, ...message } = raw;
   if (stageKey !== null && typeof stageKey !== "string") throw new ServiceError(E.invalid);
   chosenRule(db, userId, stageKey);
-  const stage = stageKey ?? MANUAL_STAGE;
-  return queueReminder(actor, invoiceId, message, (tx, _row, logId) => {
-    if (confirmedRepeat !== true && sentStagesOf(tx, userId, invoiceId).includes(stage)) {
-      throw new ServiceError(E.confirmRepeat);
-    }
+  return queueReminder(actor, invoiceId, message, (tx, audit, _row, logId) => {
+    const stage = stageOf(chosenRule(tx, userId, stageKey));
+    const repeated = alreadyUsed(tx, userId, invoiceId, stage);
+    if (repeated && confirmedRepeat !== true) throw new ServiceError(E.confirmRepeat);
     insertSent(tx, userId, invoiceId, stage, "manual", logId);
+    audit({
+      action: "reminder.manual",
+      entity: "invoice",
+      entityId: invoiceId,
+      ownerId: userId,
+      scope: "user",
+      after: { stageKey, confirmedRepeat: confirmedRepeat === true, repeated, logId },
+    });
   });
 }
 
@@ -259,6 +311,7 @@ function changeInvoice(
   unlessUnchanged(() =>
     mutate(actor, action, (tx, audit) => {
       const before = findOwned(tx, userId, invoiceId);
+      if (!isSendable(before.status)) throw new ServiceError(E.notChangeable);
       if (before[field] === value) throw new Unchanged(undefined);
       tx.update(invoice)
         .set({ [field]: value })
@@ -299,11 +352,16 @@ export function reminderHistory(ownerId: string, invoiceId: string) {
   return db
     .select({
       id: reminderSent.id,
-      stageKey: reminderSent.stageKey,
+      offsetDays: reminderSent.offsetDays,
       trigger: reminderSent.trigger,
       createdAt: reminderSent.createdAt,
+      status: emailLog.status,
     })
     .from(reminderSent)
+    .leftJoin(
+      emailLog,
+      scoped(ownerId).where(emailLog, (t, ops) => ops.eq(t.id, reminderSent.emailLogId)),
+    )
     .where(scoped(ownerId).where(reminderSent, (t, ops) => ops.eq(t.invoiceId, invoiceId)))
     .orderBy(reminderSent.createdAt)
     .all();
@@ -313,7 +371,10 @@ function reminderCandidates(q: Reader, ownerId: string, invoiceId?: string) {
   return q
     .select(REMINDER_COLUMNS)
     .from(invoice)
-    .leftJoin(customer, eq(customer.id, invoice.customerId))
+    .leftJoin(
+      customer,
+      scoped(ownerId).where(customer, (t, ops) => ops.eq(t.id, invoice.customerId)),
+    )
     .where(
       scoped(ownerId).where(invoice, (t, ops) =>
         ops.and(
@@ -329,17 +390,13 @@ function reminderCandidates(q: Reader, ownerId: string, invoiceId?: string) {
 
 type Candidate = ReturnType<typeof reminderCandidates>[number];
 
-function sentByInvoice(q: Reader, ownerId: string): Map<string, string[]> {
-  const stages = new Map<string, string[]>();
-  const rows = q
-    .select({ invoiceId: reminderSent.invoiceId, stageKey: reminderSent.stageKey })
-    .from(reminderSent)
-    .where(scoped(ownerId).where(reminderSent))
-    .all();
-  for (const { invoiceId, stageKey } of rows) {
-    stages.set(invoiceId, [...(stages.get(invoiceId) ?? []), stageKey]);
+function offsetsByInvoice(q: Reader, ownerId: string): Map<string, number[]> {
+  const offsets = new Map<string, number[]>();
+  for (const { invoiceId, offsetDays } of sentRows(q, ownerId)) {
+    if (offsetDays === null) continue;
+    offsets.set(invoiceId, [...(offsets.get(invoiceId) ?? []), offsetDays]);
   }
-  return stages;
+  return offsets;
 }
 
 export type ReviewRow = {
@@ -359,10 +416,10 @@ export function remindersForReview(ownerId: string, today: CalendarDate): Review
   if (!reminders || !openSince) return [];
   const rules = listReminderRules(ownerId);
   if (rules.length === 0) return [];
-  const sent = sentByInvoice(db, ownerId);
+  const sent = offsetsByInvoice(db, ownerId);
   return reminderCandidates(db, ownerId).flatMap((row) => {
-    const sentStages = sent.get(row.id) ?? [];
-    const rule = stageForReview({ invoice: row, rules, sentStages, today, openSince });
+    const sentOffsets = sent.get(row.id) ?? [];
+    const rule = stageForReview({ invoice: row, rules, sentOffsets, today, openSince });
     if (!rule || !row.dueDate) return [];
     return {
       invoiceId: row.id,
@@ -381,8 +438,8 @@ export function remindersForReview(ownerId: string, today: CalendarDate): Review
 const blockedPrefix = (invoiceId: string, stageKey: string) =>
   `reminder:blocked:${invoiceId}:${stageKey}:`;
 
-function alreadyBlocked(ownerId: string, dedupeKey: string): boolean {
-  const row = db
+function alreadyBlocked(tx: Tx, ownerId: string, dedupeKey: string): boolean {
+  const row = tx
     .select({ id: notification.id })
     .from(notification)
     .where(scoped(ownerId).where(notification, (t, ops) => ops.eq(t.dedupeKey, dedupeKey)))
@@ -395,10 +452,7 @@ function resolveBlocked(tx: Tx, ownerId: string, invoiceId: string, stageKey: st
     .set({ resolvedAt: clock.now() })
     .where(
       scoped(ownerId).where(notification, (t) =>
-        and(
-          like(t.dedupeKey, `${blockedPrefix(invoiceId, stageKey)}%`),
-          sql`${t.resolvedAt} IS NULL`,
-        ),
+        and(like(t.dedupeKey, `${blockedPrefix(invoiceId, stageKey)}%`), isNull(t.resolvedAt)),
       ),
     )
     .run();
@@ -432,7 +486,7 @@ function freshStage(tx: Tx, ownerId: string, invoiceId: string, today: CalendarD
   const rule = dueStage({
     invoice: row,
     rules: listReminderRules(ownerId, tx),
-    sentStages: sentStagesOf(tx, ownerId, invoiceId),
+    sentOffsets: offsetsOf(sentRows(tx, ownerId, invoiceId)),
     today,
     openSince,
   });
@@ -468,7 +522,6 @@ function recordBlocked(
 function sendStage(ownerId: string, invoiceId: string, seen: string, today: CalendarDate): void {
   // Carries the date, so a stage still blocked tomorrow is a new event rather than a lost one.
   const dedupeKey = `${blockedPrefix(invoiceId, seen)}${today}`;
-  if (alreadyBlocked(ownerId, dedupeKey)) return;
   unlessUnchanged(() =>
     mutate(schedulerActor(ownerId), "reminder.send", (tx, audit) => {
       const fresh = freshStage(tx, ownerId, invoiceId, today);
@@ -476,6 +529,8 @@ function sendStage(ownerId: string, invoiceId: string, seen: string, today: Cale
       const { rule, date } = fresh;
       const built = buildMessage(ownerId, invoiceId, rule);
       if (!built.message) {
+        // Composed on every tick, so a corrected address lifts the block the same day.
+        if (alreadyBlocked(tx, ownerId, dedupeKey)) throw new Unchanged(undefined);
         recordBlocked(tx, audit, ownerId, fresh, dedupeKey, built.problems);
         return;
       }
@@ -486,12 +541,12 @@ function sendStage(ownerId: string, invoiceId: string, seen: string, today: Cale
         trigger: "automatic",
         automation: "reminders",
         plannedFor: date,
-        key: `reminder:${invoiceId}:${rule.id}`,
+        key: `reminder:${invoiceId}:${rule.offsetDays}`,
         message: built.message,
       });
       // Either way the stage stays unspent, and a conflict must take the queued message back.
       if (!queued) throw new Unchanged(undefined);
-      if (!insertSent(tx, ownerId, invoiceId, rule.id, "automatic", queued.logId)) {
+      if (!insertSent(tx, ownerId, invoiceId, stageOf(rule), "automatic", queued.logId)) {
         throw new Unchanged(undefined);
       }
       resolveBlocked(tx, ownerId, invoiceId, rule.id);
@@ -500,7 +555,12 @@ function sendStage(ownerId: string, invoiceId: string, seen: string, today: Cale
         entityId: invoiceId,
         ownerId,
         scope: "user",
-        after: { stageKey: rule.id, logId: queued.logId, plannedFor: date },
+        after: {
+          stageKey: rule.id,
+          offsetDays: rule.offsetDays,
+          logId: queued.logId,
+          plannedFor: date,
+        },
       });
     }),
   );
@@ -529,16 +589,55 @@ function remindingAccounts() {
 function planAccount(ownerId: string, openSince: CalendarDate, today: CalendarDate): void {
   const rules = listReminderRules(ownerId);
   if (rules.length === 0) return;
-  const sent = sentByInvoice(db, ownerId);
+  const sent = offsetsByInvoice(db, ownerId);
   for (const row of reminderCandidates(db, ownerId)) {
-    const sentStages = sent.get(row.id) ?? [];
-    const rule = dueStage({ invoice: row, rules, sentStages, today, openSince });
-    if (rule) sendStage(ownerId, row.id, rule.id, today);
+    const sentOffsets = sent.get(row.id) ?? [];
+    try {
+      const rule = dueStage({ invoice: row, rules, sentOffsets, today, openSince });
+      if (rule) sendStage(ownerId, row.id, rule.id, today);
+    } catch (error) {
+      reportFailure(error, { task: "reminder-plan", userId: ownerId });
+    }
+  }
+}
+
+// The block has no reason left once the document is settled, whatever the automation does now.
+function resolveLapsedBlocks(): void {
+  const open = db
+    .select({ notice: notification, row: invoice })
+    .from(notification)
+    .innerJoin(invoice, eq(invoice.id, notification.entityId))
+    .where(
+      and(
+        eq(notification.kind, "reminder_failed"),
+        like(notification.dedupeKey, "reminder:blocked:%"),
+        isNull(notification.resolvedAt),
+      ),
+    )
+    .all();
+  for (const { notice, row } of open) {
+    if (isEligibleForReminder(row, null)) continue;
+    const { userId, dedupeKey } = notice;
+    try {
+      mutate(schedulerActor(userId), "reminder.blocked_resolved", (tx, audit) => {
+        resolveNotification(tx, userId, dedupeKey);
+        audit({
+          entity: "invoice",
+          entityId: row.id,
+          ownerId: userId,
+          scope: "user",
+          after: { status: row.status },
+        });
+      });
+    } catch (error) {
+      reportFailure(error, { task: "reminder-plan", userId });
+    }
   }
 }
 
 export function planReminders(now: Date): void {
   const today = calendarDateInPrague(now);
+  resolveLapsedBlocks();
   for (const { userId, sendTime, openSince } of remindingAccounts()) {
     if (!openSince || !isDailyDue(now, sendTime)) continue;
     try {

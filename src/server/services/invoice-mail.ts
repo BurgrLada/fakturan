@@ -185,7 +185,7 @@ type ClickOptions = {
   kind?: MessageKind;
   revision: number;
   // Runs in the queueing transaction: a throw takes the queued message back with it.
-  alongside?: (tx: Tx, row: Invoice, logId: string) => void;
+  alongside?: (tx: Tx, audit: Audit, row: Invoice, logId: string) => void;
 };
 
 function queueClicked(
@@ -222,7 +222,7 @@ function queueClicked(
       message,
     });
     if (!result) throw new ServiceError(E.alreadySending);
-    opts.alongside?.(tx, row, result.logId);
+    opts.alongside?.(tx, audit, row, result.logId);
     return result;
   });
   kickWorker();

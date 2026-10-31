@@ -105,6 +105,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "reminder_rule.delete": "Smazání stupně upomínky",
   "reminder_rule.save": "Uložení stupně upomínky",
   "reminder.blocked": "Upomínku nešlo sestavit",
+  "reminder.blocked_resolved": "Vyřízení zablokované upomínky",
+  "reminder.manual": "Ruční upomínka",
   "reminder.send": "Automatická upomínka",
   "supplier.image_set": "Nahrání obrázku dodavatele",
   "supplier.save": "Uložení profilu dodavatele",

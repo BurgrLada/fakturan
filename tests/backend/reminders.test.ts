@@ -20,6 +20,7 @@ import {
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { setAutomation, setPaused } from "@/server/services/automation";
+import { markSent } from "@/server/services/invoice-lifecycle";
 import { queueMail, sendPrefill } from "@/server/services/invoice-mail";
 import { getInvoice } from "@/server/services/invoices";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
@@ -28,6 +29,7 @@ import {
   deleteReminderRule,
   listReminderRules,
   planReminders,
+  reminderHistory,
   reminderPrefill,
   remindersForReview,
   saveReminderRule,
@@ -112,14 +114,25 @@ function reminding(over: { cc?: string[]; bcc?: string[] } = {}) {
   return seeded;
 }
 
+const LONG_AGO = new Date("2026-01-05T10:00:00Z");
+
 function sentInvoice(owner: string, customerId: string, dueDate = "2026-03-02") {
   const id = issuedInvoice(owner, customerId);
-  db.update(invoice).set({ status: "sent", dueDate }).where(eq(invoice.id, id)).run();
+  db.update(invoice)
+    .set({ status: "sent", dueDate, sentAt: LONG_AGO })
+    .where(eq(invoice.id, id))
+    .run();
   return id;
 }
 
-const rule = (owner: string, offsetDays: number, texts: unknown = null) =>
-  saveReminderRule(webActor(owner), { offsetDays, texts }).id;
+// Dated well before the tests' stages: a rule never catches up on a day it did not exist.
+const rule = (owner: string, offsetDays: number, texts: unknown = null) => {
+  const before = current;
+  current = LONG_AGO;
+  const { id } = saveReminderRule(webActor(owner), { offsetDays, texts });
+  current = before;
+  return id;
+};
 const logsOf = (owner: string) =>
   db.select().from(emailLog).where(eq(emailLog.userId, owner)).all();
 const sentOf = (owner: string) =>
@@ -423,16 +436,135 @@ describe("automatické upomínky", () => {
     expect(smtp.messages).toHaveLength(1);
   });
 
-  test("smazání pravidla neotevře dávno poslaný stupeň ani jeho historii", async () => {
+  test("[REM-007] smazaný a znovu založený stupeň neodejde podruhé a historie drží původní dny", async () => {
     const { owner, customerId } = reminding();
     const stage = rule(owner, 0);
-    sentInvoice(owner, customerId);
+    const id = sentInvoice(owner, customerId);
     await tickAt(DAY_ONE);
 
     deleteReminderRule(webActor(owner), stage);
-
     expect(listReminderRules(owner)).toEqual([]);
-    expect(sentOf(owner).map((row) => row.stageKey)).toEqual([stage]);
+    expect(reminderHistory(owner, id)).toMatchObject([{ offsetDays: 0, status: "sent" }]);
+
+    rule(owner, 0);
+    await tickAt("2026-03-02T09:31:00Z");
+    await tickAt("2026-03-03T09:30:00Z");
+
+    expect(smtp.messages).toHaveLength(1);
+    expect(reminderPrefill(owner, id, listReminderRules(owner)[0]!.id).repeat).toBe(true);
+  });
+
+  test("[REM-007] znovu založený dřívější stupeň po pozdějším pořadí nerozbije", async () => {
+    const { owner, customerId } = reminding();
+    const early = rule(owner, 1);
+    rule(owner, 3);
+    sentInvoice(owner, customerId, "2026-03-05");
+    await tickAt("2026-03-08T09:30:00Z");
+
+    deleteReminderRule(webActor(owner), early);
+    rule(owner, 1);
+    await tickAt("2026-03-08T09:31:00Z");
+
+    expect(smtp.messages).toHaveLength(1);
+  });
+
+  test("upomínka nepřijde minutu po faktuře ani po pozdním Označit jako odeslané", async () => {
+    const { owner, customerId } = reminding();
+    rule(owner, 0);
+    const late = issuedInvoice(owner, customerId);
+    setInvoice(late, { dueDate: "2026-03-02" });
+    at("2026-03-02T09:29:00Z");
+    markSent(webActor(owner), late);
+    const mailed = issuedInvoice(owner, customerId);
+    setInvoice(mailed, { status: "sent", dueDate: "2026-03-02", sentAt: current });
+
+    await tickAt("2026-03-02T09:30:00Z");
+    await tickAt("2026-03-03T09:30:00Z");
+
+    expect(smtp.messages).toEqual([]);
+  });
+
+  test("nové pravidlo a změna dnů nedohánějí, další den stupeň odejde", async () => {
+    const { owner, customerId } = reminding();
+    const moved = rule(owner, 9);
+    const id = sentInvoice(owner, customerId, "2026-03-01");
+
+    const added = saveReminderRule(webActor(owner), { offsetDays: 1, texts: null }).id;
+    await tickAt(DAY_ONE);
+    saveReminderRule(webActor(owner), { id: added, offsetDays: 1, texts: null });
+    saveReminderRule(webActor(owner), { id: moved, offsetDays: 2, texts: null });
+    await tickAt(DAY_ONE);
+    expect(smtp.messages).toEqual([]);
+
+    setInvoice(id, { dueDate: "2026-03-02" });
+    await tickAt("2026-03-03T09:30:00Z");
+
+    expect(sentOf(owner).map((row) => row.offsetDays)).toEqual([1]);
+    expect(listReminderRules(owner).find((item) => item.id === added)?.activeSince).toBe(
+      "2026-03-02",
+    );
+  });
+
+  test("[REM-006] částečná úhrada bez {{zbyva}} v rozhodujícím textu dostane výchozí text", async () => {
+    const { owner, customerId } = reminding();
+    rule(owner, 0, { cs: { subject: "Prosím o platbu", body: "Prosím o platbu." } });
+    const id = sentInvoice(owner, customerId);
+    setInvoice(id, { status: "partially_paid", paidMinor: 100_000, remindersPartial: true });
+
+    await tickAt(DAY_ONE);
+
+    expect(smtp.messages[0]!.subject).toContain("Upomínka k faktuře");
+    expect(smtp.messages[0]!.body).toMatch(/Zbývá uhradit 2\s000,00\sKč/);
+  });
+
+  test("[REM-006] vlastní text s {{zbyva}} zůstane a plná faktura vlastní text nemění", async () => {
+    const { owner, customerId } = reminding();
+    rule(owner, 0, { cs: { subject: "Doplatek", body: "Doplaťte {{zbyva}}." } });
+    rule(owner, 1, { cs: { subject: "Platba", body: "Prosím o platbu." } });
+    const id = sentInvoice(owner, customerId);
+    setInvoice(id, { status: "partially_paid", paidMinor: 100_000, remindersPartial: true });
+    sentInvoice(owner, customerId, "2026-03-01");
+
+    await tickAt(DAY_ONE);
+
+    expect(smtp.messages.map((mail) => mail.subject).sort()).toEqual(["Doplatek", "Platba"]);
+  });
+
+  test("oprava adresy odblokuje stupeň týž den a blokace se vyřeší i úhradou", async () => {
+    const { owner } = reminding();
+    const silent = seedCustomer(owner, "");
+    rule(owner, 0);
+    sentInvoice(owner, silent);
+    const unpaid = seedCustomer(owner, "");
+    const paidLater = sentInvoice(owner, unpaid);
+
+    await tickAt(DAY_ONE);
+    db.update(customer).set({ email: "nova@example.cz" }).where(eq(customer.id, silent)).run();
+    await tickAt("2026-03-02T09:31:00Z");
+    expect(smtp.messages).toHaveLength(1);
+
+    setInvoice(paidLater, { status: "paid", paidMinor: 300_000 });
+    await tickAt("2026-03-02T09:32:00Z");
+
+    const left = noticesOf(owner).filter((row) => row.kind === "reminder_failed");
+    expect(left).toHaveLength(2);
+    expect(left.every((row) => row.resolvedAt !== null)).toBe(true);
+  });
+
+  test("chyba jedné faktury nezastaví další v účtu", async () => {
+    const { owner, customerId } = reminding();
+    rule(owner, 0);
+    const broken = sentInvoice(owner, customerId);
+    const healthy = sentInvoice(owner, customerId);
+    db.$client.exec(`CREATE TRIGGER broken_invoice BEFORE INSERT ON email_log
+      WHEN NEW.invoice_id = '${broken}' BEGIN SELECT RAISE(ABORT, 'porucha'); END`);
+    try {
+      planReminders(current);
+    } finally {
+      db.$client.exec("DROP TRIGGER broken_invoice");
+    }
+
+    expect(sentOf(owner).map((row) => row.invoiceId)).toEqual([healthy]);
   });
 
   test("[TST-005] upomínka zaplacená za letu neodejde a automatika ji neuvolní", async () => {
@@ -469,13 +601,13 @@ describe("automatické upomínky", () => {
 
   test("[ARC-007] upomínka jde přes frontu s klíčem faktury a stupně", () => {
     const { owner, customerId } = reminding();
-    const stage = rule(owner, 0);
+    rule(owner, 0);
     const id = sentInvoice(owner, customerId);
 
     planReminders(current);
 
     const rows = db.select().from(job).where(eq(job.userId, owner)).all();
-    expect(rows.map((row) => row.key)).toEqual([`reminder:${id}:${stage}`]);
+    expect(rows.map((row) => row.key)).toEqual([`reminder:${id}:0`]);
     expect(rows[0]!.kind).toBe("mail.send");
     expect(Object.keys(rows[0]!.payload)).toEqual(["logId"]);
   });
@@ -552,8 +684,8 @@ describe("souběh", () => {
     const id = sentInvoice(owner, customerId);
     db.$client.exec(
       `CREATE TRIGGER race_stage BEFORE INSERT ON email_log BEGIN
-         INSERT INTO reminder_sent (id, user_id, invoice_id, stage_key, trigger, created_at)
-         VALUES ('race', NEW.user_id, NEW.invoice_id, '${stage}', 'automatic', 0);
+         INSERT INTO reminder_sent (id, user_id, invoice_id, stage_key, offset_days, trigger, created_at)
+         VALUES ('race', NEW.user_id, NEW.invoice_id, '${stage}', 0, 'automatic', 0);
        END`,
     );
     try {
@@ -580,7 +712,14 @@ describe("ruční upomínka", () => {
 
     expect(smtp.messages).toHaveLength(1);
     expect(getInvoice(owner, id)!.status).toBe("issued");
-    expect(sentOf(owner)).toMatchObject([{ stageKey: MANUAL_STAGE, trigger: "manual" }]);
+    expect(sentOf(owner)).toMatchObject([
+      { stageKey: MANUAL_STAGE, offsetDays: null, trigger: "manual" },
+    ]);
+    const audits = db.select().from(auditLog).where(eq(auditLog.ownerId, owner)).all();
+    expect(audits.find((row) => row.action === "reminder.manual")?.after).toMatchObject({
+      stageKey: null,
+      confirmedRepeat: false,
+    });
     expect(sendPrefill(owner, id).subject).toContain("Faktura");
   });
 
@@ -624,6 +763,24 @@ describe("ruční upomínka", () => {
 
     expect(smtp.messages).toEqual([]);
     expect(logsOf(owner)[0]!.status).toBe("held");
+  });
+});
+
+describe("nastavení na faktuře", () => {
+  test("koncept a storno změny upomínek odmítnou", () => {
+    const { owner, customerId } = account();
+    const cancelled = sentInvoice(owner, customerId);
+    setInvoice(cancelled, { status: "cancelled" });
+    const draft = sentInvoice(owner, customerId);
+    setInvoice(draft, { status: "draft" });
+    const actor = webActor(owner);
+    const E = TEXTS.reminders.errors.notChangeable;
+
+    for (const id of [cancelled, draft]) {
+      expect(() => snoozeReminders(actor, id, "2026-03-05")).toThrow(E);
+      expect(() => setRemindersOff(actor, id, true)).toThrow(E);
+      expect(() => setPartialReminders(actor, id, true)).toThrow(E);
+    }
   });
 });
 

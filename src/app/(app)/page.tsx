@@ -12,7 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
 import { dueAlerts } from "@/server/services/due-alerts";
-import { isOnboarded } from "@/server/services/preferences";
+import { getPreferences, isOnboarded } from "@/server/services/preferences";
 
 export const metadata: Metadata = { title: `${TEXTS.overview.title} | ${TEXTS.appName}` };
 
@@ -31,7 +31,10 @@ async function OverviewContent() {
           </AlertDescription>
         </Alert>
       )}
-      <DueAlerts {...dueAlerts(user.id, calendarDateInPrague(clock.now()))} />
+      <DueAlerts
+        {...dueAlerts(user.id, calendarDateInPrague(clock.now()))}
+        dateFormat={getPreferences(user.id).dateFormat}
+      />
       <EmptyState
         icon={LayoutDashboard}
         title={TEXTS.overview.emptyTitle}

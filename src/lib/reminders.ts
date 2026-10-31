@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { mailContentSchema } from "./email-template";
 import { addDays, daysBetween, type InvoiceStatus, type InvoiceType } from "./invoice";
-import type { CalendarDate } from "./number-format";
+import { calendarDateInPrague, type CalendarDate } from "./number-format";
 import type { Language } from "./preferences";
 import { amountDue } from "./qr-payload";
 import { MAIL_VARIABLE_NAMES, validateVariables } from "./template-vars";
@@ -20,7 +20,13 @@ export const MANUAL_STAGE = "manual";
 export type ReminderContent = z.output<typeof mailContentSchema>;
 export type ReminderTexts = Partial<Record<Language, ReminderContent>>;
 
-export type ReminderRule = { id: string; offsetDays: number; texts: ReminderTexts | null };
+export type ReminderRule = {
+  id: string;
+  offsetDays: number;
+  // The day this offset came to exist: nothing dated up to it is ever caught up on.
+  activeSince: CalendarDate;
+  texts: ReminderTexts | null;
+};
 
 const content = mailContentSchema.superRefine((value, ctx) => {
   const unknown = validateVariables(`${value.subject}\n${value.body}`, MAIL_VARIABLE_NAMES);
@@ -41,24 +47,35 @@ export const reminderRuleSchema = z.object({
 
 export type ReminderRuleInput = z.input<typeof reminderRuleSchema>;
 
-type StageInvoice = { dueDate: CalendarDate | null; remindersSnoozeUntil: CalendarDate | null };
+type StageInvoice = {
+  dueDate: CalendarDate | null;
+  remindersSnoozeUntil: CalendarDate | null;
+  sentAt: Date | null;
+};
 
 type StageInput<R> = {
   invoice: StageInvoice;
   rules: R[];
-  sentStages: string[];
+  // Days, not rule ids: a deleted and recreated stage is still the same stage for the client.
+  sentOffsets: number[];
   today: CalendarDate;
   openSince: CalendarDate;
 };
 
+function days(count: number): string {
+  if (count === 1) return "1 den";
+  return count >= 2 && count <= 4 ? `${count} dny` : `${count} dní`;
+}
+
 export function stageLabel(offsetDays: number): string {
   const { before, after, onDay } = TEXTS.reminders.rules;
   if (offsetDays === 0) return onDay;
-  return offsetDays < 0 ? before(-offsetDays) : after(offsetDays);
+  return offsetDays < 0 ? before(days(-offsetDays)) : after(days(offsetDays));
 }
 
+// A snooze only delays: the opening date always judges the undelayed date, so it revives nothing.
 export function stageDate(
-  invoice: StageInvoice & { dueDate: CalendarDate },
+  invoice: Pick<StageInvoice, "remindersSnoozeUntil"> & { dueDate: CalendarDate },
   offsetDays: number,
 ): CalendarDate {
   const date = addDays(invoice.dueDate, offsetDays);
@@ -66,16 +83,23 @@ export function stageDate(
   return snooze && snooze > date ? snooze : date;
 }
 
-function pickStage<R extends ReminderRule>(
-  { invoice, rules, sentStages }: StageInput<R>,
-  matches: (date: CalendarDate) => boolean,
+type Dated<R> = { rule: R; plain: CalendarDate; date: CalendarDate };
+
+function latestStage<R extends ReminderRule>(
+  { invoice, rules, sentOffsets }: StageInput<R>,
+  matches: (stage: Dated<R>) => boolean,
 ): R | null {
   const { dueDate } = invoice;
   if (!dueDate) return null;
-  const sent = rules.filter((rule) => sentStages.includes(rule.id));
-  const latestSent = Math.max(-Infinity, ...sent.map((rule) => rule.offsetDays));
   const dated = { ...invoice, dueDate };
-  const open = rules.filter((rule) => matches(stageDate(dated, rule.offsetDays)));
+  const latestSent = Math.max(-Infinity, ...sentOffsets);
+  const open = rules.filter((rule) =>
+    matches({
+      rule,
+      plain: addDays(dueDate, rule.offsetDays),
+      date: stageDate(dated, rule.offsetDays),
+    }),
+  );
   const latest = open.reduce<R | null>(
     (best, rule) => (best && best.offsetDays > rule.offsetDays ? best : rule),
     null,
@@ -88,13 +112,26 @@ const isFresh = (date: CalendarDate, today: CalendarDate) =>
 
 // An outage may leave several stages open: only the latest goes, so the order never runs backwards.
 export function dueStage<R extends ReminderRule>(input: StageInput<R>): R | null {
-  const { today, openSince } = input;
-  return pickStage(input, (date) => date > openSince && date <= today && isFresh(date, today));
+  const { invoice, today, openSince } = input;
+  if (!invoice.sentAt) return null;
+  const sentOn = calendarDateInPrague(invoice.sentAt);
+  return latestStage(
+    input,
+    ({ rule, plain, date }) =>
+      plain > openSince &&
+      plain > sentOn &&
+      plain > rule.activeSince &&
+      date <= today &&
+      isFresh(date, today),
+  );
 }
 
 export function stageForReview<R extends ReminderRule>(input: StageInput<R>): R | null {
   const { today, openSince } = input;
-  return pickStage(input, (date) => date <= today && (date <= openSince || !isFresh(date, today)));
+  return latestStage(
+    input,
+    ({ plain, date }) => date <= today && (plain <= openSince || !isFresh(date, today)),
+  );
 }
 
 const REMINDABLE_TYPES: readonly InvoiceType[] = ["invoice", "advance"];

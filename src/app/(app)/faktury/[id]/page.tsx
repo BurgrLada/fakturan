@@ -29,7 +29,12 @@ import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
 import { mailAvailability } from "@/server/services/mail-settings";
 import { getRecurring } from "@/server/services/recurring";
-import { listReminderRules, reminderHistory } from "@/server/services/reminders";
+import { getPreferences } from "@/server/services/preferences";
+import {
+  listReminderRules,
+  reminderHistory,
+  remindersForReview,
+} from "@/server/services/reminders";
 
 const T = TEXTS.invoices.detail;
 
@@ -169,6 +174,11 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           invoiceId={id}
           rules={listReminderRules(user.id)}
           history={reminderHistory(user.id, id)}
+          suggestedStage={
+            remindersForReview(user.id, today).find((item) => item.invoiceId === id)?.stageKey ??
+            null
+          }
+          dateFormat={getPreferences(user.id).dateFormat}
           snoozeUntil={row.remindersSnoozeUntil}
           off={row.remindersOff}
           partial={row.remindersPartial}

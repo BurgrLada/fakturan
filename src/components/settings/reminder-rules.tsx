@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatMoney } from "@/lib/money";
-import { LANGUAGES, type Language } from "@/lib/preferences";
+import { LANGUAGES, type DateFormat, type Language } from "@/lib/preferences";
 import { stageLabel, type ReminderRule, type ReminderTexts } from "@/lib/reminders";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
@@ -192,7 +192,13 @@ export function ReminderRules({ rules }: { rules: ReminderRule[] }) {
   );
 }
 
-export function ReminderReview({ rows }: { rows: ReviewRow[] }) {
+export function ReminderReview({
+  rows,
+  dateFormat,
+}: {
+  rows: ReviewRow[];
+  dateFormat: DateFormat;
+}) {
   return (
     <section
       aria-labelledby="reminder-review"
@@ -218,7 +224,7 @@ export function ReminderReview({ rows }: { rows: ReviewRow[] }) {
               <span>{row.customerName}</span>
               <span>{stageLabel(row.offsetDays)}</span>
               <span className="text-muted-foreground">
-                {V.due} {formatCalendarDate(row.dueDate, "d. M. yyyy")}
+                {V.due} {formatCalendarDate(row.dueDate, dateFormat)}
               </span>
               <span>{formatMoney(row.amountDueMinor, row.currency)}</span>
             </li>

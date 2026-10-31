@@ -8,6 +8,7 @@ import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
 import { automationImpact, getAutomation } from "@/server/services/automation";
+import { getPreferences } from "@/server/services/preferences";
 import { listReminderRules, remindersForReview } from "@/server/services/reminders";
 
 export const metadata: Metadata = { title: `${TEXTS.automation.title} | ${TEXTS.appName}` };
@@ -19,7 +20,10 @@ async function AutomationContent() {
     <>
       <AutomationPanel settings={getAutomation(user.id)} impact={automationImpact(user.id)} />
       <ReminderRules rules={listReminderRules(user.id)} />
-      <ReminderReview rows={remindersForReview(user.id, today)} />
+      <ReminderReview
+        rows={remindersForReview(user.id, today)}
+        dateFormat={getPreferences(user.id).dateFormat}
+      />
     </>
   );
 }

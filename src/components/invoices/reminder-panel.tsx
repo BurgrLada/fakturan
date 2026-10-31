@@ -14,6 +14,8 @@ import { Label } from "@/components/ui/label";
 import { formatDateTime } from "@/lib/format";
 import type { CalendarDate } from "@/lib/number-format";
 import { MANUAL_STAGE, stageLabel, type ReminderRule } from "@/lib/reminders";
+import type { EmailStatus } from "@/lib/mail-send";
+import type { DateFormat } from "@/lib/preferences";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { SendDialog, type ReminderChoice } from "./send-dialog";
@@ -26,6 +28,8 @@ export function ReminderPanel({
   invoiceId,
   rules,
   history,
+  suggestedStage,
+  dateFormat,
   snoozeUntil,
   off,
   partial,
@@ -35,7 +39,15 @@ export function ReminderPanel({
 }: {
   invoiceId: string;
   rules: ReminderRule[];
-  history: { id: string; stageKey: string; trigger: string; createdAt: Date }[];
+  history: {
+    id: string;
+    offsetDays: number | null;
+    trigger: string;
+    createdAt: Date;
+    status: EmailStatus | null;
+  }[];
+  suggestedStage: string | null;
+  dateFormat: DateFormat;
   snoozeUntil: CalendarDate | null;
   off: boolean;
   partial: boolean;
@@ -46,7 +58,7 @@ export function ReminderPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [stage, setStage] = useState(MANUAL_STAGE);
+  const [stage, setStage] = useState(suggestedStage ?? MANUAL_STAGE);
   const [sending, setSending] = useState<ReminderChoice | null>(null);
   const [until, setUntil] = useState(snoozeUntil ?? "");
 
@@ -61,11 +73,6 @@ export function ReminderPanel({
       }
     });
   }
-
-  const labelOf = (key: string) => {
-    const rule = rules.find((item) => item.id === key);
-    return rule ? stageLabel(rule.offsetDays) : T.manualStage;
-  };
 
   return (
     <section aria-labelledby="reminders-title" className="flex flex-col gap-3 sm:max-w-xl">
@@ -147,7 +154,7 @@ export function ReminderPanel({
         )}
       </div>
       <p id="reminder-snooze-hint" className="text-xs text-muted-foreground">
-        {snoozeUntil ? T.snoozed(formatCalendarDate(snoozeUntil, "d. M. yyyy")) : T.snoozeHint}
+        {snoozeUntil ? T.snoozed(formatCalendarDate(snoozeUntil, dateFormat)) : T.snoozeHint}
       </p>
       <label className="flex items-center gap-2 text-sm">
         <input
@@ -180,8 +187,10 @@ export function ReminderPanel({
         <ul data-testid="reminder-history" className="flex flex-col gap-1 text-sm">
           {history.map((row) => (
             <li key={row.id}>
-              {formatDateTime(row.createdAt)} · {labelOf(row.stageKey)} ·{" "}
+              {formatDateTime(row.createdAt)} ·{" "}
+              {row.offsetDays === null ? T.manualStage : stageLabel(row.offsetDays)} ·{" "}
               {row.trigger === "automatic" ? T.automatic : T.manual}
+              {row.status && ` · ${TEXTS.invoiceMail.statuses[row.status]}`}
             </li>
           ))}
         </ul>

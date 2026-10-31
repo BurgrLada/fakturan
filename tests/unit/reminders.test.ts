@@ -2,23 +2,32 @@ import { describe, expect, test } from "vitest";
 import {
   dueStage,
   isEligibleForReminder,
-  MANUAL_STAGE,
   reminderRuleSchema,
   stageForReview,
+  stageLabel,
   type ReminderRule,
 } from "@/lib/reminders";
 
-const rule = (id: string, offsetDays: number): ReminderRule => ({ id, offsetDays, texts: null });
+const rule = (id: string, offsetDays: number): ReminderRule => ({
+  id,
+  offsetDays,
+  activeSince: "2026-01-01",
+  texts: null,
+});
 const BEFORE = rule("before", -3);
 const AFTER = rule("after", 1);
 const LATE = rule("late", 7);
 const RULES = [BEFORE, AFTER, LATE];
 
-const invoice = { dueDate: "2026-03-10", remindersSnoozeUntil: null };
+const invoice = {
+  dueDate: "2026-03-10",
+  remindersSnoozeUntil: null,
+  sentAt: new Date("2026-01-02T10:00:00Z"),
+};
 const input = (over: Partial<Parameters<typeof dueStage>[0]> = {}) => ({
   invoice,
   rules: RULES,
-  sentStages: [] as string[],
+  sentOffsets: [] as number[],
   today: "2026-03-11",
   openSince: "2026-01-01",
   ...over,
@@ -51,9 +60,9 @@ describe("dueStage", () => {
   test("po pozdějším stupni už dřívější neodejde", () => {
     const rules = [rule("a", 1), rule("b", 3)];
     const today = "2026-03-13";
-    expect(dueStage(input({ rules, today, sentStages: ["b"] }))).toBeNull();
-    expect(dueStage(input({ rules, today: "2026-03-11", sentStages: ["b"] }))).toBeNull();
-    expect(dueStage(input({ rules: [AFTER], sentStages: ["after"] }))).toBeNull();
+    expect(dueStage(input({ rules, today, sentOffsets: [3] }))).toBeNull();
+    expect(dueStage(input({ rules, today: "2026-03-11", sentOffsets: [3] }))).toBeNull();
+    expect(dueStage(input({ rules: [AFTER], sentOffsets: [1] }))).toBeNull();
   });
 
   test("odklad posune datum stupně", () => {
@@ -63,13 +72,53 @@ describe("dueStage", () => {
     expect(dueStage(input({ rules, invoice: snoozed, today: "2026-03-20" }))).toBe(AFTER);
   });
 
-  test("ruční upomínka bez stupně pořadí nemění", () => {
-    expect(dueStage(input({ sentStages: [MANUAL_STAGE] }))).toBe(AFTER);
+  test("znovu založený stupeň se stejnými dny je už odeslaný", () => {
+    const again = { ...AFTER, id: "nove-id" };
+    expect(dueStage(input({ rules: [again], sentOffsets: [1] }))).toBeNull();
+  });
+
+  test("[R-10] odklad neoživí stupeň před zapnutím, jen posouvá způsobilý", () => {
+    const snoozed = { ...invoice, remindersSnoozeUntil: "2026-03-13" };
+    const rules = [AFTER];
+    const today = "2026-03-13";
+    expect(dueStage(input({ rules, invoice: snoozed, today, openSince: "2026-03-11" }))).toBeNull();
+    expect(dueStage(input({ rules, invoice: snoozed, today, openSince: "2026-03-10" }))).toBe(
+      AFTER,
+    );
+    expect(stageForReview(input({ rules, invoice: snoozed, today, openSince: "2026-03-11" }))).toBe(
+      AFTER,
+    );
+    expect(
+      stageForReview(input({ rules, invoice: snoozed, today, openSince: "2026-03-10" })),
+    ).toBeNull();
+  });
+
+  test("stupeň musí mít datum po dni odeslání, bez odeslání není žádný", () => {
+    const sentOn = (iso: string) => ({ ...invoice, sentAt: new Date(iso) });
+    const rules = [AFTER];
+    expect(dueStage(input({ rules, invoice: sentOn("2026-03-11T08:00:00Z") }))).toBeNull();
+    expect(dueStage(input({ rules, invoice: sentOn("2026-03-10T23:30:00Z") }))).toBeNull();
+    expect(dueStage(input({ rules, invoice: sentOn("2026-03-10T22:59:00Z") }))).toBe(AFTER);
+    expect(dueStage(input({ rules, invoice: { ...invoice, sentAt: null } }))).toBeNull();
+  });
+
+  test("nové nebo posunuté pravidlo nedohání stupeň ze dne změny a dřívější", () => {
+    const fresh = { ...AFTER, activeSince: "2026-03-11" };
+    expect(dueStage(input({ rules: [fresh] }))).toBeNull();
+    const yesterday = { ...AFTER, activeSince: "2026-03-10" };
+    expect(dueStage(input({ rules: [yesterday] }))).toBe(yesterday);
   });
 
   test("bez splatnosti není stupeň", () => {
     expect(dueStage(input({ invoice: { ...invoice, dueDate: null } }))).toBeNull();
   });
+});
+
+test("stageLabel skloňuje dny", () => {
+  expect(stageLabel(1)).toBe("1 den po splatnosti");
+  expect(stageLabel(-3)).toBe("3 dny před splatností");
+  expect(stageLabel(5)).toBe("5 dní po splatnosti");
+  expect(stageLabel(0)).toBe("V den splatnosti");
 });
 
 describe("stageForReview", () => {
@@ -83,7 +132,7 @@ describe("stageForReview", () => {
   });
 
   test("po pozdějším odeslaném stupni není co kontrolovat", () => {
-    expect(stageForReview(input({ today: "2026-03-30", sentStages: ["late"] }))).toBeNull();
+    expect(stageForReview(input({ today: "2026-03-30", sentOffsets: [7] }))).toBeNull();
   });
 });
 

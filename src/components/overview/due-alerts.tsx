@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formatMoney } from "@/lib/money";
+import type { DateFormat } from "@/lib/preferences";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import type { AlertRow } from "@/server/services/due-alerts";
@@ -12,9 +13,11 @@ function Group({
   rows,
   testId,
   href,
+  dateFormat,
 }: {
   title: string;
   rows: AlertRow[];
+  dateFormat: DateFormat;
   testId: string;
   href: string;
 }) {
@@ -32,7 +35,7 @@ function Group({
             </Link>
             <span>{row.customerName}</span>
             <span className="text-muted-foreground">
-              {T.due} {formatCalendarDate(row.dueDate, "d. M. yyyy")}
+              {T.due} {formatCalendarDate(row.dueDate, dateFormat)}
             </span>
             <span>{formatMoney(row.amountDueMinor, row.currency)}</span>
           </li>
@@ -45,7 +48,15 @@ function Group({
   );
 }
 
-export function DueAlerts({ overdue, dueSoon }: { overdue: AlertRow[]; dueSoon: AlertRow[] }) {
+export function DueAlerts({
+  overdue,
+  dueSoon,
+  dateFormat,
+}: {
+  overdue: AlertRow[];
+  dueSoon: AlertRow[];
+  dateFormat: DateFormat;
+}) {
   if (overdue.length + dueSoon.length === 0) return null;
   return (
     <section
@@ -59,12 +70,14 @@ export function DueAlerts({ overdue, dueSoon }: { overdue: AlertRow[]; dueSoon: 
         title={T.overdue}
         rows={overdue}
         testId="alerts-overdue"
+        dateFormat={dateFormat}
         href="/faktury?stav=po-splatnosti"
       />
       <Group
         title={T.dueSoon}
         rows={dueSoon}
         testId="alerts-due-soon"
+        dateFormat={dateFormat}
         href="/faktury?razeni=splatnost&smer=asc"
       />
     </section>

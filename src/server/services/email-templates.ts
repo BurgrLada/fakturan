@@ -41,6 +41,9 @@ function capSubject(subject: string): string {
   return out.trimEnd();
 }
 
+const statesRest = ({ subject, body }: MailContent) =>
+  /\{\{\s*zbyva\s*\}\}/.test(`${subject}\n${body}`);
+
 export type MailDraft = {
   to: string[];
   cc: string[];
@@ -189,7 +192,11 @@ export function composeMail(
     if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
     content = parsed.data;
   } else {
-    const template = texts?.[doc.language] ?? getEmailTemplate(ownerId, kind, doc.language);
+    const chosen = texts?.[doc.language] ?? getEmailTemplate(ownerId, kind, doc.language);
+    // REM-006: a partly paid document must state what is left, whatever text was written.
+    const mustStateRest = kind === "reminder" && doc.status === "partially_paid";
+    const template =
+      mustStateRest && !statesRest(chosen) ? DEFAULT_MAIL_CONTENT[doc.language].reminder : chosen;
     const base = variablesFor(ownerId, doc, doc.number ?? "", doc.customerName);
     const ctx = { ...base, dateFormat: doc.dateFormat ?? base.dateFormat };
     const extra = {

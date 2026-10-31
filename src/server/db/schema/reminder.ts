@@ -15,6 +15,7 @@ export const reminderRule = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     position: integer().notNull(),
     offsetDays: integer("offset_days").notNull(),
+    activeSince: text("active_since").notNull().default(""),
     texts: text({ mode: "json" }).$type<ReminderTexts>(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
@@ -22,7 +23,7 @@ export const reminderRule = sqliteTable(
   (t) => [uniqueIndex("reminder_rule_user_offset_idx").on(t.userId, t.offsetDays)],
 );
 
-// stage_key has no foreign key on purpose: deleting a rule must not reopen a stage already sent.
+// offset_days outlives the rule, so a recreated stage counts as sent; null is a stage-less reminder.
 export const reminderSent = sqliteTable(
   "reminder_sent",
   {
@@ -34,13 +35,14 @@ export const reminderSent = sqliteTable(
       .notNull()
       .references(() => invoice.id, { onDelete: "cascade" }),
     stageKey: text("stage_key").notNull(),
+    offsetDays: integer("offset_days"),
     trigger: text({ enum: EMAIL_TRIGGERS }).notNull(),
     emailLogId: text("email_log_id").references(() => emailLog.id, { onDelete: "set null" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [
     uniqueIndex("reminder_sent_automatic_idx")
-      .on(t.invoiceId, t.stageKey)
+      .on(t.invoiceId, t.offsetDays)
       .where(sql`${t.trigger} = 'automatic'`),
     index("reminder_sent_user_invoice_idx").on(t.userId, t.invoiceId),
   ],
