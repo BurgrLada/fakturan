@@ -3,7 +3,9 @@ import type { BankNoticeParser, NoticeKind, NoticeMeta, NoticeVariant } from "./
 
 export const BANK_PARSERS: readonly BankNoticeParser[] = [fioParser];
 
-export const AUTO_MATCH_VARIANTS: readonly NoticeVariant[] = ["en"];
+export const AUTO_MATCH_VARIANTS: readonly NoticeVariant[] = BANK_PARSERS.flatMap(
+  (parser) => parser.autoMatchVariants,
+);
 
 export function isProvisional(variant: NoticeVariant): boolean {
   return !AUTO_MATCH_VARIANTS.includes(variant);

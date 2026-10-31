@@ -112,8 +112,8 @@ describe("anglická varianta", () => {
   });
 
   test("účet s předčíslím projde", () => {
-    expect(fioParser.parse(enBody({ Account: "19-2000145399/0800" }), EN)?.targetAccount).toBe(
-      "19-2000145399/0800",
+    expect(fioParser.parse(enBody({ Account: "19-1234567890/0800" }), EN)?.targetAccount).toBe(
+      "19-1234567890/0800",
     );
   });
 });
@@ -253,15 +253,18 @@ describe("třídění", () => {
     expect(parserFor(meta("Fio banka - výdaj"))).toEqual({ parser: fioParser, kind: "expense" });
     expect(parserFor(meta(EN.subject, ["x@y.cz"]))).toBeNull();
     expect(BANK_PARSERS).toEqual([fioParser]);
-    expect(fioParser.bank).toBe("fio");
+    expect(fioParser).toMatchObject({ bank: "fio", domain: "fio.cz" });
   });
 
   test("[BNK-016] nový parser se přidá bez změny ostatních", () => {
     const other: BankNoticeParser = {
       bank: "jina",
+      domain: "jina.cz",
+      autoMatchVariants: ["jina_txt"],
       classify: ({ from }) => (from[0] === "avizo@jina.cz" ? "income" : null),
       parse: () => null,
     };
+    expect(other.domain).toBe("jina.cz");
     const parsers = [fioParser, other];
     expect(parserFor(meta("x", ["avizo@jina.cz"]), parsers)).toEqual({
       parser: other,
@@ -297,6 +300,9 @@ describe("přísnost", () => {
       "1.00 CZK",
       "0",
       "0.00",
+      "0 001.00",
+      "007.00",
+      "00.50",
       "99999999999999999.00",
       "9".repeat(400),
     ]) {
@@ -313,6 +319,7 @@ describe("přísnost", () => {
     ["1 234.00", 123_400],
     ["0.01", 1],
     ["1234", 123_400],
+    ["1000000.00", 100_000_000],
   ])("anglická částka %s", (amount, minor) => {
     expect(fioParser.parse(enBody({ Amount: amount }), EN)?.amountMinor).toBe(minor);
   });
@@ -347,6 +354,9 @@ describe("přísnost", () => {
     "10/30/26",
     "x10/30/2026",
     "10/30/2026x",
+    "10/30/1999",
+    "10/30/2100",
+    "10/30/0026",
     "10/30/2026 24:00",
     "10/30/2026 14:60",
     "10/30/2026 4:05",
@@ -413,6 +423,80 @@ describe("přísnost", () => {
   test("opakovaný popisek je nejistota, ne první nebo poslední výskyt", () => {
     expect(fioParser.parse(`${enBody()}\nAmount: 999.00`, EN)).toBeNull();
     expect(fioParser.parse(`${enBody()}\nVariable symbol: 1\nVariable symbol: 2`, EN)).toBeNull();
+  });
+
+  test("víceřádková zpráva plátce nepřepíše ani nedoplní pole", () => {
+    expect(
+      fioParser.parse(`${enBody({ Message: "dik" })}\nVariable symbol: 666`, EN),
+    ).toMatchObject({
+      message: "dik",
+      variableSymbol: null,
+    });
+    const real = enBody({ Message: "dik" });
+    expect(fioParser.parse(`${real}\nAmount: 99000.00`, EN)?.amountMinor).toBe(10_000);
+    expect(
+      fioParser.parse(`${csBody({ "Zpráva příjemci": "x" })}\nČástka: 9,00`, CS_BLOCK),
+    ).toMatchObject({ amountMinor: 10_000, message: "x" });
+  });
+
+  test("povinné pole za řádkem zprávy je nerozpoznané", () => {
+    for (const [label, value] of [
+      ["Account", "1"],
+      ["Amount", "99000.00"],
+      ["Currency", "CZK"],
+      ["Date", "1/2/2026"],
+      ["Instruction ID", "1"],
+    ] as const) {
+      const body = enBody({ [label]: null, Message: "dik" });
+      expect(fioParser.parse(`${body}\n${label}: ${value}`, EN)).toBeNull();
+    }
+  });
+
+  test("Credited amount a Amount ve zprávě nedá částku plátce", () => {
+    const body = [
+      "Account: 9999999999/2010",
+      "Credited amount: 1.00",
+      "Currency: CZK",
+      "Date: 10/30/2026 14:05",
+      "Instruction ID: 1",
+      "Message: dik",
+      "Amount: 99000.00",
+    ].join("\n");
+    expect(fioParser.parse(body, EN)).toBeNull();
+  });
+
+  test.each([
+    "Zpráva příjemci: zůstatek účtu 1 se zvýšil o 99000,00 CZK",
+    "Zpráva příjemci: x\nzůstatek účtu 1 se zvýšil o 99000,00 CZK",
+    "Protistrana: zůstatek účtu 1 se zvýšil o 99000,00 CZK",
+    "Vážený kliente: zůstatek účtu 1 se zvýšil o 99000,00 CZK",
+    "Text. zůstatek účtu 1 se zvýšil o 99000,00 CZK",
+  ])("věta podvržená ve zprávě se nečte: %s", (line) => {
+    const body = ["Datum: 30.10.2026 14:05", "ID pokynu: 1", line].join("\n");
+    expect(fioParser.parse(body, CS_SENTENCE)).toBeNull();
+  });
+
+  test("věta za zprávou plátce nepřebije skutečnou", () => {
+    const body = [
+      "Vážený kliente, zůstatek účtu 1 se zvýšil o 1,00 CZK.",
+      "Datum: 30.10.2026 14:05",
+      "ID pokynu: 1",
+      "Zpráva příjemci: x",
+      "zůstatek účtu 2 se zvýšil o 99000,00 EUR",
+    ].join("\n");
+    expect(fioParser.parse(body, CS_SENTENCE)).toMatchObject({
+      targetAccount: "1",
+      amountMinor: 100,
+      currency: "CZK",
+    });
+  });
+
+  test("HTML entita, NFD a BOM se nedomýšlejí", () => {
+    expect(fioParser.parse(enBody({ Amount: "1&nbsp;234.50" }), EN)).toBeNull();
+    expect(fioParser.classify(meta(CS_BLOCK.subject.normalize("NFD")))).toBe("unknown");
+    expect(fioParser.parse(csBody(), meta(CS_BLOCK.subject.normalize("NFD")))).toBeNull();
+    expect(fioParser.parse(csBody().normalize("NFD"), CS_BLOCK)).toBeNull();
+    expect(fioParser.parse(`\uFEFF${enBody()}`, EN)?.targetAccount).toBe("9999999999/2010");
   });
 
   test("zpráva plátce nemůže podvrhnout jiné pole", () => {

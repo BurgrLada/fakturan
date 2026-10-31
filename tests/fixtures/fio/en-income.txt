@@ -9,7 +9,7 @@ Variable symbol: 20260042
 Constant symbol: 0308
 Counterparty account: 1111111116/0800
 Counterparty: Ukazkova Firma s.r.o.
-Message: Fiktivni platba
 Instruction ID: 10000000001
+Message: Fiktivni platba
 
 This is an automated message.

@@ -8,13 +8,16 @@ const DOMAIN_PROPERTIES = new Map([
   ["dmarc", ["header.from"]],
 ]);
 
+const UNFOLDED_BREAK = /[\r\n](?![\r\n \t])/;
+
 function pair(token: string): [string, string] {
   const equals = token.indexOf("=");
-  return equals < 0 ? [token, ""] : [token.slice(0, equals), token.slice(equals + 1)];
+  return [token.slice(0, equals), token.slice(equals + 1)];
 }
 
 // RFC 8601 comments and quoted strings may carry text from the sender's message, so
-// a plain split on ";" would let them forge a result. Returns null when malformed.
+// a plain split on ";" would let them forge a result. Returns null when malformed; a comma
+// outside them means duplicate headers were joined, which would revive a forged lower one.
 function splitStatements(header: string): string[] | null {
   const statements: string[] = [];
   let current = "";
@@ -30,7 +33,7 @@ function splitStatements(header: string): string[] | null {
       if (char === "\\") i++;
       else if (char === "(") depth++;
       else if (char === ")") depth--;
-    } else if (char === ")") {
+    } else if (char === ")" || char === ",") {
       return null;
     } else if (char === "(") {
       depth = 1;
@@ -69,12 +72,17 @@ function passesFor({ method, result, properties }: Statement, domain: string): b
 // added. Anything below it can come from the sender.
 export function checkAuthResults(topHeader: string | null, domain: string): AuthResult {
   if (!topHeader) return "none";
+  if (UNFOLDED_BREAK.test(topHeader)) return "fail";
   const parts = splitStatements(topHeader.toLowerCase());
   if (!parts) return "fail";
-  const statements = parts
+  const texts = parts
     .slice(1)
-    .map(toStatement)
-    .filter(({ method }) => DOMAIN_PROPERTIES.has(method));
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (texts.length === 1 && texts[0] === "none") return "none";
+  // A token without "=" here can only be a second authserv-id or broken syntax.
+  if (texts.some((text) => text.split(/\s+/).some((token) => !token.includes("=")))) return "fail";
+  const statements = texts.map(toStatement).filter(({ method }) => DOMAIN_PROPERTIES.has(method));
   if (statements.some((statement) => passesFor(statement, domain.toLowerCase()))) return "pass";
   return statements.every(({ result }) => result === "none") ? "none" : "fail";
 }

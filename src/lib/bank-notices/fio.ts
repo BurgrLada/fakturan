@@ -1,11 +1,13 @@
 import { CURRENCIES } from "../currency";
 import { isCalendarDate } from "../number-format";
-import type { BankNoticeParser, NoticeMeta, NoticeVariant, ParsedNotice } from "./types";
+import type { BankNoticeParser, NoticeMeta, ParsedNotice } from "./types";
+
+type FioVariant = "en" | "cs_block" | "cs_sentence";
 
 const SENDER = "automat@fio.cz";
 const MAX_TEXT_LENGTH = 64 * 1024;
 
-const VARIANT_BY_SUBJECT = new Map<string, NoticeVariant>([
+const VARIANT_BY_SUBJECT = new Map<string, FioVariant>([
   ["Fio banka - new income on account", "en"],
   ["Fio banka - příjem na kontě", "cs_block"],
   ["Fio banka - příjem na účtu", "cs_sentence"],
@@ -37,7 +39,7 @@ const CS_DETAIL_LABELS: [string, Field][] = [
 
 // The spec names only Protistrana, Variable symbol, Counterparty and Instruction ID.
 // Every other label is an assumption that fails safe into an unrecognized notice.
-const LABELS: Record<NoticeVariant, Map<string, Field>> = {
+const LABELS: Record<FioVariant, Map<string, Field>> = {
   en: new Map([
     ["Account", "account"],
     ["Amount", "amount"],
@@ -61,12 +63,14 @@ const LABELS: Record<NoticeVariant, Map<string, Field>> = {
 
 // Every quantifier is bounded or separated by a literal the next token cannot match,
 // so the patterns stay linear on untrusted mail text.
+// A greeting may precede the sentence, but its charset excludes ":" so no labelled
+// line can pass for the sentence.
 const SENTENCE =
-  /(?:^|\s)[Zz]ůstatek účtu (\S{1,40}) se zvýšil o ([\d   ]{1,40}(?:,\d{2})?) ([A-Z]{3})\.?$/;
-const EN_AMOUNT = /^(\d{1,3}(?:[   ]\d{3})+|\d+)(?:\.(\d{2}))?$/;
-const CS_AMOUNT = /^(\d{1,3}(?:[   ]\d{3})+|\d+)(?:,(\d{2}))?$/;
-const EN_DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?: ((?:[01]\d|2[0-3]):[0-5]\d))?$/;
-const CS_DATE = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?: ((?:[01]\d|2[0-3]):[0-5]\d))?$/;
+  /^(?:[\p{L} ]{1,40}, )?[Zz]ůstatek účtu (\S{1,40}) se zvýšil o ([\d \u00A0\u202F]{1,40}(?:,\d{2})?) ([A-Z]{3})\.?$/u;
+const EN_AMOUNT = /^([1-9]\d{0,2}(?:[ \u00A0\u202F]\d{3})+|0|[1-9]\d*)(?:\.(\d{2}))?$/;
+const CS_AMOUNT = /^([1-9]\d{0,2}(?:[ \u00A0\u202F]\d{3})+|0|[1-9]\d*)(?:,(\d{2}))?$/;
+const EN_DATE = /^(\d{1,2})\/(\d{1,2})\/(20\d{2})(?: ((?:[01]\d|2[0-3]):[0-5]\d))?$/;
+const CS_DATE = /^(\d{1,2})\.(\d{1,2})\.(20\d{2})(?: ((?:[01]\d|2[0-3]):[0-5]\d))?$/;
 const ACCOUNT = /^(?:\d{1,6}-)?\d{1,10}(?:\/\d{4})?$/;
 const SYMBOL = /^\d{1,10}$/;
 const INSTRUCTION_ID = /^[0-9A-Za-z]{1,40}$/;
@@ -82,15 +86,25 @@ function classify(meta: NoticeMeta) {
   return EXPENSE_WORDS.some((word) => subject.includes(word)) ? "expense" : "unknown";
 }
 
-// A repeated label could be the payer's message posing as a field, so it voids the notice.
+function fieldOf(line: string, labels: Map<string, Field>): Field | undefined {
+  const colon = line.indexOf(":");
+  return colon < 0 ? undefined : labels.get(line.slice(0, colon));
+}
+
+// The message is free text from the payer and may span lines, so nothing after its
+// label can be trusted, however much it looks like a field.
+function linesThroughMessage(lines: string[], labels: Map<string, Field>): string[] {
+  const message = lines.findIndex((line) => fieldOf(line, labels) === "message");
+  return message < 0 ? lines : lines.slice(0, message + 1);
+}
+
 function readFields(lines: string[], labels: Map<string, Field>): Map<Field, string> | null {
   const fields = new Map<Field, string>();
   for (const line of lines) {
-    const colon = line.indexOf(":");
-    const field = labels.get(line.slice(0, colon));
-    if (colon < 0 || !field) continue;
+    const field = fieldOf(line, labels);
+    if (!field) continue;
     if (fields.has(field)) return null;
-    fields.set(field, line.slice(colon + 1).trim());
+    fields.set(field, line.slice(line.indexOf(":") + 1).trim());
   }
   return fields;
 }
@@ -104,7 +118,7 @@ function readSentence(lines: string[], fields: Map<Field, string>): boolean {
   return true;
 }
 
-function parseAmount(text: string, variant: NoticeVariant): number | null {
+function parseAmount(text: string, variant: FioVariant): number | null {
   const match = (variant === "en" ? EN_AMOUNT : CS_AMOUNT).exec(text);
   if (!match) return null;
   const [, whole, fraction = "0"] = match;
@@ -112,7 +126,7 @@ function parseAmount(text: string, variant: NoticeVariant): number | null {
   return minor > 0 && Number.isSafeInteger(minor) ? minor : null;
 }
 
-function parseOccurredAt(text: string, variant: NoticeVariant): ParsedNotice["occurredAt"] | null {
+function parseOccurredAt(text: string, variant: FioVariant): ParsedNotice["occurredAt"] | null {
   const match = (variant === "en" ? EN_DATE : CS_DATE).exec(text);
   if (!match) return null;
   const [, first, second, year, time = null] = match;
@@ -131,8 +145,12 @@ function parse(text: string, meta: NoticeMeta): ParsedNotice | null {
   const variant = VARIANT_BY_SUBJECT.get(meta.subject);
   if (!variant || !isFromFio(meta) || text.length > MAX_TEXT_LENGTH) return null;
 
-  const lines = text.split("\n").map((line) => line.trim());
-  const fields = readFields(lines, LABELS[variant]);
+  const labels = LABELS[variant];
+  const lines = linesThroughMessage(
+    text.split("\n").map((line) => line.trim()),
+    labels,
+  );
+  const fields = readFields(lines, labels);
   if (!fields) return null;
   if (variant === "cs_sentence" && !readSentence(lines, fields)) return null;
 
@@ -173,4 +191,10 @@ function parse(text: string, meta: NoticeMeta): ParsedNotice | null {
   };
 }
 
-export const fioParser: BankNoticeParser = { bank: "fio", classify, parse };
+export const fioParser: BankNoticeParser = {
+  bank: "fio",
+  domain: "fio.cz",
+  autoMatchVariants: ["en"],
+  classify,
+  parse,
+};

@@ -8,5 +8,5 @@ VS: 20260042
 KS: 0308
 Protiúčet: 1111111116/0800
 Protistrana: Ukázková Firma s.r.o.
-Zpráva příjemci: Fiktivní platba
 ID pokynu: 10000000003
+Zpráva příjemci: Fiktivní platba

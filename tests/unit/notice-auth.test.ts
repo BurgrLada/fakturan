@@ -55,10 +55,27 @@ describe("Authentication-Results", () => {
   });
 
   test("[BNK-013] lze číst jen nejvyšší hlavičku, podvržená nižší se neuplatní", () => {
-    const spoofedLower = "mx.utocnik.cz; dkim=pass header.d=fio.cz";
+    const lower = "mx.utocnik.cz; dkim=pass header.d=fio.cz";
     const top = "mx.prijemce.cz; dkim=fail header.d=fio.cz";
-    expect(check([top, spoofedLower][0]!)).toBe("fail");
-    expect(check(`dkim=pass header.d=fio.cz`)).toBe("none");
+    expect(check(`${top}, ${lower}`)).toBe("fail");
+    expect(check(`${top}\n${lower}`)).toBe("fail");
+    expect(check(`${top}\r\n${lower}`)).toBe("fail");
+    expect(check(`${top}; ${lower}`)).toBe("fail");
+    expect(check(`${top} ${lower}`)).toBe("fail");
+    const disguised = "x=y; dkim=pass header.d=fio.cz";
+    expect(check(`${top}, ${disguised}`)).toBe("fail");
+    expect(check(`${top}\n${disguised}`)).toBe("fail");
+  });
+
+  test("[BNK-013] výsledek v prvním segmentu se nečte, ten patří serveru příjemce", () => {
+    expect(check("dkim=pass header.d=fio.cz")).toBe("none");
+  });
+
+  test("[BNK-013] token bez rovnítka je fail", () => {
+    expect(check(results("dkim=pass header.d=fio.cz x"))).toBe("fail");
+    expect(check(results("x", "dkim=pass header.d=fio.cz"))).toBe("fail");
+    expect(check(results("none", "dkim=pass header.d=fio.cz"))).toBe("fail");
+    expect(check(results("dkim=pass header.d=fio.cz", ""))).toBe("pass");
   });
 
   test("[BNK-013] komentář ani řetězec nepodvrhnou výsledek", () => {
