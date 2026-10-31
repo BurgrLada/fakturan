@@ -72,6 +72,26 @@ docker run --rm -v fakturan-data:/data debian:bookworm-slim sh -c \
 docker start fakturan
 ```
 
+## Automatizace a pošta
+
+Plánovač běží uvnitř aplikace, žádná externí úloha není potřeba. Každou minutu zpracuje frontu,
+vytvoří pravidelné faktury a naplánuje upomínky. `/api/health` hlásí `scheduler: running`, Administrace
+ukazuje stav plánovače. Interval mění `SCHEDULER_TICK_SECONDS` (1 až 60), je to jen pro testy.
+
+Bez kliknutí uživatele neodejde nic, dokud v Nastavení > Automatizace nezapne konkrétní automatiku.
+Každá automatika se zapíná zvlášť a s potvrzením, hlavní vypínač zastaví všechny najednou. Po výpadku
+aplikace se doženou jen termíny staré nejvýš 3 dny, starší se nabídnou ke kontrole a samy neodejdou.
+Odeslání, u kterého nejde poznat výsledek, se neopakuje: zůstane ve stavu „nejasné“ a rozhodne uživatel.
+
+Poštu lze poslat dvěma způsoby. Sdílený server instance nastavují proměnné `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`. Vlastní server si uživatel nastaví v Nastavení > Pošta a má
+přednost. Heslo je v databázi šifrované přes `ENCRYPTION_KEY`. Bez SMTP aplikace funguje dál, jen
+odeslání není dostupné a PDF se stahuje ručně.
+
+Adresa vlastního serveru je cizí vstup, proto aplikace odmítne privátní, lokální a metadatové adresy
+a kontroluje je znovu při každém spojení, i po překladu DNS (ochrana SSRF). Na vlastní síti to vypne
+`ALLOW_PRIVATE_MAIL_HOSTS=1`, což je vhodné jen tam, kde všem uživatelům instance důvěřujete.
+
 ## Provoz za reverzní proxy
 
 Za reverzní proxy (Coolify, Traefik, nginx) je nutné nastavit `TRUST_PROXY=1`. Bez něj aplikace

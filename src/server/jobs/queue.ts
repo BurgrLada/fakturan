@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like, lt, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
 import { job, user, type Job, type JobKind, type JobPayload } from "../db/schema";
@@ -143,12 +143,13 @@ export function removeDeadJob(tx: Tx, userId: string, id: string): boolean {
   return removed.changes > 0;
 }
 
-// Dead jobs stay for diagnosis. Past this age recurring_run, reminder_sent and email_log hold idempotency.
+// Dead jobs stay for diagnosis, a cancelled recurring.run is the only record of its occurrence until
+// reactivation takes it. Past this age recurring_run, reminder_sent and email_log hold idempotency.
 export function purgeFinishedJobs(now: Date): void {
   db.delete(job)
     .where(
       and(
-        inArray(job.status, ["done", "cancelled"]),
+        or(eq(job.status, "done"), and(eq(job.status, "cancelled"), ne(job.kind, "recurring.run"))),
         lt(job.updatedAt, new Date(now.getTime() - RETENTION_MS)),
       ),
     )

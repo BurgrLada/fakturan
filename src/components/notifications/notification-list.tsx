@@ -5,6 +5,7 @@ import { markAllReadAction, markReadAction } from "@/app/(app)/upozorneni/action
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { NotificationKind, NotificationParams } from "@/lib/automation";
+import { notificationText } from "@/lib/notification-text";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.notifications;
@@ -17,10 +18,6 @@ export type NotificationRow = {
   read: boolean;
   resolved: boolean;
 };
-
-export function notificationText(kind: NotificationKind, params: NotificationParams): string {
-  return T.kinds[kind](params);
-}
 
 export function NotificationList({
   rows,

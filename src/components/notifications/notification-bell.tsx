@@ -13,10 +13,7 @@ export function NotificationBellView({ count }: { count: number }) {
     >
       <Bell aria-hidden className="size-4" />
       {count > 0 && (
-        <span
-          data-testid="notification-count"
-          className="absolute -top-1 -right-1 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 text-primary-foreground"
-        >
+        <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 text-primary-foreground">
           {count > 99 ? "99+" : count}
         </span>
       )}

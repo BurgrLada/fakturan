@@ -134,7 +134,7 @@ export function stageForReview<R extends ReminderRule>(input: StageInput<R>): R 
   );
 }
 
-const REMINDABLE_TYPES: readonly InvoiceType[] = ["invoice", "advance"];
+export const REMINDABLE_TYPES: readonly InvoiceType[] = ["invoice", "advance"];
 
 type EligibleInvoice = {
   type: InvoiceType;

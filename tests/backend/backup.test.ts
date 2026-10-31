@@ -6,6 +6,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -128,6 +129,12 @@ describe("denní záloha", () => {
     vacuum.mockRestore();
     await backupTask.run(new Date(failedAt.getTime() + HOUR));
     expect(names()).toEqual(["fakturan-2026-11-01.db", "fakturan-2026-11-02.db"]);
+  });
+
+  test("[OPS-005] .tmp, který mezitím zmizel, zálohu neshodí", () => {
+    mkdirSync(backups, { recursive: true });
+    symlinkSync(join(backups, "uz-neexistuje"), join(backups, "fakturan-cizi.db.tmp"));
+    expect(() => createBackup(MORNING)).not.toThrow();
   });
 
   test("[OPS-005] obnovená kopie má shodná data", async () => {

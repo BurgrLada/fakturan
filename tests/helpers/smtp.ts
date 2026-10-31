@@ -37,7 +37,7 @@ function decodeQuotedPrintable(raw: string): string {
     .replace(/=([0-9A-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 }
 
-export async function startSmtp(): Promise<TestSmtp> {
+export async function startSmtp(host = "127.0.0.1"): Promise<TestSmtp> {
   const messages: CapturedMail[] = [];
   const logins: TestSmtp["logins"] = [];
   let next: NextData = {};
@@ -101,7 +101,7 @@ export async function startSmtp(): Promise<TestSmtp> {
     };
     for (const connection of connections) connection._socket.destroy();
   }
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
   const { port } = server.server.address() as { port: number };
 
   return {

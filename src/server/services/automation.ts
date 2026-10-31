@@ -1,5 +1,5 @@
 import "server-only";
-import { and, count, eq, isNull, ne, or } from "drizzle-orm";
+import { and, count, eq, exists, inArray, isNull, ne, or } from "drizzle-orm";
 import {
   AUTOMATIONS,
   DEFAULT_AUTOMATION,
@@ -8,11 +8,12 @@ import {
   type AutomationSettings,
 } from "@/lib/automation";
 import { calendarDateInPrague } from "@/lib/number-format";
+import { REMINDABLE_TYPES } from "@/lib/reminders";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { automationSettings, customer, recurringInvoice, user } from "../db/schema";
+import { automationSettings, customer, invoice, recurringInvoice, user } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
@@ -52,14 +53,31 @@ export function automaticSendAllowed(ownerId: string, key: AutomationKey): boole
   return !settings.paused && settings[key];
 }
 
-// The customer count excludes opt-outs only: a null override follows the account (R-12).
+// A null override follows the account (R-12). Only a customer with an address and a document that
+// could be reminded of can actually receive anything.
 export function automationImpact(ownerId: string): { plans: number; customers: number } {
   const row = db
     .select({ n: count() })
     .from(customer)
     .where(
       scoped(ownerId).where(customer, (t) =>
-        and(isNull(t.archivedAt), or(isNull(t.remindersEnabled), ne(t.remindersEnabled, false))),
+        and(
+          isNull(t.archivedAt),
+          or(isNull(t.remindersEnabled), ne(t.remindersEnabled, false)),
+          ne(t.email, ""),
+          exists(
+            db
+              .select({ id: invoice.id })
+              .from(invoice)
+              .where(
+                and(
+                  eq(invoice.customerId, t.id),
+                  inArray(invoice.status, ["sent", "partially_paid"]),
+                  inArray(invoice.type, REMINDABLE_TYPES),
+                ),
+              ),
+          ),
+        ),
       ),
     )
     .get();

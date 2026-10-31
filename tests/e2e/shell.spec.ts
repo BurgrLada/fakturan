@@ -121,6 +121,14 @@ test("[UI-007] navigace funguje na šířce 390 px bez vodorovného posunu", asy
   }
 });
 
+test("zvonek je na mobilu i na počítači vidět právě jednou", async ({ page, freshApp }) => {
+  await registerAdmin(page, freshApp.baseURL);
+  const bell = page.getByRole("link", { name: /^Upozornění, nepřečtených/ });
+  await expect(bell).toHaveCount(1);
+  await page.setViewportSize({ width: 390, height: 800 });
+  await expect(bell).toHaveCount(1);
+});
+
 test("[ADM-001] administrátor vidí v navigaci Administraci", async ({ page, freshApp }) => {
   await registerAdmin(page, freshApp.baseURL);
   await expect(

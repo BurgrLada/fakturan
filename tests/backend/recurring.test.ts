@@ -192,6 +192,13 @@ describe("uložení plánu", () => {
     ).toThrow(/období/);
   });
 
+  test("[REC-011] automatické odeslání bez zákazníka server odmítne", () => {
+    const { owner } = owned();
+    setAutomation(webActor(owner), "recurringSend", true, { confirmed: true });
+    expect(() => savePlan(owner, null, { mode: "send", confirmSend: true })).toThrow(/zákazníka/);
+    expect(listRecurring(owner)).toEqual([]);
+  });
+
   test("[REC-004] náhled 12 termínů s vygenerovanými popisy", () => {
     const { owner, customerId } = owned();
     const preview = previewRecurring(owner, planInput(customerId, { periodOffset: -1 }));

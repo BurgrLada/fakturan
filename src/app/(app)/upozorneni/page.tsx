@@ -9,7 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import "@/server/services/due-alerts";
-import { derivedAlerts, listNotifications } from "@/server/services/notifications";
+import { notificationFeed } from "@/server/services/notifications";
 
 export const metadata: Metadata = { title: `${TEXTS.notifications.title} | ${TEXTS.appName}` };
 
@@ -20,10 +20,9 @@ async function NotificationsContent({
 }: Pick<PageProps<"/upozorneni">, "searchParams">) {
   const { user } = await requireSession();
   const raw = (await searchParams).strana;
-  const page = listNotifications(user.id, Number(Array.isArray(raw) ? raw[0] : raw));
-  const derived = derivedAlerts(user.id);
+  const page = notificationFeed(user.id, Number(Array.isArray(raw) ? raw[0] : raw));
   const rows = [
-    ...derived.map((alert) => ({
+    ...page.derived.map((alert) => ({
       id: `derived:${alert.dedupeKey}`,
       kind: alert.kind,
       params: alert.params,
@@ -45,7 +44,7 @@ async function NotificationsContent({
   }
   return (
     <>
-      <NotificationList rows={rows} canMarkAll={page.rows.some((row) => row.readAt === null)} />
+      <NotificationList rows={rows} canMarkAll={page.canMarkAll} />
       <nav className="flex gap-2">
         {page.page > 1 && (
           <Link

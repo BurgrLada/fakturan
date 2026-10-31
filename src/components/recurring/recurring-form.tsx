@@ -699,11 +699,11 @@ export function RecurringForm(props: RecurringFormProps) {
           {hasEvery && (
             <Field
               id="field-every"
-              aria-invalid={invalidField("field-every")}
               label={`${F.every} (${T.everyUnit[frequency as "every_weeks"]})`}
             >
               <Input
                 id="field-every"
+                aria-invalid={invalidField("field-every")}
                 type="number"
                 min={1}
                 value={every}
@@ -727,12 +727,12 @@ export function RecurringForm(props: RecurringFormProps) {
           {issueRule === "day" && (
             <Field
               id="field-issueDay"
-              aria-invalid={invalidField("field-issueDay")}
               label={F.issueDay}
               hint={weekBased ? T.issueDayWeek : T.issueDayMonth}
             >
               <Input
                 id="field-issueDay"
+                aria-invalid={invalidField("field-issueDay")}
                 type="number"
                 min={1}
                 max={weekBased ? 7 : 31}

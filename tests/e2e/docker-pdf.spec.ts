@@ -41,7 +41,7 @@ test("[PDF-001] standalone obraz vyrenderuje PDF s logem SVG", async ({ page, do
   await page.getByRole("alertdialog").getByRole("button", { name: "Vystavit" }).click();
   await page.waitForURL(/\/faktury\/[^/]+$/);
 
-  const response = await page.request.get(`${page.url()}/pdf`);
+  const response = await page.request.get(`${page.url().split("?")[0]}/pdf`);
   expect(response.status()).toBe(200);
   expect(response.headers()["content-type"]).toBe("application/pdf");
   const pdf = (await response.body()).toString("latin1");

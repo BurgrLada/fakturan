@@ -81,8 +81,10 @@ function removeStaleTemps(dir: string, now: Date): void {
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".tmp")) continue;
     const file = join(dir, name);
+    // Another process may finish with its .tmp between the listing and this stat.
+    const stat = statSync(file, { throwIfNoEntry: false });
     // A fresh .tmp may belong to another process still writing it.
-    if (now.getTime() - statSync(file).mtimeMs > STALE_TMP_MS) rmSync(file, { force: true });
+    if (stat && now.getTime() - stat.mtimeMs > STALE_TMP_MS) rmSync(file, { force: true });
   }
 }
 

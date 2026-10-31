@@ -191,6 +191,7 @@ function persist(actor: Actor, action: AuditAction, raw: RecurringInput): { id: 
       seriesId: null,
       lines: document.lines,
     });
+    if (mode === "send" && !customerId) throw new ServiceError(V.sendNoCustomer);
     const now = clock.now();
     // The confirmation named a recipient, so a different customer needs a new one.
     const confirmedBefore =

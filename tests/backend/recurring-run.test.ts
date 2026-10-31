@@ -118,6 +118,18 @@ const mailOf = (owner: string) =>
   db.select().from(emailLog).where(eq(emailLog.userId, owner)).all();
 
 describe("běh termínu", () => {
+  test("[REC-010] běh konceptu vrátí svůj běh a doklad", () => {
+    const { owner, customerId } = account();
+    const id = savePlan(owner, customerId);
+    const result = runOnce(owner, id);
+
+    const [draft] = invoicesOf(owner);
+    const [run] = listRuns(owner, id);
+    expect(result).toEqual({ runId: run!.id, status: "created", invoiceId: draft!.id });
+    expect(run).toMatchObject({ status: "created", invoiceId: draft!.id, reason: null });
+    expect(noticesOf(owner)).toEqual([]);
+  });
+
   test("[REC-010] nový plán je koncept, režim vystavit dá číslo, nic neodejde", async () => {
     const { owner, customerId } = account();
     const draft = runOnce(owner, savePlan(owner, customerId));

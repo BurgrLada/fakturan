@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -18,7 +19,7 @@ import { formatMoney } from "@/lib/money";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { designChoices } from "@/server/pdf/designs";
-import { requireSession } from "@/server/auth/session";
+import { getCurrentSession, requireSession } from "@/server/auth/session";
 import { getAutomation } from "@/server/services/automation";
 import { getCustomer } from "@/server/services/customers";
 import { getRecurring, listPlanInvoices, listRuns } from "@/server/services/recurring";
@@ -27,6 +28,14 @@ import { formChoices } from "../../faktury/form-data";
 const T = TEXTS.recurring;
 
 const date = (value: string | null) => (value ? formatCalendarDate(value, "d. M. yyyy") : "–");
+
+export async function generateMetadata({
+  params,
+}: PageProps<"/pravidelne/[id]">): Promise<Metadata> {
+  const session = await getCurrentSession();
+  const plan = session && getRecurring(session.user.id, (await params).id);
+  return { title: `${plan ? plan.name : T.title} | ${TEXTS.appName}` };
+}
 
 async function PlanContent({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -48,7 +57,6 @@ async function PlanContent({ params }: { params: Promise<{ id: string }> }) {
   const invoices = listPlanInvoices(user.id, id);
   return (
     <>
-      <title>{`${plan.name} | ${TEXTS.appName}`}</title>
       <h1 className="font-brand text-2xl">{plan.name}</h1>
       <MissedReview rows={runs.filter((run) => run.status === "missed")} />
       <RecurringForm

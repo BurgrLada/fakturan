@@ -80,6 +80,28 @@ async function waitForRun(page: Page, plan: string) {
   }).toPass({ timeout: 30_000 });
 }
 
+test("[REC-004] detail plánu má v titulku jeho název", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await addSupplier(page, freshApp.baseURL);
+  await addCustomer(page, freshApp.baseURL);
+  await planFromTemplate(page, freshApp.baseURL, "Správa webu");
+  await expect(page).toHaveTitle("Správa webu | Fakturan");
+});
+
+test("[REC-004] chybné pole formuláře plánu nese aria-invalid", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/pravidelne/nova`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Četnost").selectOption({ label: "Každých N měsíců" });
+  const every = page.getByLabel("Každých (měsíců)");
+  const day = page.getByRole("spinbutton", { name: "Konkrétní den" });
+  await every.fill("");
+  await day.fill("");
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await expect(every).toHaveAttribute("aria-invalid", "true");
+  await expect(day).toHaveAttribute("aria-invalid", "true");
+});
+
 test("[REC-004] změna četnosti obnoví náhled 12 termínů", async ({ page, freshApp }) => {
   await register(page, freshApp.baseURL);
   await page.goto(`${freshApp.baseURL}/pravidelne/nova`);

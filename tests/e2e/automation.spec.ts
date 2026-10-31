@@ -80,3 +80,26 @@ test("[UI-009] stránka upozornění bez dat ukáže prázdný stav a zvonek bez
   await expect(page).toHaveURL(/\/upozorneni$/);
   await expect(page.getByRole("heading", { name: "Žádná upozornění" })).toBeVisible();
 });
+
+test("[SET-042] chybu hlásí role alert, úspěch role status", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/automatizace`);
+  await page.waitForLoadState("networkidle");
+  const time = page.getByLabel("Čas", { exact: true });
+
+  // The browser would refuse this value, and the server check is what is under test. The component
+  // state keeps it even though React restores the time type, hence no form validation either.
+  await time.evaluate((input: HTMLInputElement) => {
+    input.form!.noValidate = true;
+    input.type = "text";
+    const { set } = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!;
+    set!.call(input, "99:99");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.getByRole("button", { name: "Uložit čas" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "čas" })).toBeVisible();
+
+  await time.fill("08:30");
+  await page.getByRole("button", { name: "Uložit čas" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Uloženo." })).toBeVisible();
+});

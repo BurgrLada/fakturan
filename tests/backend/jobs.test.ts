@@ -299,6 +299,19 @@ describe("údržba", () => {
   });
 });
 
+describe("údržba zrušených běhů", () => {
+  test("[ADM-005] zrušený běh pravidelné faktury čištění přežije, reaktivace ho ještě potřebuje", () => {
+    const cancelled = put({ kind: "recurring.run" });
+    const mail = put();
+    db.update(job).set({ status: "cancelled", updatedAt: T0 }).run();
+
+    purgeFinishedJobs(new Date(T0.getTime() + 91 * 86_400_000));
+
+    expect(db.select({ id: job.id }).from(job).all()).toEqual([{ id: cancelled.id }]);
+    expect(mail.created).toBe(true);
+  });
+});
+
 describe("účty", () => {
   test("[ADM-005] deaktivace zruší čekající úlohy, claim je nepřevezme", () => {
     const admin = createUser("admin");

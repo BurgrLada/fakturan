@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AUTOMATIONS, DEFAULT_SEND_TIME } from "@/lib/automation";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, automationSettings, customer, user } from "@/server/db/schema";
+import { appearanceFrom } from "@/lib/invoice";
+import { DEFAULT_PREFERENCES } from "@/lib/preferences";
+import { auditLog, automationSettings, customer, invoice, user } from "@/server/db/schema";
 import { ServiceError } from "@/server/services/access";
 import {
   automaticSendAllowed,
@@ -116,17 +118,49 @@ describe("zapnutí a potvrzení", () => {
     expect(getAutomation(id).recurringSend).toBe(false);
   });
 
-  test("[SET-042] dialog počítá zákazníky, kterým upomínky mohou odejít", () => {
+  test("[SET-042] dialog počítá jen zákazníky s adresou a dokladem, kterým upomínka může odejít", () => {
     const id = seed();
-    const row = (name: string, extra: Partial<typeof customer.$inferInsert> = {}) =>
-      db
-        .insert(customer)
-        .values({ id: randomUUID(), userId: id, name, createdAt: T0, updatedAt: T0, ...extra })
+    const row = (name: string, extra: Partial<typeof customer.$inferInsert> = {}) => {
+      const customerId = randomUUID();
+      db.insert(customer)
+        .values({
+          id: customerId,
+          userId: id,
+          name,
+          email: `${name}@example.cz`,
+          createdAt: T0,
+          updatedAt: T0,
+          ...extra,
+        })
         .run();
-    row("A");
-    row("B", { remindersEnabled: true });
-    row("C", { remindersEnabled: false });
-    row("D", { archivedAt: T0 });
+      return customerId;
+    };
+    const document = (customerId: string, extra: Partial<typeof invoice.$inferInsert> = {}) =>
+      db
+        .insert(invoice)
+        .values({
+          id: randomUUID(),
+          userId: id,
+          customerId,
+          type: "invoice",
+          language: "cs",
+          currency: "CZK",
+          paymentMethod: "cash",
+          appearance: appearanceFrom(DEFAULT_PREFERENCES),
+          createdAt: T0,
+          updatedAt: T0,
+          ...extra,
+        })
+        .run();
+    document(row("a"), { status: "sent" });
+    document(row("b", { remindersEnabled: true }), { status: "partially_paid" });
+    document(row("c", { remindersEnabled: false }), { status: "sent" });
+    document(row("d", { archivedAt: T0 }), { status: "sent" });
+    document(row("e", { email: "" }), { status: "sent" });
+    document(row("f"), { status: "issued" });
+    document(row("g"), { status: "paid" });
+    document(row("h"), { status: "sent", type: "credit_note" });
+    row("i");
 
     expect(automationImpact(id)).toEqual({ plans: 0, customers: 2 });
   });

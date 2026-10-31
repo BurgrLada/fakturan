@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import {
   listNotifications,
   markAllRead,
   markRead,
+  notificationFeed,
   notify,
   registerDerivedAlerts,
   resolveNotification,
@@ -274,5 +275,34 @@ describe("izolace", () => {
     deleteUser(actor(admin), id, `${id}@x.cz`);
 
     expect(stored(id)).toEqual([]);
+  });
+});
+
+describe("stránky upozornění", () => {
+  test("označit vše platí pro celý účet, i když je nepřečtené až na další straně", () => {
+    const id = seed();
+    setClockForTests({ now: () => T0 });
+    add(id, "stare");
+    setClockForTests({ now: () => new Date(T0.getTime() + 1000) });
+    for (let i = 0; i < 25; i += 1) add(id);
+    db.update(notification).set({ readAt: T0 }).where(ne(notification.dedupeKey, "stare")).run();
+
+    const first = notificationFeed(id, 1);
+    expect(first.rows.every((row) => row.readAt !== null)).toBe(true);
+    expect(first.canMarkAll).toBe(true);
+
+    markAllRead(actor(id));
+    expect(notificationFeed(id, 1).canMarkAll).toBe(false);
+  });
+
+  test("odvozená upozornění jsou jen na první straně", () => {
+    const id = seed();
+    registerDerivedAlerts((ownerId) =>
+      ownerId === id
+        ? [{ dedupeKey: "odvozene", kind: "invoices_overdue", params: { count: 1 } }]
+        : [],
+    );
+    expect(notificationFeed(id, 1).derived.map((alert) => alert.dedupeKey)).toContain("odvozene");
+    expect(notificationFeed(id, 2).derived).toEqual([]);
   });
 });

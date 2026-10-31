@@ -12,6 +12,9 @@ import type { Db } from "@/server/db";
 import { assertConsistent } from "../helpers/consistency";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
 
+// The name a container reaches a test server on the host by.
+export const DOCKER_HOST_NAME = "host.docker.internal";
+
 type App = { baseURL: string; dataDir: string; smtp: TestSmtp | null };
 
 function freePort(): Promise<number> {
@@ -101,8 +104,7 @@ export const test = base.extend<{
   withSmtp: [false, { option: true }],
   allowPrivateMail: [false, { option: true }],
 
-  // oxlint-disable-next-line no-empty-pattern
-  dockerApp: async ({}, use) => {
+  dockerApp: async ({ allowPrivateMail }, use) => {
     const image = process.env.E2E_DOCKER_IMAGE;
     if (!image) throw new Error("Chybí E2E_DOCKER_IMAGE");
     const port = await freePort();
@@ -121,6 +123,16 @@ export const test = base.extend<{
         "BETTER_AUTH_SECRET=e2e-secret-e2e-secret-e2e-secret-00",
         "--env",
         `ENCRYPTION_KEY=${Buffer.alloc(32, 7).toString("base64")}`,
+        "--env",
+        "SCHEDULER_TICK_SECONDS=1",
+        ...(allowPrivateMail
+          ? [
+              "--env",
+              "ALLOW_PRIVATE_MAIL_HOSTS=1",
+              "--add-host",
+              `${DOCKER_HOST_NAME}:host-gateway`,
+            ]
+          : []),
         image,
       ],
       { encoding: "utf8" },
@@ -150,7 +162,7 @@ export const test = base.extend<{
         ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         ARES_BASE_URL: ares.url,
         SCHEDULER_TICK_SECONDS: "1",
-        ...(allowPrivateMail && { ALLOW_PRIVATE_MAIL_HOSTS: "true" }),
+        ...(allowPrivateMail && { ALLOW_PRIVATE_MAIL_HOSTS: "1" }),
         ...(smtp && {
           SMTP_HOST: "127.0.0.1",
           SMTP_PORT: String(smtp.port),

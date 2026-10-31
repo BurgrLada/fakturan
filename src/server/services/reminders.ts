@@ -637,7 +637,12 @@ function resolveLapsedBlocks(): void {
 
 export function planReminders(now: Date): void {
   const today = calendarDateInPrague(now);
-  resolveLapsedBlocks();
+  // Housekeeping only: a failure here must not hold back the day's reminders.
+  try {
+    resolveLapsedBlocks();
+  } catch (error) {
+    reportFailure(error, { task: "reminder-plan" });
+  }
   for (const { userId, sendTime, openSince } of remindingAccounts()) {
     if (!openSince || !isDailyDue(now, sendTime)) continue;
     try {

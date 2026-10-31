@@ -1,3 +1,4 @@
+import { fork } from "node:child_process";
 import { Worker } from "node:worker_threads";
 
 // Workers wait on a shared gate so that they all start hitting the database at the same moment.
@@ -57,4 +58,35 @@ export function runJobWorkers<T>(
   databasePath: string,
 ): Promise<T[]> {
   return runGatedWorkers("./job-worker.mjs", "result", jobs, databasePath);
+}
+
+export type CrashPoint = "after_sending" | "after_smtp" | "in_run_tx";
+
+// A real process, because a worker thread cannot receive SIGKILL. `now` drives the child's clock.
+export function runCrashWorker(input: {
+  databasePath: string;
+  dataDir: string;
+  now: Date;
+  killAt: CrashPoint;
+}): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = fork(new URL("./crash-worker.mjs", import.meta.url), {
+      execArgv: ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON"],
+      silent: true,
+      env: {
+        ...process.env,
+        DATA_DIR: input.dataDir,
+        CRASH_DATABASE_PATH: input.databasePath,
+        CRASH_NOW: input.now.toISOString(),
+        CRASH_AT: input.killAt,
+      },
+    });
+    let output = "";
+    child.stderr?.on("data", (chunk) => (output += chunk));
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (signal === "SIGKILL") resolve();
+      else reject(new Error(`Worker nedošel k ${input.killAt}, kód ${code}: ${output}`));
+    });
+  });
 }

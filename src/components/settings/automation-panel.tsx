@@ -116,7 +116,10 @@ export function AutomationPanel({
   return (
     <div className="flex flex-col gap-6">
       {message && (
-        <Alert variant={message.ok ? "default" : "destructive"} role="status">
+        <Alert
+          variant={message.ok ? "default" : "destructive"}
+          role={message.ok ? "status" : "alert"}
+        >
           <AlertDescription>{message.text}</AlertDescription>
         </Alert>
       )}

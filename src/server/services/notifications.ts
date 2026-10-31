@@ -118,7 +118,7 @@ export function markAllRead(actor: Actor): void {
   });
 }
 
-function hasUnread(ownerId: string): boolean {
+export function hasUnread(ownerId: string): boolean {
   return (
     db
       .select({ id: notification.id })
@@ -139,4 +139,14 @@ export function registerDerivedAlerts(source: AlertSource): void {
 export function derivedAlerts(ownerId: string): Alert[] {
   const today = calendarDateInPrague(clock.now());
   return sources.flatMap((source) => source(ownerId, today));
+}
+
+// Derived alerts are not events with a page of their own, so they lead the first page only.
+export function notificationFeed(ownerId: string, page: number) {
+  const events = listNotifications(ownerId, page);
+  return {
+    ...events,
+    derived: events.page === 1 ? derivedAlerts(ownerId) : [],
+    canMarkAll: hasUnread(ownerId),
+  };
 }

@@ -757,6 +757,7 @@ export const TEXTS = {
     list: "Seznam upozornění",
     newer: "Novější",
     older: "Starší",
+    unknownKind: "Na pozadí se stala událost, kterou tato verze neumí popsat.",
     kinds: {
       mail_failed: (p: Record<string, unknown>) =>
         `E-mail k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,
@@ -807,6 +808,7 @@ export const TEXTS = {
       lines: "Zkontrolujte položky, množství a ceny",
       rule: (fields: string[]) => `Zkontrolujte nastavení termínů: ${fields.join(", ")}`,
       sendDisabled: "Režim vystavit a odeslat vyžaduje zapnutou automatiku v Automatizaci",
+      sendNoCustomer: "Plán s automatickým odesíláním musí mít zákazníka. Vyberte ho.",
       sendNotConfirmed: "Automatické odesílání této faktury musíte potvrdit",
       periodOverlap: "Nové nastavení by znovu fakturovalo období, za které už běh proběhl",
       notActive: "Plán není aktivní",
@@ -1191,7 +1193,6 @@ export const TEXTS = {
       reasons: {
         status: "Hromadně jde odeslat jen vystavená faktura",
         noAddress: "Zákazník nemá e-mail",
-        failed: "Běh se nepodařil",
         sending: "Už se odesílá",
         unknown: "Nejasný výsledek předchozího odeslání, vyřešte ho na detailu faktury",
         notFound: "Doklad neexistuje",

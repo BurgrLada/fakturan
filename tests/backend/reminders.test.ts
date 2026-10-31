@@ -167,6 +167,20 @@ function manual(
 }
 
 describe("automatické upomínky", () => {
+  test("[REM-001] selhání úklidu blokací denní upomínky nezastaví", async () => {
+    const { owner, customerId } = reminding();
+    rule(owner, 0);
+    sentInvoice(owner, customerId);
+    const failure = new Error("úklid spadl");
+    vi.spyOn(db, "select").mockImplementationOnce(() => {
+      throw failure;
+    });
+
+    await tickAt(DAY_ONE);
+
+    expect(sentOf(owner)).toHaveLength(1);
+  });
+
   test("[REM-001] bez zapnutí neodejde nic, ani s pravidly a dlužnými fakturami", async () => {
     const { owner, customerId } = account();
     rule(owner, 0);
