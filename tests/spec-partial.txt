@@ -13,17 +13,17 @@ SEC-011	Escapování hotové pro šablony, složení a odeslání zprávy, chyb�
 FOR-005	Upozornění v UI nemá e2e test, ověřený je jen backend	plán 6
 CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán 4
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
-ARC-007	Odeslání frontu používá, pravidelné faktury a upomínky zatím ne	plán 4
-ADM-005	Zastavení úloh hotové, chybí nabídka zmeškaných pravidelných faktur po reaktivaci	plán 4
+ARC-007	Odeslání a pravidelné faktury frontu používají, upomínky zatím ne	plán 4
 SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
-REC-013	Selhání a opakování odeslání hotové, běh pravidelné faktury chybí	plán 4
-REC-032	Stráž při doručení hotová, doběh termínů pravidelných faktur chybí	plán 4
-TST-005	Ověřené odeslání a zadržení ve frontě, chybí pravidelné faktury a upomínky	plán 4
-REC-001	Hotový výpočet, chybí uložení a volba četnosti v rozhraní	plán 4
-REC-002	Hotový výpočet, chybí uložení a volba dne vystavení v rozhraní	plán 4
-REC-003	Hotový výpočet, chybí uložení a ukončení plánu při běhu	plán 4
-REC-006	Výpočet z kalendářních dat hotový, chybí hranice tick úlohy v Europe/Prague	plán 4
-REC-020	Vykreslení z období termínu hotové, chybí použití při vzniku faktury	plán 4
-REC-021	Výpočet posunu hotový, chybí nastavení na plánu a uložení období na faktuře	plán 4
-REC-023	Occurrence nese období termínu, chybí důkaz na opožděném běhu úlohy	plán 4
-TST-007	Kalendářní hrany pokryté čistým výpočtem, chybí posun injektovaných hodin	plán 4
+TST-005	Ověřené odeslání, zadržení a pravidelné faktury, chybí upomínky	plán 4
+REC-001	Hotové výpočet, uložení i běh, chybí volba četnosti v rozhraní	plán 4
+REC-002	Hotové výpočet, uložení i běh, chybí volba dne vystavení v rozhraní	plán 4
+REC-003	Hotové uložení a ukončení plánu při běhu, chybí volba v rozhraní	plán 4
+REC-021	Hotové uložení období a běh, chybí nastavení posunu v rozhraní	plán 4
+REC-004	Náhled hotový ve službě, chybí zobrazení v rozhraní	plán 4
+REC-005	Služba hotová, chybí tlačítka a sekce Ke kontrole	plán 4
+REC-007	Pravidelné faktury hotové, nevyřízené upomínky chybí	plán 4
+REC-010	Režimy hotové ve službě, chybí volba v rozhraní	plán 4
+REC-011	Odmítnutí hotové ve službě, chybí potvrzovací dialog	plán 4
+REC-014	Vazba a seznam hotové ve službě, chybí zobrazení v rozhraní	plán 4
+REC-022	Kontrola při uložení hotová, chybí klikatelné vložení v editoru	plán 4

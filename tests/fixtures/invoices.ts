@@ -48,6 +48,8 @@ const short: InvoiceDocument = {
   discountValue: 0,
   rounding: "none",
   dateFormat: "d. M. yyyy",
+  periodFrom: null,
+  periodTo: null,
   appearance: {
     designId: "cisty",
     colors: { accent: "", surface: "", text: "", line: "" },

@@ -105,12 +105,20 @@ export function currentParties(
 
 export function variablesFor(
   ownerId: string,
-  row: { issueDate: CalendarDate | null; language: Language },
+  row: {
+    issueDate: CalendarDate | null;
+    language: Language;
+    periodFrom: CalendarDate | null;
+    periodTo: CalendarDate | null;
+  },
   number: string,
   customerName: string,
 ): VariableContext {
   return {
-    period: monthPeriod(row.issueDate ?? calendarDateInPrague(clock.now())),
+    period:
+      row.periodFrom && row.periodTo
+        ? { from: row.periodFrom, to: row.periodTo }
+        : monthPeriod(row.issueDate ?? calendarDateInPrague(clock.now())),
     language: row.language,
     dateFormat: getPreferences(ownerId).dateFormat,
     number,

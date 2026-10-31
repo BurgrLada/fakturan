@@ -106,6 +106,8 @@ type DocumentHeader = {
   rounding: RoundingMode;
   // Null only on a draft row; loadInvoiceDocument fills it with the current preference.
   dateFormat: DateFormat | null;
+  periodFrom: CalendarDate | null;
+  periodTo: CalendarDate | null;
 };
 
 export type InvoiceDocument = DocumentHeader & {
@@ -156,6 +158,8 @@ export function invoiceDocument(row: DocumentRow): InvoiceDocument {
     discountValue: row.discountValue,
     rounding: row.rounding,
     dateFormat: row.dateFormat,
+    periodFrom: row.periodFrom,
+    periodTo: row.periodTo,
     appearance: row.appearance,
     lines: row.lines.map((line) => ({
       catalogItemId: line.catalogItemId,

@@ -88,7 +88,9 @@ function productionAuditActions(): string[] {
       /["'`]((?:access|account|auth|invitation|rate_limit|user)\.[a-z_]+)["'`]/g,
     ),
   ]);
-  const actions = literals.map((match) => match[1]);
+  // A queue kind shares the shape of an action but never reaches the audit log.
+  const jobKinds: readonly string[] = schema.JOB_KINDS;
+  const actions = literals.map((match) => match[1]).filter((name) => !jobKinds.includes(name));
   const failed = ["password_change", "email_change_request", "profile_update", "account_unlink"];
   return [...new Set([...actions, ...failed.map((a) => `auth.${a}_failed`)])];
 }

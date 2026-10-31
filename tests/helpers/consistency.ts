@@ -108,6 +108,29 @@ function mailProblems(db: Db, ownerId: string): string[] {
   return problems;
 }
 
+function recurringProblems(db: Db, ownerId: string): string[] {
+  const problems: string[] = [];
+  const foreign = count(
+    db,
+    sql`SELECT count(*) AS n FROM recurring_run r
+      LEFT JOIN invoice i ON i.id = r.invoice_id
+      WHERE r.user_id = ${ownerId} AND r.invoice_id IS NOT NULL
+        AND (i.id IS NULL OR i.user_id <> r.user_id)`,
+  );
+  if (foreign > 0) problems.push(`recurring_run: ${foreign} běhů s cizím dokladem`);
+
+  const repeated = count(
+    db,
+    sql`SELECT count(*) AS n FROM (
+      SELECT 1 FROM invoice
+      WHERE user_id = ${ownerId} AND recurring_id IS NOT NULL
+      GROUP BY recurring_id, period_from, period_to HAVING count(*) > 1
+    )`,
+  );
+  if (repeated > 0) problems.push(`invoice: ${repeated} období plánu s více fakturami`);
+  return problems;
+}
+
 // Throws on the first broken invariant. Plans extend it as new entities arrive.
 export function assertConsistent(db: Db, ownerId: string): void {
   const problems: string[] = [];
@@ -140,6 +163,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
 
   problems.push(...invoiceProblems(db, ownerId));
   problems.push(...mailProblems(db, ownerId));
+  problems.push(...recurringProblems(db, ownerId));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

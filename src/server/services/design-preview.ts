@@ -85,6 +85,8 @@ export function samplePreviewDocument(ownerId: string): InvoiceDocument {
     discountValue: 0,
     rounding: "none",
     dateFormat: prefs.dateFormat,
+    periodFrom: null,
+    periodTo: null,
     appearance: appearanceFrom(prefs),
     lines,
     snapshot: {

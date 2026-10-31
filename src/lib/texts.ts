@@ -767,13 +767,57 @@ export const TEXTS = {
       mail_partial: (p: Record<string, unknown>) =>
         `E-mail k dokladu ${p.invoice ?? ""} odešel, ale někteří příjemci ho odmítli.`,
       recurring_failed: (p: Record<string, unknown>) =>
-        `Pravidelnou fakturu „${p.plan ?? ""}“ se nepodařilo vystavit, vznikl koncept.`,
+        `Pravidelnou fakturu „${p.plan ?? ""}“ se nepodařilo vystavit, vznikl koncept. ${p.problems ?? ""}`.trim(),
       recurring_missed: (p: Record<string, unknown>) =>
-        `Pravidelná faktura „${p.plan ?? ""}“ nevznikla v termínu ${p.date ?? ""}.`,
+        `Pravidelná faktura „${p.plan ?? ""}“ nevznikla v termínu ${p.date ?? ""}. Zmeškaných termínů ke kontrole: ${p.count ?? 1}.`,
+      recurring_held: (p: Record<string, unknown>) =>
+        `Automatika je vypnutá, pravidelná faktura „${p.plan ?? ""}“ zůstala jako koncept.`,
+      recurring_no_address: (p: Record<string, unknown>) =>
+        `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale zákazník nemá e-mail, takže neodešla.`,
+      recurring_upcoming: (p: Record<string, unknown>) =>
+        `Pravidelná faktura „${p.plan ?? ""}“ se odešle ${p.date ?? ""}.`,
       reminder_failed: (p: Record<string, unknown>) =>
         `Upomínku k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,
       reminder_missed: (p: Record<string, unknown>) =>
         `Upomínka k dokladu ${p.invoice ?? ""} se neodeslala včas a čeká na kontrolu.`,
+    },
+  },
+  recurring: {
+    validation: {
+      invalid: "Neplatné údaje",
+      forbidden: "Na tuto akci nemáte oprávnění",
+      notFound: "Pravidelná faktura neexistuje",
+      name: "Vyplňte název plánu",
+      tooLong: "Text je příliš dlouhý",
+      notifyDays: "Upozornění předem musí být celý počet dnů od 1 do 30",
+      rule: (fields: string[]) => `Zkontrolujte nastavení termínů: ${fields.join(", ")}`,
+      sendDisabled: "Režim vystavit a odeslat vyžaduje zapnutou automatiku v Automatizaci",
+      sendNotConfirmed: "Automatické odesílání této faktury musíte potvrdit",
+      periodOverlap: "Nové nastavení by znovu fakturovalo období, za které už běh proběhl",
+      notActive: "Plán není aktivní",
+      notPaused: "Plán není pozastavený",
+      notMissed: "Tento termín už je vyřízený",
+    },
+    ruleFields: {
+      frequency: "četnost",
+      every: "počet opakování",
+      issueRule: "den vystavení",
+      issueDay: "den vystavení",
+      startsOn: "začátek",
+      endsOn: "konec",
+      maxCount: "počet",
+      periodOffset: "posun období",
+    } as Record<string, string>,
+    reasons: {
+      held: "Automatika byla vypnutá",
+      paused: "Plán v termínu neběžel",
+      tooOld: "Termín je starší než 3 dny",
+      noAddress: "Zákazník nemá e-mail",
+    },
+    upcomingMail: {
+      subject: "Blíží se odeslání pravidelné faktury",
+      body: (plan: string, date: string) =>
+        `Pravidelná faktura „${plan}“ se automaticky vystaví a odešle ${date}. Pokud s tím nesouhlasíte, plán ve Fakturanu včas upravte nebo pozastavte.`,
     },
   },
   invoiceMail: {

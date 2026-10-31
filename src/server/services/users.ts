@@ -1,5 +1,6 @@
 import "server-only";
 import { and, asc, count, eq, max, ne, or, sql } from "drizzle-orm";
+import { calendarDateInPrague } from "@/lib/number-format";
 import type { Actor } from "../audit/context";
 import { auth } from "../auth";
 import { clock } from "../clock";
@@ -28,6 +29,8 @@ import {
   numberSeriesCounter,
   preferences,
   rateLimit,
+  recurringInvoice,
+  recurringRun,
   session,
   supplier,
   tag,
@@ -43,6 +46,7 @@ import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
 import { cancelQueuedMail } from "./invoice-mail";
 import { mutate } from "./mutation";
+import { markMissed, activePlansOf } from "./recurring-run";
 
 export type Role = "admin" | "user";
 
@@ -53,6 +57,8 @@ export const USER_OWNED_TABLES = [
   account,
   supplier,
   emailLog,
+  recurringRun,
+  recurringInvoice,
   invoiceTag,
   tag,
   invoiceVersion,
@@ -187,6 +193,8 @@ export function reactivateUser(actor: Actor, userId: string): void {
     assertAdmin(tx, actor);
     const target = targetUser(tx, userId);
     tx.update(user).set({ banned: false, updatedAt: clock.now() }).where(eq(user.id, userId)).run();
+    const today = calendarDateInPrague(clock.now());
+    for (const plan of activePlansOf(tx, userId)) markMissed(tx, audit, plan, today);
     audit({
       entity: "user",
       entityId: userId,

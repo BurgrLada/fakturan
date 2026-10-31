@@ -19,6 +19,7 @@ import { catalogItem } from "./catalog";
 import { customer } from "./customer";
 import { file } from "./file";
 import { numberSeries } from "./number-series";
+import { recurringInvoice } from "./recurring";
 
 const imageRef = (name: string) => text(name).references(() => file.id, { onDelete: "set null" });
 
@@ -76,6 +77,12 @@ export const invoice = sqliteTable(
     signatureFileId: imageRef("signature_file_id"),
     relatedInvoiceId: text("related_invoice_id").references((): AnySQLiteColumn => invoice.id),
     external: integer({ mode: "boolean" }).notNull().default(false),
+    recurringId: text("recurring_id").references((): AnySQLiteColumn => recurringInvoice.id, {
+      onDelete: "set null",
+    }),
+    // Stored so a late issue still bills the plan's period, not the one of the issue date (R-15).
+    periodFrom: text("period_from"),
+    periodTo: text("period_to"),
     searchText: text("search_text").notNull().default(""),
     revision: integer().notNull().default(0),
     issuedAt: integer("issued_at", { mode: "timestamp_ms" }),
@@ -90,6 +97,7 @@ export const invoice = sqliteTable(
     index("invoice_user_status_idx").on(t.userId, t.status),
     index("invoice_user_issue_date_idx").on(t.userId, t.issueDate),
     index("invoice_user_customer_idx").on(t.userId, t.customerId),
+    index("invoice_recurring_idx").on(t.recurringId),
   ],
 );
 

@@ -1,0 +1,614 @@
+import "server-only";
+import { randomUUID } from "node:crypto";
+import { and, count, eq, isNotNull, sql } from "drizzle-orm";
+import { kindForInvoice } from "@/lib/email-template";
+import { addDays, daysBetween } from "@/lib/invoice";
+import { calendarDateInPrague, isDailyDue, type CalendarDate } from "@/lib/number-format";
+import {
+  nextOccurrences,
+  occurrencesBetween,
+  type Occurrence,
+  type RecurrenceRule,
+  type RunStatus,
+} from "@/lib/recurrence";
+import { formatCalendarDate } from "@/lib/template-vars";
+import { TEXTS } from "@/lib/texts";
+import type { Actor } from "../audit/context";
+import { clock } from "../clock";
+import { db, type Tx } from "../db";
+import {
+  automationSettings,
+  notification,
+  recurringInvoice,
+  recurringRun,
+  user,
+  type Job,
+  type RecurringInvoice,
+} from "../db/schema";
+import { scoped } from "../db/scoped";
+import { enqueue, takeIdleJobs } from "../jobs/queue";
+import { RetryLater } from "../jobs/registry";
+import { reportFailure } from "../scheduler/report";
+import { ServiceError, type Reader } from "./access";
+import { automaticSendAllowed, getAutomation } from "./automation";
+import { composeMail } from "./email-templates";
+import { issueIn } from "./invoice-lifecycle";
+import { queueMail } from "./invoice-mail";
+import { draftInputFromDocument } from "./invoice-templates";
+import {
+  createDraftIn,
+  findOwned,
+  ownerOf,
+  parseDraft,
+  unlessUnchanged,
+  Unchanged,
+  type SavedDraft,
+} from "./invoices";
+import { resolveTransport } from "./mail-settings";
+import { mutate, type Audit } from "./mutation";
+import { notify, resolveNotification } from "./notifications";
+import { ensureDefaultSeries } from "./number-series";
+import { getPreferences } from "./preferences";
+import { findPlan, readPlan, ruleOf } from "./recurring";
+
+const V = TEXTS.recurring.validation;
+const R = TEXTS.recurring.reasons;
+
+const MAX_CATCH_UP_DAYS = 3;
+const MAX_REASON_CHARS = 200;
+const NOTICE_RETRY_MS = 30 * 60_000;
+
+export type RunOccurrence = Pick<Occurrence, "periodKey" | "issueDate" | "billedPeriod">;
+
+export type RunResult = {
+  runId: string;
+  status: RunStatus;
+  invoiceId: string | null;
+} | null;
+
+const schedulerActor = (userId: string): Actor => ({ userId, source: "scheduler" });
+
+const runKey = (planId: string, periodKey: string) => `recurring:${planId}:${periodKey}`;
+
+function occurrencePayload({ periodKey, issueDate, billedPeriod }: RunOccurrence) {
+  return { periodKey, issueDate, periodFrom: billedPeriod.from, periodTo: billedPeriod.to };
+}
+
+function occurrenceOf(row: Job): RunOccurrence {
+  const { periodKey, issueDate, periodFrom, periodTo } = row.payload;
+  return {
+    periodKey: String(periodKey),
+    issueDate: String(issueDate),
+    billedPeriod: { from: String(periodFrom), to: String(periodTo) },
+  };
+}
+
+function insertRun(
+  tx: Tx,
+  plan: RecurringInvoice,
+  occurrence: RunOccurrence,
+  status: RunStatus,
+  reason: string | null = null,
+): string | null {
+  const row = tx
+    .insert(recurringRun)
+    .values({
+      id: randomUUID(),
+      userId: plan.userId,
+      recurringId: plan.id,
+      periodKey: occurrence.periodKey,
+      plannedDate: occurrence.issueDate,
+      periodFrom: occurrence.billedPeriod.from,
+      periodTo: occurrence.billedPeriod.to,
+      status,
+      reason,
+      createdAt: clock.now(),
+    })
+    .onConflictDoNothing()
+    .returning({ id: recurringRun.id })
+    .get();
+  return row?.id ?? null;
+}
+
+function updateRun(
+  tx: Tx,
+  userId: string,
+  runId: string,
+  fields: { status: RunStatus; invoiceId?: string; reason?: string | null },
+): void {
+  tx.update(recurringRun)
+    .set(fields)
+    .where(scoped(userId).where(recurringRun, (t, { eq }) => eq(t.id, runId)))
+    .run();
+}
+
+function displayDate(ownerId: string, date: CalendarDate): string {
+  return formatCalendarDate(date, getPreferences(ownerId).dateFormat);
+}
+
+// One notice per plan however many occurrences it covers, and only for those newly recorded.
+function recordMissed(
+  tx: Tx,
+  plan: RecurringInvoice,
+  occurrences: RunOccurrence[],
+  reason: string,
+): number {
+  const recorded = occurrences.filter((item) => insertRun(tx, plan, item, "missed", reason));
+  const last = recorded.at(-1);
+  if (!last) return 0;
+  notify(tx, {
+    userId: plan.userId,
+    kind: "recurring_missed",
+    dedupeKey: `recurring:missed:${plan.id}:${last.periodKey}`,
+    params: {
+      plan: plan.name,
+      date: displayDate(plan.userId, last.issueDate),
+      count: recorded.length,
+    },
+    entity: { type: "recurring_invoice", id: plan.id },
+  });
+  return recorded.length;
+}
+
+function moveCursor(
+  tx: Tx,
+  plan: RecurringInvoice,
+  rule: RecurrenceRule,
+  cursorDate: CalendarDate,
+): void {
+  const finished = nextOccurrences(rule, cursorDate, 1).length === 0;
+  tx.update(recurringInvoice)
+    .set({
+      cursorDate,
+      ...(finished && { status: "finished" as const }),
+      updatedAt: clock.now(),
+    })
+    .where(scoped(plan.userId).where(recurringInvoice, (t, { eq }) => eq(t.id, plan.id)))
+    .run();
+}
+
+export function activePlansOf(q: Reader, ownerId: string): RecurringInvoice[] {
+  return q
+    .select()
+    .from(recurringInvoice)
+    .where(scoped(ownerId).where(recurringInvoice, (t, { eq }) => eq(t.status, "active")))
+    .all();
+}
+
+// After a pause or deactivation nothing old may run by itself (REC-005, ADM-005). Jobs that never
+// started are taken back too: they would run the old occurrence, or block today's under their key.
+export function markMissed(tx: Tx, audit: Audit, plan: RecurringInvoice, today: CalendarDate) {
+  const rule = ruleOf(plan);
+  const yesterday = addDays(today, -1);
+  const idle = takeIdleJobs(tx, plan.userId, `recurring:${plan.id}:`).map(occurrenceOf);
+  const past = [...idle, ...occurrencesBetween(rule, plan.cursorDate, yesterday)].filter(
+    (item) => item.issueDate <= yesterday,
+  );
+  const missed = recordMissed(tx, plan, past, R.paused);
+  moveCursor(tx, plan, rule, yesterday);
+  audit({
+    action: "recurring.plan",
+    entity: "recurring_invoice",
+    entityId: plan.id,
+    ownerId: plan.userId,
+    scope: "user",
+    before: { cursorDate: plan.cursorDate },
+    after: { cursorDate: yesterday, missed },
+  });
+}
+
+export function pauseRecurring(actor: Actor, id: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "recurring.pause", (tx, audit) => {
+    const plan = findPlan(tx, userId, id);
+    if (plan.status !== "active") throw new ServiceError(V.notActive);
+    tx.update(recurringInvoice)
+      .set({ status: "paused", updatedAt: clock.now() })
+      .where(scoped(userId).where(recurringInvoice, (t, { eq }) => eq(t.id, id)))
+      .run();
+    audit({
+      entity: "recurring_invoice",
+      entityId: id,
+      ownerId: userId,
+      scope: "user",
+      before: { status: plan.status },
+      after: { status: "paused" },
+    });
+  });
+}
+
+export function resumeRecurring(actor: Actor, id: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "recurring.resume", (tx, audit) => {
+    const plan = findPlan(tx, userId, id);
+    if (plan.status !== "paused") throw new ServiceError(V.notPaused);
+    tx.update(recurringInvoice)
+      .set({ status: "active", updatedAt: clock.now() })
+      .where(scoped(userId).where(recurringInvoice, (t, { eq }) => eq(t.id, id)))
+      .run();
+    markMissed(tx, audit, plan, calendarDateInPrague(clock.now()));
+    audit({
+      entity: "recurring_invoice",
+      entityId: id,
+      ownerId: userId,
+      scope: "user",
+      before: { status: plan.status },
+      after: { status: "active" },
+    });
+  });
+}
+
+function plannablePlans(where?: ReturnType<typeof sql>) {
+  return db
+    .select({ plan: recurringInvoice, sendTime: automationSettings.sendTime })
+    .from(recurringInvoice)
+    .innerJoin(user, eq(user.id, recurringInvoice.userId))
+    .leftJoin(automationSettings, eq(automationSettings.userId, recurringInvoice.userId))
+    .where(and(eq(recurringInvoice.status, "active"), sql`coalesce(${user.banned}, 0) = 0`, where))
+    .all();
+}
+
+// A missing settings row means the default time.
+function sendTimeOf(ownerId: string, sendTime: string | null): string {
+  return sendTime ?? getAutomation(ownerId).sendTime;
+}
+
+function planWork(plan: RecurringInvoice, through: CalendarDate) {
+  const rule = ruleOf(plan);
+  const due = occurrencesBetween(rule, plan.cursorDate, through);
+  const cursorDate = through > plan.cursorDate ? through : plan.cursorDate;
+  const finished = nextOccurrences(rule, cursorDate, 1).length === 0;
+  return { rule, due, cursorDate, idle: due.length === 0 && !finished };
+}
+
+function planOne(seen: RecurringInvoice, through: CalendarDate, today: CalendarDate): void {
+  if (planWork(seen, through).idle) return;
+  unlessUnchanged(() =>
+    mutate(schedulerActor(seen.userId), "recurring.plan", (tx, audit) => {
+      const plan = readPlan(tx, seen.userId, seen.id);
+      if (plan?.status !== "active") throw new Unchanged(undefined);
+      const { rule, due, cursorDate, idle } = planWork(plan, through);
+      if (idle) throw new Unchanged(undefined);
+      const fresh = due.filter((item) => daysBetween(item.issueDate, today) <= MAX_CATCH_UP_DAYS);
+      const stale = due.filter((item) => !fresh.includes(item));
+      for (const occurrence of fresh) {
+        enqueue(tx, {
+          kind: "recurring.run",
+          key: runKey(plan.id, occurrence.periodKey),
+          userId: plan.userId,
+          payload: { recurringId: plan.id, ...occurrencePayload(occurrence) },
+        });
+      }
+      const missed = recordMissed(tx, plan, stale, R.tooOld);
+      moveCursor(tx, plan, rule, cursorDate);
+      audit({
+        entity: "recurring_invoice",
+        entityId: plan.id,
+        ownerId: plan.userId,
+        scope: "user",
+        before: { cursorDate: plan.cursorDate },
+        after: { cursorDate, planned: fresh.length, missed },
+      });
+    }),
+  );
+}
+
+export function planRecurringRuns(now: Date): void {
+  const today = calendarDateInPrague(now);
+  for (const { plan, sendTime } of plannablePlans()) {
+    const due = isDailyDue(now, sendTimeOf(plan.userId, sendTime));
+    try {
+      planOne(plan, due ? today : addDays(today, -1), today);
+    } catch (error) {
+      reportFailure(error, { task: "recurring-plan", userId: plan.userId });
+    }
+  }
+}
+
+function draftFor(
+  tx: Tx,
+  audit: Audit,
+  plan: RecurringInvoice,
+  occurrence: RunOccurrence,
+): SavedDraft {
+  const input = draftInputFromDocument(plan.userId, plan.document, plan.customerId, {
+    issueDate: occurrence.issueDate,
+  });
+  return createDraftIn(
+    tx,
+    audit,
+    plan.userId,
+    parseDraft(input),
+    {
+      recurringId: plan.id,
+      periodFrom: occurrence.billedPeriod.from,
+      periodTo: occurrence.billedPeriod.to,
+    },
+    { fromRecurring: { id: plan.id, name: plan.name } },
+  );
+}
+
+// The account-wide switch stops issuing as well as sending; recurringSend only concerns sending (R-6).
+function effectiveMode(plan: RecurringInvoice): RecurringInvoice["mode"] {
+  if (plan.mode === "draft") return "draft";
+  if (getAutomation(plan.userId).paused) return "draft";
+  if (plan.mode === "issue") return "issue";
+  return plan.sendConfirmedAt && automaticSendAllowed(plan.userId, "recurringSend")
+    ? "send"
+    : "draft";
+}
+
+function issueSafely(
+  tx: Tx,
+  audit: Audit,
+  userId: string,
+  draft: SavedDraft,
+): { issued: true; number: string } | { issued: false; problems: string } {
+  try {
+    const { number } = tx.transaction((savepoint) =>
+      issueIn(savepoint, audit, userId, draft.id, { revision: draft.revision }),
+    );
+    return { issued: true, number };
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error;
+    return { issued: false, problems: error.message };
+  }
+}
+
+function queueRecurringMail(
+  tx: Tx,
+  audit: Audit,
+  plan: RecurringInvoice,
+  occurrence: RunOccurrence,
+  runId: string,
+  invoiceId: string,
+): boolean {
+  const { userId } = plan;
+  const kind = kindForInvoice(findOwned(tx, userId, invoiceId).type);
+  const { to, cc, bcc, subject, body } = composeMail(userId, invoiceId, kind);
+  if (to.length === 0) return false;
+  const queued = queueMail(tx, audit, {
+    userId,
+    invoiceId,
+    kind,
+    trigger: "automatic",
+    automation: "recurringSend",
+    plannedFor: occurrence.issueDate,
+    key: `mail:recurring:${runId}`,
+    message: { to, cc, bcc, subject, body },
+  });
+  return queued !== null;
+}
+
+function createInvoice(
+  tx: Tx,
+  audit: Audit,
+  plan: RecurringInvoice,
+  occurrence: RunOccurrence,
+  runId: string,
+): { status: RunStatus; invoiceId: string; reason?: string } {
+  const { userId } = plan;
+  const draft = draftFor(tx, audit, plan, occurrence);
+  const invoiceId = draft.id;
+  const params = { plan: plan.name };
+  const dedupeKey = `recurring:${runId}`;
+  const entity = { type: "invoice", id: invoiceId };
+
+  const mode = effectiveMode(plan);
+  if (mode === "draft") {
+    if (plan.mode === "draft") return { status: "created", invoiceId };
+    notify(tx, { userId, kind: "recurring_held", dedupeKey, params, entity });
+    return { status: "fallback", invoiceId, reason: R.held };
+  }
+
+  const result = issueSafely(tx, audit, userId, draft);
+  if (!result.issued) {
+    const { problems } = result;
+    const notice = { ...params, problems };
+    notify(tx, { userId, kind: "recurring_failed", dedupeKey, params: notice, entity });
+    return { status: "fallback", invoiceId, reason: problems.slice(0, MAX_REASON_CHARS) };
+  }
+  if (mode === "issue") return { status: "issued", invoiceId };
+
+  if (queueRecurringMail(tx, audit, plan, occurrence, runId, invoiceId)) {
+    return { status: "queued", invoiceId };
+  }
+  notify(tx, {
+    userId,
+    kind: "recurring_no_address",
+    dedupeKey,
+    params: { ...params, invoice: result.number },
+    entity,
+  });
+  return { status: "issued", invoiceId, reason: R.noAddress };
+}
+
+// The unique index on (plan, period) decides here, not a lease: only one run ever inserts the row.
+export function processOccurrence(
+  ownerId: string,
+  recurringId: string,
+  occurrence: RunOccurrence,
+): RunResult {
+  const actor = schedulerActor(ownerId);
+  ensureDefaultSeries(actor);
+  return unlessUnchanged(() =>
+    mutate(actor, "recurring.run", (tx, audit) => {
+      const plan = readPlan(tx, ownerId, recurringId);
+      if (!plan) throw new Unchanged<RunResult>(null);
+      const today = calendarDateInPrague(clock.now());
+      const tooOld = daysBetween(occurrence.issueDate, today) > MAX_CATCH_UP_DAYS;
+
+      let result: NonNullable<RunResult>;
+      if (plan.status === "paused" || tooOld) {
+        const missed = recordMissed(tx, plan, [occurrence], tooOld ? R.tooOld : R.paused);
+        if (missed === 0) throw new Unchanged<RunResult>(null);
+        const row = tx
+          .select({ id: recurringRun.id })
+          .from(recurringRun)
+          .where(
+            scoped(ownerId).where(recurringRun, (t, { and, eq }) =>
+              and(eq(t.recurringId, plan.id), eq(t.periodKey, occurrence.periodKey)),
+            ),
+          )
+          .get();
+        result = { runId: row!.id, status: "missed", invoiceId: null };
+      } else {
+        const runId = insertRun(tx, plan, occurrence, "created");
+        if (!runId) throw new Unchanged<RunResult>(null);
+        const { status, invoiceId, reason } = createInvoice(tx, audit, plan, occurrence, runId);
+        updateRun(tx, ownerId, runId, { status, invoiceId, reason: reason ?? null });
+        result = { runId, status, invoiceId };
+      }
+      audit({
+        entity: "recurring_invoice",
+        entityId: plan.id,
+        ownerId,
+        scope: "user",
+        after: { ...occurrencePayload(occurrence), ...result },
+      });
+      return result;
+    }),
+  );
+}
+
+export async function runRecurringJob(row: Job): Promise<void> {
+  if (!row.userId) throw new Error("Úloha pravidelné faktury nemá vlastníka");
+  processOccurrence(row.userId, String(row.payload.recurringId), occurrenceOf(row));
+}
+
+function resolveMissedNotices(tx: Tx, userId: string, planId: string): void {
+  const left = tx
+    .select({ n: count() })
+    .from(recurringRun)
+    .where(
+      scoped(userId).where(recurringRun, (t, { and, eq }) =>
+        and(eq(t.recurringId, planId), eq(t.status, "missed")),
+      ),
+    )
+    .get();
+  if (left?.n) return;
+  const notices = tx
+    .select({ dedupeKey: notification.dedupeKey })
+    .from(notification)
+    .where(
+      scoped(userId).where(notification, (t, { and, eq }) =>
+        and(eq(t.kind, "recurring_missed"), eq(t.entityId, planId)),
+      ),
+    )
+    .all();
+  for (const { dedupeKey } of notices) resolveNotification(tx, userId, dedupeKey);
+}
+
+// A person decided here, so the result is always a draft: a missed occurrence never sends (R-19).
+export function resolveMissed(
+  actor: Actor,
+  runId: string,
+  action: "draft" | "skip",
+): { invoiceId: string | null } {
+  const userId = ownerOf(actor);
+  if (action === "draft") ensureDefaultSeries(actor);
+  const auditAction = action === "draft" ? "recurring.missed_draft" : "recurring.missed_skip";
+  return mutate(actor, auditAction, (tx, audit) => {
+    const run = tx
+      .select()
+      .from(recurringRun)
+      .where(scoped(userId).where(recurringRun, (t, { eq }) => eq(t.id, runId)))
+      .get();
+    if (run?.status !== "missed") throw new ServiceError(V.notMissed);
+    const plan = findPlan(tx, userId, run.recurringId);
+
+    let invoiceId: string | null = null;
+    if (action === "draft") {
+      invoiceId = draftFor(tx, audit, plan, {
+        periodKey: run.periodKey,
+        issueDate: run.plannedDate,
+        billedPeriod: { from: run.periodFrom, to: run.periodTo },
+      }).id;
+      updateRun(tx, userId, runId, { status: "created", invoiceId, reason: null });
+    } else {
+      updateRun(tx, userId, runId, { status: "skipped" });
+    }
+    resolveMissedNotices(tx, userId, plan.id);
+    audit({
+      entity: "recurring_invoice",
+      entityId: plan.id,
+      ownerId: userId,
+      scope: "user",
+      before: { runId, status: "missed" },
+      after: { runId, action, invoiceId },
+    });
+    return { invoiceId };
+  });
+}
+
+function noticePlan(plan: RecurringInvoice, occurrence: Occurrence): void {
+  const key = `notice:${plan.id}:${occurrence.periodKey}`;
+  const { userId } = plan;
+  unlessUnchanged(() =>
+    mutate(schedulerActor(userId), "recurring.notice", (tx, audit) => {
+      const queued = enqueue(tx, {
+        kind: "user.notice",
+        key,
+        userId,
+        payload: { recurringId: plan.id, issueDate: occurrence.issueDate },
+      });
+      if (!queued.created) throw new Unchanged(undefined);
+      notify(tx, {
+        userId,
+        kind: "recurring_upcoming",
+        dedupeKey: key,
+        params: { plan: plan.name, date: displayDate(userId, occurrence.issueDate) },
+        entity: { type: "recurring_invoice", id: plan.id },
+      });
+      audit({
+        entity: "recurring_invoice",
+        entityId: plan.id,
+        ownerId: userId,
+        scope: "user",
+        after: { issueDate: occurrence.issueDate },
+      });
+    }),
+  );
+}
+
+// Runs under the master switch as well: a message to the account owner leaves nothing to a client (R-27).
+export function planRecurringNotices(now: Date): void {
+  const today = calendarDateInPrague(now);
+  const candidates = plannablePlans(
+    sql`${recurringInvoice.mode} = 'send' AND ${isNotNull(recurringInvoice.notifyDaysBefore)}`,
+  );
+  for (const { plan, sendTime } of candidates) {
+    if (!isDailyDue(now, sendTimeOf(plan.userId, sendTime))) continue;
+    const after = plan.cursorDate > today ? plan.cursorDate : today;
+    const through = addDays(today, plan.notifyDaysBefore!);
+    try {
+      for (const item of occurrencesBetween(ruleOf(plan), after, through)) noticePlan(plan, item);
+    } catch (error) {
+      reportFailure(error, { task: "recurring-notice", userId: plan.userId });
+    }
+  }
+}
+
+export async function deliverUserNotice(row: Job): Promise<void> {
+  if (!row.userId) throw new Error("Upozornění uživatele nemá vlastníka");
+  const plan = readPlan(db, row.userId, String(row.payload.recurringId));
+  const account = db.select({ email: user.email }).from(user).where(eq(user.id, row.userId)).get();
+  if (!plan || !account) return;
+  const transport = await resolveTransport(row.userId);
+  if (!transport) return;
+  const { from, replyTo } = transport.identity;
+  const { subject, body } = TEXTS.recurring.upcomingMail;
+  const date = displayDate(row.userId, String(row.payload.issueDate));
+  try {
+    // Without the account's standing copies: this message is for the owner alone.
+    await transport.send({
+      from,
+      ...(replyTo ? { replyTo } : {}),
+      to: account.email,
+      subject,
+      text: body(plan.name, date),
+    });
+  } catch {
+    throw new RetryLater("Upozornění se zopakuje", NOTICE_RETRY_MS);
+  }
+}

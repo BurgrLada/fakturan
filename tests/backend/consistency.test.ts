@@ -4,7 +4,14 @@ import { describe, expect, test } from "vitest";
 import { appearanceFrom } from "@/lib/invoice";
 import type { CustomerSnapshot, SupplierSnapshot } from "@/lib/invoice-document";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
-import { auditLog, invoice, invoiceLine } from "@/server/db/schema";
+import {
+  auditLog,
+  invoice,
+  invoiceLine,
+  recurringInvoice,
+  recurringRun,
+  type RecurringInvoice,
+} from "@/server/db/schema";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 
@@ -213,6 +220,50 @@ describe("assertConsistent", () => {
         sql`CREATE UNIQUE INDEX invoice_user_number_idx ON invoice (user_id, number) WHERE number IS NOT NULL`,
       );
     }
+  });
+
+  test("[TST-018] odhalí druhou fakturu téhož období plánu a běh s cizím dokladem", () => {
+    const owner = createUser();
+    const stranger = createUser();
+    const now = new Date();
+    const recurringId = randomUUID();
+    db.insert(recurringInvoice)
+      .values({
+        id: recurringId,
+        userId: owner,
+        name: "Plán",
+        document: {} as RecurringInvoice["document"],
+        frequency: "monthly",
+        issueRule: "period_end",
+        startsOn: "2026-01-01",
+        cursorDate: "2026-01-01",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    const period = { recurringId, periodFrom: "2026-01-01", periodTo: "2026-01-31" };
+    const first = createInvoice(owner, period);
+    expect(() => assertConsistent(db, owner)).not.toThrow();
+    const second = createInvoice(owner, period);
+    expect(() => assertConsistent(db, owner)).toThrow(/období plánu/);
+    db.delete(invoice).where(eq(invoice.id, second)).run();
+
+    db.insert(recurringRun)
+      .values({
+        id: randomUUID(),
+        userId: owner,
+        recurringId,
+        periodKey: "2026-01-01",
+        plannedDate: "2026-01-31",
+        periodFrom: "2026-01-01",
+        periodTo: "2026-01-31",
+        status: "created",
+        invoiceId: createInvoice(stranger),
+        createdAt: now,
+      })
+      .run();
+    expect(() => assertConsistent(db, owner)).toThrow(/cizím dokladem/);
+    expect(first).toBeTruthy();
   });
 
   // Last on purpose: audit_log is append-only, so the orphan row stays in this file's database.

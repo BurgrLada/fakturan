@@ -7,6 +7,8 @@ import { parentPort, workerData } from "node:worker_threads";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const stub = pathToFileURL(join(root, "tests/helpers/server-only.ts")).href;
+// The designs are JSX, which Node's type stripping cannot load, and these workers never render one.
+const designsStub = pathToFileURL(join(root, "tests/helpers/designs-stub.ts")).href;
 
 function withExtension(path) {
   if (existsSync(`${path}.ts`)) return `${path}.ts`;
@@ -16,6 +18,9 @@ function withExtension(path) {
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "server-only") return { url: stub, shortCircuit: true };
+    if (/\/(pdf\/)?(designs|render)$/.test(specifier) && !specifier.startsWith("/")) {
+      return { url: designsStub, shortCircuit: true };
+    }
     if (specifier.startsWith("@/")) {
       const path = withExtension(join(root, "src", specifier.slice(2)));
       return { url: pathToFileURL(path).href, shortCircuit: true };
@@ -28,12 +33,13 @@ registerHooks({
   },
 });
 
-const { databasePath, gate, mode, worker, ticks } = workerData;
+const { databasePath, gate, mode, worker, ticks, ownerId, recurringId, occurrence } = workerData;
 
 const { createDb, db, setDbForTests } = await import("@/server/db");
 const { claimNext, completeJob, enqueue } = await import("@/server/jobs/queue");
 const { registerJob } = await import("@/server/jobs/registry");
 const { registerTickTask, tick } = await import("@/server/scheduler/tick");
+const { processOccurrence } = await import("@/server/services/recurring-run");
 
 setDbForTests(createDb(databasePath));
 
@@ -69,4 +75,9 @@ async function tickRepeatedly() {
   return results;
 }
 
-parentPort.postMessage({ result: mode === "claim" ? claimAll() : await tickRepeatedly() });
+const work = {
+  claim: claimAll,
+  tick: tickRepeatedly,
+  recurring: () => processOccurrence(ownerId, recurringId, occurrence),
+};
+parentPort.postMessage({ result: await work[mode]() });

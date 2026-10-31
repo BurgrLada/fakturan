@@ -17,6 +17,22 @@ export type RecurrenceFrequency = (typeof RECURRENCE_FREQUENCIES)[number];
 export const ISSUE_RULES = ["day", "period_end", "first_working_day", "last_working_day"] as const;
 export type IssueRule = (typeof ISSUE_RULES)[number];
 
+export const RECURRING_MODES = ["draft", "issue", "send"] as const;
+export type RecurringMode = (typeof RECURRING_MODES)[number];
+
+export const RECURRING_STATUSES = ["active", "paused", "finished"] as const;
+export type RecurringStatus = (typeof RECURRING_STATUSES)[number];
+
+export const RUN_STATUSES = [
+  "created",
+  "issued",
+  "queued",
+  "fallback",
+  "missed",
+  "skipped",
+] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
 export type RecurrenceRule = {
   frequency: RecurrenceFrequency;
   every: number;

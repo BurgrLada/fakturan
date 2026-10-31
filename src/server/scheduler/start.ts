@@ -10,6 +10,12 @@ import { purgeFinishedJobs } from "../jobs/queue";
 import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
 import { deliverMail, recoverMail, settleDeadMail } from "../services/mail-delivery";
+import {
+  deliverUserNotice,
+  planRecurringNotices,
+  planRecurringRuns,
+  runRecurringJob,
+} from "../services/recurring-run";
 import { backupTask } from "./backup";
 import { releaseLease } from "./lease";
 import { reportFailure } from "./report";
@@ -38,6 +44,13 @@ export const jobCleanupTask: TickTask = {
 };
 
 export const deadMailTask: TickTask = { name: "dead-mail", run: () => settleDeadMail() };
+
+export const recurringPlanTask: TickTask = { name: "recurring-plan", run: planRecurringRuns };
+
+export const recurringNoticeTask: TickTask = {
+  name: "recurring-notice",
+  run: planRecurringNotices,
+};
 
 export function cronPattern(seconds: number): string {
   return `*/${seconds} * * * * *`;
@@ -68,7 +81,11 @@ export function startScheduler(): void {
     .onConflictDoUpdate({ target: schedulerState.id, set: { startedAt, lastTickAt: null } })
     .run();
   registerJob("mail.send", { run: deliverMail, recover: recoverMail });
+  registerJob("recurring.run", { run: runRecurringJob });
+  registerJob("user.notice", { run: deliverUserNotice });
   registerTickTask(deadMailTask);
+  registerTickTask(recurringPlanTask);
+  registerTickTask(recurringNoticeTask);
   registerTickTask(jobCleanupTask);
   registerTickTask(backupTask);
   bindWorker(holder);

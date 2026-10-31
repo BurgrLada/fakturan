@@ -210,6 +210,8 @@ export type IssuedInput = z.input<typeof issuedInputSchema>;
 export type ParsedDraft = z.output<typeof draftInputSchema>;
 type DraftLine = ParsedDraft["lines"][number];
 
+export type DraftOrigin = { recurringId: string; periodFrom: string; periodTo: string };
+
 export type SavedDraft = { id: string; revision: number; totals: Totals };
 
 export function ownerOf(actor: Actor): string {
@@ -439,6 +441,7 @@ export function createDraftIn(
   audit: Audit,
   userId: string,
   input: ParsedDraft,
+  origin?: DraftOrigin,
   auditNote: Record<string, unknown> = {},
 ): SavedDraft {
   const { id: _i, clientId, revision: _r, lines, ...fields } = input;
@@ -453,6 +456,7 @@ export function createDraftIn(
       id,
       userId,
       ...fields,
+      ...origin,
       ...sumsOf(totals),
       customerName,
       searchText: searchTextOf({ customerName, lines: rows }),
@@ -497,7 +501,7 @@ export function saveDraft(
         : clientId
           ? draftWithClientId(tx, userId, clientId)
           : null;
-      if (!before) return createDraftIn(tx, audit, userId, input, auditNote);
+      if (!before) return createDraftIn(tx, audit, userId, input, undefined, auditNote);
       if (before.status !== "draft") throw new ServiceError(TEXTS.invoices.stale);
       assertReferencesOwned(tx, userId, input);
 

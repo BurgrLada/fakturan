@@ -4,6 +4,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { addDays, daysBetween, INVOICE_TYPES } from "@/lib/invoice";
 import type { TemplateDocument } from "@/lib/invoice-template";
+import type { CalendarDate } from "@/lib/number-format";
 import { validateVariables } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -24,6 +25,7 @@ import {
   ownerOf,
   saveDraft,
   withoutStrayDiscount,
+  type DraftInput,
 } from "./invoices";
 import { mutate } from "./mutation";
 import { defaultSeriesFor, ensureDefaultSeries } from "./number-series";
@@ -53,7 +55,7 @@ const {
   lines,
 } = documentFields;
 
-const templateDocumentSchema = z
+export const templateDocumentSchema = z
   .object({
     type: z.enum(INVOICE_TYPES, TEXTS.invoices.validation.type),
     bankAccountId,
@@ -96,7 +98,7 @@ function variableTexts(document: TemplateDocument): string[] {
 }
 
 // A template is rendered later, when the period and number are known, so a typo must not slip in.
-function assertKnownVariables(document: TemplateDocument): void {
+export function assertKnownVariables(document: TemplateDocument): void {
   const unknown = [...new Set(variableTexts(document).flatMap((text) => validateVariables(text)))];
   if (unknown.length > 0) throw new ServiceError(V.unknownVariable(unknown));
 }
@@ -273,43 +275,54 @@ function existingCatalogIds(ownerId: string, document: TemplateDocument): Set<st
   );
 }
 
+// `issueDate` is left out for "as of today"; a recurring plan passes the date of its occurrence.
+export function draftInputFromDocument(
+  ownerId: string,
+  document: TemplateDocument,
+  customerId: string | null,
+  dates: { issueDate?: CalendarDate },
+): DraftInput {
+  const base = newDraftDefaults(ownerId, usableCustomerId(ownerId, customerId));
+  const issueDate = dates.issueDate ?? base.issueDate;
+  const items = existingCatalogIds(ownerId, document);
+  return {
+    ...base,
+    type: document.type,
+    seriesId: defaultSeriesFor(ownerId, document.type)?.id ?? null,
+    bankAccountId: usableAccountId(ownerId, document),
+    issueDate,
+    dueDate: issueDate ? addDays(issueDate, document.dueDays) : null,
+    language: document.language,
+    currency: document.currency,
+    paymentMethod: document.paymentMethod,
+    orderRef: document.orderRef,
+    reference: document.reference,
+    textBefore: document.textBefore,
+    textAfter: document.textAfter,
+    note: document.note,
+    discountKind: document.discountKind,
+    discountValue: document.discountValue,
+    rounding: document.rounding,
+    appearance: document.appearance,
+    lines: document.lines.map((line) => ({
+      ...line,
+      catalogItemId:
+        line.catalogItemId && items.has(line.catalogItemId) ? line.catalogItemId : null,
+    })),
+  };
+}
+
 export function draftFromTemplate(actor: Actor, templateId: string): { id: string } {
   const userId = ownerOf(actor);
   const template = readTemplate(db, userId, templateId);
   if (!template) throw new ServiceError(V.notFound);
-  const { document } = template;
   ensureDefaultSeries(actor);
-
-  const base = newDraftDefaults(userId, usableCustomerId(userId, template.customerId));
-  const items = existingCatalogIds(userId, document);
-  const source = { fromTemplate: { id: template.id, name: template.name } };
   return saveDraft(
     actor,
     {
-      ...base,
+      ...draftInputFromDocument(userId, template.document, template.customerId, {}),
       clientId: randomUUID(),
-      type: document.type,
-      seriesId: defaultSeriesFor(userId, document.type)?.id ?? null,
-      bankAccountId: usableAccountId(userId, document),
-      dueDate: base.issueDate ? addDays(base.issueDate, document.dueDays) : null,
-      language: document.language,
-      currency: document.currency,
-      paymentMethod: document.paymentMethod,
-      orderRef: document.orderRef,
-      reference: document.reference,
-      textBefore: document.textBefore,
-      textAfter: document.textAfter,
-      note: document.note,
-      discountKind: document.discountKind,
-      discountValue: document.discountValue,
-      rounding: document.rounding,
-      appearance: document.appearance,
-      lines: document.lines.map((line) => ({
-        ...line,
-        catalogItemId:
-          line.catalogItemId && items.has(line.catalogItemId) ? line.catalogItemId : null,
-      })),
     },
-    source,
+    { fromTemplate: { id: template.id, name: template.name } },
   );
 }

@@ -169,6 +169,13 @@
       "when": 1793452714029,
       "tag": "0023_email_log",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1793462303370,
+      "tag": "0024_recurring",
+      "breakpoints": true
     }
   ]
 }

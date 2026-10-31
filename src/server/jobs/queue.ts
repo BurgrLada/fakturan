@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, like, lt, sql, type SQL } from "drizzle-orm";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
 import { job, user, type Job, type JobKind, type JobPayload } from "../db/schema";
@@ -119,6 +119,19 @@ export function cancelUserJobs(tx: Tx, userId: string): string[] {
     .returning({ id: job.id })
     .all()
     .map((row) => row.id);
+}
+
+// Deleting frees the key, so the same work can be enqueued again. A running attempt is left alone.
+export function takeIdleJobs(tx: Tx, userId: string, keyPrefix: string): Job[] {
+  return tx
+    .delete(job)
+    .where(
+      scoped(userId).where(job, (t, { and }) =>
+        and(inArray(t.status, ["pending", "cancelled"]), like(t.key, `${keyPrefix}%`)),
+      ),
+    )
+    .returning()
+    .all();
 }
 
 // Dead jobs stay for diagnosis. Past this age recurring_run, reminder_sent and email_log hold idempotency.
