@@ -4,6 +4,7 @@ import type { Actor } from "../audit/context";
 import { db } from "../db";
 import { env } from "../env";
 import { isInstanceMailConfigured } from "../mail/instance";
+import { schedulerHealth } from "../scheduler/start";
 import pkg from "../../../package.json";
 import { assertAdmin } from "./access";
 
@@ -22,7 +23,7 @@ export function getInstanceStatus(actor: Actor) {
   return {
     version: pkg.version,
     databaseBytes: fileSize(path) + fileSize(`${path}-wal`),
-    scheduler: "not_started" as const,
+    scheduler: schedulerHealth(db),
     lastBackupAt: null as Date | null,
     smtpConfigured: isInstanceMailConfigured(env),
     monitoringConfigured: Boolean(env.SENTRY_DSN),

@@ -17,6 +17,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { auditActionLabel } from "@/lib/audit-labels";
 import { formatBytes, formatDateTime } from "@/lib/format";
+import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, requireAdmin } from "@/server/auth/session";
 import { getInstanceStatus } from "@/server/services/instance-status";
 import { listInstanceAudit } from "@/server/services/instance-audit";
@@ -80,7 +81,7 @@ function InstanceStatus({ status }: { status: ReturnType<typeof getInstanceStatu
   const rows: [string, string][] = [
     ["Verze", status.version],
     ["Velikost databáze", formatBytes(status.databaseBytes)],
-    ["Plánovač", status.scheduler === "not_started" ? "není spuštěn" : "běží"],
+    ["Plánovač", TEXTS.instanceStatus.scheduler[status.scheduler]],
     ["Poslední záloha", status.lastBackupAt ? formatDateTime(status.lastBackupAt) : "žádná"],
     ["SMTP", status.smtpConfigured ? "nastaveno" : "nenastaveno"],
     ["Monitoring chyb", status.monitoringConfigured ? "nastaveno" : "nenastaveno"],

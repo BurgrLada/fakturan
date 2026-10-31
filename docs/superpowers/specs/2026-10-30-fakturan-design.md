@@ -588,6 +588,7 @@ Pravidla:
 | `VIES_BASE_URL` | ne | Adresa REST API VIES pro ověření DIČ, výchozí veřejné API EU; mění se jen kvůli testům |
 | `ALLOW_PRIVATE_MAIL_HOSTS` | ne | Výjimka ze SEC-007 |
 | `TRUST_PROXY` | ne | Čtení IP z hlavičky reverzní proxy pro rate limiting a audit |
+| `SCHEDULER_TICK_SECONDS` | ne | Interval plánovače v sekundách, 1 až 60, výchozí 60; mění se jen kvůli testům |
 
 ## 20. Design a UI (UI)
 

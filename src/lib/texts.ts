@@ -1054,4 +1054,12 @@ export const TEXTS = {
     other: "Jiný uživatel",
     nobody: "Systém nebo nepřihlášený",
   },
+  instanceStatus: {
+    scheduler: {
+      not_started: "není spuštěn",
+      starting: "spouští se",
+      running: "běží",
+      stale: "neodpovídá",
+    },
+  },
 } as const;

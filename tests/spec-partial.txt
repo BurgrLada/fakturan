@@ -13,3 +13,5 @@ SEC-011	Escapování e-mailů a šablon e-mailů chybí	plán 4
 FOR-005	Upozornění v UI nemá e2e test, ověřený je jen backend	plán 6
 CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán 4
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
+ARC-007	Fronta stojí, ale odeslání a automatika ji zatím nepoužívají	plán 4
+ADM-005	Zastavení úloh hotové, chybí nabídka zmeškaných pravidelných faktur po reaktivaci	plán 4

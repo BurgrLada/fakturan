@@ -27,6 +27,8 @@ function clean(text: string): string {
     .replace(QUERY_TOKEN, "$1[token]");
 }
 
+export const scrubText = clean;
+
 function cleanUrl(raw: string): string {
   return clean(raw.split(/[?#]/)[0]);
 }
@@ -47,7 +49,10 @@ function cleanFrames(frames: Frame) {
   }));
 }
 
-// Allowlist: a field not copied here (headers, cookies, bodies, extra, tags, contexts, spans,
+// Set by reportFailure from job metadata, the only tags that identify a failed job (R-30).
+const JOB_TAGS = ["task", "kind", "job_id"] as const;
+
+// Allowlist: a field not copied here (headers, cookies, bodies, extra, other tags, contexts, spans,
 // breadcrumbs, frame variables) never leaves the instance (MON-004).
 export function scrubEvent<T extends Event>(event: T): T {
   const out: Event = {};
@@ -64,6 +69,8 @@ export function scrubEvent<T extends Event>(event: T): T {
   ] as const) {
     if (event[key] !== undefined) (out as Record<string, unknown>)[key] = event[key];
   }
+  const tags = JOB_TAGS.filter((key) => event.tags?.[key] !== undefined);
+  if (tags.length) out.tags = Object.fromEntries(tags.map((key) => [key, event.tags?.[key]]));
   if (event.user?.id !== undefined) out.user = { id: event.user.id };
   if (event.message) out.message = clean(event.message);
   if (event.transaction) out.transaction = cleanUrl(event.transaction);

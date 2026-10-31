@@ -47,6 +47,7 @@ const schema = z.object({
     .transform((v) => v.replace(/\/+$/, "")),
   ALLOW_PRIVATE_MAIL_HOSTS: flag,
   TRUST_PROXY: flag,
+  SCHEDULER_TICK_SECONDS: z.coerce.number().int().min(1).max(60).default(60),
 });
 
 export type Env = Omit<z.output<typeof schema>, "DATABASE_PATH"> & { DATABASE_PATH: string };

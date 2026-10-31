@@ -9,6 +9,8 @@ export async function register() {
     parseEnv(process.env);
     const { db, runMigrations } = await import("./server/db");
     runMigrations(db);
+    const { startScheduler } = await import("./server/scheduler/start");
+    startScheduler();
   } catch (err) {
     logger.error("start selhal", { err });
     // The standalone server survives a failing register() and answers 500; a supervisor needs the exit.

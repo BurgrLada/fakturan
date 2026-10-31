@@ -53,6 +53,20 @@ export function calendarDateInPrague(value: Date): CalendarDate {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+export function timeInPrague(value: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Prague",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(value);
+}
+
+// True from `at` until midnight: first tick past the time, so an outage or a DST jump skips nothing.
+export function isDailyDue(now: Date, at: string): boolean {
+  return timeInPrague(now) >= at;
+}
+
 export function validateTemplate(template: string): string | null {
   if ((template.match(SEQUENCE) ?? []).length !== 1) return TEXTS.numberSeries.errors.oneSequence;
   if (/[{}]/.test(template.replace(TOKEN, ""))) return TEXTS.numberSeries.errors.unknownToken;

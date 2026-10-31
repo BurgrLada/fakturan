@@ -1,12 +1,12 @@
 import type { Db } from "./db";
+import { schedulerHealth, type SchedulerHealth } from "./scheduler/start";
 
 export type Health = {
   status: "ok" | "error";
   database: "ok" | "error";
-  scheduler: "not_started";
+  scheduler: SchedulerHealth;
 };
 
-// Health is the database alone for now: the scheduler lands in a later plan and then reports here.
 export function checkHealth(db: Pick<Db, "$client">): Health {
   let database: Health["database"] = "ok";
   try {
@@ -14,5 +14,7 @@ export function checkHealth(db: Pick<Db, "$client">): Health {
   } catch {
     database = "error";
   }
-  return { status: database, database, scheduler: "not_started" };
+  const scheduler = schedulerHealth(db);
+  const healthy = database === "ok" && scheduler !== "stale";
+  return { status: healthy ? "ok" : "error", database, scheduler };
 }

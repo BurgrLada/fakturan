@@ -21,6 +21,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.doUnmock("@/server/db");
+  vi.doUnmock("@/server/scheduler/start");
   vi.resetModules();
 });
 
@@ -62,10 +63,11 @@ describe("logger", () => {
 });
 
 describe("start", () => {
-  async function loadRegister(migrate: () => void) {
+  async function loadRegister(migrate: () => void, start: () => void = () => {}) {
     vi.stubEnv("NEXT_RUNTIME", "nodejs");
     for (const [k, v] of Object.entries(validEnv)) vi.stubEnv(k, v);
     vi.doMock("@/server/db", () => ({ db: {}, runMigrations: migrate }));
+    vi.doMock("@/server/scheduler/start", () => ({ startScheduler: start }));
     return (await import("../../src/instrumentation")).register;
   }
 
@@ -88,6 +90,28 @@ describe("start", () => {
     });
     await expect(register()).rejects.toThrow("exit");
     expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  test("[OPS-002] plánovač startuje až za migracemi", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const order: string[] = [];
+    const register = await loadRegister(
+      () => order.push("migrace"),
+      () => order.push("plánovač"),
+    );
+    await register();
+    expect(order).toEqual(["migrace", "plánovač"]);
+  });
+
+  test("[OPS-002] selhání startu plánovače zastaví start", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const register = await loadRegister(
+      () => {},
+      () => {
+        throw new Error("plánovač selhal");
+      },
+    );
+    await expect(register()).rejects.toThrow("plánovač selhal");
   });
 
   test("[SEC-003] bez ENCRYPTION_KEY se aplikace nespustí", async () => {

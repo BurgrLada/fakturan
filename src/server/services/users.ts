@@ -18,6 +18,7 @@ import {
   invoiceTag,
   invoiceTemplate,
   invoiceVersion,
+  job,
   numberSeries,
   numberSeriesCounter,
   preferences,
@@ -32,6 +33,7 @@ import {
 import { scoped } from "../db/scoped";
 import { logger } from "../logger";
 import { removeUserDir } from "../files/store";
+import { cancelUserJobs } from "../jobs/queue";
 import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
 import { mutate } from "./mutation";
@@ -58,6 +60,7 @@ export const USER_OWNED_TABLES = [
   numberSeries,
   preferences,
   file,
+  job,
 ];
 
 const REAUTH_WINDOW_MS = 15 * 60_000;
@@ -151,6 +154,7 @@ export function deactivateUser(actor: Actor, userId: string): void {
     tx.update(user).set({ banned: true, updatedAt: clock.now() }).where(eq(user.id, userId)).run();
     // In the same transaction, so a commit can never leave a banned user with a live session.
     const revoked = tx.delete(session).where(scoped(userId).where(session)).run();
+    cancelUserJobs(tx, userId);
     audit({
       entity: "user",
       entityId: userId,

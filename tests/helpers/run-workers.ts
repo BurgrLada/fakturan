@@ -1,14 +1,16 @@
 import { Worker } from "node:worker_threads";
 
 // Workers wait on a shared gate so that they all start hitting the database at the same moment.
-export async function runAllocateWorkers<T>(
+async function runGatedWorkers<T>(
+  script: string,
+  resultKey: string,
   jobs: Record<string, unknown>[],
   databasePath: string,
 ): Promise<T[]> {
   const gate = new SharedArrayBuffer(4);
   const workers = jobs.map(
     (job) =>
-      new Worker(new URL("./allocate-worker.mjs", import.meta.url), {
+      new Worker(new URL(script, import.meta.url), {
         execArgv: ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON"],
         workerData: { ...job, databasePath, gate },
       }),
@@ -28,7 +30,7 @@ export async function runAllocateWorkers<T>(
       failure(worker),
     ]);
   const ready = workers.map((worker) => message<boolean>(worker, "ready"));
-  const results = workers.map((worker) => message<T>(worker, "allocated"));
+  const results = workers.map((worker) => message<T>(worker, resultKey));
   // A rejection before the gate opens must surface through `ready`, not as an unhandled one.
   void Promise.allSettled(results);
 
@@ -41,4 +43,18 @@ export async function runAllocateWorkers<T>(
   } finally {
     await Promise.all(workers.map((worker) => worker.terminate()));
   }
+}
+
+export function runAllocateWorkers<T>(
+  jobs: Record<string, unknown>[],
+  databasePath: string,
+): Promise<T[]> {
+  return runGatedWorkers("./allocate-worker.mjs", "allocated", jobs, databasePath);
+}
+
+export function runJobWorkers<T>(
+  jobs: Record<string, unknown>[],
+  databasePath: string,
+): Promise<T[]> {
+  return runGatedWorkers("./job-worker.mjs", "result", jobs, databasePath);
 }

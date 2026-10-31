@@ -10,8 +10,9 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "@/server/db/schema";
 import type { Db } from "@/server/db";
 import { assertConsistent } from "../helpers/consistency";
+import { startSmtp, type TestSmtp } from "../helpers/smtp";
 
-type App = { baseURL: string; dataDir: string };
+type App = { baseURL: string; dataDir: string; smtp: TestSmtp | null };
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -91,7 +92,13 @@ function assertDataDirConsistent(dataDir: string) {
   }
 }
 
-export const test = base.extend<{ freshApp: App; dockerApp: { baseURL: string } }>({
+export const test = base.extend<{
+  freshApp: App;
+  dockerApp: { baseURL: string };
+  withSmtp: boolean;
+}>({
+  withSmtp: [false, { option: true }],
+
   // oxlint-disable-next-line no-empty-pattern
   dockerApp: async ({}, use) => {
     const image = process.env.E2E_DOCKER_IMAGE;
@@ -124,9 +131,9 @@ export const test = base.extend<{ freshApp: App; dockerApp: { baseURL: string } 
     }
   },
 
-  // oxlint-disable-next-line no-empty-pattern
-  freshApp: async ({}, use) => {
+  freshApp: async ({ withSmtp }, use) => {
     const ares = await startAresStub();
+    const smtp = withSmtp ? await startSmtp() : null;
     const dataDir = mkdtempSync(join(tmpdir(), "fakturan-e2e-"));
     const port = await freePort();
     const baseURL = `http://127.0.0.1:${port}`;
@@ -140,15 +147,22 @@ export const test = base.extend<{ freshApp: App; dockerApp: { baseURL: string } 
         BETTER_AUTH_SECRET: "e2e-secret-e2e-secret-e2e-secret-00",
         ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         ARES_BASE_URL: ares.url,
+        SCHEDULER_TICK_SECONDS: "1",
+        ...(smtp && {
+          SMTP_HOST: "127.0.0.1",
+          SMTP_PORT: String(smtp.port),
+          SMTP_FROM: "fakturan@example.cz",
+        }),
       },
     });
     try {
       await waitForReady(baseURL, child);
-      await use({ baseURL, dataDir });
+      await use({ baseURL, dataDir, smtp });
       assertDataDirConsistent(dataDir);
     } finally {
       process.kill(-child.pid!, "SIGTERM");
       ares.close();
+      await smtp?.stop();
       rmSync(dataDir, { recursive: true, force: true });
     }
   },
