@@ -25,6 +25,7 @@ import { queueMail, sendPrefill } from "@/server/services/invoice-mail";
 import { getInvoice } from "@/server/services/invoices";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import { mutate } from "@/server/services/mutation";
+import { addPayment, markPaid } from "@/server/services/payments";
 import {
   deleteReminderRule,
   listReminderRules,
@@ -519,6 +520,30 @@ describe("automatické upomínky", () => {
     );
   });
 
+  test("[REM-006] částečná platba nechá upomínku způsobilou se zapnutým přepínačem", async () => {
+    const { owner, customerId } = reminding();
+    rule(owner, 0);
+    const id = sentInvoice(owner, customerId);
+    addPayment(webActor(owner), id, {
+      revision: getInvoice(owner, id)!.revision,
+      paidOn: "2026-03-02",
+      amountMinor: 100_000,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+    expect(getInvoice(owner, id)!.status).toBe("partially_paid");
+
+    await tickAt(DAY_ONE);
+    expect(smtp.messages).toEqual([]);
+
+    setPartialReminders(webActor(owner), id, true);
+    await tickAt("2026-03-02T09:31:00Z");
+
+    expect(smtp.messages).toHaveLength(1);
+    expect(smtp.messages[0]!.body).toMatch(/Zbývá uhradit 2\s000,00\sKč/);
+  });
+
   test("[REM-006] částečná úhrada bez {{zbyva}} v rozhodujícím textu dostane výchozí text", async () => {
     const { owner, customerId } = reminding();
     rule(owner, 0, { cs: { subject: "Prosím o platbu", body: "Prosím o platbu." } });
@@ -786,6 +811,19 @@ describe("zpráva, která přestala platit", () => {
     const id = sentInvoice(owner, customerId);
     manual(owner, id, null);
     setInvoice(id, { status: "paid", paidMinor: 300_000, revision: 99 });
+
+    await drainJobs("w");
+
+    expect(smtp.messages).toEqual([]);
+    expect(logsOf(owner)[0]).toMatchObject({ status: "held", reason: TEXTS.reminders.held });
+    expect(noticesOf(owner)).toEqual([]);
+  });
+
+  test("upomínka ve frontě se po platbě zadrží a SMTP nic nedostane", async () => {
+    const { owner, customerId } = account();
+    const id = sentInvoice(owner, customerId);
+    manual(owner, id, null);
+    markPaid(webActor(owner), id, { revision: getInvoice(owner, id)!.revision });
 
     await drainJobs("w");
 

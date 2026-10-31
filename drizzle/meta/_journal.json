@@ -197,6 +197,13 @@
       "when": 1793473634567,
       "tag": "0027_email_log_stage_ack",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1793475391994,
+      "tag": "0028_payment",
+      "breakpoints": true
     }
   ]
 }

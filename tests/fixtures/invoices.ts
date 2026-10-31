@@ -1,4 +1,8 @@
+import { randomUUID } from "node:crypto";
+import type { InvoiceStatus } from "@/lib/invoice";
 import type { DocumentLine, InvoiceDocument } from "@/lib/invoice-document";
+import { deriveStatus } from "@/lib/payments";
+import type { Db } from "@/server/db";
 
 export const FIXTURE_LOGO_ID = "fixture-logo";
 
@@ -179,5 +183,44 @@ const longNames: InvoiceDocument = {
     },
   },
 };
+
+// Raw SQL, because the Docker PDF smoke test bundles this file. Like the direct writes it replaces,
+// it keeps the revision, so a test's stored revision stays valid.
+export function seedPayment(db: Db, invoiceId: string, creditedMinor: number): void {
+  const client = db.$client;
+  const row = client
+    .prepare<
+      [string],
+      {
+        user_id: string;
+        status: string;
+        sent_at: number | null;
+        currency: string;
+        total_minor: number;
+      }
+    >("SELECT user_id, status, sent_at, currency, total_minor FROM invoice WHERE id = ?")
+    .get(invoiceId)!;
+  client
+    .prepare(
+      `INSERT INTO payment (id, user_id, invoice_id, kind, paid_on, amount_minor, currency,
+        credited_minor, method, source, created_at, updated_at)
+       VALUES (?, ?, ?, 'payment', '2026-03-10', ?, ?, ?, 'transfer', 'manual', 0, 0)`,
+    )
+    .run(randomUUID(), row.user_id, invoiceId, creditedMinor, row.currency, creditedMinor);
+  const paidMinor = client
+    .prepare<[string], { paid: number }>(
+      "SELECT sum(credited_minor) AS paid FROM payment WHERE invoice_id = ?",
+    )
+    .get(invoiceId)!.paid;
+  const status = deriveStatus({
+    status: row.status as InvoiceStatus,
+    sentAt: row.sent_at === null ? null : new Date(row.sent_at),
+    totalMinor: row.total_minor,
+    paidMinor,
+  });
+  client
+    .prepare("UPDATE invoice SET paid_minor = ?, status = ? WHERE id = ?")
+    .run(paidMinor, status, invoiceId);
+}
 
 export const INVOICE_FIXTURES = { short, long, eur, english, noLogo, longNames };

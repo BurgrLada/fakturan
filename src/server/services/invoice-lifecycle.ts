@@ -31,6 +31,7 @@ import {
 } from "./invoices";
 import { mutate, type Audit } from "./mutation";
 import { allocateNumber, defaultSeriesFor, peekNumber, type NumberSeries } from "./number-series";
+import { hasPayments } from "./payments";
 import { getPreferences } from "./preferences";
 import { missingSupplierKeys } from "./supplier";
 
@@ -439,12 +440,12 @@ function changeStatus(
   actor: Actor,
   id: string,
   action: AuditAction,
-  change: (row: Invoice) => StatusChange,
+  change: (row: Invoice, tx: Tx) => StatusChange,
 ): void {
   const userId = ownerOf(actor);
   mutate(actor, action, (tx, audit) => {
     const row = findOwned(tx, userId, id);
-    const values = change(row);
+    const values = change(row, tx);
     tx.update(invoice)
       .set({ ...values, revision: row.revision + 1, updatedAt: clock.now() })
       .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
@@ -461,7 +462,8 @@ function changeStatus(
 }
 
 export function cancelInvoice(actor: Actor, id: string): void {
-  changeStatus(actor, id, "invoice.cancel", (row) => {
+  changeStatus(actor, id, "invoice.cancel", (row, tx) => {
+    if (hasPayments(tx, row.userId, id)) throw new ServiceError(V.hasPayments);
     if (row.status !== "issued" && row.status !== "sent") throw new ServiceError(V.notCancellable);
     return { status: "cancelled", cancelledFrom: row.status };
   });
@@ -474,20 +476,32 @@ export function restoreInvoice(actor: Actor, id: string): void {
   });
 }
 
+// A document paid before it left still has to record sending, or removing the payment would put
+// it back to issued although the client has it.
+function paidBeforeSending(row: Invoice): boolean {
+  return (row.status === "partially_paid" || row.status === "paid") && row.sentAt === null;
+}
+
 export function markSent(actor: Actor, id: string): void {
   changeStatus(actor, id, "invoice.mark_sent", (row) => {
-    if (row.status !== "issued") throw new ServiceError(V.notMarkable);
-    return { status: "sent", sentAt: clock.now() };
+    if (row.status === "issued") return { status: "sent", sentAt: clock.now() };
+    if (paidBeforeSending(row)) return { status: row.status, sentAt: clock.now() };
+    throw new ServiceError(V.notMarkable);
   });
 }
 
-// Only an issued document moves: a paid one stays paid when it is sent again (INV-005).
+// Only an issued document changes status: a paid one stays paid when it is sent (INV-005).
 export function applySent(tx: Tx, userId: string, invoiceId: string): void {
   const row = findOwned(tx, userId, invoiceId);
-  if (row.status !== "issued") return;
+  if (row.status !== "issued" && !paidBeforeSending(row)) return;
   const now = clock.now();
   tx.update(invoice)
-    .set({ status: "sent", sentAt: now, revision: row.revision + 1, updatedAt: now })
+    .set({
+      status: row.status === "issued" ? "sent" : row.status,
+      sentAt: now,
+      revision: row.revision + 1,
+      updatedAt: now,
+    })
     .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, userId)))
     .run();
 }

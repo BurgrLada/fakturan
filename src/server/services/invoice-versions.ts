@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, max } from "drizzle-orm";
 import type { InvoiceStatus } from "@/lib/invoice";
 import { diffInvoices, diffLines, type LineRow } from "@/lib/invoice-diff";
 import { invoiceDocument, type InvoiceDocument } from "@/lib/invoice-document";
+import { deriveStatus } from "@/lib/payments";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -47,6 +48,7 @@ import {
 } from "./invoices";
 import { mutate } from "./mutation";
 import { isNumberTaken } from "./number-series";
+import { hasPayments } from "./payments";
 
 const V = TEXTS.invoices.validation;
 
@@ -80,18 +82,18 @@ function assertEditable(row: Invoice): void {
   if (!EDITABLE_STATUSES.has(row.status)) throw new ServiceError(V.notEditable);
 }
 
-// Below the total only a paid document disagrees with its payments: partial payment is its state.
-function balanceWarningOf(row: Invoice): BalanceWarning {
+// Underpaid is the move out of paid: a document already partially paid has nothing new to warn of.
+function balanceWarningOf(row: Invoice, statusBefore: InvoiceStatus): BalanceWarning {
   if (row.paidMinor > row.totalMinor) return "overpaid";
-  return row.status === "paid" && row.paidMinor < row.totalMinor ? "underpaid" : "none";
+  return statusBefore === "paid" && row.status === "partially_paid" ? "underpaid" : "none";
 }
 
-function resultOf(row: Invoice, changed: boolean): EditResult {
+function resultOf(row: Invoice, changed: boolean, statusBefore = row.status): EditResult {
   return {
     revision: row.revision,
     variableSymbol: row.variableSymbol,
-    resendSuggested: changed && row.status === "sent",
-    balanceWarning: balanceWarningOf(row),
+    resendSuggested: changed && row.sentAt !== null,
+    balanceWarning: balanceWarningOf(row, statusBefore),
   };
 }
 
@@ -146,12 +148,16 @@ function applyChange(
   { values, rows, note }: Change,
 ): EditResult {
   const id = before.id;
+  // credited_minor is in the document currency, so changing it would silently restate the money.
+  const newCurrency = values.currency !== undefined && values.currency !== before.currency;
+  if (newCurrency && hasPayments(tx, ownerId, id)) throw new ServiceError(V.currencyHasPayments);
   const beforeLines = linesOf(tx, ownerId, id);
   const versionNo = writeVersion(tx, ownerId, before, beforeLines);
   const candidate = { ...before, ...values };
   tx.update(invoice)
     .set({
       ...values,
+      status: deriveStatus(candidate),
       searchText: searchTextOf({ ...candidate, lines: rows ?? beforeLines }),
       revision: before.revision + 1,
       updatedAt: clock.now(),
@@ -185,7 +191,7 @@ function applyChange(
       ...(changes && { lines: changes.after }),
     },
   });
-  return resultOf(after, true);
+  return resultOf(after, true, before.status);
 }
 
 function accountSnapshotFor(
@@ -344,7 +350,7 @@ export function getVersion(ownerId: string, versionId: string): InvoiceVersion |
   return readVersion(db, ownerId, versionId);
 }
 
-// Status and payments are not part of what a version restores: they record what has happened since.
+// Payments are not part of a version, they record what has happened since, and status follows them.
 export function restoreVersion(actor: Actor, versionId: string): EditResult {
   const userId = ownerOf(actor);
   return unlessUnchanged(() =>

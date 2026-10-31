@@ -2,6 +2,7 @@ import { asc, eq, getTableColumns, getTableName, is, sql } from "drizzle-orm";
 import { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { toDiscount } from "@/lib/invoice";
 import { computeTotals } from "@/lib/invoice-totals";
+import { deriveStatus } from "@/lib/payments";
 import type { Db } from "@/server/db";
 import * as schema from "@/server/db/schema";
 
@@ -76,6 +77,53 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
   const numbers = rows.flatMap((row) => row.number ?? []);
   const repeated = numbers.filter((number, i) => numbers.indexOf(number) !== i);
   if (repeated.length > 0) problems.push(`invoice: opakovaná čísla ${repeated.join(", ")}`);
+  return problems;
+}
+
+// A payment in a foreign currency is valid (PAY-006), so currency is checked through the credit:
+// only a payment in the document currency must credit exactly what it says.
+function paymentProblems(db: Db, ownerId: string): string[] {
+  const { invoice } = schema;
+  const problems: string[] = [];
+  const paidByInvoice = new Map(
+    db
+      .all<{ id: string; paid: number }>(
+        sql`SELECT invoice_id AS id, sum(credited_minor) AS paid FROM payment GROUP BY invoice_id`,
+      )
+      .map((row) => [row.id, row.paid]),
+  );
+  for (const row of db.select().from(invoice).where(eq(invoice.userId, ownerId)).all()) {
+    const label = `invoice ${row.id}`;
+    const paid = paidByInvoice.get(row.id) ?? 0;
+    if (row.paidMinor !== paid) problems.push(`${label}: paid_minor neodpovídá součtu plateb`);
+    const expected = deriveStatus({ ...row, paidMinor: paid });
+    if (row.status !== expected) {
+      problems.push(`${label}: stav ${row.status} neodpovídá platbám (${expected})`);
+    }
+  }
+
+  const foreign = count(
+    db,
+    sql`SELECT count(*) AS n FROM payment p LEFT JOIN invoice i ON i.id = p.invoice_id
+      WHERE (p.user_id = ${ownerId} OR i.user_id = ${ownerId})
+        AND (i.id IS NULL OR i.user_id <> p.user_id)`,
+  );
+  if (foreign > 0) problems.push(`payment: ${foreign} plateb s cizím dokladem`);
+
+  const miscredited = count(
+    db,
+    sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
+      WHERE p.user_id = ${ownerId} AND p.currency = i.currency
+        AND p.credited_minor <> p.amount_minor`,
+  );
+  if (miscredited > 0) problems.push(`payment: ${miscredited} plateb s jinou připsanou částkou`);
+
+  const unpayable = count(
+    db,
+    sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
+      WHERE p.user_id = ${ownerId} AND i.status IN ('draft', 'cancelled')`,
+  );
+  if (unpayable > 0) problems.push(`payment: ${unpayable} plateb na konceptu nebo stornu`);
   return problems;
 }
 
@@ -162,6 +210,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
     problems.push(`audit_log: ${orphanAudit} uživatelských záznamů bez vlastníka`);
 
   problems.push(...invoiceProblems(db, ownerId));
+  problems.push(...paymentProblems(db, ownerId));
   problems.push(...mailProblems(db, ownerId));
   problems.push(...recurringProblems(db, ownerId));
 

@@ -445,8 +445,14 @@ test("[INV-021] po obnovení verze detail upozorní na odeslání a přeplatek",
 
   const sqlite = new Database(join(dataDir, "fakturan.db"));
   sqlite
-    .prepare("UPDATE invoice SET paid_minor = 150000, status = 'partially_paid' WHERE id = ?")
+    .prepare(
+      `INSERT INTO payment (id, user_id, invoice_id, kind, paid_on, amount_minor, currency,
+        credited_minor, method, source, created_at, updated_at)
+       SELECT 'e2e-payment', user_id, id, 'payment', '2026-03-10', 150000, currency, 150000,
+         'transfer', 'manual', 0, 0 FROM invoice WHERE id = ?`,
+    )
     .run(id);
+  sqlite.prepare("UPDATE invoice SET paid_minor = 150000, status = 'paid' WHERE id = ?").run(id);
   sqlite.close();
   await page.goto(detail);
   await expect(page.getByTestId("invoice-steps")).toContainText("Přeplatek");

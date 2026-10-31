@@ -5,15 +5,13 @@ TST-009	Matice nemá roli administrátora ani entity dalších plánů	plány 4 
 TST-012	Chybí přepočty měn	plán 6
 TST-013	Stryker neběžel na párování, frontě úloh, lease a ticku, skóre 90 % celého jádra není ověřené; test s tímto ID jen zkouší pomůcky PDF	plán 5
 TST-015	Chybí zpětné čtení ISDOC proti schématu	plán 8
-TST-018	Kontrola nepokrývá platby a přehledy	plán 5, plán 7
-QR-005	Stav uhrazená vzniká jen v testech, skutečné platby chybí	plán 5
-QR-006	Zbývající částka je ověřená jen s ručně nastaveným paid_minor	plán 5
+TST-018	Kontrola nepokrývá přehledy	plán 7
+PAY-006	Chybí předvyplnění kurzem ČNB, částku u jiné měny zadává uživatel	plán 6
 QR-002	Důvod chybějícího QR ukáže jen detail, formulář konceptu ne	plán 6
 FOR-005	Upozornění v UI nemá e2e test, ověřený je jen backend	plán 6
 CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán 6
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
-REM-006	Částečná úhrada je ověřená jen s ručně nastaveným paid_minor, skutečné platby chybí	plán 5
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 UI-011	Chybí nespárované platby a nerozpoznaná avíza (plán 5) a blížící se limity, spec je nedefinuje (plán 8)	plán 5, plán 8
 INV-024	Chybí hromadné označení jako uhrazené (plán 5) a export (plán 8)	plán 5, plán 8

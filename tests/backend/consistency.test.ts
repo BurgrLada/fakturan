@@ -8,6 +8,7 @@ import {
   auditLog,
   invoice,
   invoiceLine,
+  payment,
   recurringInvoice,
   recurringRun,
   type RecurringInvoice,
@@ -267,6 +268,98 @@ describe("assertConsistent", () => {
   });
 
   // Last on purpose: audit_log is append-only, so the orphan row stays in this file's database.
+  describe("platby", () => {
+    const addPayment = (
+      owner: string,
+      invoiceId: string,
+      over: Partial<typeof payment.$inferInsert> = {},
+    ) =>
+      db
+        .insert(payment)
+        .values({
+          id: randomUUID(),
+          userId: owner,
+          invoiceId,
+          kind: "payment",
+          paidOn: "2026-03-10",
+          amountMinor: 10_000,
+          currency: "CZK",
+          creditedMinor: 10_000,
+          method: "transfer",
+          source: "manual",
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+          ...over,
+        })
+        .run();
+
+    function paidInvoice(owner: string) {
+      const id = createInvoice(owner, {
+        ...issued,
+        number: randomUUID(),
+        status: "paid",
+        subtotalMinor: 10_000,
+        totalMinor: 10_000,
+        paidMinor: 10_000,
+      });
+      addLine(owner, id, 10_000);
+      addPayment(owner, id);
+      return id;
+    }
+
+    test("[TST-018] přijme doklad, jehož stav a součet odpovídají platbám", () => {
+      const owner = createUser();
+      paidInvoice(owner);
+
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+    });
+
+    test("[TST-018] nesoulad paid_minor a plateb kontrola odhalí", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      db.update(invoice).set({ paidMinor: 9000 }).where(eq(invoice.id, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/paid_minor/);
+    });
+
+    test("[TST-018] odhalí stav, který neodpovídá platbám", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      db.update(invoice).set({ status: "partially_paid" }).where(eq(invoice.id, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/neodpovídá platbám/);
+    });
+
+    test("[TST-018] odhalí platbu cizího vlastníka na dokladu", () => {
+      const owner = createUser();
+      const stranger = createUser();
+      const id = paidInvoice(owner);
+      db.update(payment).set({ userId: stranger }).where(eq(payment.invoiceId, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/cizím dokladem/);
+      expect(() => assertConsistent(db, stranger)).toThrow(/cizím dokladem/);
+    });
+
+    test("[TST-018] v měně dokladu musí připsaná částka odpovídat a jiná měna může lišit", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      const row = eq(payment.invoiceId, id);
+      db.update(payment).set({ currency: "EUR", amountMinor: 400 }).where(row).run();
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+
+      db.update(payment).set({ currency: "CZK" }).where(row).run();
+      expect(() => assertConsistent(db, owner)).toThrow(/jinou připsanou/);
+    });
+
+    test.each(["draft", "cancelled"] as const)("[TST-018] odhalí platbu na stavu %s", (status) => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      db.update(invoice).set({ status }).where(eq(invoice.id, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/koncept|stornu/);
+    });
+  });
+
   test("[TST-018] odhalí uživatelský auditní záznam bez vlastníka", () => {
     const owner = createUser();
     db.insert(auditLog)

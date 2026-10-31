@@ -65,6 +65,7 @@ import { MAX_PRICE_MINOR } from "./catalog";
 import { customerDefaults, escapeLike } from "./customers";
 import { mutate, type Audit } from "./mutation";
 import { defaultSeriesFor } from "./number-series";
+import { averagePaymentDays } from "./payments";
 import { colorSchema, designIdSchema, getPreferences, logoPositionSchema } from "./preferences";
 import { linkTags, listTags, tagsOf, type Tag } from "./tags";
 
@@ -960,7 +961,12 @@ export function customerInvoiceStats(ownerId: string, customerId: string) {
     .orderBy(asc(invoice.currency))
     .all();
   const { rows, hasNext } = invoiceRows(ofCustomer, { pageSize: CUSTOMER_CARD_ROWS });
-  return { sums, rows, hasMore: hasNext };
+  return {
+    sums,
+    rows,
+    hasMore: hasNext,
+    averageDays: averagePaymentDays(ownerId, customerId),
+  };
 }
 
 export function invoiceFilterOptions(ownerId: string): InvoiceFilterOptions {

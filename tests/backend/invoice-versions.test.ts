@@ -45,10 +45,12 @@ import {
   type IssuedInput,
 } from "@/server/services/invoices";
 import { ensureDefaultSeries } from "@/server/services/number-series";
+import { markPaid } from "@/server/services/payments";
 import { saveSupplier, setSupplierImage, type SupplierInput } from "@/server/services/supplier";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
+import { seedPayment } from "../fixtures/invoices";
 import { assertIsolated } from "../helpers/isolation";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
@@ -489,8 +491,7 @@ describe("úprava vystaveného dokladu", () => {
   test("[INV-020] upozornění na platby vychází z paid_minor", () => {
     const { owner, customerId } = newOwner();
     const { id } = issued(owner, customerId);
-    const total = detail(owner, id).totalMinor;
-    db.update(invoice).set({ status: "paid", paidMinor: total }).where(eq(invoice.id, id)).run();
+    seedPayment(db, id, detail(owner, id).totalMinor);
 
     expect(update(owner, id, { lines: [line({ unitPriceMinor: 100_000 })] })).toMatchObject({
       balanceWarning: "overpaid",
@@ -506,12 +507,88 @@ describe("úprava vystaveného dokladu", () => {
   test("[INV-020] částečná úhrada menší než částka není nesoulad", () => {
     const { owner, customerId } = newOwner();
     const { id } = issued(owner, customerId);
-    db.update(invoice)
-      .set({ status: "partially_paid", paidMinor: 100 })
-      .where(eq(invoice.id, id))
-      .run();
+    seedPayment(db, id, 100);
 
     expect(update(owner, id, { note: "x" }).balanceWarning).toBe("none");
+  });
+
+  test("[INV-023] úprava uhrazené na vyšší částku dá partially_paid s upozorněním", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    markPaid(actor(owner), id, { revision: detail(owner, id).revision });
+
+    const result = update(owner, id, { lines: [line({ unitPriceMinor: 200_000 })] });
+
+    expect(result.balanceWarning).toBe("underpaid");
+    expect(detail(owner, id).status).toBe("partially_paid");
+    expect(update(owner, id, { note: "Dál částečně" }).balanceWarning).toBe("none");
+    assertConsistent(db, owner);
+  });
+
+  test("[INV-023] úprava na nižší částku nechá paid s přeplatkem", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    markPaid(actor(owner), id, { revision: detail(owner, id).revision });
+
+    const result = update(owner, id, { lines: [line({ unitPriceMinor: 10_000 })] });
+
+    expect(result.balanceWarning).toBe("overpaid");
+    expect(detail(owner, id).status).toBe("paid");
+    assertConsistent(db, owner);
+  });
+
+  test("[INV-023] obnovení verze přepočítá stav", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    update(owner, id, { lines: [line({ unitPriceMinor: 200_000 })] });
+    markPaid(actor(owner), id, { revision: detail(owner, id).revision });
+    const paidTotal = detail(owner, id).paidMinor;
+    update(owner, id, { lines: [line({ unitPriceMinor: 300_000 })] });
+    expect(detail(owner, id).status).toBe("partially_paid");
+
+    const newest = listVersions(owner, id)[0]!.id;
+    const restored = restoreVersion(actor(owner), newest);
+
+    expect(detail(owner, id)).toMatchObject({ status: "paid", paidMinor: paidTotal });
+    expect(restored.balanceWarning).toBe("none");
+
+    const again = restoreVersion(actor(owner), listVersions(owner, id)[0]!.id);
+    expect(detail(owner, id).status).toBe("partially_paid");
+    expect(again.balanceWarning).toBe("underpaid");
+    assertConsistent(db, owner);
+  });
+
+  test("resendSuggested platí pro každý odeslaný doklad, ne jen ve stavu sent", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    markSent(actor(owner), id);
+    markPaid(actor(owner), id, { revision: detail(owner, id).revision });
+
+    expect(update(owner, id, { note: "Po úhradě" }).resendSuggested).toBe(true);
+  });
+
+  test("změna měny dokladu s platbou je odmítnutá i při obnovení verze", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    const czk = {
+      currency: "CZK" as const,
+      exchangeRateMicros: null,
+      bankAccountId: detail(owner, id).bankAccountId,
+    };
+    update(owner, id, {
+      currency: "EUR",
+      exchangeRateMicros: 25_000_000,
+      bankAccountId: newAccount(owner, "EUR"),
+    });
+    seedPayment(db, id, 100);
+
+    expectRefused(() => update(owner, id, czk), V.currencyHasPayments);
+    expectRefused(
+      () => restoreVersion(actor(owner), listVersions(owner, id)[0]!.id),
+      V.currencyHasPayments,
+    );
+    expect(detail(owner, id).currency).toBe("EUR");
+    expect(listVersions(owner, id)).toHaveLength(1);
   });
 });
 
@@ -629,13 +706,13 @@ describe("verze", () => {
     const { id } = issued(owner, customerId);
     update(owner, id, { note: "Změna" });
     markSent(actor(owner), id);
-    db.update(invoice).set({ paidMinor: 500 }).where(eq(invoice.id, id)).run();
+    seedPayment(db, id, 500);
     const { sentAt } = detail(owner, id);
 
     const result = restoreVersion(actor(owner), listVersions(owner, id)[0]!.id);
 
     expect(detail(owner, id)).toMatchObject({
-      status: "sent",
+      status: "partially_paid",
       paidMinor: 500,
       sentAt,
       note: "",
