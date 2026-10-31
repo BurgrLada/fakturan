@@ -21,7 +21,7 @@ import { deliverDigest } from "@/server/services/due-alerts";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import { deliverUserNotice, runRecurringJob } from "@/server/services/recurring-run";
 import { saveReminderRule, snoozeReminders } from "@/server/services/reminders";
-import { deactivateUser } from "@/server/services/users";
+import { deactivateUser, reactivateUser } from "@/server/services/users";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import {
@@ -105,6 +105,17 @@ async function everyDay() {
 
 const afterOutage = () => tickAt(new Date(T0.getTime() + DAYS * DAY));
 
+// Both terms (10 and 12 March) are still fresh on the 13th, so only reactivation can stop them.
+const REACTIVATED_ON_DAY = 12;
+
+async function reactivatedRightAfterTerms(owner: string) {
+  for (let day = 1; day <= DAYS; day += 1) {
+    current = new Date(T0.getTime() + day * DAY);
+    if (day === REACTIVATED_ON_DAY) reactivateUser(webActor(admin), owner);
+    await tick("silence");
+  }
+}
+
 // A single term and a single stage: nothing later exists that could legitimately go out.
 function armed(key: AutomationKey) {
   const owner = seedOwner(db, T0);
@@ -131,7 +142,7 @@ const toClient = () => smtp.messages.filter((message) => message.to.includes(CLI
 type Situation = {
   name: string;
   prepare: (owner: string, key: AutomationKey) => void;
-  pass: () => Promise<void>;
+  pass: (owner: string) => Promise<void>;
 };
 
 const SITUATIONS: Situation[] = [
@@ -156,6 +167,11 @@ const SITUATIONS: Situation[] = [
     pass: afterOutage,
   },
   { name: "zmeškaný termín", prepare: () => {}, pass: afterOutage },
+  {
+    name: "po reaktivaci",
+    prepare: (owner) => deactivateUser(webActor(admin), owner),
+    pass: reactivatedRightAfterTerms,
+  },
 ];
 
 const MATRIX = available.flatMap((key) =>
@@ -170,9 +186,10 @@ describe("matice ticha", () => {
       const owner = armed(key);
       situation.prepare(owner, key);
 
-      await situation.pass();
+      await situation.pass(owner);
 
       expect(toClient()).toEqual([]);
+      expect(smtp.connections()).toBe(0);
       assertConsistent(db, owner);
     },
     30_000,

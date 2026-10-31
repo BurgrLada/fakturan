@@ -311,6 +311,32 @@ describe("deaktivace", () => {
   });
 });
 
+describe("reaktivace aktivního účtu", () => {
+  test("[ADM-005] účet bez deaktivace nic nezmění a nic nezapíše do auditu", () => {
+    seedUser("active", "active@example.cz");
+    const opened = "2026-01-05";
+    db.insert(schema.automationSettings)
+      .values({
+        userId: "active",
+        reminders: true,
+        remindersOpenSince: opened,
+        updatedAt: new Date(),
+      })
+      .run();
+    const before = auditRows("user.reactivate").length;
+
+    reactivateUser(admin, "active");
+
+    expect(auditRows("user.reactivate")).toHaveLength(before);
+    const row = db
+      .select()
+      .from(schema.automationSettings)
+      .where(eq(schema.automationSettings.userId, "active"))
+      .get();
+    expect(row?.remindersOpenSince).toBe(opened);
+  });
+});
+
 describe("smazání účtu", () => {
   test("[ADM-006] smazání vyžaduje shodný e-mail a odstraní data", () => {
     seedUser("u1", "Mixed@Example.cz");

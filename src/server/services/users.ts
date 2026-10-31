@@ -47,6 +47,7 @@ import { cancelUserJobs } from "../jobs/queue";
 import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
 import { cancelQueuedMail } from "./invoice-mail";
+import { Unchanged, unlessUnchanged } from "./invoices";
 import { mutate } from "./mutation";
 import { markMissed, reviewablePlansOf } from "./recurring-run";
 
@@ -193,21 +194,30 @@ export function deactivateUser(actor: Actor, userId: string): void {
 }
 
 export function reactivateUser(actor: Actor, userId: string): void {
-  mutate(actor, "user.reactivate", (tx, audit) => {
-    assertAdmin(tx, actor);
-    const target = targetUser(tx, userId);
-    tx.update(user).set({ banned: false, updatedAt: clock.now() }).where(eq(user.id, userId)).run();
-    const today = calendarDateInPrague(clock.now());
-    for (const plan of reviewablePlansOf(tx, userId)) markMissed(tx, audit, plan, today);
-    audit({
-      entity: "user",
-      entityId: userId,
-      ownerId: userId,
-      scope: "instance",
-      before: { banned: Boolean(target.banned) },
-      after: { banned: false },
-    });
-  });
+  unlessUnchanged(() =>
+    mutate(actor, "user.reactivate", (tx, audit) => {
+      assertAdmin(tx, actor);
+      const target = targetUser(tx, userId);
+      if (!target.banned) throw new Unchanged(undefined);
+      const now = clock.now();
+      tx.update(user).set({ banned: false, updatedAt: now }).where(eq(user.id, userId)).run();
+      const today = calendarDateInPrague(now);
+      for (const plan of reviewablePlansOf(tx, userId)) markMissed(tx, audit, plan, today);
+      // Same rule as the plans above: what fell due while the account was off goes to review.
+      tx.update(automationSettings)
+        .set({ remindersOpenSince: today, updatedAt: now })
+        .where(scoped(userId).where(automationSettings, (t, { eq }) => eq(t.reminders, true)))
+        .run();
+      audit({
+        entity: "user",
+        entityId: userId,
+        ownerId: userId,
+        scope: "instance",
+        before: { banned: true },
+        after: { banned: false },
+      });
+    }),
+  );
 }
 
 // Removes everything naming the account. The closing row is the instance's record of the deletion
