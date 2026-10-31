@@ -97,7 +97,7 @@ function variableTexts(document: TemplateDocument): string[] {
 
 // A template is rendered later, when the period and number are known, so a typo must not slip in.
 function assertKnownVariables(document: TemplateDocument): void {
-  const unknown = [...new Set(variableTexts(document).flatMap(validateVariables))];
+  const unknown = [...new Set(variableTexts(document).flatMap((text) => validateVariables(text)))];
   if (unknown.length > 0) throw new ServiceError(V.unknownVariable(unknown));
 }
 

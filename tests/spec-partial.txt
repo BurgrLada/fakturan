@@ -9,7 +9,7 @@ TST-018	Kontrola nepokrývá platby a přehledy	plán 5, plán 7
 QR-005	Stav uhrazená vzniká jen v testech, skutečné platby chybí	plán 5
 QR-006	Zbývající částka je ověřená jen s ručně nastaveným paid_minor	plán 5
 QR-002	Důvod chybějícího QR ukáže jen detail, formulář konceptu ne	plán 4
-SEC-011	Escapování e-mailů a šablon e-mailů chybí	plán 4
+SEC-011	Escapování hotové pro šablony a složení zprávy, chybí odeslání a upomínky	plán 4
 FOR-005	Upozornění v UI nemá e2e test, ověřený je jen backend	plán 6
 CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán 4
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7

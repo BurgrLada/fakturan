@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition, type FormEvent } from "react";
 import {
   clearOwnSmtpAction,
@@ -192,6 +193,15 @@ export function MailSettingsForm({
           <AlertDescription>{message.text}</AlertDescription>
         </Alert>
       )}
+
+      <section className="flex max-w-xl flex-col gap-1 rounded-lg border p-4">
+        <h2 className="text-lg">
+          <Link href="/nastaveni/posta/sablony" className="underline">
+            {TEXTS.emailTemplates.link}
+          </Link>
+        </h2>
+        <p className="text-sm text-muted-foreground">{TEXTS.emailTemplates.linkBody}</p>
+      </section>
 
       <form onSubmit={save} className="flex max-w-xl flex-col gap-6">
         <section className="flex flex-col gap-4 rounded-lg border p-4">

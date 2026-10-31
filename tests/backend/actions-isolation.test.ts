@@ -16,6 +16,10 @@ import {
   setNextNumberAction,
 } from "@/app/(app)/nastaveni/rady/actions";
 import { saveMailSettingsAction } from "@/app/(app)/nastaveni/posta/actions";
+import {
+  resetEmailTemplateAction,
+  saveEmailTemplateAction,
+} from "@/app/(app)/nastaveni/posta/sablony/actions";
 import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
 import {
   deleteTemplateAction,
@@ -26,6 +30,7 @@ import { user } from "@/server/db/schema";
 import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accounts";
 import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
 import { listInvoices, newDraftDefaults, saveDraft } from "@/server/services/invoices";
+import { getEmailTemplate } from "@/server/services/email-templates";
 import { getMailSettings } from "@/server/services/mail-settings";
 import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
@@ -85,6 +90,26 @@ describe("cizí id přes server actions", () => {
     expect(result).toEqual({ ok: true });
     expect(getMailSettings("m1").senderName).toBe("Jméno m1");
     expect(getMailSettings("m2").senderName).toBeNull();
+  });
+
+  test("[TST-009] šablona e-mailu platí jen pro přihlášený účet, cizí id se ignoruje", async () => {
+    seed("s1");
+    seed("s2");
+    session.userId = "s1";
+    const template = { kind: "invoice", language: "cs", subject: "Moje", body: "Text" };
+
+    expect(await saveEmailTemplateAction({ ...template, userId: "s2" })).toEqual({ ok: true });
+    expect(getEmailTemplate("s1", "invoice", "cs").subject).toBe("Moje");
+    expect(getEmailTemplate("s2", "invoice", "cs").subject).not.toBe("Moje");
+
+    session.userId = "s2";
+    expect(await resetEmailTemplateAction({ kind: "invoice", language: "cs" })).toEqual({
+      ok: true,
+    });
+    expect(getEmailTemplate("s1", "invoice", "cs").subject).toBe("Moje");
+    expect(await resetEmailTemplateAction({ kind: "x", language: "cs" })).toMatchObject({
+      ok: false,
+    });
   });
 
   test("[TST-009] cizí šablonu ani fakturu nejde použít ani smazat přes server action", async () => {

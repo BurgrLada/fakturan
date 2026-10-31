@@ -41,6 +41,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "customer.restore": "Obnovení zákazníka",
   "customer.save": "Uložení zákazníka",
   "customer.vat_verify": "Ověření DIČ ve VIES",
+  "email_template.reset": "Vrácení šablony e-mailu na výchozí",
+  "email_template.save": "Uložení šablony e-mailu",
   "file.create": "Nahrání souboru",
   "file.delete": "Smazání souboru",
   "invoice_template.delete": "Smazání šablony faktury",

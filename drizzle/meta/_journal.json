@@ -155,6 +155,13 @@
       "when": 1793449897005,
       "tag": "0021_mail_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1793451631904,
+      "tag": "0022_email_template",
+      "breakpoints": true
     }
   ]
 }

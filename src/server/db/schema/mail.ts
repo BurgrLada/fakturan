@@ -1,4 +1,6 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { MESSAGE_KINDS } from "@/lib/email-template";
+import { LANGUAGES } from "@/lib/preferences";
 import { user } from "./auth";
 
 export const mailSettings = sqliteTable("mail_settings", {
@@ -17,3 +19,19 @@ export const mailSettings = sqliteTable("mail_settings", {
   verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const emailTemplate = sqliteTable(
+  "email_template",
+  {
+    id: text().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text({ enum: MESSAGE_KINDS }).notNull(),
+    language: text({ enum: LANGUAGES }).notNull(),
+    subject: text().notNull(),
+    body: text().notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("email_template_user_kind_language_idx").on(t.userId, t.kind, t.language)],
+);

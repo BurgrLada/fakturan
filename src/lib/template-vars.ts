@@ -13,6 +13,16 @@ export const VARIABLE_NAMES = [
   "zakaznik",
 ] as const;
 
+// Variables that only make sense in a message, where the document is a separate attachment.
+export const MAIL_VARIABLE_NAMES = [
+  ...VARIABLE_NAMES,
+  "castka",
+  "zbyva",
+  "splatnost",
+  "vs",
+  "dodavatel",
+] as const;
+
 export type VariableName = (typeof VARIABLE_NAMES)[number];
 
 export type VariablePeriod = { from: CalendarDate; to: CalendarDate };
@@ -98,14 +108,24 @@ function isVariableName(name: string): name is VariableName {
 }
 
 // A single replace pass, so a substituted value is never scanned for further variables (SEC-011).
-export function renderVariables(text: string, ctx: VariableContext): string {
+// Names in `extra` resolve only when the caller passes them, so documents never see them.
+export function renderVariables(
+  text: string,
+  ctx: VariableContext,
+  extra?: Record<string, string>,
+): string {
   const values = variableValues(ctx);
-  return text.replace(VARIABLE, (match, name: string) =>
-    isVariableName(name) ? values[name] : match,
-  );
+  return text.replace(VARIABLE, (match, name: string) => {
+    if (isVariableName(name)) return values[name];
+    if (extra && Object.hasOwn(extra, name)) return extra[name]!;
+    return match;
+  });
 }
 
-export function validateVariables(text: string): string[] {
-  const names = [...text.matchAll(VARIABLE)].map((match) => match[1]!);
-  return [...new Set(names.filter((name) => !isVariableName(name)))];
+export function validateVariables(
+  text: string,
+  names: readonly string[] = VARIABLE_NAMES,
+): string[] {
+  const found = [...text.matchAll(VARIABLE)].map((match) => match[1]!);
+  return [...new Set(found.filter((name) => !names.includes(name)))];
 }

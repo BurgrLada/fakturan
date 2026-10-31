@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  MAIL_VARIABLE_NAMES,
   monthPeriod,
   renderVariables,
   validateVariables,
@@ -73,5 +74,35 @@ describe("proměnné v textu", () => {
     expect(monthPeriod("2026-03-10")).toEqual({ from: "2026-03-01", to: "2026-03-31" });
     expect(monthPeriod("2024-02-29")).toEqual({ from: "2024-02-01", to: "2024-02-29" });
     expect(monthPeriod("2026-12-01")).toEqual({ from: "2026-12-01", to: "2026-12-31" });
+  });
+});
+
+describe("proměnné e-mailů", () => {
+  const extra = { castka: "3 000,00 Kč", zbyva: "1 000,00 Kč" };
+
+  test("[MAIL-003] doplňkové proměnné se dosadí jen když je volající předá", () => {
+    expect(renderVariables("{{castka}} / {{zbyva}} / {{rok}}", ctx(), extra)).toBe(
+      "3 000,00 Kč / 1 000,00 Kč / 2026",
+    );
+    expect(renderVariables("{{zbyva}}", ctx())).toBe("{{zbyva}}");
+  });
+
+  test("[SEC-011] hodnota doplňkové proměnné se dál nerozvine", () => {
+    expect(renderVariables("{{castka}} {{rok}}", ctx(), { castka: "{{rok}}" })).toBe(
+      "{{rok}} 2026",
+    );
+  });
+
+  test("[MAIL-003] doplňkový název z prototypu objektu se nebere", () => {
+    expect(renderVariables("{{constructor}} {{toString}}", ctx(), {})).toBe(
+      "{{constructor}} {{toString}}",
+    );
+  });
+
+  test("[MAIL-003] validace zná seznam e-mailů a ten v dokladech zůstává užší", () => {
+    expect(validateVariables("{{zbyva}} {{vs}} {{rok}} {{nic}}", MAIL_VARIABLE_NAMES)).toEqual([
+      "nic",
+    ]);
+    expect(validateVariables("{{zbyva}}")).toEqual(["zbyva"]);
   });
 });

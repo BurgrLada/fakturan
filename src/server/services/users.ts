@@ -20,6 +20,7 @@ import {
   invoiceTemplate,
   invoiceVersion,
   job,
+  emailTemplate,
   mailSettings,
   notification,
   numberSeries,
@@ -67,6 +68,7 @@ export const USER_OWNED_TABLES = [
   automationSettings,
   notification,
   mailSettings,
+  emailTemplate,
 ];
 
 const REAUTH_WINDOW_MS = 15 * 60_000;
