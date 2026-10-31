@@ -7,7 +7,7 @@ export const TEXTS = {
     customers: "Zákazníci",
     catalog: "Ceník",
     payments: "Platby",
-    reports: "Přehledy",
+    reports: "Statistiky",
     settings: "Nastavení",
     admin: "Administrace",
   },

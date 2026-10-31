@@ -245,7 +245,7 @@ Stavy: `koncept` → `vystavená` → `odeslaná` → `částečně uhrazená` �
 - **FOR-005** Účet podle měny dle SET-021. Chybí-li účet v dané měně, UI na to upozorní před vystavením.
 - **FOR-006** U identifikované osoby a služby pro firmu z EU se na fakturu doplní doložka o přenesení daňové povinnosti a VAT ID obou stran, bez výpočtu DPH. Doložka je předvyplněná a upravitelná. Přesné znění ověří daňový poradce před vydáním (viz 24).
 - **FOR-007** Doložky jsou v jazyce faktury.
-- **FOR-008** Přehledy přepočítávají cizí měny do CZK kurzem faktury, viz REP-009.
+- **FOR-008** Statistiky přepočítávají cizí měny do CZK kurzem faktury, viz REP-009.
 - **FOR-009** Rozhodný den je v nastavení: datum vystavení (výchozí), nebo DUZP, pokud je na faktuře vyplněný.
 - **FOR-010** Pro každou měnu jde v nastavení zapnout vlastní pevný kurz. Použije se místo ČNB a ve formuláři je u něj vidět, že jde o pevný kurz. Pevný kurz ani ruční přepsání se od ČNB nesmí odchýlit o víc než 5 % bez upozornění.
 
@@ -445,9 +445,9 @@ Princip: uživatel si ve Fio nastaví e-mailová oznámení do své schránky a 
 - **DSH-031** Import JSON s validací proti schématu. Neplatný soubor ukáže konkrétní chybu a nic nezmění.
 - **DSH-032** Import ukáže náhled před uložením a nezahrnuje žádná data, jen konfiguraci.
 
-## 15. Přehledy (REP)
+## 15. Statistiky (REP)
 
-- **REP-001** Stránka Přehledy: fakturace, úhrady, pohledávky, zákazníci, položky, měny. Filtr období a porovnání.
+- **REP-001** Stránka Statistiky: fakturace, úhrady, pohledávky, zákazníci, položky, měny. Filtr období a porovnání.
 - **REP-002** Stárnutí pohledávek v pásmech 0–30, 31–60, 61–90, 90+ dní.
 - **REP-003** Předpověď příjmů z otevřených faktur a pravidelných šablon.
 - **REP-004** Každý přehled jde exportovat do CSV a Excelu.
@@ -603,7 +603,7 @@ Pravidla:
 - **UI-010** Rychlé hledání napříč aplikací (Ctrl+K).
 - **UI-011** Centrum upozornění v aplikaci: selhání odeslání, faktury po splatnosti, nespárované platby, nerozpoznaná avíza, blížící se limity.
 
-Navigace: Přehled, Faktury, Pravidelné, Zákazníci, Ceník, Platby, Přehledy, Nastavení, Administrace.
+Navigace: Přehled, Faktury, Pravidelné, Zákazníci, Ceník, Platby, Statistiky, Nastavení, Administrace.
 
 ## 21. Datový model (přehled)
 

@@ -11,7 +11,7 @@ describe("navigace", () => {
       "Zákazníci",
       "Ceník",
       "Platby",
-      "Přehledy",
+      "Statistiky",
       "Nastavení",
       "Administrace",
     ]);
