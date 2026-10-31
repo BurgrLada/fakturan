@@ -266,6 +266,7 @@ export function reminderPrefill(
   const row = getInvoice(ownerId, invoiceId);
   if (!row) throw new ServiceError(TEXTS.invoiceMail.errors.notFound);
   if (amountDue(row) <= 0) throw new ServiceError(E.nothingDue);
+  if (!row.sentAt) throw new ServiceError(E.notSent);
   const rule = chosenRule(db, ownerId, stageKey);
   const prefill = sendPrefill(ownerId, invoiceId, undefined, {
     kind: "reminder",

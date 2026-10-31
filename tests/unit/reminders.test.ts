@@ -142,6 +142,7 @@ describe("isEligibleForReminder", () => {
     status: "sent" as const,
     totalMinor: 1000,
     paidMinor: 0,
+    sentAt: new Date("2026-03-01T10:00:00Z"),
     remindersOff: false,
     remindersPartial: false,
   };
@@ -169,6 +170,17 @@ describe("isEligibleForReminder", () => {
     const partial = { ...row, status: "partially_paid" as const, paidMinor: 400 };
     expect(isEligibleForReminder(partial, client)).toBe(false);
     expect(isEligibleForReminder({ ...partial, remindersPartial: true }, client)).toBe(true);
+  });
+
+  test("[REM-006] neodeslaný doklad ne, ani částečně uhrazený se zapnutým přepínačem", () => {
+    const partial = {
+      ...row,
+      status: "partially_paid" as const,
+      paidMinor: 400,
+      remindersPartial: true,
+      sentAt: null,
+    };
+    expect(isEligibleForReminder(partial, client)).toBe(false);
   });
 
   test("vypnutá nebo plně zaplacená ne", () => {

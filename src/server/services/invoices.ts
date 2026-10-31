@@ -7,6 +7,7 @@ import {
   desc,
   eq,
   exists,
+  gt,
   gte,
   inArray,
   lt,
@@ -835,7 +836,11 @@ export function isFiltered(filter: InvoiceFilter): boolean {
 
 // The SQL form of isOverdue in lib/invoice; tests compare the two.
 function overdueCondition(today: string): SQL {
-  return and(inArray(invoice.status, AWAITING_PAYMENT), lt(invoice.dueDate, today)) as SQL;
+  return and(
+    inArray(invoice.status, AWAITING_PAYMENT),
+    gt(invoice.totalMinor, invoice.paidMinor),
+    lt(invoice.dueDate, today),
+  ) as SQL;
 }
 
 function statusCondition(status: InvoiceStatusFilter): SQL {
@@ -947,7 +952,11 @@ export function invoiceSummary(ownerId: string, filter: InvoiceFilter): InvoiceS
 
 export function customerInvoiceStats(ownerId: string, customerId: string) {
   const ofCustomer = scoped(ownerId).where(invoice, (t, { eq }) => eq(t.customerId, customerId));
-  const outstanding = inArray(invoice.status, AWAITING_PAYMENT);
+  // A zero document keeps a stranded payment as awaiting, and that must not lower what is owed.
+  const outstanding = and(
+    inArray(invoice.status, AWAITING_PAYMENT),
+    gt(invoice.totalMinor, invoice.paidMinor),
+  );
   const sums = db
     .select({
       currency: invoice.currency,

@@ -76,6 +76,8 @@ test("[REM-003] ruční upomínka z faktury", async ({ page, freshApp, smtp }) =
 
   await page.goto(detail);
   await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Označit jako odeslanou" }).click();
+  await expect(page.getByText("Odeslaná", { exact: true })).toBeVisible();
   await page.getByLabel("Stupeň").selectOption({ label: "5 dní po splatnosti" });
   await page.getByRole("button", { name: "Odeslat upomínku" }).click();
   const dialog = page.getByRole("alertdialog");

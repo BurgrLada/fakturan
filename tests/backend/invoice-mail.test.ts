@@ -662,6 +662,10 @@ describe("text a doklad jsou v souladu", () => {
   describe("čerstvá zpráva místo záznamu", () => {
     async function failedReminder() {
       const { owner, invoiceId } = account();
+      db.update(invoice)
+        .set({ status: "sent", sentAt: new Date(0) })
+        .where(eq(invoice.id, invoiceId))
+        .run();
       smtp.rejectNext(550);
       const logId = mutate(webActor(owner), "invoice.send", (tx, audit) =>
         queueMail(tx, audit, {

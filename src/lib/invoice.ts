@@ -67,11 +67,17 @@ export const MAX_BULK_DOCUMENTS = 200;
 export const AWAITING_PAYMENT = ["issued", "sent", "partially_paid"] as const;
 
 export function isOverdue(
-  row: { status: InvoiceStatus; dueDate: CalendarDate | null },
+  row: {
+    status: InvoiceStatus;
+    dueDate: CalendarDate | null;
+    totalMinor: number;
+    paidMinor: number;
+  },
   today: CalendarDate,
 ): boolean {
   return (
     (AWAITING_PAYMENT as readonly InvoiceStatus[]).includes(row.status) &&
+    row.totalMinor > row.paidMinor &&
     row.dueDate !== null &&
     row.dueDate < today
   );

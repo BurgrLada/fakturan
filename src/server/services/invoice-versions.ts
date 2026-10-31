@@ -5,6 +5,7 @@ import type { InvoiceStatus } from "@/lib/invoice";
 import { diffInvoices, diffLines, type LineRow } from "@/lib/invoice-diff";
 import { invoiceDocument, type InvoiceDocument } from "@/lib/invoice-document";
 import { deriveStatus } from "@/lib/payments";
+import { amountDue } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -85,7 +86,7 @@ function assertEditable(row: Invoice): void {
 
 // Underpaid is the move out of paid: a document already partially paid has nothing new to warn of.
 function balanceWarningOf(row: Invoice, statusBefore: InvoiceStatus): BalanceWarning {
-  if (row.paidMinor > row.totalMinor) return "overpaid";
+  if (amountDue(row) < 0) return "overpaid";
   return statusBefore === "paid" && row.status === "partially_paid" ? "underpaid" : "none";
 }
 

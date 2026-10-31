@@ -141,6 +141,7 @@ type EligibleInvoice = {
   status: InvoiceStatus;
   totalMinor: number;
   paidMinor: number;
+  sentAt: Date | null;
   remindersOff: boolean;
   remindersPartial: boolean;
 };
@@ -151,6 +152,7 @@ export function isEligibleForReminder(
   customer: { remindersEnabled: boolean | null } | null,
 ): boolean {
   if (!REMINDABLE_TYPES.includes(invoice.type) || amountDue(invoice) <= 0) return false;
+  if (!invoice.sentAt) return false;
   if (invoice.remindersOff || customer?.remindersEnabled === false) return false;
   return (
     invoice.status === "sent" || (invoice.status === "partially_paid" && invoice.remindersPartial)

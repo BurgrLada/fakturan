@@ -544,6 +544,35 @@ describe("automatické upomínky", () => {
     expect(smtp.messages[0]!.body).toMatch(/Zbývá uhradit 2\s000,00\sKč/);
   });
 
+  test("[REM-006] částečně uhrazený neodeslaný doklad upomínku nedostane", async () => {
+    const { owner, customerId } = reminding();
+    rule(owner, 0);
+    const id = issuedInvoice(owner, customerId);
+    setInvoice(id, { dueDate: "2026-03-02", remindersPartial: true });
+    addPayment(webActor(owner), id, {
+      revision: getInvoice(owner, id)!.revision,
+      paidOn: "2026-03-02",
+      amountMinor: 100_000,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+
+    await tickAt("2026-03-05T09:30:00Z");
+
+    expect(smtp.messages).toEqual([]);
+    expect(remindersForReview(owner, "2026-03-05")).toEqual([]);
+    expect(() => reminderPrefill(owner, id, null)).toThrow(TEXTS.reminders.errors.notSent);
+    const prefill = sendPrefill(owner, id, undefined, { kind: "reminder", texts: null });
+    expect(() =>
+      sendManualReminder(webActor(owner), id, {
+        ...prefill,
+        stageKey: null,
+        confirmedRepeat: false,
+      }),
+    ).toThrow(TEXTS.reminders.errors.notSent);
+  });
+
   test("[REM-006] částečná úhrada bez {{zbyva}} v rozhodujícím textu dostane výchozí text", async () => {
     const { owner, customerId } = reminding();
     rule(owner, 0, { cs: { subject: "Prosím o platbu", body: "Prosím o platbu." } });
@@ -741,16 +770,23 @@ describe("souběh", () => {
 });
 
 describe("ruční upomínka", () => {
-  test("[REM-003] jde i na vystavenou a stav dokladu nezmění, hlavní vypínač ji neblokuje", async () => {
+  test("[REM-003] vystavenou neodeslanou odmítne s vysvětlením", () => {
     const { owner, customerId } = account();
     const id = issuedInvoice(owner, customerId);
+
+    expect(() => manual(owner, id, null)).toThrow(TEXTS.reminders.errors.notSent);
+  });
+
+  test("[REM-003] stav dokladu nezmění a hlavní vypínač ji neblokuje", async () => {
+    const { owner, customerId } = account();
+    const id = sentInvoice(owner, customerId);
     setPaused(webActor(owner), true, { confirmed: false });
 
     manual(owner, id, null);
     await drainJobs("w");
 
     expect(smtp.messages).toHaveLength(1);
-    expect(getInvoice(owner, id)!.status).toBe("issued");
+    expect(getInvoice(owner, id)!.status).toBe("sent");
     expect(sentOf(owner)).toMatchObject([
       { stageKey: MANUAL_STAGE, offsetDays: null, trigger: "manual" },
     ]);

@@ -155,7 +155,12 @@ describe("koncept", () => {
   });
 
   test("[INV-001] po splatnosti je jen nezaplacený doklad a jen po dni splatnosti", () => {
-    const row = { status: "issued" as const, dueDate: "2026-03-10" };
+    const row = {
+      status: "issued" as const,
+      dueDate: "2026-03-10",
+      totalMinor: 1000,
+      paidMinor: 0,
+    };
 
     expect(isOverdue(row, "2026-03-10")).toBe(false);
     expect(isOverdue(row, "2026-03-11")).toBe(true);
@@ -163,7 +168,8 @@ describe("koncept", () => {
     expect(isOverdue({ ...row, status: "partially_paid" }, "2026-03-11")).toBe(true);
     for (const status of ["draft", "paid", "cancelled", "credited"] as const)
       expect(isOverdue({ ...row, status }, "2026-03-11")).toBe(false);
-    expect(isOverdue({ status: "issued", dueDate: null }, "2026-03-11")).toBe(false);
+    expect(isOverdue({ ...row, dueDate: null }, "2026-03-11")).toBe(false);
+    expect(isOverdue({ ...row, paidMinor: 1000 }, "2026-03-11")).toBe(false);
   });
 
   test("[INV-001] stavy a typy dokladu odpovídají datovému modelu", () => {

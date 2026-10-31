@@ -267,7 +267,6 @@ describe("assertConsistent", () => {
     expect(first).toBeTruthy();
   });
 
-  // Last on purpose: audit_log is append-only, so the orphan row stays in this file's database.
   describe("platby", () => {
     const addPayment = (
       owner: string,
@@ -360,6 +359,7 @@ describe("assertConsistent", () => {
     });
   });
 
+  // Last on purpose: audit_log is append-only, so the orphan row stays in this file's database.
   test("[TST-018] odhalí uživatelský auditní záznam bez vlastníka", () => {
     const owner = createUser();
     db.insert(auditLog)

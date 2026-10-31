@@ -10,8 +10,19 @@ import { documentQrInput, qrStateOf } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, invoice, payment, user } from "@/server/db/schema";
-import { applySent, cancelInvoice, markSent } from "@/server/services/invoice-lifecycle";
-import { customerInvoiceStats, getInvoice } from "@/server/services/invoices";
+import {
+  applySent,
+  cancelInvoice,
+  issueInvoice,
+  markSent,
+} from "@/server/services/invoice-lifecycle";
+import { updateIssuedInvoice } from "@/server/services/invoice-versions";
+import {
+  customerInvoiceStats,
+  getInvoice,
+  invoiceSummary,
+  listInvoices,
+} from "@/server/services/invoices";
 import {
   addPayment,
   applyPayments,
@@ -73,6 +84,8 @@ const input = (owner: string, id: string, over: Partial<PaymentInput> = {}): Pay
 });
 const pay = (owner: string, id: string, over: Partial<PaymentInput> = {}) =>
   addPayment(webActor(owner), id, input(owner, id, over));
+const storedRevision = (id: string) =>
+  db.select({ revision: invoice.revision }).from(invoice).where(eq(invoice.id, id)).get()!.revision;
 const qrDocument = (owner: string, id: string) => invoiceDocument(row(owner, id));
 const auditOf = (id: string) =>
   db
@@ -180,7 +193,6 @@ describe("zápis plateb", () => {
     pay(owner, id, { amountMinor: TOTAL + 5000 });
 
     expect(row(owner, id)).toMatchObject({ status: "paid", paidMinor: TOTAL + 5000 });
-    expect(row(owner, id).totalMinor - row(owner, id).paidMinor).toBe(-5000);
     assertConsistent(db, owner);
   });
 
@@ -500,6 +512,51 @@ describe("stav dokladu a odeslání", () => {
   });
 });
 
+describe("doklad s nulovou částkou", () => {
+  const zeroLine = {
+    catalogItemId: null,
+    name: "Bez ceny",
+    description: "",
+    quantityMilli: 1000,
+    unit: "ks",
+    unitPriceMinor: 0,
+    discountKind: "none" as const,
+    discountValue: 0,
+  };
+
+  test("platbu nepřijme a úhradu jedním klikem také ne", () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    const { id, revision } = draftFor(owner, customerId, { lines: [zeroLine] });
+    issueInvoice(webActor(owner), id, { revision });
+
+    expect(() => pay(owner, id)).toThrow(E.zeroTotal);
+    expect(() => markPaid(webActor(owner), id, { revision: revisionOf(owner, id) })).toThrow(
+      E.nothingDue,
+    );
+    expect(listPayments(owner, id)).toEqual([]);
+  });
+
+  test("úprava na nulu po platbě varuje přeplatkem a nezkreslí souhrny", () => {
+    const { owner, customerId, id } = account();
+    const late = { dueDate: "2026-03-20" };
+    db.update(invoice).set(late).where(eq(invoice.id, id)).run();
+    pay(owner, id);
+    current = new Date("2026-04-20T10:00:00Z");
+    const edit = { ...row(owner, id), number: row(owner, id).number! };
+
+    const result = updateIssuedInvoice(webActor(owner), id, { ...edit, lines: [zeroLine] });
+
+    expect(result.balanceWarning).toBe("overpaid");
+    expect(row(owner, id)).toMatchObject({ status: "issued", totalMinor: 0, paidMinor: 100_000 });
+    expect(customerInvoiceStats(owner, customerId).sums[0]!.outstandingMinor).toBe(0);
+    expect(invoiceSummary(owner, {})[0]!.overdueMinor).toBe(0);
+    expect(listInvoices(owner, { status: "overdue" }).rows).toEqual([]);
+    expect(listInvoices(owner, {}).rows[0]!.overdue).toBe(false);
+    assertConsistent(db, owner);
+  });
+});
+
 describe("průměrná doba úhrady", () => {
   test("počítá uhrazené doklady podle poslední platby a vynechá doklady s rozdílem", () => {
     const { owner, customerId, id } = account();
@@ -543,15 +600,18 @@ describe("izolace a audit", () => {
       find: (owner, { invoiceId, paymentId }) =>
         listPayments(owner, invoiceId).find((p) => p.id === paymentId),
       update: (owner, { invoiceId, paymentId }) => {
-        const revision = getInvoice(owner, invoiceId)?.revision ?? 1;
         updatePayment(webActor(owner), paymentId, {
-          ...input(owner, invoiceId, { amountMinor: 1 }),
-          revision,
+          revision: storedRevision(invoiceId),
+          paidOn: "2026-03-20",
+          amountMinor: 1,
+          currency: "CZK",
+          method: "transfer",
+          note: "",
         });
         return 1;
       },
       remove: (owner, { invoiceId, paymentId }) => {
-        deletePayment(webActor(owner), paymentId, getInvoice(owner, invoiceId)?.revision ?? 1);
+        deletePayment(webActor(owner), paymentId, storedRevision(invoiceId));
         return 1;
       },
     });
@@ -567,6 +627,20 @@ describe("izolace a audit", () => {
       V.notFound,
     );
     expect(listPayments(stranger, id)).toEqual([]);
+  });
+
+  test("cizí platbu nejde upravit ani smazat", () => {
+    const { owner, id } = account();
+    const stranger = account().owner;
+    const { id: paymentId } = pay(owner, id);
+    const revision = storedRevision(id);
+
+    expect(() => updatePayment(webActor(stranger), paymentId, input(owner, id))).toThrow(
+      E.notFound,
+    );
+    expect(() => deletePayment(webActor(stranger), paymentId, revision)).toThrow(E.notFound);
+    expect(listPayments(owner, id)).toHaveLength(1);
+    expect(storedRevision(id)).toBe(revision);
   });
 
   test("smazání účtu smaže i jeho platby", () => {

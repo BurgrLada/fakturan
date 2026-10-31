@@ -125,6 +125,7 @@ export function insertPayment(
   const { action = "payment.create", kind = "payment", ...fields } = input;
   const before = findOwned(tx, userId, invoiceId);
   assertPayable(before);
+  if (before.totalMinor <= 0) throw new ServiceError(E.zeroTotal);
   if (fields.amountMinor <= 0 || fields.creditedMinor <= 0) throw new ServiceError(E.amount);
 
   const id = randomUUID();

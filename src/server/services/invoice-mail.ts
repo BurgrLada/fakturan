@@ -214,6 +214,7 @@ function queueClicked(
     if (kind === "reminder" && amountDue(row) <= 0) {
       throw new ServiceError(TEXTS.reminders.errors.nothingDue);
     }
+    if (kind === "reminder" && !row.sentAt) throw new ServiceError(TEXTS.reminders.errors.notSent);
     if (!opts.confirmedUnknown && hasUnresolvedUnknown(userId, invoiceId, kind)) {
       throw new ServiceError(E.unknownPending);
     }
