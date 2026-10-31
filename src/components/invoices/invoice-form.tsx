@@ -13,12 +13,22 @@ import {
 } from "react";
 import {
   customerDefaultsAction,
+  deleteDraftAction,
   issueAction,
   issuePreviewAction,
   saveDraftAction,
   updateIssuedAction,
 } from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,11 +42,14 @@ import {
   changeIssueDate,
   changeTaxableDate,
   computeFormTotals,
+  customerOffer,
+  discountNotes,
   draftFields,
   fieldTarget,
   nonEmptyLines,
   toDocumentFields,
   type AccountChoice,
+  type CustomerOffer,
   type FormValues,
   type TouchedField,
 } from "@/lib/invoice-form";
@@ -44,6 +57,7 @@ import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { formatMoney } from "@/lib/money";
 import { setLeaveGuard } from "@/lib/leave-guard";
 import { LANGUAGES, PAYMENT_METHODS, type DesignChoice } from "@/lib/preferences";
+import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { useRouteShown } from "@/lib/use-route-shown";
 import { AppearanceSection } from "./appearance-section";
@@ -51,11 +65,13 @@ import { CustomerPicker } from "./customer-picker";
 import { IssueDialog, type IssueSummary } from "./issue-dialog";
 import { LineEditor } from "./line-editor";
 import { PdfPreview } from "./pdf-preview";
+import { SaveTemplateDialog, TemplatesLink } from "./save-template-dialog";
 import { TagInput } from "./tag-input";
 
 const T = TEXTS.invoices.form;
 const F = T.fields;
 const P = TEXTS.preferences;
+const TPL = TEXTS.invoices.templates.save;
 
 type Problem = { field: string; message: string };
 type Saved = { id: string; revision: number; problems: Problem[] };
@@ -68,6 +84,7 @@ export type InvoiceFormProps = {
   mode: "draft" | "issued";
   status: string;
   number: string;
+  variableSymbol: string;
   revision: number;
   customerName: string;
   initial: FormValues;
@@ -104,12 +121,28 @@ function statusText(status: SaveStatus, hasId: boolean): string {
   return T.status[status.kind];
 }
 
+function offerRows(offer: CustomerOffer, accounts: InvoiceFormProps["accounts"]): string[] {
+  const { currency, language, paymentMethod, dueDate, bankAccountId, appearance } = offer;
+  const account = accounts.find((item) => item.id === bankAccountId);
+  return [
+    ...(currency ? [`${F.currency}: ${currency}`] : []),
+    ...(bankAccountId !== undefined
+      ? [`${F.bankAccount}: ${account ? account.name : T.noAccount}`]
+      : []),
+    ...(language ? [`${F.language}: ${P.languages[language]}`] : []),
+    ...(paymentMethod ? [`${F.paymentMethod}: ${P.paymentMethods[paymentMethod]}`] : []),
+    ...(dueDate ? [`${F.dueDate}: ${formatCalendarDate(dueDate, "d. M. yyyy")}`] : []),
+    ...(appearance ? [T.appearance] : []),
+  ];
+}
+
 function Form(props: InvoiceFormProps) {
   const { id, type, mode, accounts, series, units, tagOptions, defaultUnit, designs } = props;
   const router = useRouter();
   const [values, setValues] = useState(props.initial);
   const [tags, setTags] = useState(props.initialTags);
   const [number, setNumber] = useState(props.number);
+  const [variableSymbol, setVariableSymbol] = useState(props.variableSymbol);
   const [customerName, setCustomerName] = useState(props.customerName);
   const [saved, setSaved] = useState(props.saved);
   const [revision, setRevision] = useState(props.revision);
@@ -122,14 +155,20 @@ function Form(props: InvoiceFormProps) {
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<IssueSummary | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [offer, setOffer] = useState<CustomerOffer | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { shown, root } = useRouteShown<HTMLDivElement>();
 
   const touched = useRef(new Set<TouchedField>());
   const identity = useRef({ exists: props.saved, revision: props.revision });
   const problemsRef = useRef<HTMLDivElement>(null);
   const customerTicket = useRef(0);
-  const savedIssued = useRef(JSON.stringify([props.initial, props.initialTags, props.number]));
+  const savedIssued = useRef(
+    JSON.stringify([props.initial, props.initialTags, props.number, props.variableSymbol]),
+  );
   const needsConfirm = useRef<() => boolean>(() => false);
+  const latestValues = useRef(props.initial);
 
   const [saver] = useState(
     () =>
@@ -160,6 +199,10 @@ function Form(props: InvoiceFormProps) {
   const result = useMemo(() => toDocumentFields(values), [values]);
   const invalid = useMemo(() => new Set(result.ok ? [] : result.invalid), [result]);
   const totals = useMemo(() => computeFormTotals(values), [values]);
+  const notes = useMemo(
+    () => (result.ok && totals ? discountNotes(result.fields, totals) : []),
+    [result, totals],
+  );
   const nets = useMemo(() => {
     const kept = nonEmptyLines(values.lines);
     return new Map(kept.map((line, i) => [line.key, totals?.lines[i]?.netMinor ?? 0]));
@@ -172,10 +215,11 @@ function Form(props: InvoiceFormProps) {
   }, [mode, type, saver, values, tags, result]);
 
   useEffect(() => {
+    latestValues.current = values;
     needsConfirm.current = () => {
       if (locked) return false;
       if (mode === "issued") {
-        return JSON.stringify([values, tags, number]) !== savedIssued.current;
+        return JSON.stringify([values, tags, number, variableSymbol]) !== savedIssued.current;
       }
       return !result.ok || saver.hasFailed();
     };
@@ -229,6 +273,7 @@ function Form(props: InvoiceFormProps) {
   async function pickCustomer(customer: { id: string; name: string }) {
     customerTicket.current += 1;
     const ticket = customerTicket.current;
+    setOffer(null);
     setCustomerName(customer.name);
     setValues((current) => ({ ...current, customerId: customer.id }));
     try {
@@ -237,6 +282,10 @@ function Form(props: InvoiceFormProps) {
       if (!reply.ok) {
         if (reply.expired) setLock("expired");
         else setMessage({ ok: false, text: reply.error });
+        return;
+      }
+      if (props.saved) {
+        setOffer(customerOffer(latestValues.current, reply.defaults, touched.current, accounts));
         return;
       }
       setValues((current) =>
@@ -256,6 +305,52 @@ function Form(props: InvoiceFormProps) {
     field?.focus();
   }
 
+  async function flushedDocument(): Promise<boolean> {
+    if (!(await saver.flush())) {
+      if (!saver.isLocked()) setMessage({ ok: false, text: T.saveFailed });
+      return false;
+    }
+    if (!identity.current.exists) setMessage({ ok: false, text: T.emptyDraft });
+    return identity.current.exists;
+  }
+
+  async function startTemplate() {
+    setMessage(null);
+    if (!result.ok) {
+      focusFirstInvalid();
+      return;
+    }
+    setBusy(true);
+    try {
+      if (await flushedDocument()) setNaming(true);
+    } catch {
+      setMessage({ ok: false, text: T.network });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeDraft() {
+    setDeleting(false);
+    setMessage(null);
+    setBusy(true);
+    try {
+      await saver.halt();
+      const reply = await deleteDraftAction({ id });
+      if (reply.ok) {
+        router.push("/faktury");
+        return;
+      }
+      saver.resume();
+      setMessage({ ok: false, text: reply.error });
+    } catch {
+      saver.resume();
+      setMessage({ ok: false, text: T.network });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startIssue() {
     setMessage(null);
     if (!result.ok) {
@@ -264,14 +359,7 @@ function Form(props: InvoiceFormProps) {
     }
     setBusy(true);
     try {
-      if (!(await saver.flush())) {
-        if (!saver.isLocked()) setMessage({ ok: false, text: T.saveFailed });
-        return;
-      }
-      if (!identity.current.exists) {
-        setMessage({ ok: false, text: T.emptyDraft });
-        return;
-      }
+      if (!(await flushedDocument())) return;
       const preview = await issuePreviewAction({ id });
       if (!preview.ok) {
         if (preview.expired) setLock("expired");
@@ -361,7 +449,7 @@ function Form(props: InvoiceFormProps) {
       const reply = await updateIssuedAction({
         id,
         tags,
-        document: { ...result.fields, number, revision: identity.current.revision },
+        document: { ...result.fields, number, variableSymbol, revision: identity.current.revision },
       });
       if (!reply.ok) {
         if (reply.expired) setLock("expired");
@@ -370,7 +458,9 @@ function Form(props: InvoiceFormProps) {
         return;
       }
       identity.current.revision = reply.revision;
-      savedIssued.current = JSON.stringify([values, tags, number]);
+      const symbol = reply.variableSymbol ?? "";
+      setVariableSymbol(symbol);
+      savedIssued.current = JSON.stringify([values, tags, number, symbol]);
       setRevision(reply.revision);
       setMessage({ ok: true, text: T.saved });
       setNotices([
@@ -458,7 +548,10 @@ function Form(props: InvoiceFormProps) {
         )}
         {message && (
           <Alert variant={message.ok ? "default" : "destructive"} role="status">
-            <AlertDescription>{message.text}</AlertDescription>
+            <AlertDescription>
+              {message.text}
+              {message.ok && message.text === TPL.saved && <TemplatesLink />}
+            </AlertDescription>
           </Alert>
         )}
         {notices.map((notice) => (
@@ -477,12 +570,46 @@ function Form(props: InvoiceFormProps) {
                   invalid={problems.some((problem) => problem.field === "customerId")}
                   onNameChange={(name) => {
                     customerTicket.current += 1;
+                    setOffer(null);
                     setCustomerName(name);
                     setValues((current) => ({ ...current, customerId: null }));
                   }}
                   onPick={pickCustomer}
                   onExpired={() => setLock("expired")}
                 />
+                {offer && (
+                  <Alert role="status" data-testid="customer-defaults">
+                    <AlertDescription className="flex flex-col items-start gap-2">
+                      <span>{T.customerOffer.title}</span>
+                      <ul className="list-disc pl-4">
+                        {offerRows(offer, accounts).map((row) => (
+                          <li key={row}>{row}</li>
+                        ))}
+                      </ul>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setValues((current) => ({ ...current, ...offer }));
+                            setOffer(null);
+                          }}
+                        >
+                          {T.customerOffer.apply}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setOffer(null)}
+                        >
+                          {T.customerOffer.keep}
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <Field id="field-seriesId" label={F.series}>
                   <NativeSelect
                     id="field-seriesId"
@@ -510,6 +637,14 @@ function Form(props: InvoiceFormProps) {
                     value={number}
                     required
                     onChange={(event) => setNumber(event.target.value)}
+                  />
+                </Field>
+                <Field id="field-variableSymbol" label={F.variableSymbol}>
+                  <Input
+                    id="field-variableSymbol"
+                    inputMode="numeric"
+                    value={variableSymbol}
+                    onChange={(event) => setVariableSymbol(event.target.value)}
                   />
                 </Field>
               </>
@@ -720,6 +855,15 @@ function Form(props: InvoiceFormProps) {
             ) : (
               <p className="text-sm text-muted-foreground">{T.totalsUnavailable}</p>
             )}
+            {notes.length > 0 && (
+              <Alert role="status" data-testid="discount-notes">
+                <AlertDescription className="flex flex-col gap-1">
+                  {notes.map((note) => (
+                    <span key={note}>{note}</span>
+                  ))}
+                </AlertDescription>
+              </Alert>
+            )}
           </section>
 
           <section className="flex flex-col gap-4">
@@ -763,10 +907,32 @@ function Form(props: InvoiceFormProps) {
             <TagInput tags={tags} options={tagOptions} onChange={setTags} />
           </section>
 
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button type="submit" size="lg" disabled={busy}>
               {mode === "draft" ? T.issue : T.save}
             </Button>
+            {mode === "draft" && (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                disabled={busy}
+                onClick={() => void startTemplate()}
+              >
+                {TPL.trigger}
+              </Button>
+            )}
+            {mode === "draft" && saved && (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                disabled={busy}
+                onClick={() => setDeleting(true)}
+              >
+                {T.deleteDraft}
+              </Button>
+            )}
           </div>
         </fieldset>
       </form>
@@ -779,6 +945,21 @@ function Form(props: InvoiceFormProps) {
         onToday={applyToday}
         onConfirm={confirmIssue}
       />
+      <SaveTemplateDialog id={id} open={naming} onOpenChange={setNaming} onResult={setMessage} />
+      <AlertDialog open={deleting} onOpenChange={setDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{T.deleteTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{T.deleteBody}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{T.deleteBack}</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => void removeDraft()}>
+              {T.deleteDraft}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

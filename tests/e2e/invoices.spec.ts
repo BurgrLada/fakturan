@@ -148,6 +148,37 @@ test("[INV-021] verze ukáže rozdíl a jde obnovit", async ({ page, freshApp })
   await expect(page.getByRole("link", { name: "Verze 2" })).toBeVisible();
 });
 
+test("[INV-002] koncept jde smazat z formuláře i ze seznamu, vystavený doklad ne", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await openForm(page, baseURL);
+  await cashInvoice(page);
+  await settled(page);
+
+  await page.getByRole("button", { name: "Smazat koncept" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Smazat koncept" }).click();
+  await page.waitForURL(/\/faktury$/);
+  await expect(page.getByText("Zatím tu není žádná faktura")).toBeVisible();
+
+  const detail = await cashIssued(page, baseURL);
+  await openForm(page, baseURL);
+  await cashInvoice(page);
+  await settled(page);
+  await page.goto(`${baseURL}/faktury`);
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(3);
+
+  await page.getByRole("button", { name: "Smazat koncept: Alfa s.r.o." }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Smazat koncept" }).click();
+
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: /Smazat koncept/ })).toHaveCount(0);
+  await page.goto(detail);
+  await expect(page.getByRole("button", { name: "Smazat koncept" })).toHaveCount(0);
+});
+
 test("[INV-018] duplikace otevře nový koncept", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
   await ready(page, baseURL);

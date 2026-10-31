@@ -58,6 +58,7 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
         mode={isDraft ? "draft" : "issued"}
         status={row?.status ?? "draft"}
         number={row?.number ?? ""}
+        variableSymbol={row?.variableSymbol ?? ""}
         revision={row?.revision ?? 0}
         customerName={row?.customerName ?? ""}
         initial={formFromDocument(row ?? newDocument(user.id), choices.defaultUnit)}

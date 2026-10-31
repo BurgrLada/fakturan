@@ -79,6 +79,19 @@ export class DraftSaver<P, R> {
     return !this.locked && !this.failed && !this.isDirty();
   }
 
+  // For a delete: whatever is queued is dropped, because a later write would act on a gone document.
+  async halt(): Promise<void> {
+    this.locked = true;
+    this.wanted = null;
+    this.clearTimer();
+    while (this.running) await this.running;
+    this.unconfirmed = null;
+  }
+
+  resume(): void {
+    this.locked = false;
+  }
+
   private clearTimer(): void {
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;

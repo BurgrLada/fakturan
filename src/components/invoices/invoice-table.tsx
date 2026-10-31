@@ -1,10 +1,19 @@
 "use client";
 
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { markSentManyAction } from "@/app/(app)/faktury/actions";
+import { deleteDraftAction, markSentManyAction } from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -21,6 +30,7 @@ import type { InvoiceRow, InvoiceSort, SortLink } from "@/server/services/invoic
 import { InvoiceStatusBadge } from "./invoice-status";
 
 const T = TEXTS.invoices.list;
+const F = TEXTS.invoices.form;
 const NARROW_HIDDEN = "hidden sm:table-cell";
 
 const COLUMNS: { sort: InvoiceSort; label: string; className?: string }[] = [
@@ -70,6 +80,7 @@ export function InvoiceTable({
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const selectable = rows.filter((row) => row.status !== "draft");
@@ -110,6 +121,21 @@ export function InvoiceTable({
         setMessage({ ok: true, text: T.bulk.marked(result.done, result.skipped) });
       } catch {
         setMessage({ ok: false, text: T.bulk.failed });
+      }
+    });
+  }
+
+  function removeDraft() {
+    const id = deleting;
+    if (!id) return;
+    setDeleting(null);
+    setMessage(null);
+    startTransition(async () => {
+      try {
+        const reply = await deleteDraftAction({ id });
+        if (!reply.ok) setMessage({ ok: false, text: reply.error });
+      } catch {
+        setMessage({ ok: false, text: F.network });
       }
     });
   }
@@ -166,6 +192,7 @@ export function InvoiceTable({
                 </TableHead>
               );
             })}
+            <TableHead className="w-8" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -200,10 +227,42 @@ export function InvoiceTable({
               <TableCell>
                 <InvoiceStatusBadge status={row.status} overdue={row.overdue} />
               </TableCell>
+              <TableCell>
+                {row.status === "draft" && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={pending}
+                    aria-label={T.deleteDraft(row.customerName)}
+                    onClick={() => setDeleting(row.id)}
+                  >
+                    <Trash2 aria-hidden className="size-4" />
+                  </Button>
+                )}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+      <AlertDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{F.deleteTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{F.deleteBody}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{F.deleteBack}</AlertDialogCancel>
+            <Button variant="destructive" onClick={removeDraft}>
+              {F.deleteDraft}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

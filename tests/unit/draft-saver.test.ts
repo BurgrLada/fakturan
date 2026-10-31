@@ -188,4 +188,38 @@ describe("automatické ukládání", () => {
     expect(sent).toHaveLength(1);
     expect(saver.isDirty()).toBe(false);
   });
+
+  test("[INV-002] zastavení před smazáním zahodí čekající změnu a počká na běžící zápis", async () => {
+    let finish = (_reply: SaveReply<number>) => {};
+    const replies = [new Promise<SaveReply<number>>((resolve) => (finish = resolve)), ok()];
+    const { saver, sent } = harness(() => replies.shift()!);
+    saver.change("a", { note: "a" });
+    await vi.advanceTimersByTimeAsync(1500);
+    saver.change("b", { note: "b" });
+
+    let halted = false;
+    void saver.halt().then(() => (halted = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(halted).toBe(false);
+    finish({ kind: "saved", result: 1 });
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(halted).toBe(true);
+    expect(sent).toEqual([{ note: "a" }]);
+    expect(saver.isDirty()).toBe(false);
+  });
+
+  test("[INV-002] po nepovedeném smazání ukládání běží dál", async () => {
+    const { saver, sent } = harness(() => ok());
+    await saver.halt();
+    saver.change("a", { note: "a" });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(sent).toEqual([]);
+
+    saver.resume();
+    saver.change("a", { note: "a" });
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(sent).toEqual([{ note: "a" }]);
+  });
 });

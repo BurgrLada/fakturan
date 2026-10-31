@@ -122,6 +122,77 @@ test("[NUM-007] variabilní symbol se v dialogu předvyplní a jde přepsat", as
   expect(await issuedPdf(page)).toContain("778899");
 });
 
+test("[NUM-007] vymazaný VS v dialogu nepoužije automatický a dialog to řekne", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await openForm(page, baseURL);
+  await cashInvoice(page);
+  await settled(page);
+
+  await page.getByRole("button", { name: "Vystavit" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByLabel("Variabilní symbol").fill("");
+  await expect(dialog).toContainText("bez variabilního symbolu");
+  await dialog.getByRole("button", { name: "Vystavit" }).click();
+  await page.waitForURL(/\/faktury\/[^/]+$/);
+
+  expect(await issuedPdf(page)).not.toContain("Variabilní symbol");
+});
+
+test("[NUM-007] VS vystaveného dokladu jde opravit a po změně čísla se ukáže nový", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await openForm(page, baseURL);
+  await cashInvoice(page);
+  await settled(page);
+  await issue(page);
+  const detail = page.url();
+  await page.goto(`${detail}/upravit`);
+  await page.waitForLoadState("networkidle");
+  const symbol = page.getByLabel("Variabilní symbol");
+
+  await page.getByLabel("Číslo faktury").fill("2030-777");
+  await page.getByRole("button", { name: "Uložit změny" }).click();
+  await expect(page.getByText("Změny jsou uložené.")).toBeVisible();
+  await expect(symbol).toHaveValue("2030777");
+
+  await symbol.fill("12ab");
+  await page.getByRole("button", { name: "Uložit změny" }).click();
+  await expect(page.getByText("Variabilní symbol smí mít jen číslice")).toBeVisible();
+
+  await symbol.fill("4242");
+  await page.getByRole("button", { name: "Uložit změny" }).click();
+  await expect(page.getByText("Změny jsou uložené.")).toBeVisible();
+
+  await page.goto(detail);
+  expect(await issuedPdf(page)).toContain("4242");
+  await expect(page.getByRole("link", { name: "Verze 2" })).toBeVisible();
+});
+
+test("[INV-014] sleva vyšší než základ se ve formuláři i dialogu ohlásí", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await openForm(page, baseURL);
+  await cashInvoice(page);
+  await page.getByLabel("Sleva na doklad").selectOption("amount");
+  await page.getByLabel("Výše slevy na doklad").fill("5000");
+
+  const note = "Sleva na doklad je vyšší než základ";
+  await expect(page.getByTestId("discount-notes")).toContainText(note);
+  await settled(page);
+  await page.getByRole("button", { name: "Vystavit" }).click();
+  await expect(page.getByRole("alertdialog")).toContainText(note);
+});
+
 test("[NUM-003] řada zvolená ve formuláři se projeví v čísle", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
   await ready(page, baseURL);
@@ -145,6 +216,27 @@ test("[NUM-003] řada zvolená ve formuláři se projeví v čísle", async ({ p
   await issue(page);
 
   await expect(page.getByRole("heading", { name: /Faktura B\d{4}-001/ })).toBeVisible();
+});
+
+test("[INV-010] výběr zákazníka u uloženého konceptu nic tiše nepřepíše", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await openForm(page, baseURL);
+  await page.getByLabel("Měna").selectOption("EUR");
+  await page.getByLabel("Způsob platby").selectOption("cash");
+  await fillLine(page, 0, "Konzultace", "1000");
+  await settled(page);
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+
+  await chooseCustomer(page);
+  await settled(page);
+
+  await expect(page.getByLabel("Měna")).toHaveValue("EUR");
+  await expect(page.getByLabel("Způsob platby")).toHaveValue("cash");
 });
 
 test("[INV-011] zákazník založený ve formuláři je vybraný", async ({ page, freshApp }) => {
@@ -182,6 +274,9 @@ test("[INV-012] položky lze přeřadit myší i klávesnicí", async ({ page, f
   const handle = page.getByRole("button", { name: "Přesunout položku 1" });
   await handle.focus();
   await page.keyboard.press("Space");
+  // dnd-kit starts listening for arrows only after the drag has begun.
+  await expect(handle).toHaveAttribute("aria-pressed", "true");
+  await page.waitForTimeout(200);
   await page.keyboard.press("ArrowDown");
   await page.waitForTimeout(300);
   await page.keyboard.press("Space");

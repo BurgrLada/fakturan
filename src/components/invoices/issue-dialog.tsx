@@ -13,6 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { Currency } from "@/lib/currency";
+import { formatMoney } from "@/lib/money";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.invoices.issueDialog;
@@ -22,6 +24,10 @@ export type IssueSummary = {
   variableSymbol: string | null;
   issueDate: string | null;
   today: string;
+  customerName: string;
+  totalMinor: number;
+  currency: Currency;
+  discountNotes: string[];
 };
 
 export function IssueDialog({
@@ -61,7 +67,7 @@ export function IssueDialog({
           className="contents"
           onSubmit={(event) => {
             event.preventDefault();
-            onConfirm(shown && shown !== automatic ? shown : undefined);
+            onConfirm(shown !== automatic ? shown : undefined);
           }}
         >
           <AlertDialogHeader>
@@ -69,6 +75,17 @@ export function IssueDialog({
             <AlertDialogDescription>{T.body}</AlertDialogDescription>
           </AlertDialogHeader>
           {summary?.number && <p className="text-sm font-medium">{T.number(summary.number)}</p>}
+          {summary && (
+            <div className="text-sm">
+              <p>{T.customer(summary.customerName)}</p>
+              <p>{T.total(formatMoney(summary.totalMinor, summary.currency))}</p>
+            </div>
+          )}
+          {summary?.discountNotes.map((note) => (
+            <Alert key={note}>
+              <AlertDescription>{note}</AlertDescription>
+            </Alert>
+          ))}
           <div className="flex flex-col gap-2">
             <Label htmlFor="issue-variable-symbol">{T.variableSymbol}</Label>
             <Input
@@ -78,6 +95,7 @@ export function IssueDialog({
               value={shown}
               onChange={(event) => setSymbol(event.target.value)}
             />
+            {!shown && automatic && <p className="text-sm text-muted-foreground">{T.noSymbol}</p>}
           </div>
           {wrongMonth && (
             <Alert>
