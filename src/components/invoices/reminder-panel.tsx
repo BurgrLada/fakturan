@@ -36,6 +36,7 @@ export function ReminderPanel({
   today,
   latestSnooze,
   canSend,
+  sent,
 }: {
   invoiceId: string;
   rules: ReminderRule[];
@@ -54,6 +55,7 @@ export function ReminderPanel({
   today: CalendarDate;
   latestSnooze: CalendarDate;
   canSend: boolean;
+  sent: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -103,12 +105,18 @@ export function ReminderPanel({
         </div>
         <Button
           variant="outline"
-          disabled={!canSend}
+          disabled={!canSend || !sent}
+          aria-describedby={sent ? undefined : "reminder-unsent"}
           onClick={() => setSending({ stageKey: stage === MANUAL_STAGE ? null : stage })}
         >
           {T.send}
         </Button>
       </div>
+      {!sent && (
+        <p id="reminder-unsent" className="text-sm text-muted-foreground">
+          {T.unsent}
+        </p>
+      )}
       <SendDialog
         invoiceId={invoiceId}
         reminder={sending ?? undefined}

@@ -49,7 +49,7 @@ const COLUMNS: { sort: InvoiceSort; label: string; className?: string }[] = [
   { sort: "status", label: T.columns.status },
 ];
 
-function payableSummary(rows: InvoiceRow[]): { count: number; sums: string } {
+function payableSummary(rows: InvoiceRow[]): { count: number; sums: string; skipped: number } {
   const payable = rows.filter(
     (row) => (AWAITING_PAYMENT as readonly string[]).includes(row.status) && amountDue(row) > 0,
   );
@@ -61,7 +61,7 @@ function payableSummary(rows: InvoiceRow[]): { count: number; sums: string } {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([currency, minor]) => formatMoney(minor, currency))
     .join(", ");
-  return { count: payable.length, sums };
+  return { count: payable.length, sums, skipped: rows.length - payable.length };
 }
 
 const SORT_STATE = { asc: "ascending", desc: "descending" } as const;
@@ -244,7 +244,7 @@ export function InvoiceTable({
             <AlertDialogTitle>{TEXTS.payments.bulk.title}</AlertDialogTitle>
             <AlertDialogDescription data-testid="bulk-paid-summary">
               {summary.count > 0
-                ? TEXTS.payments.bulk.body(summary.count, summary.sums)
+                ? TEXTS.payments.bulk.body(summary.count, summary.sums, summary.skipped)
                 : TEXTS.payments.bulk.nothing}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -267,7 +267,10 @@ export function InvoiceTable({
         </Alert>
       )}
       {message && (
-        <Alert variant={message.ok ? "default" : "destructive"} role="status">
+        <Alert
+          variant={message.ok ? "default" : "destructive"}
+          role={message.ok ? "status" : "alert"}
+        >
           <AlertDescription>{message.text}</AlertDescription>
         </Alert>
       )}

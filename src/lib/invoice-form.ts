@@ -393,14 +393,17 @@ export type CustomerOffer = Partial<
 >;
 
 // A saved document already says what it wants, so a new customer only proposes its defaults. The
-// account stays with the currency: without a currency change there is no reason to swap it.
+// account stays with the currency: without a currency change there is no reason to swap it. A locked
+// currency (the document has payments) is never offered, nor is the account that follows it.
 export function customerOffer(
   values: FormValues,
   defaults: CustomerDefaults,
   touched: ReadonlySet<TouchedField>,
   accounts: readonly AccountChoice[],
+  currencyLocked = false,
 ): CustomerOffer | null {
-  const next = applyCustomerDefaults(values, defaults, touched, accounts);
+  const wantedDefaults = currencyLocked ? { ...defaults, currency: values.currency } : defaults;
+  const next = applyCustomerDefaults(values, wantedDefaults, touched, accounts);
   const { currency, language, paymentMethod, appearance, dueDate } = next;
   const bankAccountId = currency === values.currency ? values.bankAccountId : next.bankAccountId;
   const wanted = { currency, language, paymentMethod, appearance, dueDate, bankAccountId };

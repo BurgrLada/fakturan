@@ -205,6 +205,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           today={today}
           latestSnooze={addDays(today, MAX_SNOOZE_DAYS)}
           canSend={available && !sending}
+          sent={row.sentAt !== null}
         />
       )}
       {takesPayment && (

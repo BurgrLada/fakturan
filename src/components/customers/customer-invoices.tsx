@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { InvoiceStatusBadge } from "@/components/invoices/invoice-status";
 import { formatMoney } from "@/lib/money";
+import { days } from "@/lib/reminders";
 import { TEXTS } from "@/lib/texts";
 import { customerInvoiceStats } from "@/server/services/invoices";
 
@@ -13,7 +14,7 @@ export function CustomerInvoices({ ownerId, customerId }: { ownerId: string; cus
       <h2 className="text-lg">{T.title}</h2>
       <p className="text-sm" data-testid="customer-average-days">
         <span className="text-muted-foreground">{T.averageDays}: </span>
-        {averageDays === null ? T.noAverage : T.days(Math.round(averageDays))}
+        {averageDays === null ? T.noAverage : days(Math.round(averageDays))}
       </p>
       {sums.map((sum) => (
         <dl

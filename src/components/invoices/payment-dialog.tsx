@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type FormEvent } from "react";
 import { addPaymentAction, updatePaymentAction } from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -50,36 +50,58 @@ function positive(text: string): number | null {
 function Form({
   target,
   payment,
+  dirty,
   onClose,
   onDone,
 }: {
   target: PaymentTarget;
   payment: PaymentView | null;
+  dirty: { current: boolean };
   onClose: () => void;
   onDone: () => void;
 }) {
   const key = useId();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
+  const [invalid, setInvalid] = useState<"amount" | "credited" | null>(null);
   const [paidOn, setPaidOn] = useState(payment?.paidOn ?? target.today);
-  const [amount, setAmount] = useState(
-    formatMoneyInput(payment?.amountMinor ?? target.suggestedMinor),
-  );
+  const initialAmount = payment?.amountMinor ?? target.suggestedMinor;
+  const [amount, setAmount] = useState(initialAmount > 0 ? formatMoneyInput(initialAmount) : "");
   const [currency, setCurrency] = useState<Currency>(payment?.currency ?? target.currency);
   const [credited, setCredited] = useState(payment ? formatMoneyInput(payment.creditedMinor) : "");
   const [method, setMethod] = useState<PaymentChannel>(payment?.method ?? "transfer");
   const [note, setNote] = useState(payment?.note ?? "");
 
+  const initial = useRef({ paidOn, amount, currency, credited, method, note });
+  useEffect(() => {
+    const first = initial.current;
+    dirty.current =
+      paidOn !== first.paidOn ||
+      amount !== first.amount ||
+      currency !== first.currency ||
+      credited !== first.credited ||
+      method !== first.method ||
+      note !== first.note;
+  }, [dirty, paidOn, amount, currency, credited, method, note]);
+
   const foreign = currency !== target.currency;
   const locked = payment?.source === "notice";
+
+  function reject(field: "amount" | "credited", text: string) {
+    setError(text);
+    setInvalid(field);
+    document.getElementById(`${key}-${field}`)?.focus();
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const amountMinor = positive(amount);
-    if (amountMinor === null) return setError(T.badAmount);
+    if (amountMinor === null) return reject("amount", T.badAmount);
     const creditedMinor = foreign ? positive(credited) : null;
-    if (foreign && creditedMinor === null) return setError(T.badCredited);
+    if (foreign && creditedMinor === null) return reject("credited", T.badCredited);
     setError(null);
+    setInvalid(null);
     const body = {
       revision: target.revision,
       paidOn,
@@ -94,8 +116,13 @@ function Form({
         const reply = payment
           ? await updatePaymentAction({ id: payment.id, payment: body })
           : await addPaymentAction({ id: target.invoiceId, payment: body });
-        if (reply.ok) onDone();
-        else setError(reply.stale ? P.stale : reply.error);
+        if (reply.ok) {
+          dirty.current = false;
+          onDone();
+        } else {
+          setExpired(Boolean(reply.expired));
+          setError(reply.expired ? P.expired : reply.stale ? P.stale : reply.error);
+        }
       } catch {
         setError(P.failed);
       }
@@ -125,6 +152,7 @@ function Form({
             id={`${key}-amount`}
             inputMode="decimal"
             disabled={locked}
+            aria-invalid={invalid === "amount" || undefined}
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
           />
@@ -152,6 +180,7 @@ function Form({
             id={`${key}-credited`}
             inputMode="decimal"
             disabled={locked}
+            aria-invalid={invalid === "credited" || undefined}
             aria-describedby={`${key}-credited-hint`}
             value={credited}
             onChange={(event) => setCredited(event.target.value)}
@@ -181,14 +210,27 @@ function Form({
       </div>
       {error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-col items-start gap-1">
+            {error}
+            {expired && (
+              <a className="underline" href="/prihlaseni">
+                {P.login}
+              </a>
+            )}
+          </AlertDescription>
         </Alert>
       )}
       <AlertDialogFooter>
-        <Button type="button" variant="outline" disabled={pending} onClick={onClose}>
+        <Button
+          type="button"
+          variant="outline"
+          className="max-sm:h-11"
+          disabled={pending}
+          onClick={onClose}
+        >
           {T.back}
         </Button>
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" className="max-sm:h-11" disabled={pending}>
           {T.save}
         </Button>
       </AlertDialogFooter>
@@ -209,15 +251,57 @@ export function PaymentDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const dirty = useRef(false);
+  const [discarding, setDiscarding] = useState(false);
+
+  function close() {
+    if (dirty.current) setDiscarding(true);
+    else onClose();
+  }
+
+  function finish() {
+    setDiscarding(false);
+    onDone();
+  }
+
   return (
     <AlertDialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next) close();
       }}
     >
       <AlertDialogContent className="max-h-[90dvh] overflow-y-auto">
-        <Form target={target} payment={payment} onClose={onClose} onDone={onDone} />
+        <Form target={target} payment={payment} dirty={dirty} onClose={close} onDone={finish} />
+        {discarding && (
+          <Alert role="alert" data-testid="payment-discard">
+            <AlertDescription className="flex flex-col items-start gap-2">
+              {T.discardTitle}
+              <span className="flex gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="max-sm:h-11"
+                  onClick={() => {
+                    setDiscarding(false);
+                    dirty.current = false;
+                    onClose();
+                  }}
+                >
+                  {T.discard}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="max-sm:h-11"
+                  onClick={() => setDiscarding(false)}
+                >
+                  {T.keepEditing}
+                </Button>
+              </span>
+            </AlertDescription>
+          </Alert>
+        )}
       </AlertDialogContent>
     </AlertDialog>
   );

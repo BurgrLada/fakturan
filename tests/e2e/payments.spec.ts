@@ -128,7 +128,7 @@ test("[PAY-004] přeplatek je zvýrazněný", async ({ page, freshApp, smtp }) =
   await expect(badge(page, "Uhrazená")).toBeVisible();
   await expect(page.getByTestId("payment-overpaid")).toContainText("Přeplatek");
   await expect(page.getByTestId("payment-overpaid")).toContainText("200,00");
-  await expect(page.getByTestId("payment-overpaid")).toHaveClass(/bg-accent/);
+  await expect(page.getByTestId("payment-overpaid")).toHaveAttribute("data-tone", "warning");
 });
 
 test("[PAY-005] úprava platby přepočte stav a smazání ho vrátí", async ({
@@ -193,6 +193,23 @@ test("[INV-023] úprava uhrazené faktury ukáže upozornění a stav po přepo�
   await expect(page.getByText("Stav po přepočtu: Částečně uhrazená.")).toBeVisible();
 });
 
+const prague = (offsetDays: number) =>
+  new Date(Date.now() + offsetDays * 86_400_000).toLocaleDateString("sv-SE", {
+    timeZone: "Europe/Prague",
+  });
+
+async function issuedOn(page: Page, baseURL: string, price: string, daysAgo: number) {
+  await openForm(page, baseURL);
+  await chooseCustomer(page);
+  await page.getByLabel("Způsob platby").selectOption("cash");
+  await fillLine(page, 0, "Konzultace", price);
+  await page.getByLabel("Datum vystavení").fill(prague(-daysAgo));
+  await settled(page);
+  await issue(page);
+  await page.waitForLoadState("networkidle");
+  return page.url();
+}
+
 test("[CUS-006] karta zákazníka ukáže uhrazeno, pohledávky a průměrnou dobu úhrady", async ({
   page,
   freshApp,
@@ -200,20 +217,102 @@ test("[CUS-006] karta zákazníka ukáže uhrazeno, pohledávky a průměrnou do
 }) => {
   const { baseURL } = freshApp;
   await ready(page, baseURL, smtp);
-  const detail = await issuedCash(page, baseURL);
+  const first = await issuedOn(page, baseURL, "1000", 10);
+  const second = await issuedOn(page, baseURL, "500", 4);
   await page.getByRole("link", { name: "Alfa s.r.o." }).click();
   await page.waitForURL(/\/zakaznici\/[^/]+$/);
   const card = page.url();
+  const sums = page.getByTestId("customer-sum-CZK");
+  const row = (label: string) => sums.locator("dt", { hasText: label }).locator("+ dd");
   await expect(page.getByTestId("customer-average-days")).toContainText("–");
-  await expect(page.getByTestId("customer-sum-CZK")).toContainText("Pohledávky");
+  await expect(row("Uhrazeno")).toContainText("0,00");
+  await expect(row("Pohledávky")).toContainText("1 500,00");
 
-  await page.goto(detail);
+  await page.goto(first);
   await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
   await expect(badge(page, "Uhrazená")).toBeVisible();
-
   await page.goto(card);
-  await expect(page.getByTestId("customer-average-days")).toContainText("0 dní");
-  await expect(page.getByTestId("customer-sum-CZK")).toContainText("1 000,00");
+  await expect(row("Uhrazeno")).toContainText("1 000,00");
+  await expect(row("Pohledávky")).toContainText("500,00");
+  await expect(page.getByTestId("customer-average-days")).toContainText("10 dní");
+
+  await page.goto(second);
+  await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+  await expect(badge(page, "Uhrazená")).toBeVisible();
+  await page.goto(card);
+  await expect(row("Uhrazeno")).toContainText("1 500,00");
+  await expect(row("Pohledávky")).toContainText("0,00");
+  await expect(page.getByTestId("customer-average-days")).toContainText("7 dní");
+});
+
+test("[UI-007] označení úhrady funguje na šířce 390 px s dostatečnými cíli", async ({
+  page,
+  freshApp,
+  smtp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL, smtp);
+  await issuedCash(page, baseURL);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+
+  await addPayment(page, "400");
+  await expect(badge(page, "Částečně uhrazená")).toBeVisible();
+
+  const panel = page.getByTestId("payment-panel");
+  for (const name of [
+    "Označit jako uhrazené",
+    "Přidat platbu",
+    "Uzavřít jako uhrazené",
+    "Upravit",
+    "Smazat",
+  ]) {
+    const box = await panel.getByRole("button", { name, exact: true }).boundingBox();
+    expect(box?.height, name).toBeGreaterThanOrEqual(44);
+    expect(box?.width, name).toBeGreaterThanOrEqual(44);
+  }
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+
+  await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+  await expect(badge(page, "Uhrazená")).toBeVisible();
+});
+
+test("[PAY-005] smazání platby uvádí částku a datum, Escape nezahodí rozepsané bez potvrzení", async ({
+  page,
+  freshApp,
+  smtp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL, smtp);
+  await issuedCash(page, baseURL);
+  await addPayment(page, "400");
+
+  await page.getByRole("button", { name: "Smazat" }).click();
+  await expect(page.getByTestId("remove-payment-body")).toContainText("400,00");
+  await expect(page.getByTestId("remove-payment-body")).toContainText(/ze dne \d+\. \d+\. \d{4}/);
+  await dialog(page).getByRole("button", { name: "Zpět" }).click();
+
+  await page.getByRole("button", { name: "Přidat platbu" }).click();
+  await dialog(page).getByLabel("Částka", { exact: true }).fill("0");
+  await dialog(page).getByRole("button", { name: "Uložit platbu" }).click();
+  await expect(dialog(page).getByLabel("Částka", { exact: true })).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await expect(dialog(page).getByLabel("Částka", { exact: true })).toBeFocused();
+  await expect(dialog(page).getByRole("alert")).toContainText("Zadejte částku");
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("payment-discard")).toBeVisible();
+  await dialog(page).getByRole("button", { name: "Pokračovat v úpravě" }).click();
+  await expect(dialog(page).getByLabel("Částka", { exact: true })).toHaveValue("0");
+  await page.keyboard.press("Escape");
+  await dialog(page).getByRole("button", { name: "Zahodit" }).click();
+  await expect(dialog(page)).toBeHidden();
 });
 
 test("[INV-024] hromadné označení přeskočí koncept a storno a nic neodešle", async ({

@@ -288,7 +288,15 @@ function Form(props: InvoiceFormProps) {
         return;
       }
       if (props.saved) {
-        setOffer(customerOffer(latestValues.current, reply.defaults, touched.current, accounts));
+        setOffer(
+          customerOffer(
+            latestValues.current,
+            reply.defaults,
+            touched.current,
+            accounts,
+            props.hasPayments,
+          ),
+        );
         return;
       }
       setValues((current) =>
@@ -472,9 +480,7 @@ function Form(props: InvoiceFormProps) {
       setNotices([
         ...(reply.balanceWarning === "overpaid" ? [T.overpaid] : []),
         ...(reply.balanceWarning === "underpaid" ? [T.underpaid] : []),
-        ...(reply.balanceWarning !== "none"
-          ? [T.statusAfter(TEXTS.invoices.statuses[reply.status])]
-          : []),
+        T.statusAfter(TEXTS.invoices.statuses[reply.status]),
       ]);
     } catch {
       setMessage({ ok: false, text: T.network });

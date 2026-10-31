@@ -62,7 +62,7 @@ type StageInput<R> = {
   openSince: CalendarDate;
 };
 
-function days(count: number): string {
+export function days(count: number): string {
   if (count === 1) return "1 den";
   return count >= 2 && count <= 4 ? `${count} dny` : `${count} dní`;
 }

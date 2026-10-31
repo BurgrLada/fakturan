@@ -226,6 +226,15 @@ describe("formulář faktury", () => {
     });
   });
 
+  test("[INV-023] doklad s platbou nedostane nabídku měny ani účtu", () => {
+    expect(customerOffer(form(), defaults, new Set(), accounts, true)).toEqual({
+      language: "en",
+      paymentMethod: "cash",
+      appearance: defaults.appearance,
+      dueDate: "2026-04-09",
+    });
+  });
+
   test("[INV-010] nabídka vynechá shodné a uživatelem změněné hodnoty", () => {
     const same = {
       ...defaults,

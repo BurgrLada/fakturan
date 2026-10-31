@@ -31,6 +31,7 @@ import { PaymentDialog, type PaymentView } from "./payment-dialog";
 const T = TEXTS.payments.panel;
 
 type Reply = { ok: true } | { ok: false; error: string; stale?: true; expired?: true };
+const TOUCH = "max-sm:h-11 max-sm:min-w-11";
 
 export function PaymentPanel({
   invoiceId,
@@ -58,6 +59,7 @@ export function PaymentPanel({
   const [editing, setEditing] = useState<PaymentView | "new" | null>(null);
   const [removing, setRemoving] = useState<PaymentView | null>(null);
   const [closing, setClosing] = useState(false);
+  const [expired, setExpired] = useState(false);
 
   const due = amountDue({ totalMinor, paidMinor });
 
@@ -70,7 +72,11 @@ export function PaymentPanel({
           if (done) setMessage({ ok: true, text: done });
           router.refresh();
         } else {
-          setMessage({ ok: false, text: reply.stale ? T.stale : reply.error });
+          if (reply.expired) setExpired(true);
+          setMessage({
+            ok: false,
+            text: reply.expired ? T.expired : reply.stale ? T.stale : reply.error,
+          });
         }
       } catch {
         setMessage({ ok: false, text: T.failed });
@@ -94,6 +100,8 @@ export function PaymentPanel({
       {due < 0 && (
         <p
           data-testid="payment-overpaid"
+          data-tone="warning"
+          role="status"
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-foreground"
         >
           {T.overpaid(formatMoney(-due, currency))}
@@ -134,6 +142,7 @@ export function PaymentPanel({
                   <Button
                     variant="ghost"
                     size="sm"
+                    className={TOUCH}
                     disabled={pending}
                     onClick={() => setEditing(item)}
                   >
@@ -144,6 +153,7 @@ export function PaymentPanel({
                   <Button
                     variant="ghost"
                     size="sm"
+                    className={TOUCH}
                     disabled={pending}
                     onClick={() => setRemoving(item)}
                   >
@@ -164,11 +174,13 @@ export function PaymentPanel({
                 id="mark-paid-date"
                 type="date"
                 max={today}
+                className="max-sm:h-11"
                 value={markDate}
                 onChange={(event) => setMarkDate(event.target.value)}
               />
             </div>
             <Button
+              className={TOUCH}
               disabled={pending || !markDate}
               onClick={() =>
                 perform(
@@ -181,18 +193,38 @@ export function PaymentPanel({
             </Button>
           </>
         )}
-        <Button variant="outline" disabled={pending} onClick={() => setEditing("new")}>
+        <Button
+          variant="outline"
+          className={TOUCH}
+          disabled={pending}
+          onClick={() => setEditing("new")}
+        >
           {T.add}
         </Button>
         {status === "partially_paid" && (
-          <Button variant="outline" disabled={pending} onClick={() => setClosing(true)}>
+          <Button
+            variant="outline"
+            className={TOUCH}
+            disabled={pending}
+            onClick={() => setClosing(true)}
+          >
             {T.closeAction}
           </Button>
         )}
       </div>
       {message && (
-        <Alert variant={message.ok ? "default" : "destructive"} role="status">
-          <AlertDescription>{message.text}</AlertDescription>
+        <Alert
+          variant={message.ok ? "default" : "destructive"}
+          role={message.ok ? "status" : "alert"}
+        >
+          <AlertDescription className="flex flex-col items-start gap-1">
+            {message.text}
+            {expired && (
+              <a className="underline" href="/prihlaseni">
+                {T.login}
+              </a>
+            )}
+          </AlertDescription>
         </Alert>
       )}
       <PaymentDialog
@@ -241,7 +273,12 @@ export function PaymentPanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{T.removeTitle}</AlertDialogTitle>
-            <AlertDialogDescription>{T.removeBody}</AlertDialogDescription>
+            <AlertDialogDescription data-testid="remove-payment-body">
+              {removing &&
+                T.removeBody(
+                  `${formatMoney(removing.amountMinor, removing.currency)} ze dne ${formatCalendarDate(removing.paidOn, "d. M. yyyy")}`,
+                )}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{T.removeBack}</AlertDialogCancel>

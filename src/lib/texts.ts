@@ -105,7 +105,6 @@ export const TEXTS = {
       paid: "Uhrazeno",
       outstanding: "Pohledávky",
       averageDays: "Průměrná doba úhrady",
-      days: (count: number) => (count === 1 ? "1 den" : `${count} dní`),
       noAverage: "–",
     },
     vat: {
@@ -710,6 +709,8 @@ export const TEXTS = {
       difference: "Uzavřený rozdíl",
       credited: (amount: string) => `na fakturu ${amount}`,
       failed: "Akce se nezdařila. Zkuste to znovu.",
+      expired: "Přihlášení vypršelo.",
+      login: "Přihlásit se znovu",
       stale: "Doklad se mezitím změnil. Obnovte stránku a zkuste to znovu.",
       marked: "Faktura je označená jako uhrazená.",
       closeAction: "Uzavřít jako uhrazené",
@@ -719,7 +720,8 @@ export const TEXTS = {
       closeBack: "Zpět",
       closeConfirm: "Uzavřít rozdíl",
       removeTitle: "Smazat platbu?",
-      removeBody: "Stav faktury se přepočte podle zbývajících plateb.",
+      removeBody: (what: string) =>
+        `Smazat platbu ${what}? Stav faktury se přepočte podle zbývajících plateb.`,
       removeBack: "Zpět",
       removeConfirm: "Smazat platbu",
       closedDifference: "Uzavřený rozdíl",
@@ -738,20 +740,27 @@ export const TEXTS = {
       noticeLocked: "Platba z avíza: změnit jde jen datum, způsob a poznámku.",
       save: "Uložit platbu",
       back: "Zpět",
+      discardTitle: "Zahodit rozepsané údaje?",
+      discard: "Zahodit",
+      keepEditing: "Pokračovat v úpravě",
       badAmount: "Zadejte částku větší než nula, například 1 250,50",
       badCredited: "Zadejte připsanou částku větší než nula",
     },
     bulk: {
       action: "Označit jako uhrazené",
       title: "Označit jako uhrazené?",
-      body: (count: number, sums: string) =>
-        `Počet dokladů: ${count}, celkem ${sums}. Použije se dnešní datum a nic se klientům neodešle.`,
+      body: (count: number, sums: string, skipped: number) =>
+        `Počet dokladů: ${count}, celkem ${sums}. Uhradí se zbývající částka vystavených, odeslaných i částečně uhrazených dokladů dnešním datem a nic se klientům neodešle.${
+          skipped > 0
+            ? ` Přeskočí se ${skipped}: koncepty, uhrazené, stornované a dobropisované doklady.`
+            : ""
+        }`,
       nothing: "Žádný z vybraných dokladů teď nejde označit jako uhrazený.",
       confirm: "Označit jako uhrazené",
       back: "Zpět",
       done: (done: number, skipped: number) =>
         skipped > 0
-          ? `Uhrazeno ${done}, přeskočeno ${skipped}. Označit jde jen vystavený nebo odeslaný doklad.`
+          ? `Uhrazeno ${done}, přeskočeno ${skipped}. Označit jde jen vystavený, odeslaný nebo částečně uhrazený doklad.`
           : `Uhrazeno ${done}.`,
     },
   },
@@ -1157,6 +1166,7 @@ export const TEXTS = {
       stage: "Stupeň",
       manualStage: "Bez stupně",
       send: "Odeslat upomínku",
+      unsent: "Upomínku jde poslat až po odeslání faktury, klient zatím nemá co připomínat.",
       snooze: "Odložit do",
       snoozeHint: "Nejvýš 30 dní od dneška.",
       snoozeSave: "Odložit",
