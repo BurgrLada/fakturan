@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import {
   deleteBankAccountAction,
@@ -26,7 +27,15 @@ import {
   draftFromTemplateAction,
   saveInvoiceAsTemplateAction,
 } from "@/app/(app)/faktury/sablony/actions";
-import { user } from "@/server/db/schema";
+import {
+  bulkSendAction,
+  bulkSendPreviewAction,
+  resendFromLogAction,
+  sendInvoiceAction,
+  sendPrefillAction,
+} from "@/app/(app)/faktury/actions";
+import { emailLog, user } from "@/server/db/schema";
+import { issuedInvoice, ownSmtp, seedCustomer, seedOwner } from "../helpers/fixtures-mail";
 import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accounts";
 import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
 import { listInvoices, newDraftDefaults, saveDraft } from "@/server/services/invoices";
@@ -40,6 +49,7 @@ const session = vi.hoisted(() => ({ userId: "a1" }));
 
 vi.mock("@/server/auth/session", () => ({
   requireSession: async () => ({ user: { id: session.userId } }),
+  getCurrentSession: async () => ({ user: { id: session.userId } }),
   actorFromRequest: async () => ({ userId: session.userId, source: "web" }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
@@ -67,6 +77,83 @@ const account = {
   iban: "",
   swift: "",
 };
+
+const REQUEST = "11111111-1111-4111-8111-111111111111";
+const message = {
+  requestId: REQUEST,
+  to: ["alfa@example.cz"],
+  cc: [],
+  bcc: [],
+  subject: "Faktura",
+  body: "Text",
+};
+
+describe("akce pošty", () => {
+  function mailAccount() {
+    const owner = seedOwner(db, new Date());
+    ownSmtp(db, owner, 2525);
+    const invoiceId = issuedInvoice(owner, seedCustomer(owner));
+    return { owner, invoiceId };
+  }
+
+  test("[SEC-002] akce pošty odmítnou cizí ID", async () => {
+    const mine = mailAccount();
+    const stranger = mailAccount();
+    session.userId = mine.owner;
+    const sent = await sendInvoiceAction({ id: mine.invoiceId, message });
+    if (!sent.ok) throw new Error(sent.error);
+
+    session.userId = stranger.owner;
+    const replies = [
+      await sendPrefillAction({ id: mine.invoiceId }),
+      await sendPrefillAction({ id: stranger.invoiceId, logId: sent.logId }),
+      await sendInvoiceAction({
+        id: mine.invoiceId,
+        message: { ...message, requestId: "22222222-2222-4222-8222-222222222222" },
+      }),
+      await resendFromLogAction({
+        id: sent.logId,
+        requestId: "33333333-3333-4333-8333-333333333333",
+        confirmedUnknown: true,
+      }),
+    ];
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: false });
+    expect(await bulkSendPreviewAction({ ids: [mine.invoiceId] })).toMatchObject({
+      ok: true,
+      ready: [],
+      skipped: [{ id: mine.invoiceId, number: "" }],
+    });
+    expect(await bulkSendAction({ ids: [mine.invoiceId], requestId: REQUEST })).toEqual({
+      ok: true,
+      queued: 0,
+      skipped: 1,
+    });
+    expect(
+      db.select().from(emailLog).where(eq(emailLog.invoiceId, mine.invoiceId)).all(),
+    ).toHaveLength(1);
+  });
+
+  test("[SEC-006] akce pošty odmítnou neplatnou adresu a předmět s koncem řádku", async () => {
+    const { owner, invoiceId } = mailAccount();
+    session.userId = owner;
+
+    const replies = [
+      await sendInvoiceAction({ id: invoiceId, message: { ...message, to: ["nic"] } }),
+      await sendInvoiceAction({ id: invoiceId, message: { ...message, cc: ["a@b"] } }),
+      await sendInvoiceAction({
+        id: invoiceId,
+        message: { ...message, subject: "A\r\nBcc: x@example.cz" },
+      }),
+      await sendInvoiceAction({ id: invoiceId, message: { ...message, requestId: "x" } }),
+      await resendFromLogAction({ id: "x", requestId: "x", confirmedUnknown: false }),
+      await bulkSendAction({ ids: [invoiceId], requestId: "x" }),
+    ];
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: false });
+    expect(db.select().from(emailLog).where(eq(emailLog.userId, owner)).all()).toEqual([]);
+  });
+});
 
 describe("cizí id přes server actions", () => {
   test("[TST-009] nastavení pošty platí jen pro přihlášený účet, cizí id se ignoruje", async () => {

@@ -111,7 +111,7 @@ test("[INV-004] detail ukáže stavy, verze a historii", async ({ page, freshApp
   await expect(page.getByText("Doklad zatím nemá starší verze.")).toBeVisible();
   const send = page.getByRole("button", { name: "Odeslat klientovi" });
   await expect(send).toBeDisabled();
-  await expect(page.getByText("Odesílání přijde s e-mailem")).toBeVisible();
+  await expect(page.getByText("Odesílání není dostupné")).toBeVisible();
 
   await page.getByRole("button", { name: "Označit jako odeslanou" }).click();
   await expect(page.getByText("Odeslaná", { exact: true })).toBeVisible();
@@ -120,7 +120,7 @@ test("[INV-004] detail ukáže stavy, verze a historii", async ({ page, freshApp
   await page.getByRole("button", { name: "Stornovat" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Stornovat fakturu" }).click();
   await expect(page.getByText("Stornovaná", { exact: true })).toBeVisible();
-  await expect(send).toBeDisabled();
+  await expect(send).toHaveCount(0);
   await page.getByRole("button", { name: "Vrátit storno" }).click();
   await expect(page.getByText("Odeslaná", { exact: true })).toBeVisible();
 
@@ -441,7 +441,7 @@ test("[INV-021] po obnovení verze detail upozorní na odeslání a přeplatek",
   await page.getByRole("link", { name: "Verze 1" }).click();
   await expect(page.getByTestId("version-diff")).toContainText("cena");
   await page.getByRole("button", { name: "Obnovit tuto verzi" }).click();
-  await expect(page.getByTestId("restored-notice")).toContainText("zvažte opětovné odeslání");
+  await expect(page.getByTestId("send-offer")).toContainText("zvažte opětovné odeslání");
 
   const sqlite = new Database(join(dataDir, "fakturan.db"));
   sqlite

@@ -23,12 +23,23 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
+import type { EmailStatus } from "@/lib/mail-send";
 import { SaveTemplateDialog, TemplatesLink } from "./save-template-dialog";
+import { SendDialog } from "./send-dialog";
 
 const T = TEXTS.invoices.detail;
 const TPL = TEXTS.invoices.templates.save;
+const M = TEXTS.invoiceMail;
 
 type Reply = { ok: boolean; error?: string };
+
+export type MailPanel = {
+  sendable: boolean;
+  available: boolean;
+  sending: boolean;
+  problem: { id: string; status: EmailStatus; reason: string | null } | null;
+  offer: string | null;
+};
 
 export function InvoiceActions({
   id,
@@ -37,6 +48,7 @@ export function InvoiceActions({
   restorable,
   markable,
   refreshable,
+  mail,
 }: {
   id: string;
   editable: boolean;
@@ -44,12 +56,22 @@ export function InvoiceActions({
   restorable: boolean;
   markable: boolean;
   refreshable: boolean;
+  mail: MailPanel;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [naming, setNaming] = useState(false);
+  const [sendingFrom, setSendingFrom] = useState<{ logId?: string } | null>(null);
+  const hintId = `send-unavailable-${id}`;
+  const canSend = mail.available && !mail.sending;
+
+  function sent() {
+    setSendingFrom(null);
+    if (mail.offer) router.replace(`/faktury/${id}`);
+    else router.refresh();
+  }
 
   function perform(work: () => Promise<Reply>, done?: string) {
     setMessage(null);
@@ -153,13 +175,69 @@ export function InvoiceActions({
             </AlertDialogContent>
           </AlertDialog>
         )}
-        <Button disabled aria-describedby={`send-later-${id}`}>
-          {T.send}
-        </Button>
+        {mail.sendable && (
+          <Button
+            disabled={!canSend}
+            aria-describedby={mail.available ? undefined : hintId}
+            onClick={() => setSendingFrom({})}
+          >
+            {T.send}
+          </Button>
+        )}
+        <SendDialog
+          invoiceId={id}
+          logId={sendingFrom?.logId}
+          open={sendingFrom !== null}
+          onClose={() => setSendingFrom(null)}
+          onSent={sent}
+        />
       </div>
-      <p id={`send-later-${id}`} className="text-sm text-muted-foreground">
-        {T.sendLater}
-      </p>
+      {mail.sendable && !mail.available && (
+        <p id={hintId} data-testid="send-unavailable" className="text-sm text-muted-foreground">
+          {M.detail.unavailable}{" "}
+          <Link href="/nastaveni/posta" className="underline underline-offset-4">
+            {M.detail.settings}
+          </Link>
+        </p>
+      )}
+      {mail.sending && (
+        <p data-testid="send-progress" role="status" className="text-sm text-muted-foreground">
+          {M.detail.sending}
+        </p>
+      )}
+      {mail.offer && mail.sendable && !mail.sending && (
+        <Alert role="status" data-testid="send-offer">
+          <AlertDescription className="flex flex-col items-start gap-2">
+            {mail.offer}
+            {mail.available && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canSend}
+                onClick={() => setSendingFrom({})}
+              >
+                {M.detail.offerSend}
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+      {mail.problem && !mail.sending && (
+        <Alert variant="destructive" role="status" data-testid="send-problem">
+          <AlertDescription className="flex flex-col items-start gap-2">
+            {M.detail.problem(M.statuses[mail.problem.status], mail.problem.reason ?? "")}
+            {mail.sendable && mail.available && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSendingFrom({ logId: mail.problem?.id })}
+              >
+                {mail.problem.status === "unknown" ? M.detail.manualSend : M.detail.resend}
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
       {message && (
         <Alert variant={message.ok ? "default" : "destructive"} role="status">
           <AlertDescription>

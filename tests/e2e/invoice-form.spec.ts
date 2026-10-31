@@ -47,7 +47,7 @@ test("[INV-010] vyberu zákazníka, položku z ceníku a vystavím", async ({ pa
 
   await expect(page.getByRole("heading", { name: /Faktura \S+/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Odeslat klientovi" })).toBeDisabled();
-  await expect(page.getByText("Odesílání přijde s e-mailem")).toBeVisible();
+  await expect(page.getByText("Odesílání není dostupné")).toBeVisible();
   const pdf = await issuedPdf(page);
   expect(pdf).toContain("Vývoj webu");
   expect(pdf).toContain(CUSTOMER);

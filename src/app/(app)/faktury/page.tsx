@@ -11,6 +11,7 @@ import { PageLoading } from "@/components/page-loading";
 import { buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
+import { mailAvailability } from "@/server/services/mail-settings";
 import {
   invoiceFilterOptions,
   invoiceQuery,
@@ -74,6 +75,7 @@ async function InvoicesContent({ searchParams }: Pick<PageProps<"/faktury">, "se
           key={invoiceQuery(filter)}
           rows={result.rows}
           sortLinks={invoiceSortLinks(filter)}
+          mailAvailable={mailAvailability(user.id).available}
         />
       )}
       <div className="flex gap-2">

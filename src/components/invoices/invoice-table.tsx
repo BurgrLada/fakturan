@@ -27,6 +27,7 @@ import { formatMoney } from "@/lib/money";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import type { InvoiceRow, InvoiceSort, SortLink } from "@/server/services/invoices";
+import { BulkSendDialog } from "./bulk-send-dialog";
 import { InvoiceStatusBadge } from "./invoice-status";
 
 const T = TEXTS.invoices.list;
@@ -74,14 +75,17 @@ async function downloadZip(ids: string[]): Promise<string | null> {
 export function InvoiceTable({
   rows,
   sortLinks,
+  mailAvailable,
 }: {
   rows: InvoiceRow[];
   sortLinks: Record<InvoiceSort, SortLink>;
+  mailAvailable: boolean;
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
+  const [sending, setSending] = useState<string[] | null>(null);
   const [pending, startTransition] = useTransition();
 
   const selectable = rows.filter((row) => row.status !== "draft");
@@ -159,8 +163,31 @@ export function InvoiceTable({
           <Button variant="outline" size="sm" disabled={pending || expired} onClick={markSent}>
             {T.bulk.markSent}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pending || expired || !mailAvailable}
+            onClick={() => setSending(chosen)}
+          >
+            {TEXTS.invoiceMail.bulk.action}
+          </Button>
+          {!mailAvailable && (
+            <span className="text-sm text-muted-foreground">
+              {TEXTS.invoiceMail.bulk.unavailable}
+            </span>
+          )}
         </div>
       )}
+      <BulkSendDialog
+        ids={sending ?? []}
+        open={sending !== null}
+        onClose={() => setSending(null)}
+        onDone={(text) => {
+          setSending(null);
+          setSelected(new Set());
+          setMessage({ ok: true, text });
+        }}
+      />
       {expired && (
         <Alert variant="destructive" role="alert">
           <AlertDescription className="flex flex-col items-start gap-2">

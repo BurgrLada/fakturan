@@ -18,14 +18,16 @@ const optionalEmail = (message: string) =>
     .trim()
     .refine((value) => value === "" || z.email().safeParse(value).success, message);
 
+export function splitAddresses(value: string): string[] {
+  return value
+    .split(/[,;\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 const addressList = z
   .string()
-  .transform((value) =>
-    value
-      .split(/[,;\s]+/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  )
+  .transform(splitAddresses)
   .refine(
     (items) =>
       items.length <= MAX_COPIES && items.every((item) => z.email().safeParse(item).success),

@@ -1,8 +1,10 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import * as Sentry from "@sentry/nextjs";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import type { AutomationKey } from "@/lib/automation";
 import { kindForInvoice, type MessageKind } from "@/lib/email-template";
+import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import { isSendable, sendInputSchema, type EmailTrigger, type SendInput } from "@/lib/mail-send";
 import type { CalendarDate } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
@@ -15,6 +17,8 @@ import { enqueue } from "../jobs/queue";
 import { kickWorker } from "../jobs/worker";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError } from "./access";
+import { getAutomation } from "./automation";
+import { composeMail, type MailDraft } from "./email-templates";
 import { FileNotFoundError, readOwnedFile } from "./files";
 import { InvoicePdfNotFoundError } from "./invoice-pdf";
 import { findOwned, getInvoice } from "./invoices";
@@ -23,6 +27,7 @@ import { mutate } from "./mutation";
 import { notify } from "./notifications";
 
 const E = TEXTS.invoiceMail.errors;
+const B = TEXTS.invoiceMail.bulk.reasons;
 
 // One attempt plus three repeats (R-3).
 const MAX_ATTEMPTS = 4;
@@ -274,13 +279,168 @@ const mayHaveLeft = (log: Pick<EmailLog, "status">) =>
   log.status === "sent" || log.status === "unknown";
 
 export function listEmailLog(ownerId: string, invoiceId: string) {
+  const delivered = new Set<MessageKind>();
   return db
     .select()
     .from(emailLog)
     .where(scoped(ownerId).where(emailLog, (t, { eq }) => eq(t.invoiceId, invoiceId)))
     .orderBy(desc(emailLog.createdAt), sql`rowid DESC`)
     .all()
-    .map(({ fileId, ...row }) => ({ ...row, hasArchive: fileId !== null && mayHaveLeft(row) }));
+    .map(({ fileId, ...row }) => {
+      const resendable = RESENDABLE.includes(row.status) && !delivered.has(row.kind);
+      if (mayHaveLeft(row)) delivered.add(row.kind);
+      return { ...row, hasArchive: fileId !== null && mayHaveLeft(row), resendable };
+    });
+}
+
+export type EmailLogRow = ReturnType<typeof listEmailLog>[number];
+
+// An unknown outranks a newer failure: the client may hold that message, and only a person can tell.
+export function mailStateOf(rows: EmailLogRow[]): {
+  sending: boolean;
+  problem: EmailLogRow | null;
+} {
+  const open = rows.filter((row) => row.resendable);
+  return {
+    sending: rows.some((row) => row.status === "queued" || row.status === "sending"),
+    problem: open.find((row) => row.status === "unknown") ?? open[0] ?? null,
+  };
+}
+
+export type SendPrefill = MailDraft & {
+  requestId: string;
+  unknownPending: boolean;
+  paused: boolean;
+  log: { id: string; status: EmailLog["status"]; reason: string | null } | null;
+};
+
+// The request id is born here, so reopening the dialog is a new send and a double click is not.
+export function sendPrefill(ownerId: string, invoiceId: string, logId?: string): SendPrefill {
+  const row = getInvoice(ownerId, invoiceId);
+  if (!row) throw new ServiceError(E.notFound);
+  if (!isSendable(row.status)) throw new ServiceError(E.notSendable);
+  const log = logId ? readLog(ownerId, logId) : undefined;
+  if (logId && log?.invoiceId !== invoiceId) throw new ServiceError(E.logNotFound);
+  const kind = log?.kind ?? kindForInvoice(row.type);
+  const draft = composeMail(ownerId, invoiceId, kind);
+  return {
+    ...draft,
+    ...(log && {
+      to: log.to,
+      cc: log.cc,
+      bcc: log.bcc,
+      subject: log.subject,
+      body: log.body,
+    }),
+    requestId: randomUUID(),
+    unknownPending: log?.status === "unknown" || hasUnresolvedUnknown(ownerId, invoiceId, kind),
+    paused: getAutomation(ownerId).paused,
+    log: log ? { id: log.id, status: log.status, reason: log.reason } : null,
+  };
+}
+
+function isRunning(ownerId: string, invoiceId: string, kind: MessageKind): boolean {
+  const row = db
+    .select({ id: emailLog.id })
+    .from(emailLog)
+    .where(
+      scoped(ownerId).where(emailLog, (t, { and, eq }) =>
+        and(eq(t.invoiceId, invoiceId), eq(t.kind, kind), inArray(t.status, ["queued", "sending"])),
+      ),
+    )
+    .get();
+  return row !== undefined;
+}
+
+type BulkVerdict =
+  | { number: string; customer: string; kind: MessageKind; draft: MailDraft; reason?: never }
+  | { number: string; reason: string };
+
+// Bulk has no way to ask, so everything a single send would confirm or refuse is a skip here.
+function judgeBulk(ownerId: string, invoiceId: string): BulkVerdict {
+  const row = getInvoice(ownerId, invoiceId);
+  if (!row) return { number: "", reason: B.notFound };
+  const number = row.number ?? TEXTS.invoices.statuses.draft;
+  if (row.status !== "issued") return { number, reason: B.status };
+  const kind = kindForInvoice(row.type);
+  if (hasUnresolvedUnknown(ownerId, invoiceId, kind)) return { number, reason: B.unknown };
+  if (isRunning(ownerId, invoiceId, kind)) return { number, reason: B.sending };
+  let draft: MailDraft;
+  try {
+    draft = composeMail(ownerId, invoiceId, kind);
+  } catch (error) {
+    if (error instanceof ServiceError) return { number, reason: error.message };
+    throw error;
+  }
+  if (draft.to.length === 0) return { number, reason: B.noAddress };
+  const checked = sendInputSchema.safeParse({ ...draft, requestId: randomUUID() });
+  if (!checked.success) {
+    return { number, reason: checked.error.issues[0]?.message ?? E.invalid };
+  }
+  return { number, customer: row.customerName, kind, draft };
+}
+
+export function bulkSendPreview(ownerId: string, ids: string[]) {
+  const ready: { id: string; number: string; customer: string; to: string[]; copies: string[] }[] =
+    [];
+  const skipped: { id: string; number: string; reason: string }[] = [];
+  for (const id of new Set(ids)) {
+    const verdict = judgeBulk(ownerId, id);
+    if (verdict.reason !== undefined) {
+      skipped.push({ id, number: verdict.number, reason: verdict.reason });
+      continue;
+    }
+    const { number, customer, draft } = verdict;
+    ready.push({ id, number, customer, to: draft.to, copies: [...draft.cc, ...draft.bcc] });
+  }
+  return { ready, skipped };
+}
+
+export function bulkSend(
+  actor: Actor,
+  ids: string[],
+  requestId: string,
+): { queued: number; skipped: number } {
+  const userId = ownerOf(actor);
+  const unique = [...new Set(ids)];
+  if (unique.length > MAX_BULK_DOCUMENTS) {
+    throw new ServiceError(TEXTS.invoices.list.bulk.tooMany(MAX_BULK_DOCUMENTS));
+  }
+  enforceRateLimit(actor, RATE_RULES.sendBulkUser);
+  enforceRateLimit(actor, RATE_RULES.sendUser);
+  if (!mailAvailability(userId).available) throw new ServiceError(E.unavailable);
+
+  let queued = 0;
+  for (const invoiceId of unique) {
+    const key = `${requestKey(userId, requestId)}:${invoiceId}`;
+    if (loggedRequest(userId, key)) {
+      queued += 1;
+      continue;
+    }
+    try {
+      mutate(actor, "invoice.send", (tx, audit) => {
+        const verdict = judgeBulk(userId, invoiceId);
+        if (verdict.reason !== undefined) throw new ServiceError(verdict.reason);
+        const { to, cc, bcc, subject, body } = verdict.draft;
+        const message = { to, cc, bcc, subject, body };
+        const { kind } = verdict;
+        const result = queueMail(tx, audit, {
+          userId,
+          invoiceId,
+          kind,
+          trigger: "bulk",
+          key,
+          message,
+        });
+        if (!result) throw new ServiceError(E.alreadySending);
+      });
+      queued += 1;
+    } catch (error) {
+      if (!(error instanceof ServiceError)) Sentry.captureException(error);
+    }
+  }
+  if (queued > 0) kickWorker();
+  return { queued, skipped: unique.length - queued };
 }
 
 export function archivedPdf(

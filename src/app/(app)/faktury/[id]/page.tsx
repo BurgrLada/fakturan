@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { EntityHistory } from "@/components/audit/entity-history";
+import { EmailHistory } from "@/components/invoices/email-history";
 import { InvoiceActions } from "@/components/invoices/invoice-actions";
 import { InvoiceStatusBadge } from "@/components/invoices/invoice-status";
 import { VersionList } from "@/components/invoices/version-list";
@@ -12,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
 import { isOverdue } from "@/lib/invoice";
+import { isSendable } from "@/lib/mail-send";
 import { invoiceDocument } from "@/lib/invoice-document";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague } from "@/lib/number-format";
@@ -21,7 +23,9 @@ import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
 import { EDITABLE_STATUSES, listVersions } from "@/server/services/invoice-versions";
+import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
+import { mailAvailability } from "@/server/services/mail-settings";
 
 const T = TEXTS.invoices.detail;
 
@@ -63,15 +67,24 @@ function restoredNotices(query: Record<string, string | string[] | undefined>): 
   const F = TEXTS.invoices.form;
   return [
     TEXTS.invoices.versions.restored,
-    ...(query.odeslat === "1" ? [F.resend] : []),
     ...(query.zustatek === "overpaid" ? [F.overpaid] : []),
     ...(query.zustatek === "underpaid" ? [F.underpaid] : []),
   ];
 }
 
+// The query only opens the offer: sending always takes a click in the dialog.
+function sendOffer(
+  query: Record<string, string | string[] | undefined>,
+  available: boolean,
+): string | null {
+  if (query.odeslat === "1") return TEXTS.invoices.form.resend;
+  return query.vystaveno === "1" && available ? TEXTS.invoiceMail.detail.offerIssued : null;
+}
+
 async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]">) {
   const { id } = await params;
-  const notices = restoredNotices(await searchParams);
+  const query = await searchParams;
+  const notices = restoredNotices(query);
   const { user } = await requireSession();
   const row = getInvoice(user.id, id);
   if (!row) notFound();
@@ -80,6 +93,10 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
   const today = calendarDateInPrague(clock.now());
   const editable = EDITABLE_STATUSES.has(row.status);
   const qr = qrStateOf(invoiceDocument(row));
+  const emails = listEmailLog(user.id, id);
+  const { sending, problem } = mailStateOf(emails);
+  const sendable = isSendable(row.status);
+  const { available } = mailAvailability(user.id);
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
@@ -125,6 +142,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         restorable={row.status === "cancelled" && row.cancelledFrom !== null}
         markable={row.status === "issued"}
         refreshable={editable && row.customerId !== null}
+        mail={{ sendable, available, sending, problem, offer: sendOffer(query, available) }}
       />
       <section className="flex flex-col gap-3">
         <h2 className="text-lg">{T.statusTitle}</h2>
@@ -136,6 +154,15 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
       <section className="flex flex-col gap-3 sm:max-w-xl">
         <h2 className="text-lg">{TEXTS.invoices.versions.title}</h2>
         <VersionList invoiceId={id} versions={listVersions(user.id, id)} />
+      </section>
+      <section className="flex flex-col gap-3 sm:max-w-xl">
+        <h2 className="text-lg">{TEXTS.invoiceMail.history.title}</h2>
+        <EmailHistory
+          invoiceId={id}
+          rows={emails}
+          sending={sending}
+          canResend={sendable && available}
+        />
       </section>
       <section className="flex flex-col gap-3 sm:max-w-xl">
         <h2 className="text-lg">{T.historyTitle}</h2>

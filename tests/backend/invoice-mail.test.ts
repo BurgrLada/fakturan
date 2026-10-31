@@ -19,16 +19,23 @@ import { drainJobs } from "@/server/jobs/worker";
 import { RATE_RULES } from "@/server/rate-limit";
 import { RateLimitError, ServiceError } from "@/server/services/access";
 import { archiveSentPdf, deleteFile } from "@/server/services/files";
-import { cancelInvoice } from "@/server/services/invoice-lifecycle";
+import { cancelInvoice, markSent } from "@/server/services/invoice-lifecycle";
+import { getInvoice } from "@/server/services/invoices";
+import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import {
   archivedPdf,
+  bulkSend,
+  bulkSendPreview,
   hasUnresolvedUnknown,
   listEmailLog,
+  mailStateOf,
   queueMail,
   resendFromLog,
   sendInvoice,
+  sendPrefill,
 } from "@/server/services/invoice-mail";
 import { InvoicePdfNotFoundError } from "@/server/services/invoice-pdf";
+import { setPaused } from "@/server/services/automation";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import { mutate } from "@/server/services/mutation";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
@@ -43,6 +50,7 @@ import {
 } from "../helpers/fixtures-mail";
 import { assertIsolated } from "../helpers/isolation";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
+import { TEXTS } from "@/lib/texts";
 
 const session = vi.hoisted(() => ({ userId: null as string | null }));
 vi.mock("@/server/auth/session", () => ({
@@ -465,6 +473,266 @@ describe("archiv", () => {
       ServiceError,
     );
     expect(db.select().from(file).where(eq(file.userId, other.owner)).all()).toEqual([]);
+  });
+});
+
+const B = TEXTS.invoiceMail.bulk.reasons;
+
+async function leaveUnknown(owner: string, invoiceId: string) {
+  smtp.dropDuringData();
+  const { logId } = sendInvoice(webActor(owner), invoiceId, input());
+  await drainJobs(WORKER);
+  expect(logsOf(owner).find((log) => log.id === logId)?.status).toBe("unknown");
+  return logId;
+}
+
+describe("sendPrefill", () => {
+  test("[MAIL-002] předvyplní zprávu ze šablony včetně stálých kopií, příjemců a nového requestId", () => {
+    const owner = seedOwner(db, T0);
+    ownSmtp(db, owner, smtp.port, { cc: ["ucetni@example.cz"], bcc: ["archiv@example.cz"] });
+    const invoiceId = issuedInvoice(owner);
+
+    const first = sendPrefill(owner, invoiceId);
+    expect(first).toMatchObject({
+      to: ["alfa@example.cz"],
+      cc: ["ucetni@example.cz"],
+      bcc: ["archiv@example.cz"],
+      unknownPending: false,
+      paused: false,
+      log: null,
+    });
+    expect(first.subject).toContain(getInvoice(owner, invoiceId)?.number);
+    expect(first.attachmentName).toMatch(/\.pdf$/);
+    expect(first.requestId).not.toBe(sendPrefill(owner, invoiceId).requestId);
+  });
+
+  test("řekne, že hlavní vypínač je vypnutý, a ruční odeslání přesto projde", async () => {
+    const { owner, invoiceId } = account();
+    setPaused(webActor(owner), true, { confirmed: true });
+    const draft = sendPrefill(owner, invoiceId);
+    expect(draft.paused).toBe(true);
+
+    const { to, cc, bcc, subject, body, requestId } = draft;
+    sendInvoice(webActor(owner), invoiceId, { to, cc, bcc, subject, body, requestId });
+    await drainJobs(WORKER);
+    expect(logsOf(owner)).toMatchObject([{ status: "sent" }]);
+  });
+
+  test("hlásí nevyřešené unknown, dokud nepřijde novější doručení", async () => {
+    const { owner, invoiceId } = account();
+    await leaveUnknown(owner, invoiceId);
+    expect(sendPrefill(owner, invoiceId).unknownPending).toBe(true);
+
+    sendInvoice(webActor(owner), invoiceId, input({ confirmedUnknown: true }));
+    await drainJobs(WORKER);
+    expect(sendPrefill(owner, invoiceId).unknownPending).toBe(false);
+  });
+
+  test("ze záznamu vezme jeho příjemce a předmět a odmítne stornovaný doklad i cizí záznam", async () => {
+    const { owner, invoiceId } = account();
+    const logId = await leaveUnknown(owner, invoiceId);
+
+    expect(sendPrefill(owner, invoiceId, logId)).toMatchObject({
+      to: ["alfa@example.cz"],
+      subject: "Faktura",
+      unknownPending: true,
+      log: { id: logId, status: "unknown" },
+    });
+    const other = account();
+    expect(fail(() => sendPrefill(other.owner, other.invoiceId, logId))).toBe(
+      TEXTS.invoiceMail.errors.logNotFound,
+    );
+    cancelInvoice(webActor(owner), invoiceId);
+    expect(fail(() => sendPrefill(owner, invoiceId))).toBe(TEXTS.invoiceMail.errors.notSendable);
+  });
+});
+
+describe("stav pošty na dokladu", () => {
+  test("[MAIL-005] selhání je vidět s důvodem a záznam jde poslat znovu", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(550);
+    sendInvoice(webActor(owner), invoiceId, input());
+    await drainJobs(WORKER);
+
+    const rows = listEmailLog(owner, invoiceId);
+    expect(rows).toMatchObject([{ status: "failed", resendable: true }]);
+    expect(rows[0].reason).toBeTruthy();
+    expect(mailStateOf(rows)).toMatchObject({ sending: false, problem: { status: "failed" } });
+  });
+
+  test("po novějším doručení starý záznam nejde poslat znovu a problém zmizí", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(550);
+    sendInvoice(webActor(owner), invoiceId, input());
+    await drainJobs(WORKER);
+    sendInvoice(webActor(owner), invoiceId, input());
+    expect(mailStateOf(listEmailLog(owner, invoiceId))).toMatchObject({ sending: true });
+    await drainJobs(WORKER);
+
+    const rows = listEmailLog(owner, invoiceId);
+    expect(rows).toMatchObject([
+      { status: "sent", resendable: false },
+      { status: "failed", resendable: false },
+    ]);
+    expect(mailStateOf(rows)).toEqual({ sending: false, problem: null });
+  });
+
+  test("unknown má přednost před novějším selháním, klient zprávu možná má", async () => {
+    const { owner, invoiceId } = account();
+    await leaveUnknown(owner, invoiceId);
+    smtp.rejectNext(550);
+    sendInvoice(webActor(owner), invoiceId, input({ confirmedUnknown: true }));
+    await drainJobs(WORKER);
+    expect(mailStateOf(listEmailLog(owner, invoiceId)).problem?.status).toBe("unknown");
+  });
+});
+
+describe("hromadné odeslání", () => {
+  function batch(count: number, cc: string[] = [], bcc: string[] = []) {
+    const owner = seedOwner(db, T0);
+    ownSmtp(db, owner, smtp.port, { cc, bcc });
+    return {
+      owner,
+      ids: Array.from({ length: count }, () => issuedInvoice(owner)),
+    };
+  }
+
+  test("[MAIL-008] souhrn ukáže příjemce a přeskočené s důvodem", async () => {
+    const { owner, ids } = batch(3, ["ucetni@example.cz"]);
+    const [ready, sentOne, unknownOne] = ids;
+    markSent(webActor(owner), sentOne);
+    await leaveUnknown(owner, unknownOne);
+    const noAddress = issuedInvoice(owner, seedCustomer(owner, ""));
+    const running = issuedInvoice(owner);
+    sendInvoice(webActor(owner), running, input());
+    const draft = draftFor(owner, seedCustomer(owner)).id;
+    const foreign = batch(1).ids[0];
+
+    const preview = bulkSendPreview(owner, [
+      ready,
+      sentOne,
+      unknownOne,
+      noAddress,
+      running,
+      draft,
+      foreign,
+    ]);
+
+    expect(preview.ready).toMatchObject([
+      {
+        id: ready,
+        number: getInvoice(owner, ready)?.number,
+        customer: "Alfa s.r.o.",
+        to: ["alfa@example.cz"],
+        copies: ["ucetni@example.cz"],
+      },
+    ]);
+    const reasons = Object.fromEntries(preview.skipped.map((s) => [s.id, s.reason]));
+    expect(reasons).toEqual({
+      [sentOne]: B.status,
+      [unknownOne]: B.unknown,
+      [noAddress]: B.noAddress,
+      [running]: B.sending,
+      [draft]: B.status,
+      [foreign]: B.notFound,
+    });
+    expect(preview.skipped.find((s) => s.id === foreign)?.number).toBe("");
+  });
+
+  test("[MAIL-008] hromadné odeslání 3 dokladů pošle 3 zprávy se stálými kopiemi a přeskočí koncept", async () => {
+    const { owner, ids } = batch(3, ["ucetni@example.cz"], ["archiv@example.cz"]);
+    const draft = draftFor(owner, seedCustomer(owner)).id;
+
+    expect(bulkSend(webActor(owner), [...ids, draft], randomUUID())).toEqual({
+      queued: 3,
+      skipped: 1,
+    });
+    await drainJobs(WORKER);
+
+    const logs = logsOf(owner);
+    expect(logs).toHaveLength(3);
+    for (const log of logs) {
+      expect(log).toMatchObject({
+        status: "sent",
+        trigger: "bulk",
+        cc: ["ucetni@example.cz"],
+        bcc: ["archiv@example.cz"],
+      });
+    }
+    expect(smtp.messages).toHaveLength(3);
+    for (const mail of smtp.messages) {
+      expect(mail.to.toSorted()).toEqual([
+        "alfa@example.cz",
+        "archiv@example.cz",
+        "ucetni@example.cz",
+      ]);
+      expect(mail.attachments).toHaveLength(1);
+    }
+    for (const id of ids) expect(getInvoice(owner, id)?.status).toBe("sent");
+    expect(getInvoice(owner, draft)?.status).toBe("draft");
+  });
+
+  test("hromadné odeslání přeskočí doklad s unknown a nikdy ho nepotvrdí", async () => {
+    const { owner, ids } = batch(2);
+    await leaveUnknown(owner, ids[0]);
+
+    expect(bulkSend(webActor(owner), ids, randomUUID())).toEqual({ queued: 1, skipped: 1 });
+    await drainJobs(WORKER);
+    expect(logsOf(owner).filter((log) => log.invoiceId === ids[0])).toMatchObject([
+      { status: "unknown" },
+    ]);
+  });
+
+  test("server stav vyhodnotí znovu: storno po náhledu se neodešle", () => {
+    const { owner, ids } = batch(2);
+    bulkSendPreview(owner, ids);
+    cancelInvoice(webActor(owner), ids[0]);
+    expect(bulkSend(webActor(owner), ids, randomUUID())).toEqual({ queued: 1, skipped: 1 });
+  });
+
+  test("selhání jednoho dokladu nezastaví ostatní", () => {
+    const { owner, ids } = batch(2);
+    const broken = draftFor(owner, seedCustomer(owner)).id;
+    const badCustomer = seedCustomer(owner);
+    const badInvoice = issuedInvoice(owner, badCustomer);
+    db.run(sql`UPDATE customer SET email = 'neplatna' WHERE id = ${badCustomer}`);
+
+    expect(bulkSend(webActor(owner), [badInvoice, broken, ...ids], randomUUID())).toEqual({
+      queued: 2,
+      skipped: 2,
+    });
+  });
+
+  test("opakovaný stejný požadavek nic nezdvojí", async () => {
+    const { owner, ids } = batch(2);
+    const requestId = randomUUID();
+    bulkSend(webActor(owner), ids, requestId);
+    expect(bulkSend(webActor(owner), [...ids, ...ids], requestId)).toEqual({
+      queued: 2,
+      skipped: 0,
+    });
+    await drainJobs(WORKER);
+    expect(smtp.messages).toHaveLength(2);
+  });
+
+  test("odmítne víc dokladů než limit, bez SMTP nic nezařadí a drží rate limit", () => {
+    const { owner, ids } = batch(1);
+    const tooMany = Array.from({ length: MAX_BULK_DOCUMENTS + 1 }, () => randomUUID());
+    expect(fail(() => bulkSend(webActor(owner), tooMany, randomUUID()))).toBe(
+      TEXTS.invoices.list.bulk.tooMany(MAX_BULK_DOCUMENTS),
+    );
+
+    const bare = seedOwner(db, T0);
+    const invoiceId = issuedInvoice(bare);
+    expect(fail(() => bulkSend(webActor(bare), [invoiceId], randomUUID()))).toBe(
+      TEXTS.invoiceMail.errors.unavailable,
+    );
+    expect(logsOf(bare)).toEqual([]);
+
+    for (let i = 0; i < RATE_RULES.sendBulkUser.limit; i += 1) {
+      bulkSend(webActor(owner), ids, randomUUID());
+    }
+    expect(() => bulkSend(webActor(owner), ids, randomUUID())).toThrow(RateLimitError);
   });
 });
 

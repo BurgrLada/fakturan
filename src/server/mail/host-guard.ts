@@ -39,9 +39,12 @@ for (const [network, prefix] of V6_RANGES) blockedV6.addSubnet(network, prefix, 
 
 export class BlockedHostError extends Error {
   // A DNS outage may pass, so delivery can retry; users see the same refusal either way.
-  constructor(readonly temporary = false) {
+  temporary: boolean;
+
+  constructor(temporary = false) {
     super("Hostitel pošty není povolený");
     this.name = "BlockedHostError";
+    this.temporary = temporary;
   }
 }
 

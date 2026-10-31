@@ -26,10 +26,11 @@ export async function addSupplier(page: Page, baseURL: string) {
   await expect(page.getByText("Uloženo.").first()).toBeVisible();
 }
 
-export async function addCustomer(page: Page, baseURL: string, name = CUSTOMER) {
+export async function addCustomer(page: Page, baseURL: string, name = CUSTOMER, email = "") {
   await page.goto(`${baseURL}/zakaznici/novy`);
   await page.waitForLoadState("networkidle");
   await page.getByLabel("Název nebo jméno").fill(name);
+  if (email) await page.getByLabel("E-mail pro fakturaci").fill(email);
   await page.getByRole("button", { name: "Uložit" }).click();
   await expect(page.getByRole("heading", { name: "Karta zákazníka" })).toBeVisible();
 }
@@ -69,14 +70,20 @@ export async function fillLine(page: Page, index: number, name: string, price: s
   await page.getByLabel("Cena za jednotku").nth(index).fill(price);
 }
 
-export async function issue(page: Page) {
+export async function issueWithOffer(page: Page) {
   await page.getByRole("button", { name: "Vystavit" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Vystavit" }).click();
-  await page.waitForURL(/\/faktury\/[^/]+$/);
+  await page.waitForURL(/\/faktury\/[^/?]+\?vystaveno=1$/);
+}
+
+// Leaves the plain detail URL, which tests extend with /pdf or /upravit.
+export async function issue(page: Page) {
+  await issueWithOffer(page);
+  await page.goto(page.url().split("?")[0]);
 }
 
 export async function issuedPdf(page: Page) {
-  const response = await page.request.get(`${page.url()}/pdf`);
+  const response = await page.request.get(`${page.url().split("?")[0]}/pdf`);
   expect(response.status()).toBe(200);
   return (await pdfText(await response.body())).join("\n");
 }

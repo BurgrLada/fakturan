@@ -16,10 +16,6 @@ SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 ARC-007	Odeslání frontu používá, pravidelné faktury a upomínky zatím ne	plán 4
 ADM-005	Zastavení úloh hotové, chybí nabídka zmeškaných pravidelných faktur po reaktivaci	plán 4
 SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
-SET-053	Dialog odeslání a jeho nedostupnost bez SMTP chybí, ukazuje to jen stránka Pošta	plán 4
-MAIL-002	Skládání zprávy hotové, dialog s předvyplněním chybí	plán 4
-MAIL-005	Fronta a opakování hotové, selhání zatím není vidět na faktuře	plán 4
-MAIL-006	Historie a archiv hotové ve službě a trase, detail faktury je neukazuje	plán 4
 REC-013	Selhání a opakování odeslání hotové, běh pravidelné faktury chybí	plán 4
 REC-032	Stráž při doručení hotová, doběh termínů pravidelných faktur chybí	plán 4
 TST-005	Ověřené odeslání a zadržení ve frontě, chybí pravidelné faktury a upomínky	plán 4

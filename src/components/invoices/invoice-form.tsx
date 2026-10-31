@@ -152,6 +152,7 @@ function Form(props: InvoiceFormProps) {
   const locked = lock !== null;
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [notices, setNotices] = useState<string[]>([]);
+  const [resendOffer, setResendOffer] = useState(false);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<IssueSummary | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -416,7 +417,7 @@ function Form(props: InvoiceFormProps) {
         variableSymbol,
       });
       if (issued.ok) {
-        router.push(`/faktury/${issued.id}`);
+        router.push(`/faktury/${issued.id}?vystaveno=1`);
         return;
       }
       if (issued.stale || issued.expired) {
@@ -441,6 +442,7 @@ function Form(props: InvoiceFormProps) {
   async function saveIssued() {
     setMessage(null);
     setNotices([]);
+    setResendOffer(false);
     if (!result.ok) {
       focusFirstInvalid();
       return;
@@ -464,8 +466,8 @@ function Form(props: InvoiceFormProps) {
       savedIssued.current = JSON.stringify([values, tags, number, symbol]);
       setRevision(reply.revision);
       setMessage({ ok: true, text: T.saved });
+      setResendOffer(reply.resendSuggested);
       setNotices([
-        ...(reply.resendSuggested ? [T.resend] : []),
         ...(reply.balanceWarning === "overpaid" ? [T.overpaid] : []),
         ...(reply.balanceWarning === "underpaid" ? [T.underpaid] : []),
       ]);
@@ -552,6 +554,16 @@ function Form(props: InvoiceFormProps) {
             <AlertDescription>
               {message.text}
               {message.ok && message.text === TPL.saved && <TemplatesLink />}
+            </AlertDescription>
+          </Alert>
+        )}
+        {resendOffer && (
+          <Alert role="status" data-testid="send-offer">
+            <AlertDescription className="flex flex-col items-start gap-2">
+              {T.resend}
+              <a className="underline underline-offset-4" href={`/faktury/${id}?odeslat=1`}>
+                {TEXTS.invoiceMail.detail.offerSend}
+              </a>
             </AlertDescription>
           </Alert>
         )}

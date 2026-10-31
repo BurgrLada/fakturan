@@ -1,13 +1,16 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
 import { daysBetween, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import type { CustomerDefaults } from "@/lib/invoice-form";
+import { sendInputSchema } from "@/lib/mail-send";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
+import { getAutomation } from "@/server/services/automation";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
 import { customerInputSchema, saveCustomer, searchCustomers } from "@/server/services/customers";
 import {
@@ -21,6 +24,13 @@ import {
   restoreInvoice,
   type IssueProblem,
 } from "@/server/services/invoice-lifecycle";
+import {
+  bulkSend,
+  bulkSendPreview,
+  resendFromLog,
+  sendInvoice,
+  sendPrefill,
+} from "@/server/services/invoice-mail";
 import {
   refreshCustomerSnapshot,
   restoreVersion,
@@ -66,6 +76,11 @@ const issueInput = z.object({
   variableSymbol: z.string(V.invalid).optional(),
 });
 const updateInput = z.object({ id, tags, document: issuedInputSchema });
+const requestId = z.uuid(TEXTS.invoiceMail.errors.invalid);
+const prefillInput = z.object({ id, logId: id.optional() });
+const sendInput = z.object({ id, message: sendInputSchema });
+const resendInput = z.object({ id, requestId, confirmedUnknown: z.boolean(V.invalid) });
+const bulkInput = idsInput.extend({ requestId });
 const lineInput = z.object({
   name: z.string(V.invalid),
   description: z.string(V.invalid).optional(),
@@ -254,6 +269,47 @@ export async function refreshCustomerAction(raw: unknown) {
 export async function restoreVersionAction(raw: unknown) {
   return run(idInput, raw, ({ id: versionId }, actor) => {
     const result = restoreVersion(actor, versionId);
+    changedInvoices();
+    return result;
+  });
+}
+
+export async function sendPrefillAction(raw: unknown) {
+  return run(prefillInput, raw, ({ id: invoiceId, logId }, actor) => ({
+    draft: sendPrefill(ownerOf(actor), invoiceId, logId),
+  }));
+}
+
+export async function sendInvoiceAction(raw: unknown) {
+  return run(sendInput, raw, ({ id: invoiceId, message }, actor) => {
+    const queued = sendInvoice(actor, invoiceId, message);
+    changedInvoices();
+    return queued;
+  });
+}
+
+export async function resendFromLogAction(raw: unknown) {
+  return run(resendInput, raw, ({ id: logId, ...opts }, actor) => {
+    const queued = resendFromLog(actor, logId, opts);
+    changedInvoices();
+    return queued;
+  });
+}
+
+export async function bulkSendPreviewAction(raw: unknown) {
+  return run(idsInput, raw, ({ ids }, actor) => {
+    const owner = ownerOf(actor);
+    return {
+      ...bulkSendPreview(owner, ids),
+      paused: getAutomation(owner).paused,
+      requestId: randomUUID(),
+    };
+  });
+}
+
+export async function bulkSendAction(raw: unknown) {
+  return run(bulkInput, raw, ({ ids, requestId: request }, actor) => {
+    const result = bulkSend(actor, ids, request);
     changedInvoices();
     return result;
   });
