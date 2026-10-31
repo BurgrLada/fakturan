@@ -22,6 +22,7 @@ import {
   invoiceTemplate,
   invoiceVersion,
   job,
+  bankMailbox,
   emailTemplate,
   mailSettings,
   notification,
@@ -84,6 +85,7 @@ export const USER_OWNED_TABLES = [
   automationSettings,
   notification,
   mailSettings,
+  bankMailbox,
   emailTemplate,
 ];
 

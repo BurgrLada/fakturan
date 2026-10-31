@@ -13,6 +13,7 @@ export * from "./invoice";
 export * from "./invoice-version";
 export * from "./invoice-template";
 export * from "./payment";
+export * from "./bank";
 export * from "./recurring";
 export * from "./job";
 export * from "./automation";

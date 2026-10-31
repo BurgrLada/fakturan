@@ -90,7 +90,7 @@ odeslání není dostupné a PDF se stahuje ručně.
 
 Adresa vlastního serveru je cizí vstup, proto aplikace odmítne privátní, lokální a metadatové adresy
 a kontroluje je znovu při každém spojení, i po překladu DNS (ochrana SSRF). Na vlastní síti to vypne
-`ALLOW_PRIVATE_MAIL_HOSTS=1`, což je vhodné jen tam, kde všem uživatelům instance důvěřujete.
+`ALLOW_PRIVATE_MAIL_HOSTS=1` (platí i pro IMAP schránku s avízy z banky), což je vhodné jen tam, kde všem uživatelům instance důvěřujete.
 
 ## Provoz za reverzní proxy
 

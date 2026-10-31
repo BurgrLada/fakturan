@@ -13,6 +13,7 @@ const TABS = [
   { href: "/nastaveni/vychozi", label: TEXTS.settings.defaults },
   { href: "/nastaveni/designy", label: TEXTS.settings.designs },
   { href: "/nastaveni/posta", label: TEXTS.settings.mail },
+  { href: "/nastaveni/aviza", label: TEXTS.settings.bankMailbox },
   { href: "/nastaveni/automatizace", label: TEXTS.settings.automation },
   { href: "/nastaveni/historie", label: TEXTS.settings.history },
 ];

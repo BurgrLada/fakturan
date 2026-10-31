@@ -11,7 +11,6 @@ QR-002	Důvod chybějícího QR ukáže jen detail, formulář konceptu ne	plán
 FOR-005	Upozornění v UI nemá e2e test, ověřený je jen backend	plán 6
 CUS-008	Obnovení údajů zákazníka nemá e2e test tlačítka na detailu	plán 6
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
-SEC-007	Ochrana platí pro SMTP, IMAP chybí	plán 5
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 UI-011	Chybí nespárované platby a nerozpoznaná avíza (plán 5) a blížící se limity, spec je nedefinuje (plán 8)	plán 5, plán 8
 INV-024	Chybí export (plán 8)	plán 8

@@ -2,7 +2,8 @@ import "server-only";
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 
-const ALLOWED_PORTS = new Set([25, 465, 587, 2525]);
+const SMTP_PORTS: readonly number[] = [25, 465, 587, 2525];
+export const IMAP_PORTS: readonly number[] = [143, 993];
 
 const V4_RANGES: [string, number][] = [
   ["0.0.0.0", 8],
@@ -67,7 +68,7 @@ async function resolveAll(host: string): Promise<string[]> {
 export async function assertPublicHost(
   host: string,
   port: number,
-  opts: { allowPrivate: boolean },
+  opts: { allowPrivate: boolean; ports?: readonly number[] },
 ): Promise<{ address: string; isPrivate: boolean }> {
   const addresses = await resolveAll(host);
   const [address] = addresses;
@@ -75,6 +76,6 @@ export async function assertPublicHost(
   if (!opts.allowPrivate && addresses.some(isPrivateAddress)) throw new BlockedHostError();
   // The caller connects to this one address, so it alone decides which limits the exception lifts.
   const isPrivate = isPrivateAddress(address);
-  if (!isPrivate && !ALLOWED_PORTS.has(port)) throw new BlockedHostError();
+  if (!isPrivate && !(opts.ports ?? SMTP_PORTS).includes(port)) throw new BlockedHostError();
   return { address, isPrivate };
 }

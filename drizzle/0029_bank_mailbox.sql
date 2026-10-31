@@ -1,0 +1,22 @@
+CREATE TABLE `bank_mailbox` (
+	`user_id` text PRIMARY KEY NOT NULL,
+	`host` text NOT NULL,
+	`port` integer NOT NULL,
+	`tls` text NOT NULL,
+	`username` text NOT NULL,
+	`password_enc` text NOT NULL,
+	`folder` text DEFAULT 'INBOX' NOT NULL,
+	`enabled` integer DEFAULT true NOT NULL,
+	`require_confirmation` integer DEFAULT true NOT NULL,
+	`uid_validity` integer,
+	`last_uid` integer,
+	`first_read_at` integer,
+	`last_check_at` integer,
+	`last_success_at` integer,
+	`last_notice_at` integer,
+	`failure_code` text,
+	`failures` integer DEFAULT 0 NOT NULL,
+	`verified_at` integer,
+	`updated_at` integer NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+);

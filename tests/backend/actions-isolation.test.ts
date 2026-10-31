@@ -16,6 +16,11 @@ import {
   setDefaultSeriesAction,
   setNextNumberAction,
 } from "@/app/(app)/nastaveni/rady/actions";
+import {
+  clearBankMailboxAction,
+  saveBankMailboxAction,
+  testBankMailboxAction,
+} from "@/app/(app)/nastaveni/aviza/actions";
 import { saveMailSettingsAction } from "@/app/(app)/nastaveni/posta/actions";
 import {
   resetEmailTemplateAction,
@@ -64,6 +69,7 @@ import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accoun
 import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
 import { getInvoice, listInvoices, newDraftDefaults, saveDraft } from "@/server/services/invoices";
 import { getEmailTemplate } from "@/server/services/email-templates";
+import { getBankMailbox } from "@/server/services/bank-mailbox";
 import { getMailSettings } from "@/server/services/mail-settings";
 import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
@@ -303,6 +309,31 @@ describe("cizí id přes server actions", () => {
     expect(result).toEqual({ ok: true });
     expect(getMailSettings("m1").senderName).toBe("Jméno m1");
     expect(getMailSettings("m2").senderName).toBeNull();
+  });
+
+  test("[SEC-002] akce schránky odmítnou cizí účet a cizí id se ignoruje", async () => {
+    seed("b1");
+    seed("b2");
+    const mailbox = {
+      host: "8.8.8.8",
+      port: "993",
+      tls: "implicit",
+      username: "avizo",
+      password: "tajne-heslo-imap",
+      folder: "",
+      enabled: true,
+      requireConfirmation: true,
+    };
+
+    session.userId = "b1";
+    expect(await saveBankMailboxAction({ ...mailbox, userId: "b2" })).toEqual({ ok: true });
+    expect(getBankMailbox("b1")).toMatchObject({ host: "8.8.8.8", hasCredentials: true });
+    expect(getBankMailbox("b2")).toBeNull();
+
+    session.userId = "b2";
+    expect(await clearBankMailboxAction()).toEqual({ ok: true });
+    expect(await testBankMailboxAction()).toEqual({ ok: false, error: "Schránka není nastavená" });
+    expect(getBankMailbox("b1")).not.toBeNull();
   });
 
   test("[TST-009] šablona e-mailu platí jen pro přihlášený účet, cizí id se ignoruje", async () => {

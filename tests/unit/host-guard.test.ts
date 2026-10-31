@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { assertPublicHost, BlockedHostError, isPrivateAddress } from "@/server/mail/host-guard";
+import {
+  assertPublicHost,
+  BlockedHostError,
+  IMAP_PORTS,
+  isPrivateAddress,
+} from "@/server/mail/host-guard";
 import { smtpOptions } from "@/server/mail/transport";
 
 const dns = vi.hoisted(() => ({ records: [] as string[], code: "ENOTFOUND" }));
@@ -176,6 +181,63 @@ describe("assertPublicHost", () => {
     await expect(assertPublicHost("smtp.example.cz", 587, allowed)).resolves.toEqual({
       address: "8.8.8.8",
       isPrivate: false,
+    });
+  });
+});
+
+describe("assertPublicHost pro IMAP", () => {
+  const imap = { allowPrivate: false, ports: IMAP_PORTS };
+
+  test.each(["10.0.0.5", "::ffff:127.0.0.1", "::ffff:7f00:1", "169.254.169.254"])(
+    "[SEC-007] IMAP odmítne %s",
+    async (address) => {
+      dns.records = ["8.8.8.8", address];
+      await expect(assertPublicHost("imap.example.cz", 993, imap)).rejects.toBeInstanceOf(
+        BlockedHostError,
+      );
+    },
+  );
+
+  test("[SEC-007] port 22 je pro IMAP odmítnutý, 993 projde a SMTP dál neumí 993", async () => {
+    expect(IMAP_PORTS).toEqual([143, 993]);
+    await expect(assertPublicHost("imap.example.cz", 22, imap)).rejects.toBeInstanceOf(
+      BlockedHostError,
+    );
+    await expect(assertPublicHost("imap.example.cz", 587, imap)).rejects.toBeInstanceOf(
+      BlockedHostError,
+    );
+    await expect(assertPublicHost("imap.example.cz", 993, imap)).resolves.toEqual({
+      address: "8.8.8.8",
+      isPrivate: false,
+    });
+    await expect(assertPublicHost("imap.example.cz", 143, imap)).resolves.toMatchObject({
+      isPrivate: false,
+    });
+    await expect(assertPublicHost("smtp.example.cz", 993, open)).rejects.toBeInstanceOf(
+      BlockedHostError,
+    );
+    await expect(assertPublicHost("smtp.example.cz", 143, open)).rejects.toBeInstanceOf(
+      BlockedHostError,
+    );
+  });
+
+  test("[SEC-007] výjimka pro privátní cíl zruší i omezení portů IMAP, veřejný cíl ho drží", async () => {
+    dns.records = ["10.0.0.5"];
+    await expect(
+      assertPublicHost("mail.lan", 1143, { allowPrivate: true, ports: IMAP_PORTS }),
+    ).resolves.toEqual({ address: "10.0.0.5", isPrivate: true });
+
+    dns.records = ["8.8.8.8"];
+    await expect(
+      assertPublicHost("imap.example.cz", 1143, { allowPrivate: true, ports: IMAP_PORTS }),
+    ).rejects.toBeInstanceOf(BlockedHostError);
+  });
+
+  test("dočasná chyba DNS zůstane dočasná i pro IMAP", async () => {
+    dns.records = [];
+    dns.code = "EAI_AGAIN";
+    await expect(assertPublicHost("imap.example.cz", 993, imap)).rejects.toMatchObject({
+      temporary: true,
     });
   });
 });
