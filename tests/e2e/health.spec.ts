@@ -34,7 +34,12 @@ test("[ADM-008] administrace ukáže stav instance bez tajemství", async ({ pag
   await page.getByRole("tab", { name: "Stav instance" }).click();
   await expect(page.getByRole("row", { name: /^Verze \d+\.\d+\.\d+/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /^Plánovač (běží|spouští se)/ })).toBeVisible();
-  await expect(page.getByRole("row", { name: /^Poslední záloha žádná/ })).toBeVisible();
+  // The scheduler backs up on its first tick after 2:30, so a fresh app may already have a backup.
+  await expect(
+    page.getByRole("row", {
+      name: /^Poslední záloha (žádná|\d{1,2}\. \d{1,2}\. \d{4} \d{1,2}:\d{2})/,
+    }),
+  ).toBeVisible();
   await expect(page.getByRole("row", { name: /^SMTP nenastaveno/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /^Monitoring chyb nenastaveno/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /^Velikost databáze/ })).toBeVisible();
