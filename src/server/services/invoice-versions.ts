@@ -20,7 +20,12 @@ import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
 import { currentParties } from "./invoice-document";
-import { automaticSymbol, documentProblems, NotIssuableError } from "./invoice-lifecycle";
+import {
+  automaticSymbol,
+  documentProblems,
+  NotIssuableError,
+  vatStatementProblems,
+} from "./invoice-lifecycle";
 import {
   assertReferencesOwned,
   auditSnapshot,
@@ -56,6 +61,7 @@ export const EDITABLE_STATUSES: ReadonlySet<InvoiceStatus> = new Set([
 export type BalanceWarning = "none" | "overpaid" | "underpaid";
 export type EditResult = {
   revision: number;
+  variableSymbol: string | null;
   resendSuggested: boolean;
   balanceWarning: BalanceWarning;
 };
@@ -83,6 +89,7 @@ function balanceWarningOf(row: Invoice): BalanceWarning {
 function resultOf(row: Invoice, changed: boolean): EditResult {
   return {
     revision: row.revision,
+    variableSymbol: row.variableSymbol,
     resendSuggested: changed && row.status === "sent",
     balanceWarning: balanceWarningOf(row),
   };
@@ -195,11 +202,29 @@ function accountSnapshotFor(
   return parties.snapshot.account;
 }
 
+// An untouched symbol keeps following the number unless it was written by hand. A typed one is
+// manual only while it differs from what the number gives, so retyping that hands it back.
+function symbolValues(
+  ownerId: string,
+  before: Invoice,
+  number: string,
+  requested: string | null | undefined,
+): InvoiceValues {
+  const automatic = automaticSymbol(ownerId, number);
+  const current = before.variableSymbol ?? "";
+  const wanted = requested ?? current;
+  if (wanted !== current) {
+    return { variableSymbol: wanted || null, variableSymbolManual: wanted !== (automatic ?? "") };
+  }
+  const follows = number !== before.number && !before.variableSymbolManual;
+  return follows ? { variableSymbol: automatic } : {};
+}
+
 export function updateIssuedInvoice(actor: Actor, id: string, raw: IssuedInput): EditResult {
   const userId = ownerOf(actor);
   const parsed = issuedInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
-  const { revision, lines, ...fields } = parsed.data;
+  const { revision, lines, variableSymbol, ...fields } = parsed.data;
   const totals = totalsOf(lines, fields);
   const rows = lineRows(lines, totals);
 
@@ -213,10 +238,7 @@ export function updateIssuedInvoice(actor: Actor, id: string, raw: IssuedInput):
         ...fields,
         ...sumsOf(totals),
         accountSnapshot: accountSnapshotFor(tx, userId, before, fields.bankAccountId),
-        ...(fields.number !== before.number &&
-          !before.variableSymbolManual && {
-            variableSymbol: automaticSymbol(userId, fields.number),
-          }),
+        ...symbolValues(userId, before, fields.number, variableSymbol),
       };
       const beforeLines = linesOf(tx, userId, id);
       if (
@@ -359,6 +381,9 @@ export function restoreVersion(actor: Actor, versionId: string): EditResult {
         customerSnapshot: snapshot.customer,
         accountSnapshot: snapshot.account,
       };
+      // Only this check: the rest of documentProblems would refuse a version whose account is gone.
+      const problems = vatStatementProblems(tx, userId, { ...before, ...values });
+      if (problems.length > 0) throw new NotIssuableError(problems);
       return applyChange(tx, audit, userId, before, {
         values,
         rows: lineRows(lines, totals),

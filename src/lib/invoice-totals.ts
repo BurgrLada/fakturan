@@ -57,6 +57,20 @@ function discountOf(base: bigint, discount: Discount): bigint {
   return raw < base ? raw : base;
 }
 
+function lineAmounts(line: TotalsLine): { gross: bigint; discount: bigint; net: bigint } {
+  const quantity = nonNegativeInteger(line.quantityMilli);
+  if (quantity > MAX_QUANTITY) throw new AmountOutOfRangeError();
+  const gross = withinDocument(
+    divideRounded(quantity * nonNegativeInteger(line.unitPriceMinor), MILLI),
+  );
+  const discount = discountOf(gross, line.discount);
+  return { gross, discount, net: gross - discount };
+}
+
+export function appliedLineDiscount(line: TotalsLine): number {
+  return Number(lineAmounts(line).discount);
+}
+
 export function computeTotals(
   lines: TotalsLine[],
   discount: Discount,
@@ -64,13 +78,7 @@ export function computeTotals(
 ): Totals {
   let subtotal = ZERO;
   const computed = lines.map((line) => {
-    const quantity = nonNegativeInteger(line.quantityMilli);
-    if (quantity > MAX_QUANTITY) throw new AmountOutOfRangeError();
-    const gross = withinDocument(
-      divideRounded(quantity * nonNegativeInteger(line.unitPriceMinor), MILLI),
-    );
-    const lineDiscount = discountOf(gross, line.discount);
-    const net = gross - lineDiscount;
+    const { gross, discount: lineDiscount, net } = lineAmounts(line);
     subtotal = withinDocument(subtotal + net);
     return {
       grossMinor: Number(gross),
@@ -90,6 +98,24 @@ export function computeTotals(
     discountMinor: Number(documentDiscount),
     roundingMinor: Number(total - discounted),
     totalMinor: Number(total),
+  };
+}
+
+export type CappedDiscounts = { document: boolean; lines: number[] };
+
+// A percentage is limited to 100 %, so only an amount can ask for more than its base.
+export function cappedDiscounts(
+  lines: TotalsLine[],
+  discount: Discount,
+  totals: Totals,
+): CappedDiscounts {
+  return {
+    document: discount.kind === "amount" && discount.minor > totals.subtotalMinor,
+    lines: lines.flatMap((line, i) =>
+      line.discount.kind === "amount" && line.discount.minor > totals.lines[i]!.grossMinor
+        ? [i + 1]
+        : [],
+    ),
   };
 }
 

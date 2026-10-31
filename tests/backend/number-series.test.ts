@@ -265,7 +265,11 @@ describe("reset počítadla", () => {
 
     expect(allocate("r1", id, "2026-01-15").number).toBe("2026Q1-001");
     expect(allocate("r1", id, "2026-03-31").number).toBe("2026Q1-002");
-    expect(allocate("r1", id, "2026-04-01")).toEqual({ number: "2026Q2-001", n: 1 });
+    expect(allocate("r1", id, "2026-04-01")).toEqual({
+      number: "2026Q2-001",
+      n: 1,
+      skipped: [],
+    });
   });
 
   test("[NUM-002] roční reset začne v novém roce od 1 podle data dokladu", () => {

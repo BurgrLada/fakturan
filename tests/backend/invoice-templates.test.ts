@@ -332,6 +332,79 @@ describe("šablony faktur", () => {
     expect(getInvoice(owner, issued.id)!.status).toBe("issued");
   });
 
+  test("[TPL-004] šablona z konceptu zachová proměnné, z vystaveného dokladu dosazené hodnoty", () => {
+    const owner = newOwner();
+    const customerId = newCustomer(owner);
+    saveSupplier(actor(owner), {
+      name: "Jan Novák",
+      street: "Dlouhá 1",
+      city: "Praha",
+      zip: "110 00",
+      country: "Česká republika",
+      ico: "27082440",
+      dic: "",
+      email: "",
+      phone: "",
+      web: "",
+      registryNote: "",
+      contactPerson: "",
+      vatIdentified: false,
+      footerText: "",
+      notVatPayerCs: "Nejsem plátce DPH.",
+      notVatPayerEn: "I am not a VAT payer.",
+    });
+    const { id, revision } = saveDraft(actor(owner), {
+      ...newDraftDefaults(owner, customerId),
+      paymentMethod: "cash",
+      note: "Rok {{rok}}",
+      orderRef: "OBJ-{{rok}}",
+      lines: [
+        {
+          catalogItemId: null,
+          name: "Hosting {{mesic_nazev}} {{rok}}",
+          description: "",
+          quantityMilli: 1000,
+          unit: "ks",
+          unitPriceMinor: 100_000,
+          discountKind: "none",
+          discountValue: 0,
+        },
+      ],
+    });
+
+    const fromDraft = templateFromInvoice(actor(owner), id, "Z konceptu");
+    issueInvoice(actor(owner), id, { revision });
+    const fromIssued = templateFromInvoice(actor(owner), id, "Z vystavené");
+
+    expect(getTemplate(owner, fromDraft.id)?.document).toMatchObject({
+      note: "Rok {{rok}}",
+      orderRef: "OBJ-{{rok}}",
+      lines: [{ name: "Hosting {{mesic_nazev}} {{rok}}" }],
+    });
+    expect(getTemplate(owner, fromIssued.id)?.document).toMatchObject({
+      note: "Rok 2026",
+      orderRef: "OBJ-2026",
+      lines: [{ name: "Hosting březen 2026" }],
+    });
+  });
+
+  test("[TPL-002] audit konceptu ze šablony uvádí zdrojovou šablonu", () => {
+    const owner = newOwner();
+    const { id: templateId } = saveTemplate(actor(owner), input(owner));
+
+    const { id } = draftFromTemplate(actor(owner), templateId);
+
+    const entry = db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.entityId, id))
+      .all()
+      .find((row) => row.action === "invoice.save");
+    expect(entry).toMatchObject({
+      after: { fromTemplate: { id: templateId, name: "Měsíční správa" } },
+    });
+  });
+
   test("[TPL-003] cizí fakturu nelze uložit jako šablonu", () => {
     const owner = newOwner();
     const other = newOwner();

@@ -729,6 +729,30 @@ describe("povinné údaje", () => {
     expect(text).toMatch(/Zbývá uhradit[\s\S]*2\s000,00\sKč/);
   });
 
+  test.each([
+    ["cs", /1\s000,00/],
+    ["en", /1,000\.00/],
+  ] as const)(
+    "[INV-041] tiskne skutečně uplatněnou slevu položky, ne zadanou (%s)",
+    async (language, applied) => {
+      const view = await viewOf({
+        ...F.short,
+        language,
+        lines: [
+          fixtureLine({
+            quantityMilli: 1000,
+            unitPriceMinor: 100_000,
+            discountKind: "amount",
+            discountValue: 500_000,
+            netMinor: 0,
+          }),
+        ],
+      });
+
+      expect(view.lines[0]?.discount).toMatch(applied);
+    },
+  );
+
   test("[INV-042] patička nemá značku aplikace", async () => {
     const pdf = await render({
       ...F.short,

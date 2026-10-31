@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   applyCustomerDefaults,
+  customerOffer,
+  discountNotes,
   changeTaxableDate,
   draftFields,
   blankLine,
@@ -211,6 +213,72 @@ describe("formulář faktury", () => {
       paymentMethod: "cash",
       appearance: { designId: "mono" },
     });
+  });
+
+  test("[INV-010] uložený dokument dostane jen nabídku rozdílných hodnot", () => {
+    expect(customerOffer(form(), defaults, new Set(), accounts)).toEqual({
+      currency: "EUR",
+      bankAccountId: "eur-2",
+      language: "en",
+      paymentMethod: "cash",
+      appearance: defaults.appearance,
+      dueDate: "2026-04-09",
+    });
+  });
+
+  test("[INV-010] nabídka vynechá shodné a uživatelem změněné hodnoty", () => {
+    const same = {
+      ...defaults,
+      currency: "CZK",
+      language: "cs",
+      appearance: document.appearance,
+    } as const;
+    const offer = customerOffer(
+      form({ bankAccountId: "jiny" }),
+      same,
+      new Set(["dueDate"]),
+      accounts,
+    );
+
+    expect(offer).toEqual({ paymentMethod: "cash" });
+  });
+
+  test("[INV-010] bez rozdílu se nic nenabízí", () => {
+    const same = {
+      dueDays: 14,
+      language: "cs",
+      currency: "CZK",
+      paymentMethod: "transfer",
+      appearance: document.appearance,
+    } as const;
+
+    expect(customerOffer(form(), same, new Set(), accounts)).toBeNull();
+  });
+
+  test("[INV-014] omezená sleva dostane poznámku, běžná ne", () => {
+    const line = {
+      quantityMilli: 1000,
+      unitPriceMinor: 10_000,
+      discountKind: "amount",
+      discountValue: 20_000,
+    } as const;
+    const totals = (subtotalMinor: number, grossMinor: number) => ({
+      lines: [{ grossMinor, discountMinor: 0, netMinor: 0 }],
+      subtotalMinor,
+      discountMinor: 0,
+      roundingMinor: 0,
+      totalMinor: 0,
+    });
+
+    expect(
+      discountNotes({ discountKind: "amount", discountValue: 1, lines: [line] }, totals(0, 10_000)),
+    ).toHaveLength(2);
+    expect(
+      discountNotes(
+        { discountKind: "percent", discountValue: 10_000, lines: [line] },
+        totals(30_000, 30_000),
+      ),
+    ).toEqual([]);
   });
 
   test("[INV-010] změna zákazníka nesáhne na pole změněná uživatelem", () => {

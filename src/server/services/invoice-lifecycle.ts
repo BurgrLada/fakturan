@@ -1,14 +1,15 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { InvoiceStatus } from "@/lib/invoice";
 import { diffLines } from "@/lib/invoice-diff";
+import { discountNotes } from "@/lib/invoice-form";
 import { calendarDateInPrague, variableSymbolFrom } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { bankAccount, invoice, invoiceLine, numberSeries } from "../db/schema";
+import { bankAccount, catalogItem, invoice, invoiceLine, numberSeries } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
@@ -17,8 +18,10 @@ import {
   auditSnapshot,
   findOwned,
   linesOf,
+  MANUAL_VARIABLE_SYMBOL,
   MAX_DOCUMENT_TEXT,
   MAX_LINE_NAME,
+  MAX_REFERENCE,
   ownerOf,
   searchTextOf,
   sumsOf,
@@ -33,7 +36,6 @@ import { missingSupplierKeys } from "./supplier";
 
 const V = TEXTS.invoices.validation;
 const T = TEXTS.invoices.issue;
-const MANUAL_VARIABLE_SYMBOL = /^\d{1,10}$/;
 
 export type IssueProblem = { field: string; message: string };
 
@@ -75,13 +77,21 @@ function supplierProblems(ownerId: string): IssueProblem[] {
   }));
 }
 
-// The statement is printed in the document's language, so only that one has to be filled in.
-function vatStatementProblems(q: Reader, ownerId: string, row: Invoice): IssueProblem[] {
-  const profile = currentParties(q, ownerId, row).snapshot.supplier;
+// The statement is printed in the document's language from the document's own supplier, so an
+// issued document is judged by its snapshot: changing the settings cannot fix it afterwards.
+export function vatStatementProblems(q: Reader, ownerId: string, row: Invoice): IssueProblem[] {
+  const frozen = row.supplierSnapshot;
+  const profile = frozen ?? currentParties(q, ownerId, row).snapshot.supplier;
   if (!profile) return [];
   const key = row.language === "en" ? "notVatPayerEn" : "notVatPayerCs";
   if (profile[key].trim()) return [];
-  return [{ field: `supplier.${key}`, message: T.notVatPayer(TEXTS.supplier.fields[key]) }];
+  const label = TEXTS.supplier.fields[key];
+  return [
+    {
+      field: `supplier.${key}`,
+      message: frozen ? T.notVatPayerFrozen(label) : T.notVatPayer(label),
+    },
+  ];
 }
 
 type CheckedLine = Pick<
@@ -156,7 +166,7 @@ function accountProblems(
   return account.currency === row.currency ? [] : problem(T.accountCurrency(row.currency));
 }
 
-// The supplier is frozen in the snapshot of an issued document, so only issuing checks it.
+// The supplier's required fields are frozen in the snapshot, so only issuing checks those.
 export function documentProblems(
   q: Reader,
   ownerId: string,
@@ -171,6 +181,7 @@ export function documentProblems(
     ...(ofLines.length === 0 ? amountProblems(row, lines) : []),
     ...dateProblems(row),
     ...accountProblems(q, ownerId, row, keptAccountId),
+    ...vatStatementProblems(q, ownerId, row),
   ];
   if (row.currency !== "CZK" && !row.exchangeRateMicros) {
     found.push({
@@ -182,11 +193,7 @@ export function documentProblems(
 }
 
 function draftProblems(q: Reader, ownerId: string, row: Invoice, lines: InvoiceLine[]) {
-  return [
-    ...supplierProblems(ownerId),
-    ...vatStatementProblems(q, ownerId, row),
-    ...documentProblems(q, ownerId, row, lines),
-  ];
+  return [...supplierProblems(ownerId), ...documentProblems(q, ownerId, row, lines)];
 }
 
 export function checkIssuable(ownerId: string, id: string): IssueProblem[] {
@@ -209,7 +216,20 @@ export type IssuePreview = {
   variableSymbol: string | null;
   issueDate: string | null;
   today: string;
+  customerName: string;
+  totalMinor: number;
+  currency: Invoice["currency"];
+  discountNotes: string[];
 };
+
+function capNotes(row: Invoice, lines: InvoiceLine[]): string[] {
+  try {
+    return discountNotes({ ...row, lines }, totalsOf(lines, row));
+  } catch (error) {
+    if (error instanceof ServiceError) return [];
+    throw error;
+  }
+}
 
 export function previewIssue(ownerId: string, id: string): IssuePreview {
   const row = findOwned(db, ownerId, id);
@@ -224,18 +244,27 @@ export function previewIssue(ownerId: string, id: string): IssuePreview {
     variableSymbol: number && automaticSymbol(ownerId, number),
     issueDate: row.issueDate,
     today: calendarDateInPrague(clock.now()),
+    customerName: currentParties(db, ownerId, row).snapshot.customer?.name ?? row.customerName,
+    totalMinor: row.totalMinor,
+    currency: row.currency,
+    discountNotes: capNotes(row, linesOf(db, ownerId, id)),
   };
 }
 
 // Variables can outgrow the limits saveDraft enforced, and editing an issued document validates
 // against the same limits, so an oversized text would make the document uneditable.
 function textProblems(texts: {
+  orderRef: string;
+  reference: string;
   textBefore: string;
   textAfter: string;
   note: string;
   lines: Pick<InvoiceLine, "name" | "description">[];
 }): IssueProblem[] {
   const found: IssueProblem[] = [];
+  for (const field of ["orderRef", "reference"] as const) {
+    if (texts[field].length > MAX_REFERENCE) found.push({ field, message: T[field] });
+  }
   for (const field of ["textBefore", "textAfter", "note"] as const) {
     if (texts[field].length > MAX_DOCUMENT_TEXT) found.push({ field, message: T[field] });
   }
@@ -267,16 +296,31 @@ function issuedTexts(
   return { ...texts, ...parties, customerName, dateFormat: ctx.dateFormat };
 }
 
-function storeLines(tx: Tx, before: InvoiceLine[], after: InvoiceLine[]): void {
+export function storeLines(
+  tx: Tx,
+  ownerId: string,
+  before: InvoiceLine[],
+  after: InvoiceLine[],
+): void {
   after.forEach((line, i) => {
     const { name, description, netMinor } = line;
     const old = before[i]!;
     if (name === old.name && description === old.description && netMinor === old.netMinor) return;
     tx.update(invoiceLine)
       .set({ name, description, netMinor })
-      .where(eq(invoiceLine.id, line.id))
+      .where(scoped(ownerId).where(invoiceLine, (t, { eq }) => eq(t.id, line.id)))
       .run();
   });
+}
+
+function catalogUses(tx: Tx, ownerId: string, lines: InvoiceLine[]) {
+  const ids = [...new Set(lines.flatMap((line) => line.catalogItemId ?? []))];
+  if (ids.length === 0) return [];
+  return tx
+    .select({ id: catalogItem.id, useCount: catalogItem.useCount })
+    .from(catalogItem)
+    .where(scoped(ownerId).where(catalogItem, (t) => inArray(t.id, ids)))
+    .all();
 }
 
 export function automaticSymbol(ownerId: string, number: string): string | null {
@@ -307,7 +351,7 @@ export function issueInvoice(
     if (problems.length > 0 || "problem" in picked) throw new NotIssuableError(problems);
 
     const totals = totalsOf(lines, row);
-    const { number } = allocateNumber(tx, userId, picked.series.id, row.issueDate!);
+    const { number, skipped } = allocateNumber(tx, userId, picked.series.id, row.issueDate!);
     const texts = issuedTexts(tx, userId, row, lines, number);
     const overLimit = textProblems(texts);
     if (overLimit.length > 0) throw new NotIssuableError(overLimit);
@@ -317,21 +361,25 @@ export function issueInvoice(
     }));
     const now = clock.now();
 
-    storeLines(tx, lines, issuedLines);
+    storeLines(tx, userId, lines, issuedLines);
     for (const line of lines) {
       if (line.catalogItemId) recordCatalogUse(tx, userId, line.catalogItemId);
     }
+    const catalogUse = catalogUses(tx, userId, lines);
     tx.update(invoice)
       .set({
         ...sumsOf(totals),
         ...texts.images,
         status: "issued",
         number,
-        variableSymbol: manualSymbol ?? automaticSymbol(userId, number),
+        variableSymbol:
+          manualSymbol === undefined ? automaticSymbol(userId, number) : manualSymbol || null,
         variableSymbolManual: manualSymbol !== undefined,
         seriesId: picked.series.id,
         customerName: texts.customerName,
         dateFormat: texts.dateFormat,
+        orderRef: texts.orderRef,
+        reference: texts.reference,
         textBefore: texts.textBefore,
         textAfter: texts.textAfter,
         note: texts.note,
@@ -363,6 +411,8 @@ export function issueInvoice(
       after: {
         ...auditSnapshot(findOwned(tx, userId, id), lines.length),
         ...(changes && { lines: changes.after }),
+        ...(skipped.length > 0 && { skippedNumbers: skipped }),
+        ...(catalogUse.length > 0 && { catalogUse }),
       },
     });
     return { id, number };

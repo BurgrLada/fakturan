@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   customerDefaultsAction,
+  deleteDraftAction,
   issueAction,
   issuePreviewAction,
   saveDraftAction,
@@ -172,6 +173,25 @@ beforeEach(() => {
 });
 
 describe("akce formuláře faktury", () => {
+  test("[INV-002] koncept jde smazat, cizí ani vystavený ne", async () => {
+    const owner = session.userId;
+    const { customerId } = issuable(owner);
+    const own = await savedDraft(owner, { customerId });
+    const kept = await issued(owner, customerId);
+
+    expect(await deleteDraftAction({ id: kept.id })).toMatchObject({ ok: false });
+    expect(await deleteDraftAction({})).toMatchObject({ ok: false });
+    const stranger = seed();
+    expect(await deleteDraftAction({ id: own.id })).toMatchObject({ ok: false });
+    expect(getInvoice(owner, own.id)).not.toBeNull();
+    expect(getInvoice(owner, kept.id)).not.toBeNull();
+
+    session.userId = owner;
+    expect(await deleteDraftAction({ id: own.id })).toMatchObject({ ok: true });
+    expect(getInvoice(owner, own.id)).toBeNull();
+    expect(stranger).not.toBe(owner);
+  });
+
   test("[SEC-006] akce odmítnou neplatný vstup a cizí ID", async () => {
     const owner = session.userId;
     const { customerId } = issuable(owner);

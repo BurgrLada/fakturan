@@ -27,7 +27,9 @@ import {
   issueInvoice,
   markSent,
   NotIssuableError,
+  previewIssue,
   restoreInvoice,
+  storeLines,
 } from "@/server/services/invoice-lifecycle";
 import {
   deleteDraft,
@@ -582,7 +584,11 @@ describe("vystavení", () => {
 
     const result = db.transaction((tx) => allocateNumber(tx, owner, seriesId, "2026-03-10"));
 
-    expect(result).toEqual({ number: "2026-004", n: 4 });
+    expect(result).toEqual({
+      number: "2026-004",
+      n: 4,
+      skipped: ["2026-002", "2026-003"],
+    });
     expect(counters(owner)[0]).toMatchObject({ next: 5, highest: 4 });
   });
 
@@ -621,7 +627,7 @@ describe("vystavení", () => {
     });
 
     const draft = save(owner, customerId);
-    for (const variableSymbol of ["12a4", "", "12345678901", "12 34"]) {
+    for (const variableSymbol of ["12a4", "12345678901", "12 34"]) {
       expect(() =>
         issueInvoice(actor(owner), draft.id, { revision: draft.revision, variableSymbol }),
       ).toThrow(/číslice/);
@@ -635,6 +641,18 @@ describe("vystavení", () => {
     expect(getInvoice(owner, draft.id)).toMatchObject({
       number: "2026-041",
       variableSymbol: "0123456789",
+      variableSymbolManual: true,
+    });
+  });
+
+  test("[NUM-007] prázdný VS z dialogu nechá doklad bez symbolu, ne s automatickým", () => {
+    const { owner, customerId } = newOwner();
+
+    const { id } = issueNew(owner, customerId, {}, { variableSymbol: "" });
+
+    expect(getInvoice(owner, id)).toMatchObject({
+      number: "2026-001",
+      variableSymbol: null,
       variableSymbolManual: true,
     });
   });
@@ -725,7 +743,7 @@ describe("vystavení", () => {
 
     expect(doc.number).toBeNull();
     expect(doc.snapshot.customer?.name).toBe("Beta a.s.");
-    expect(doc.note).toBe("Beta a.s. |");
+    expect(doc.note).toBe("Beta a.s. 2026-001|");
     expect(getInvoice(owner, id)?.note).toBe("{{zakaznik}} {{cislo_faktury}}|");
   });
 
@@ -748,6 +766,125 @@ describe("vystavení", () => {
       note: "březen pro Alfa s.r.o. {{neznama}}",
     });
     expect(row.lines[0]).toMatchObject({ name: "Služby 3/2026", description: "od 1. 3. 2026" });
+  });
+
+  test("[TPL-004] objednávka a reference se dosadí při vystavení i v náhledu", () => {
+    const { owner, customerId } = newOwner();
+    const { id, revision } = save(owner, customerId, {
+      orderRef: "OBJ-{{rok}}",
+      reference: "{{zakaznik}} {{mesic}}/{{rok}}",
+    });
+
+    expect(loadInvoiceDocument(owner, id)).toMatchObject({
+      orderRef: "OBJ-2026",
+      reference: "Alfa s.r.o. 3/2026",
+    });
+
+    issueInvoice(actor(owner), id, { revision });
+
+    expect(getInvoice(owner, id)).toMatchObject({
+      orderRef: "OBJ-2026",
+      reference: "Alfa s.r.o. 3/2026",
+    });
+    expect(audit(id, "invoice.issue")).toMatchObject({
+      before: { orderRef: "OBJ-{{rok}}" },
+      after: { orderRef: "OBJ-2026" },
+    });
+  });
+
+  test("[TPL-004] objednávka a reference přerostlé po dosazení jsou odmítnuté", () => {
+    const { owner } = newOwner();
+    const customerId = newCustomer(owner, "D".repeat(150));
+    const { id, revision } = save(owner, customerId, {
+      orderRef: `${"o".repeat(100)}{{zakaznik}}`,
+      reference: `${"r".repeat(100)}{{zakaznik}}`,
+    });
+
+    expect(fields(owner, id)).toEqual(expect.arrayContaining(["orderRef", "reference"]));
+    expect(() => issueInvoice(actor(owner), id, { revision })).toThrow(NotIssuableError);
+  });
+
+  test("[TPL-004] náhled dosadí číslo, které by doklad dostal", () => {
+    const { owner, customerId } = newOwner();
+    issueNew(owner, customerId);
+    const { id } = save(owner, customerId, { note: "Doklad {{cislo_faktury}}" });
+
+    expect(loadInvoiceDocument(owner, id)?.note).toBe("Doklad 2026-002");
+  });
+
+  test("[NUM-005] audit vystavení nese přeskočená čísla a počet použití ceníku", () => {
+    const { owner, customerId } = newOwner();
+    const manualSeries = saveSeries(actor(owner), {
+      name: "Ruční",
+      documentType: "invoice",
+      template: "R{RRRR}-{NNN}",
+      reset: "yearly",
+    });
+    issueNew(owner, customerId);
+    const renumbered = issueNew(owner, customerId, {}, { seriesId: manualSeries });
+    db.update(invoice).set({ number: "2026-002" }).where(eq(invoice.id, renumbered.id)).run();
+    const item = saveCatalogItem(actor(owner), {
+      name: "Hosting",
+      description: "",
+      unit: "ks",
+      priceMinor: 100,
+      currency: "CZK",
+      category: "",
+      tags: [],
+    });
+    const { id, revision } = save(owner, customerId, {
+      lines: [line({ catalogItemId: item.id }), line({ catalogItemId: item.id })],
+    });
+
+    issueInvoice(actor(owner), id, { revision });
+
+    expect(audit(id, "invoice.issue")).toMatchObject({
+      after: {
+        number: "2026-003",
+        skippedNumbers: ["2026-002"],
+        catalogUse: [{ id: item.id, useCount: 2 }],
+      },
+    });
+  });
+
+  test("[TST-009] zápis řádků po vystavení cizí řádek nezmění", () => {
+    const { owner, customerId } = newOwner();
+    const { owner: stranger } = newOwner();
+    const { id } = save(owner, customerId);
+    const lines = getInvoice(owner, id)!.lines;
+
+    db.transaction((tx) =>
+      storeLines(
+        tx,
+        stranger,
+        lines,
+        lines.map((row) => ({ ...row, name: "Cizí zásah" })),
+      ),
+    );
+
+    expect(getInvoice(owner, id)?.lines[0]?.name).toBe("Konzultace");
+  });
+
+  test("[INV-014] náhled vystavení ukáže zákazníka, částku a omezenou slevu", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = save(owner, customerId, {
+      discountKind: "amount",
+      discountValue: 900_000,
+      lines: [
+        line(),
+        line({ quantityMilli: 1000, discountKind: "amount", discountValue: 200_000 }),
+      ],
+    });
+
+    expect(previewIssue(owner, id)).toMatchObject({
+      customerName: "Alfa s.r.o.",
+      totalMinor: 0,
+      currency: "CZK",
+      discountNotes: [
+        "Sleva na doklad je vyšší než základ, uplatní se jen do výše základu.",
+        "Položka 2: sleva je vyšší než cena, uplatní se jen do výše ceny.",
+      ],
+    });
   });
 
   test("[SEC-011] hodnota zákazníka {{rok}} se nerozvine", () => {

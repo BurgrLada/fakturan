@@ -16,8 +16,15 @@ import {
   setNextNumberAction,
 } from "@/app/(app)/nastaveni/rady/actions";
 import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
+import {
+  deleteTemplateAction,
+  draftFromTemplateAction,
+  saveInvoiceAsTemplateAction,
+} from "@/app/(app)/faktury/sablony/actions";
 import { user } from "@/server/db/schema";
 import { listBankAccounts, saveBankAccount } from "@/server/services/bank-accounts";
+import { getTemplate, listTemplates, saveTemplate } from "@/server/services/invoice-templates";
+import { listInvoices, newDraftDefaults, saveDraft } from "@/server/services/invoices";
 import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
 import { createTestDb } from "../helpers/db";
@@ -55,6 +62,51 @@ const account = {
 };
 
 describe("cizí id přes server actions", () => {
+  test("[TST-009] cizí šablonu ani fakturu nejde použít ani smazat přes server action", async () => {
+    seed("t1");
+    seed("t2");
+    const { id: templateId } = saveTemplate(actor("t1"), {
+      name: "Moje šablona",
+      customerId: null,
+      document: {
+        ...newDraftDefaults("t1", null),
+        type: "invoice",
+        dueDays: 14,
+        lines: [],
+      },
+    });
+    const { id: invoiceId } = saveDraft(actor("t1"), {
+      ...newDraftDefaults("t1", null),
+      note: "Soukromá poznámka",
+    });
+    session.userId = "t2";
+
+    const replies = [
+      await draftFromTemplateAction({ id: templateId }),
+      await deleteTemplateAction({ id: templateId }),
+      await saveInvoiceAsTemplateAction({ id: invoiceId, name: "Kopie cizí faktury" }),
+    ];
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: false });
+    expect(listInvoices("t2", {}).rows).toEqual([]);
+    expect(listTemplates("t2")).toEqual([]);
+    expect(getTemplate("t1", templateId)?.name).toBe("Moje šablona");
+  });
+
+  test("[TST-009] vlastní šablona přes server action projde", async () => {
+    seed("t3");
+    session.userId = "t3";
+    const { id: invoiceId } = saveDraft(actor("t3"), newDraftDefaults("t3", null));
+
+    const saved = await saveInvoiceAsTemplateAction({ id: invoiceId, name: "Vlastní" });
+    if (!saved.ok) throw new Error(saved.error);
+    const draft = await draftFromTemplateAction({ id: saved.id });
+    const removed = await deleteTemplateAction({ id: saved.id });
+
+    expect(draft).toMatchObject({ ok: true });
+    expect(removed).toMatchObject({ ok: true });
+  });
+
   test("[SEC-002] cizí bankovní účet nejde změnit, skrýt, nastavit ani smazat přes server action", async () => {
     seed("a1");
     seed("a2");

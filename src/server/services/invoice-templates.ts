@@ -282,29 +282,34 @@ export function draftFromTemplate(actor: Actor, templateId: string): { id: strin
 
   const base = newDraftDefaults(userId, usableCustomerId(userId, template.customerId));
   const items = existingCatalogIds(userId, document);
-  return saveDraft(actor, {
-    ...base,
-    clientId: randomUUID(),
-    type: document.type,
-    seriesId: defaultSeriesFor(userId, document.type)?.id ?? null,
-    bankAccountId: usableAccountId(userId, document),
-    dueDate: base.issueDate ? addDays(base.issueDate, document.dueDays) : null,
-    language: document.language,
-    currency: document.currency,
-    paymentMethod: document.paymentMethod,
-    orderRef: document.orderRef,
-    reference: document.reference,
-    textBefore: document.textBefore,
-    textAfter: document.textAfter,
-    note: document.note,
-    discountKind: document.discountKind,
-    discountValue: document.discountValue,
-    rounding: document.rounding,
-    appearance: document.appearance,
-    lines: document.lines.map((line) => ({
-      ...line,
-      catalogItemId:
-        line.catalogItemId && items.has(line.catalogItemId) ? line.catalogItemId : null,
-    })),
-  });
+  const source = { fromTemplate: { id: template.id, name: template.name } };
+  return saveDraft(
+    actor,
+    {
+      ...base,
+      clientId: randomUUID(),
+      type: document.type,
+      seriesId: defaultSeriesFor(userId, document.type)?.id ?? null,
+      bankAccountId: usableAccountId(userId, document),
+      dueDate: base.issueDate ? addDays(base.issueDate, document.dueDays) : null,
+      language: document.language,
+      currency: document.currency,
+      paymentMethod: document.paymentMethod,
+      orderRef: document.orderRef,
+      reference: document.reference,
+      textBefore: document.textBefore,
+      textAfter: document.textAfter,
+      note: document.note,
+      discountKind: document.discountKind,
+      discountValue: document.discountValue,
+      rounding: document.rounding,
+      appearance: document.appearance,
+      lines: document.lines.map((line) => ({
+        ...line,
+        catalogItemId:
+          line.catalogItemId && items.has(line.catalogItemId) ? line.catalogItemId : null,
+      })),
+    },
+    source,
+  );
 }

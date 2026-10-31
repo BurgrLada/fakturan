@@ -240,6 +240,7 @@ describe("úprava vystaveného dokladu", () => {
 
     expect(result).toEqual({
       revision: revision + 1,
+      variableSymbol: "2026001",
       resendSuggested: false,
       balanceWarning: "none",
     });
@@ -952,6 +953,93 @@ describe("číslo dokladu", () => {
     });
   });
 
+  test("[NUM-007] VS jde opravit, vznikne verze a výsledek ho vrátí", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+
+    const result = update(owner, id, { variableSymbol: " 4242 " });
+
+    expect(result.variableSymbol).toBe("4242");
+    expect(detail(owner, id)).toMatchObject({
+      variableSymbol: "4242",
+      variableSymbolManual: true,
+    });
+    expect(listVersions(owner, id)).toHaveLength(1);
+    expect(audits(id, "invoice.update")[0]).toMatchObject({
+      before: { variableSymbol: "2026001", variableSymbolManual: false },
+      after: { variableSymbol: "4242", variableSymbolManual: true },
+    });
+  });
+
+  test.each(["12a4", "12345678901", "12 34"])(
+    "[NUM-007] VS %s je odmítnutý a nic se nezmění",
+    (variableSymbol) => {
+      const { owner, customerId } = newOwner();
+      const { id } = issued(owner, customerId);
+
+      expectRefused(() => update(owner, id, { variableSymbol }), V.variableSymbol);
+
+      expect(detail(owner, id).variableSymbol).toBe("2026001");
+      expect(listVersions(owner, id)).toHaveLength(0);
+    },
+  );
+
+  test("[NUM-007] VS shodný s automatickým příznak ručního zruší a pak následuje číslo", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    update(owner, id, { variableSymbol: "4242" });
+
+    update(owner, id, { variableSymbol: "2026001" });
+    expect(detail(owner, id).variableSymbolManual).toBe(false);
+
+    const result = update(owner, id, { number: "2030-777" });
+    expect(result.variableSymbol).toBe("2030777");
+    expect(detail(owner, id).variableSymbol).toBe("2030777");
+  });
+
+  test("[NUM-007] vymazaný VS zůstane prázdný i po změně čísla", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+
+    update(owner, id, { variableSymbol: "" });
+    expect(detail(owner, id)).toMatchObject({ variableSymbol: null, variableSymbolManual: true });
+
+    update(owner, id, { number: "2030-777" });
+    expect(detail(owner, id)).toMatchObject({ variableSymbol: null, variableSymbolManual: true });
+  });
+
+  test("[NUM-007] změna VS i čísla najednou platí, co uživatel napsal", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+
+    update(owner, id, { number: "2030-777", variableSymbol: "99" });
+
+    expect(detail(owner, id)).toMatchObject({ variableSymbol: "99", variableSymbolManual: true });
+  });
+
+  test("[NUM-007] stejný VS je úprava bez změny", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+
+    update(owner, id, { variableSymbol: "2026001" });
+
+    expect(listVersions(owner, id)).toHaveLength(0);
+    expect(detail(owner, id).variableSymbolManual).toBe(false);
+  });
+
+  test("[NUM-007] obnovení verze vrátí VS i příznak", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    update(owner, id, { variableSymbol: "4242" });
+
+    restoreVersion(actor(owner), listVersions(owner, id)[0]!.id);
+
+    expect(detail(owner, id)).toMatchObject({
+      variableSymbol: "2026001",
+      variableSymbolManual: false,
+    });
+  });
+
   test("[INV-022] obnovení verze s mezitím obsazeným číslem je odmítnuté", () => {
     const { owner, customerId } = newOwner();
     const first = issued(owner, customerId);
@@ -964,6 +1052,49 @@ describe("číslo dokladu", () => {
       V.numberTaken,
     );
     expect(detail(owner, first.id).number).toBe("NOVE-1");
+  });
+});
+
+describe("text o neplátcovství", () => {
+  const withoutEnglish = (owner: string) =>
+    saveSupplier(actor(owner), { ...supplierInput, notVatPayerEn: "" });
+
+  test("[INV-040] přepnutí do jazyka bez textu o neplátcovství je odmítnuté", () => {
+    const { owner, customerId } = newOwner();
+    withoutEnglish(owner);
+    const { id } = issued(owner, customerId);
+
+    expect(() => update(owner, id, { language: "en" })).toThrow(/anglicky/);
+    expect(detail(owner, id).language).toBe("cs");
+  });
+
+  test("[INV-040] u vystaveného dokladu rozhoduje jeho snapshot, ne aktuální nastavení", () => {
+    const { owner, customerId } = newOwner();
+    withoutEnglish(owner);
+    const frozen = issued(owner, customerId);
+    saveSupplier(actor(owner), supplierInput);
+    const filled = issued(owner, customerId);
+    withoutEnglish(owner);
+
+    expect(() => update(owner, frozen.id, { language: "en" })).toThrow(/při vystavení/);
+    update(owner, filled.id, { language: "en" });
+    expect(detail(owner, filled.id).language).toBe("en");
+  });
+
+  test("[INV-040] obnovení verze v jazyce bez textu o neplátcovství je odmítnuté", () => {
+    const { owner, customerId } = newOwner();
+    withoutEnglish(owner);
+    const { id } = issued(owner, customerId);
+    update(owner, id, { note: "Změna" });
+    const [version] = listVersions(owner, id);
+    const stored = getVersion(owner, version!.id)!;
+    db.update(invoiceVersion)
+      .set({ document: { ...stored.document, language: "en" } })
+      .where(eq(invoiceVersion.id, version!.id))
+      .run();
+
+    expect(() => restoreVersion(actor(owner), version!.id)).toThrow(/anglicky/);
+    expect(detail(owner, id).note).toBe("Změna");
   });
 });
 

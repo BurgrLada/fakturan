@@ -73,7 +73,9 @@ const MAX_LINES = 500;
 const MAX_EXCHANGE_RATE_MICROS = 1_000_000_000_000;
 const MAX_NUMBER = 100;
 export const MAX_LINE_NAME = 200;
+export const MAX_REFERENCE = 200;
 export const MAX_DOCUMENT_TEXT = 2000;
+export const MANUAL_VARIABLE_SYMBOL = /^\d{0,10}$/;
 
 export type Invoice = typeof invoice.$inferSelect;
 export type InvoiceLine = typeof invoiceLine.$inferSelect;
@@ -161,8 +163,8 @@ export const documentFields = {
     .max(MAX_EXCHANGE_RATE_MICROS, V.exchangeRate)
     .nullable(),
   paymentMethod: z.enum(PAYMENT_METHODS, V.paymentMethod),
-  orderRef: text(200),
-  reference: text(200),
+  orderRef: text(MAX_REFERENCE),
+  reference: text(MAX_REFERENCE),
   textBefore: text(MAX_DOCUMENT_TEXT),
   textAfter: text(MAX_DOCUMENT_TEXT),
   note: text(MAX_DOCUMENT_TEXT),
@@ -193,6 +195,11 @@ export const issuedInputSchema = z
   .object({
     revision: z.number(V.invalid).int(V.invalid).nullish(),
     number: z.string(V.number).trim().min(1, V.number).max(MAX_NUMBER, V.number),
+    variableSymbol: z
+      .string(V.variableSymbol)
+      .trim()
+      .regex(MANUAL_VARIABLE_SYMBOL, V.variableSymbol)
+      .nullish(),
     ...documentFields,
   })
   .superRefine(checkDiscount)
@@ -421,7 +428,11 @@ export function unlessUnchanged<T>(run: () => T): T {
   }
 }
 
-export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
+export function saveDraft(
+  actor: Actor,
+  raw: DraftInput,
+  auditNote: Record<string, unknown> = {},
+): SavedDraft {
   const userId = ownerOf(actor);
   const parsed = draftInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
@@ -499,6 +510,7 @@ export function saveDraft(actor: Actor, raw: DraftInput): SavedDraft {
           ...(changes && { lines: changes.before }),
         },
         after: {
+          ...auditNote,
           ...auditSnapshot(findOwned(tx, userId, id), rows.length),
           ...(changes && { lines: changes.after }),
         },

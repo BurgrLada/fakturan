@@ -2,15 +2,18 @@ import type { Currency } from "./currency";
 import { isHexColor } from "./contrast";
 import { addDays, daysBetween, toDiscount, type Appearance } from "./invoice";
 import {
+  cappedDiscounts,
   computeTotals,
   formatQuantity,
   parseQuantity,
   type DiscountKind,
   type RoundingMode,
   type Totals,
+  type TotalsLine,
 } from "./invoice-totals";
 import { AmountOutOfRangeError, formatMoneyInput, parseMoney } from "./money";
 import type { Language, PaymentMethod } from "./preferences";
+import { TEXTS } from "./texts";
 
 export type FormLine = {
   key: string;
@@ -264,17 +267,41 @@ export function draftFields(type: string, values: FormValues, fields: DocumentFi
   return { ...fields, type, customerId: values.customerId, seriesId: values.seriesId };
 }
 
+type DiscountedLine = Pick<
+  DocumentLine,
+  "quantityMilli" | "unitPriceMinor" | "discountKind" | "discountValue"
+>;
+
+const totalsLines = (lines: readonly DiscountedLine[]): TotalsLine[] =>
+  lines.map((line) => ({
+    quantityMilli: line.quantityMilli,
+    unitPriceMinor: line.unitPriceMinor,
+    discount: toDiscount(line.discountKind, line.discountValue),
+  }));
+
+export function discountNotes(
+  document: { discountKind: DiscountKind; discountValue: number; lines: readonly DiscountedLine[] },
+  totals: Totals,
+): string[] {
+  const capped = cappedDiscounts(
+    totalsLines(document.lines),
+    toDiscount(document.discountKind, document.discountValue),
+    totals,
+  );
+  const T = TEXTS.invoices.form;
+  return [
+    ...(capped.document ? [T.discountCapped] : []),
+    ...capped.lines.map(T.lineDiscountCapped),
+  ];
+}
+
 export function computeFormTotals(values: FormValues): Totals | null {
   const result = toDocumentFields(values);
   if (!result.ok) return null;
   const { fields } = result;
   try {
     return computeTotals(
-      fields.lines.map((line) => ({
-        quantityMilli: line.quantityMilli,
-        unitPriceMinor: line.unitPriceMinor,
-        discount: toDiscount(line.discountKind, line.discountValue),
-      })),
+      totalsLines(fields.lines),
       toDiscount(fields.discountKind, fields.discountValue),
       fields.rounding,
     );
@@ -356,6 +383,32 @@ export function applyCustomerDefaults(
         : addDays(values.issueDate, defaults.dueDays),
   };
   return changeCurrency(next, unlessTouched("currency"), touched, accounts);
+}
+
+export type CustomerOffer = Partial<
+  Pick<
+    FormValues,
+    "currency" | "bankAccountId" | "language" | "paymentMethod" | "appearance" | "dueDate"
+  >
+>;
+
+// A saved document already says what it wants, so a new customer only proposes its defaults. The
+// account stays with the currency: without a currency change there is no reason to swap it.
+export function customerOffer(
+  values: FormValues,
+  defaults: CustomerDefaults,
+  touched: ReadonlySet<TouchedField>,
+  accounts: readonly AccountChoice[],
+): CustomerOffer | null {
+  const next = applyCustomerDefaults(values, defaults, touched, accounts);
+  const { currency, language, paymentMethod, appearance, dueDate } = next;
+  const bankAccountId = currency === values.currency ? values.bankAccountId : next.bankAccountId;
+  const wanted = { currency, language, paymentMethod, appearance, dueDate, bankAccountId };
+  const changed = Object.entries(wanted).filter(
+    ([field, value]) =>
+      JSON.stringify(value) !== JSON.stringify(values[field as keyof CustomerOffer]),
+  );
+  return changed.length > 0 ? Object.fromEntries(changed) : null;
 }
 
 const LINE_FIELDS: Record<string, string> = {

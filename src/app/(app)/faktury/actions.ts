@@ -27,6 +27,7 @@ import {
   updateIssuedInvoice,
 } from "@/server/services/invoice-versions";
 import {
+  deleteDraft,
   draftInputSchema,
   duplicateInvoice,
   issuedInputSchema,
@@ -231,6 +232,14 @@ export async function duplicateInvoiceAction(raw: unknown) {
     const copy = duplicateInvoice(actor, invoiceId);
     changedInvoices();
     return copy;
+  });
+}
+
+export async function deleteDraftAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    deleteDraft(actor, invoiceId);
+    changedInvoices();
+    return {};
   });
 }
 

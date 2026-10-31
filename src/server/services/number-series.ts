@@ -403,8 +403,9 @@ export function allocateNumber(
   ownerId: string,
   seriesId: string,
   date: CalendarDate,
-): { number: string; n: number } {
+): { number: string; n: number; skipped: string[] } {
   const series = findOwned(tx, ownerId, seriesId);
+  const skipped: string[] = [];
   for (;;) {
     const { n } = tx
       .insert(numberSeriesCounter)
@@ -425,6 +426,7 @@ export function allocateNumber(
       .returning({ n: numberSeriesCounter.highest })
       .get();
     const number = formatNumber(series.template, date, n);
-    if (!isNumberTaken(tx, ownerId, number)) return { number, n };
+    if (!isNumberTaken(tx, ownerId, number)) return { number, n, skipped };
+    skipped.push(number);
   }
 }

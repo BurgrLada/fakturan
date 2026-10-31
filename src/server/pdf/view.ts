@@ -1,6 +1,8 @@
 import "server-only";
 import type { Currency } from "@/lib/currency";
+import { toDiscount } from "@/lib/invoice";
 import type { DocumentLine, InvoiceDocument } from "@/lib/invoice-document";
+import { appliedLineDiscount } from "@/lib/invoice-totals";
 import type { CalendarDate } from "@/lib/number-format";
 import type { Language } from "@/lib/preferences";
 import { amountDue, documentQrInput, planQr } from "@/lib/qr-payload";
@@ -84,7 +86,13 @@ function lineDiscount(line: DocumentLine, currency: Currency, locale: string): s
   if (line.discountKind === "percent") {
     return `${decimal(line.discountValue / 100, locale, 2)} %`;
   }
-  return line.discountKind === "amount" ? money(line.discountValue, currency, locale) : "";
+  if (line.discountKind !== "amount") return "";
+  const applied = appliedLineDiscount({
+    quantityMilli: line.quantityMilli,
+    unitPriceMinor: line.unitPriceMinor,
+    discount: toDiscount(line.discountKind, line.discountValue),
+  });
+  return money(applied, currency, locale);
 }
 
 function lineView(line: DocumentLine, currency: Currency, locale: string): LineView {
