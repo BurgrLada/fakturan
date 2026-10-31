@@ -79,6 +79,35 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
   return problems;
 }
 
+function mailProblems(db: Db, ownerId: string): string[] {
+  const problems: string[] = [];
+  const unarchived = count(
+    db,
+    sql`SELECT count(*) AS n FROM email_log
+      WHERE user_id = ${ownerId} AND status = 'sent' AND file_id IS NULL`,
+  );
+  if (unarchived > 0) problems.push(`email_log: ${unarchived} odeslaných bez archivu`);
+
+  const abandoned = count(
+    db,
+    sql`SELECT count(*) AS n FROM email_log l
+      WHERE l.user_id = ${ownerId} AND l.status = 'sending' AND NOT EXISTS (
+        SELECT 1 FROM job j
+        WHERE j.status = 'running' AND json_extract(j.payload, '$.logId') = l.id
+      )`,
+  );
+  if (abandoned > 0) problems.push(`email_log: ${abandoned} ve stavu sending bez běžící úlohy`);
+
+  const stillIssued = count(
+    db,
+    sql`SELECT count(*) AS n FROM email_log l JOIN invoice i ON i.id = l.invoice_id
+      WHERE l.user_id = ${ownerId} AND l.status = 'sent' AND l.kind = i.type
+        AND i.status = 'issued'`,
+  );
+  if (stillIssued > 0) problems.push(`invoice: ${stillIssued} odeslaných stále vystavených`);
+  return problems;
+}
+
 // Throws on the first broken invariant. Plans extend it as new entities arrive.
 export function assertConsistent(db: Db, ownerId: string): void {
   const problems: string[] = [];
@@ -110,6 +139,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
     problems.push(`audit_log: ${orphanAudit} uživatelských záznamů bez vlastníka`);
 
   problems.push(...invoiceProblems(db, ownerId));
+  problems.push(...mailProblems(db, ownerId));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

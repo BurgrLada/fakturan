@@ -1,7 +1,7 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { user } from "./auth";
 
-export const FILE_KINDS = ["logo", "qr_logo", "signature"] as const;
+export const FILE_KINDS = ["logo", "qr_logo", "signature", "sent_pdf"] as const;
 export type FileKind = (typeof FILE_KINDS)[number];
 
 export const file = sqliteTable(

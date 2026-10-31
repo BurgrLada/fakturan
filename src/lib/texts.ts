@@ -765,6 +765,8 @@ export const TEXTS = {
         `U dokladu ${p.invoice ?? ""} nevíme, zda e-mail odešel. Zkontrolujte to a rozhodněte o dalším kroku.`,
       mail_held: (p: Record<string, unknown>) =>
         `E-mail k dokladu ${p.invoice ?? ""} byl zadržen a sám se neodešle.`,
+      mail_partial: (p: Record<string, unknown>) =>
+        `E-mail k dokladu ${p.invoice ?? ""} odešel, ale někteří příjemci ho odmítli.`,
       recurring_failed: (p: Record<string, unknown>) =>
         `Pravidelnou fakturu „${p.plan ?? ""}“ se nepodařilo vystavit, vznikl koncept.`,
       recurring_missed: (p: Record<string, unknown>) =>
@@ -773,6 +775,37 @@ export const TEXTS = {
         `Upomínku k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,
       reminder_missed: (p: Record<string, unknown>) =>
         `Upomínka k dokladu ${p.invoice ?? ""} se neodeslala včas a čeká na kontrolu.`,
+    },
+  },
+  invoiceMail: {
+    errors: {
+      forbidden: "Na tuto akci nemáte oprávnění",
+      invalid: "Odeslání se nepodařilo, načtěte stránku a zkuste to znovu",
+      address: "Zadejte platnou e-mailovou adresu",
+      noRecipient: "Zadejte alespoň jednoho příjemce",
+      recipients: "Zpráva může mít nejvýš 20 příjemců včetně kopií",
+      notSendable: "Tento doklad nejde odeslat",
+      unavailable: "Odesílání není dostupné, nastavte SMTP v nastavení pošty",
+      alreadySending: "Tento doklad se právě odesílá, počkejte na výsledek",
+      logNotFound: "Záznam o odeslání neexistuje",
+      notResendable: "Tuto zprávu nejde odeslat znovu",
+      superseded: "Tato zpráva už byla odeslána znovu, podívejte se do historie",
+      confirmUnknown: "Nevíme, zda zpráva odešla. Opakované odeslání musíte potvrdit",
+      notPdf: "Soubor není PDF",
+      archiveLocked: "Archiv odeslaného dokladu nejde smazat",
+    },
+    reasons: {
+      status: "Doklad už není ve stavu, ve kterém jde odeslat",
+      revision: "Doklad se od zařazení do fronty změnil",
+      automation: "Automatika je vypnutá",
+      tooOld: "Termín odeslání je starší než 3 dny",
+      deactivated: "Účet je deaktivovaný",
+      unavailable: "SMTP není dostupné",
+      archive: "PDF se nepodařilo připravit",
+      unreachable: "Server pošty se nepodařilo kontaktovat",
+      refused: "Server pošty zprávu odmítl",
+      interrupted: "Spojení se přerušilo během odesílání, zpráva mohla odejít",
+      partial: (addresses: string) => `Odmítnutí příjemci: ${addresses}`,
     },
   },
   settings: {

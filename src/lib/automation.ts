@@ -40,6 +40,7 @@ export const NOTIFICATION_KINDS = [
   "mail_failed",
   "mail_unknown",
   "mail_held",
+  "mail_partial",
   "recurring_failed",
   "recurring_missed",
   "reminder_failed",

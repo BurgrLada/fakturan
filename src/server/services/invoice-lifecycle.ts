@@ -471,6 +471,17 @@ export function markSent(actor: Actor, id: string): void {
   });
 }
 
+// Only an issued document moves: a paid one stays paid when it is sent again (INV-005).
+export function applySent(tx: Tx, userId: string, invoiceId: string): void {
+  const row = findOwned(tx, userId, invoiceId);
+  if (row.status !== "issued") return;
+  const now = clock.now();
+  tx.update(invoice)
+    .set({ status: "sent", sentAt: now, revision: row.revision + 1, updatedAt: now })
+    .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, userId)))
+    .run();
+}
+
 // A batch stops for nobody: one document already changed elsewhere must not block the others.
 export function markSentMany(actor: Actor, ids: string[]): { done: number; skipped: number } {
   let done = 0;

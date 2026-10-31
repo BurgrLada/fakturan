@@ -8,6 +8,7 @@ import {
   account,
   auditLog,
   automationSettings,
+  emailLog,
   auditPurge,
   bankAccount,
   catalogItem,
@@ -40,6 +41,7 @@ import { removeUserDir } from "../files/store";
 import { cancelUserJobs } from "../jobs/queue";
 import { RATE_RULES } from "../rate-limit";
 import { assertAdmin, enforceRateLimit, ServiceError } from "./access";
+import { cancelQueuedMail } from "./invoice-mail";
 import { mutate } from "./mutation";
 
 export type Role = "admin" | "user";
@@ -50,6 +52,7 @@ export const USER_OWNED_TABLES = [
   session,
   account,
   supplier,
+  emailLog,
   invoiceTag,
   tag,
   invoiceVersion,
@@ -163,13 +166,18 @@ export function deactivateUser(actor: Actor, userId: string): void {
     // In the same transaction, so a commit can never leave a banned user with a live session.
     const revoked = tx.delete(session).where(scoped(userId).where(session)).run();
     cancelUserJobs(tx, userId);
+    const cancelledMail = cancelQueuedMail(tx, userId);
     audit({
       entity: "user",
       entityId: userId,
       ownerId: userId,
       scope: "instance",
       before: { banned: Boolean(target.banned) },
-      after: { banned: true, revokedSessions: revoked.changes },
+      after: {
+        banned: true,
+        revokedSessions: revoked.changes,
+        cancelledMail,
+      },
     });
   });
 }

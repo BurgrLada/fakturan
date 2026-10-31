@@ -7,7 +7,8 @@ import { setClockForTests } from "@/server/clock";
 import { job, schedulerState } from "@/server/db/schema";
 import { checkHealth } from "@/server/health";
 import { claimNext, completeJob, enqueue } from "@/server/jobs/queue";
-import { registerJob } from "@/server/jobs/registry";
+import { jobDefinition, registerJob } from "@/server/jobs/registry";
+import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import { drainJobs, kickWorker } from "@/server/jobs/worker";
 import { acquireLease, releaseLease } from "@/server/scheduler/lease";
 import { reportFailure } from "@/server/scheduler/report";
@@ -400,11 +401,17 @@ describe("start", () => {
     expect(state()?.startedAt).toEqual(first);
   });
 
+  test("start zaregistruje doručení pošty i s obnovou", () => {
+    stubEnv();
+    startScheduler();
+    expect(jobDefinition("mail.send")).toEqual({ run: deliverMail, recover: recoverMail });
+  });
+
   test("[R-5] SIGTERM s běžící úlohou lease neuvolní a nechá ho vypršet", async () => {
     stubEnv();
     let finish = () => {};
-    registerJob(KIND, { run: () => new Promise<void>((resolve) => (finish = resolve)) });
     startScheduler();
+    registerJob(KIND, { run: () => new Promise<void>((resolve) => (finish = resolve)) });
     put();
     kickWorker();
     const holder = state()?.holder;
@@ -421,8 +428,8 @@ describe("start", () => {
   test("[OPS-004] stopScheduler uvolní lease a kickWorker pak nic nedělá", async () => {
     stubEnv();
     const run = vi.fn(async () => {});
-    registerJob(KIND, { run });
     startScheduler();
+    registerJob(KIND, { run });
     put();
     kickWorker();
     await vi.waitFor(() => expect(db.select().from(job).get()?.status).toBe("done"));

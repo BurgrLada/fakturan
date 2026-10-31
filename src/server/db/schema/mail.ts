@@ -1,7 +1,12 @@
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { AUTOMATION_KEYS } from "@/lib/automation";
 import { MESSAGE_KINDS } from "@/lib/email-template";
+import { EMAIL_STATUSES, EMAIL_TRIGGERS } from "@/lib/mail-send";
 import { LANGUAGES } from "@/lib/preferences";
 import { user } from "./auth";
+import { file } from "./file";
+import { invoice } from "./invoice";
 
 export const mailSettings = sqliteTable("mail_settings", {
   userId: text("user_id")
@@ -35,3 +40,42 @@ export const emailTemplate = sqliteTable(
   },
   (t) => [uniqueIndex("email_template_user_kind_language_idx").on(t.userId, t.kind, t.language)],
 );
+
+export const emailLog = sqliteTable(
+  "email_log",
+  {
+    id: text().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => invoice.id, { onDelete: "cascade" }),
+    kind: text({ enum: MESSAGE_KINDS }).notNull(),
+    trigger: text({ enum: EMAIL_TRIGGERS }).notNull(),
+    to: text({ mode: "json" }).$type<string[]>().notNull(),
+    cc: text({ mode: "json" }).$type<string[]>().notNull(),
+    bcc: text({ mode: "json" }).$type<string[]>().notNull(),
+    subject: text().notNull(),
+    body: text().notNull(),
+    status: text({ enum: EMAIL_STATUSES }).notNull().default("queued"),
+    reason: text(),
+    fileId: text("file_id").references(() => file.id, { onDelete: "set null" }),
+    invoiceRevision: integer("invoice_revision").notNull(),
+    plannedFor: text("planned_for"),
+    automation: text({ enum: AUTOMATION_KEYS }),
+    attempts: integer().notNull().default(0),
+    messageId: text("message_id"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    sentAt: integer("sent_at", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    index("email_log_user_invoice_created_idx").on(t.userId, t.invoiceId, t.createdAt),
+    uniqueIndex("email_log_running_idx")
+      .on(t.invoiceId, t.kind)
+      .where(sql`${t.status} IN ('queued', 'sending')`),
+  ],
+);
+
+export type EmailLog = typeof emailLog.$inferSelect;

@@ -13,7 +13,6 @@ import { logger } from "../logger";
 import { assertPublicHost, BlockedHostError } from "../mail/host-guard";
 import { instanceTarget, isInstanceMailConfigured } from "../mail/instance";
 import {
-  buildTransport,
   deliver,
   type MailAddress,
   type MailIdentity,
@@ -114,10 +113,7 @@ function ownTransport(row: OwnServer, auth: SmtpTarget["auth"], env: Env): MailT
       const { address, isPrivate } = await assertPublicHost(host, port, {
         allowPrivate: env.ALLOW_PRIVATE_MAIL_HOSTS,
       });
-      return deliver(
-        buildTransport({ host: address, port, auth }, { servername: host, isPrivate }),
-        msg,
-      );
+      return deliver({ host: address, port, auth }, { servername: host, isPrivate }, msg);
     },
   };
 }
@@ -126,7 +122,7 @@ function instanceTransport(row: Row | undefined, env: Env): MailTransport {
   return {
     source: "instance",
     identity: identityOf(row, instanceFrom(row, env.SMTP_FROM ?? "")),
-    send: (msg) => deliver(buildTransport(instanceTarget(env)), msg),
+    send: (msg) => deliver(instanceTarget(env), undefined, msg),
   };
 }
 

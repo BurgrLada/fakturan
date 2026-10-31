@@ -1,9 +1,10 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { FILE_KINDS, file, type FileKind } from "../db/schema";
+import { emailLog, FILE_KINDS, file, type FileKind } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { readBlob, removeBlob, writeBlob } from "../files/store";
 import { InvalidFileError, validateImage } from "../files/validate";
@@ -74,6 +75,63 @@ export function storeFile(
   return { id };
 }
 
+const E = TEXTS.invoiceMail.errors;
+
+function archiveOf(userId: string, logId: string) {
+  return db
+    .select({ fileId: emailLog.fileId })
+    .from(emailLog)
+    .where(scoped(userId).where(emailLog, (t, { eq: is }) => is(t.id, logId)))
+    .get();
+}
+
+// Blob, row and link commit together, so a repeated attempt finds the archive or nothing at all.
+export function archiveSentPdf(
+  actor: Actor,
+  logId: string,
+  data: Buffer,
+  name: string,
+): { id: string } {
+  const userId = ownerOf(actor);
+  if (data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new ServiceError(E.notPdf);
+  const log = archiveOf(userId, logId);
+  if (!log) throw new ServiceError(E.logNotFound);
+  if (log.fileId) return { id: log.fileId };
+
+  const id = randomUUID();
+  try {
+    mutate(actor, "file.create", (tx, audit) => {
+      tx.insert(file)
+        .values({
+          id,
+          userId,
+          kind: "sent_pdf",
+          mimeType: "application/pdf",
+          name: displayName(name),
+          size: data.length,
+          createdAt: clock.now(),
+        })
+        .run();
+      writeBlob(userId, id, data);
+      tx.update(emailLog)
+        .set({ fileId: id, updatedAt: clock.now() })
+        .where(scoped(userId).where(emailLog, (t, { eq: is }) => is(t.id, logId)))
+        .run();
+      audit({
+        entity: "file",
+        entityId: id,
+        ownerId: userId,
+        scope: "user",
+        after: { kind: "sent_pdf", mimeType: "application/pdf", size: data.length, logId },
+      });
+    });
+  } catch (error) {
+    removeBlob(userId, id);
+    throw error;
+  }
+  return { id };
+}
+
 export function readOwnedFile(
   actor: Actor,
   id: string,
@@ -102,6 +160,7 @@ export function deleteFile(actor: Actor, id: string): void {
       .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, id)))
       .get();
     if (!row) throw new FileNotFoundError();
+    if (row.kind === "sent_pdf") throw new ServiceError(E.archiveLocked);
     tx.delete(file)
       .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, id)))
       .run();

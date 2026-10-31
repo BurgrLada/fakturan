@@ -7,7 +7,9 @@ import { db, type Db } from "../db";
 import { schedulerState } from "../db/schema";
 import { env } from "../env";
 import { purgeFinishedJobs } from "../jobs/queue";
+import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
+import { deliverMail, recoverMail } from "../services/mail-delivery";
 import { backupTask } from "./backup";
 import { releaseLease } from "./lease";
 import { reportFailure } from "./report";
@@ -63,6 +65,7 @@ export function startScheduler(): void {
     .values({ id: 1, startedAt })
     .onConflictDoUpdate({ target: schedulerState.id, set: { startedAt, lastTickAt: null } })
     .run();
+  registerJob("mail.send", { run: deliverMail, recover: recoverMail });
   registerTickTask(jobCleanupTask);
   registerTickTask(backupTask);
   bindWorker(holder);

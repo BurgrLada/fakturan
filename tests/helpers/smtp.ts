@@ -15,9 +15,14 @@ export type TestSmtp = {
   port: number;
   messages: CapturedMail[];
   logins: { username: string | undefined; password: string | null | undefined }[];
+  connections(): number;
   waitFor(to: string): Promise<CapturedMail>;
   // Each of these applies to the next message only.
   rejectNext(code: number): void;
+  // Until reset().
+  rejectEvery(code: number): void;
+  rejectRecipient(address: string, code: number): void;
+  reset(): void;
   dropDuringData(): void;
   holdData(): () => void;
   stop(): Promise<void>;
@@ -35,16 +40,29 @@ export async function startSmtp(): Promise<TestSmtp> {
   const messages: CapturedMail[] = [];
   const logins: TestSmtp["logins"] = [];
   let next: NextData = {};
+  let every: number | undefined;
+  let connections = 0;
+  const refused = new Map<string, number>();
   const server = new SMTPServer({
     authOptional: true,
     allowInsecureAuth: true,
     disabledCommands: ["STARTTLS"],
+    onConnect(_session, callback) {
+      connections += 1;
+      callback();
+    },
+    onRcptTo({ address }, _session, callback) {
+      const code = refused.get(address);
+      if (!code) return callback();
+      callback(Object.assign(new Error(`Odmítnuto ${code}`), { responseCode: code }));
+    },
     onAuth({ username, password }, _session, callback) {
       logins.push({ username, password });
       callback(null, { user: username });
     },
     onData(stream, session, callback) {
-      const { reject, drop, hold } = next;
+      const { drop, hold } = next;
+      const reject = next.reject ?? every;
       next = {};
       const chunks: Buffer[] = [];
       stream.on("data", (chunk: Buffer) => {
@@ -88,6 +106,7 @@ export async function startSmtp(): Promise<TestSmtp> {
     port,
     messages,
     logins,
+    connections: () => connections,
     async waitFor(to) {
       const deadline = Date.now() + 5_000;
       while (Date.now() < deadline) {
@@ -99,6 +118,20 @@ export async function startSmtp(): Promise<TestSmtp> {
     },
     rejectNext(code) {
       next = { reject: code };
+    },
+    rejectEvery(code) {
+      every = code;
+    },
+    rejectRecipient(address, code) {
+      refused.set(address, code);
+    },
+    reset() {
+      messages.length = 0;
+      logins.length = 0;
+      connections = 0;
+      every = undefined;
+      next = {};
+      refused.clear();
     },
     dropDuringData() {
       next = { drop: true };
