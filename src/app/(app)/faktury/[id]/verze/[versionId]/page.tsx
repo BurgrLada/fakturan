@@ -59,6 +59,11 @@ async function VersionContent({ params }: { params: Promise<{ id: string; versio
         {T.label(version.versionNo)} · {version.document.number}
       </h1>
       <p className="text-sm text-muted-foreground">{formatDateTime(version.createdAt)}</p>
+      <iframe
+        title={T.preview}
+        src={`/faktury/${id}/verze/${versionId}/pdf`}
+        className="h-[36rem] w-full rounded-md border bg-card"
+      />
       <section className="flex flex-col gap-3 sm:max-w-xl">
         <h2 className="text-lg">{T.compare}</h2>
         <Changes

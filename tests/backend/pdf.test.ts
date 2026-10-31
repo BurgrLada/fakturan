@@ -18,7 +18,13 @@ import { saveCustomer } from "@/server/services/customers";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { fileNameFor, invoicePdf } from "@/server/services/invoice-pdf";
 import { cancelInvoice, checkIssuable, issueInvoice } from "@/server/services/invoice-lifecycle";
-import { newDraftDefaults, saveDraft, type DraftInput } from "@/server/services/invoices";
+import { listVersions, updateIssuedInvoice } from "@/server/services/invoice-versions";
+import {
+  getInvoice,
+  newDraftDefaults,
+  saveDraft,
+  type DraftInput,
+} from "@/server/services/invoices";
 import { ensureDefaultSeries } from "@/server/services/number-series";
 import { savePreferences } from "@/server/services/preferences";
 import { saveSupplier, setSupplierImage, type SupplierInput } from "@/server/services/supplier";
@@ -41,6 +47,7 @@ vi.mock("@/server/auth/session", () => ({ actorFromRequest: async () => session.
 
 const { GET: pdfRoute } = await import("@/app/(app)/faktury/[id]/pdf/route");
 const { GET: previewRoute } = await import("@/app/(app)/faktury/[id]/nahled/route");
+const { GET: versionRoute } = await import("@/app/(app)/faktury/[id]/verze/[versionId]/pdf/route");
 
 // Rendering is CPU bound and competes with the other test workers.
 vi.setConfig({ testTimeout: 30_000 });
@@ -181,6 +188,31 @@ describe("vykreslení PDF", () => {
     expect(preview.headers.get("content-disposition")).toMatch(/^inline; /);
     const [a, b] = await Promise.all([download.arrayBuffer(), preview.arrayBuffer()]);
     expect(await pdfText(Buffer.from(a))).toEqual(await pdfText(Buffer.from(b)));
+  });
+
+  test("[INV-021] verze se vykreslí z vlastního obsahu a cizí verze je 404", async () => {
+    const { owner, customerId } = newOwner();
+    const id = issued(owner, customerId, { note: "Původní poznámka" });
+    const row = getInvoice(owner, id)!;
+    updateIssuedInvoice(actor(owner), id, { ...row, number: row.number!, note: "Nová poznámka" });
+    const versionId = listVersions(owner, id)[0]!.id;
+    const url = request(`/faktury/${id}/verze/${versionId}/pdf`);
+    const context = { params: Promise.resolve({ id, versionId }) };
+
+    session.actor = actor(owner);
+    const own = await versionRoute(url, context);
+    expect(own.status).toBe(200);
+    expect(own.headers.get("content-disposition")).toMatch(/^inline; /);
+    const text = await textOf(Buffer.from(await own.arrayBuffer()));
+    expect(text).toContain("Původní poznámka");
+    expect(text).not.toContain("Nová poznámka");
+
+    session.actor = actor(newOwner().owner);
+    expect((await versionRoute(url, context)).status).toBe(404);
+    session.actor = actor(owner);
+    const other = issued(owner, customerId);
+    const mismatch = { params: Promise.resolve({ id: other, versionId }) };
+    expect((await versionRoute(url, mismatch)).status).toBe(404);
   });
 
   test("[PDF-001] rendery běží za sebou a chyba jednoho neblokuje další", async () => {

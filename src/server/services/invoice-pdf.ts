@@ -13,6 +13,7 @@ import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError } from "./access";
 import { FileNotFoundError, readOwnedFile } from "./files";
 import { loadInvoiceDocument } from "./invoice-document";
+import { getVersion } from "./invoice-versions";
 import { getInvoice, ownerOf } from "./invoices";
 import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
@@ -51,12 +52,10 @@ export function ownerImageReader(ownerId: string) {
   };
 }
 
-export async function invoicePdf(
+async function documentPdf(
   ownerId: string,
-  id: string,
+  doc: InvoiceDocument,
 ): Promise<{ data: Buffer; fileName: string }> {
-  const doc = loadInvoiceDocument(ownerId, id);
-  if (!doc) throw new InvoicePdfNotFoundError();
   const view = await buildInvoiceView(doc, {
     today: calendarDateInPrague(clock.now()),
     draft: doc.status === "draft",
@@ -66,6 +65,19 @@ export async function invoicePdf(
     data: await renderInvoicePdf(view),
     fileName: fileNameFor(getPreferences(ownerId).pdfFileName, doc),
   };
+}
+
+export async function invoicePdf(ownerId: string, id: string) {
+  const doc = loadInvoiceDocument(ownerId, id);
+  if (!doc) throw new InvoicePdfNotFoundError();
+  return documentPdf(ownerId, doc);
+}
+
+// A version is rendered from its own stored document, so it shows what the document said back then.
+export async function versionPdf(ownerId: string, invoiceId: string, versionId: string) {
+  const version = getVersion(ownerId, versionId);
+  if (version?.invoiceId !== invoiceId) throw new InvoicePdfNotFoundError();
+  return documentPdf(ownerId, version.document);
 }
 
 export function recordPdfDownload(actor: Actor, ownerId: string, id: string): void {

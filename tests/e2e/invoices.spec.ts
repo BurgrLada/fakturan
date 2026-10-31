@@ -148,6 +148,27 @@ test("[INV-021] verze ukáže rozdíl a jde obnovit", async ({ page, freshApp })
   await expect(page.getByRole("link", { name: "Verze 2" })).toBeVisible();
 });
 
+test("[INV-021] verze se ukáže jako doklad s tehdejším obsahem", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  const detail = await cashIssued(page, baseURL);
+  await page.goto(`${detail}/upravit`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Poznámka").fill("Pozdější poznámka");
+  await page.getByRole("button", { name: "Uložit změny" }).click();
+  await expect(page.getByText("Změny jsou uložené.")).toBeVisible();
+
+  await page.goto(detail);
+  await page.getByRole("link", { name: "Verze 1" }).click();
+  const src = await page.getByTitle("Náhled verze").getAttribute("src");
+  const response = await page.request.get(new URL(src!, page.url()).href);
+
+  expect(response.headers()["content-type"]).toBe("application/pdf");
+  const text = (await pdfText(await response.body())).join("\n");
+  expect(text).toContain("Konzultace");
+  expect(text).not.toContain("Pozdější poznámka");
+});
+
 test("[INV-002] koncept jde smazat z formuláře i ze seznamu, vystavený doklad ne", async ({
   page,
   freshApp,
@@ -304,6 +325,7 @@ test("[TST-009] cizí detail a verze vrátí 404 a seznam je nevrátí", async (
   await expect(guest.getByText("cizi@example.cz", { exact: true })).toBeVisible();
   expect((await guest.goto(detail))?.status()).toBe(404);
   expect((await guest.goto(version))?.status()).toBe(404);
+  expect((await guest.request.get(`${version}/pdf`)).status()).toBe(404);
   await guest.goto(`${baseURL}/faktury`);
   await expect(guest.getByText("Zatím tu není žádná faktura")).toBeVisible();
   await context.close();
