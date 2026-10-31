@@ -613,7 +613,7 @@ Navigace: Přehled, Faktury, Pravidelné, Zákazníci, Ceník, Platby, Statistik
 Každá tabulka s daty účtu má `user_id`.
 
 - auth: tabulky Better Auth, `invitation`
-- `supplier_profile`, `bank_account`, `user_settings`, `mail_settings`, `bank_mailbox`
+- `supplier_profile`, `bank_account`, `user_settings`, `automation_settings`, `mail_settings`, `bank_mailbox`
 - `customer`, `catalog_item`, `unit`
 - `number_series`, `invoice`, `invoice_line`, `invoice_version`, `payment`, `invoice_template`, `tag`, `invoice_tag`
 - `recurring_invoice`, `recurring_run` (unikátní `(recurring_id, period_key)`)
@@ -621,7 +621,7 @@ Každá tabulka s daty účtu má `user_id`.
 - `bank_notification`
 - `dashboard`, `dashboard_widget`
 - `import_batch`, `mapping_preset`, `export_job`, `file`
-- `audit_log`, `job`, `notification`, `exchange_rate`
+- `audit_log`, `job`, `scheduler_state`, `notification`, `exchange_rate`
 
 Vztahy: `invoice.related_invoice_id` (záloha, oprava), `invoice.recurring_id`, `invoice.import_batch_id`. Faktura drží kopii údajů dodavatele a zákazníka.
 

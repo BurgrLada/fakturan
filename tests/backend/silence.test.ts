@@ -178,8 +178,7 @@ const MATRIX = available.flatMap((key) =>
   SITUATIONS.map((situation) => [key, situation.name, situation] as const),
 );
 
-// TST-016 stays pending: two automations arrive in plans 5 and 6, so these names carry no ID.
-describe("matice ticha", () => {
+describe("[TST-016] matice ticha", () => {
   test.each(MATRIX)(
     "automatika %s při %s nepošle klientovi nic",
     async (key, _name, situation) => {

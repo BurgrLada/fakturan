@@ -85,8 +85,7 @@ async function nothingLeaves(page: Page, smtp: TestSmtp) {
 test.describe("se SMTP", () => {
   test.use({ allowPrivateMail: true });
 
-  // MAIL-001 stays pending until the ISDOC attachment arrives in plan 8, so the name has no ID.
-  test("tlačítko Odeslat klientovi je na detailu vystavené i odeslané faktury a chybí na konceptu a stornu", async ({
+  test("[MAIL-001] tlačítko Odeslat klientovi je na detailu vystavené i odeslané faktury a chybí na konceptu a stornu", async ({
     page,
     freshApp,
     smtp,
@@ -561,7 +560,7 @@ test.describe("se SMTP", () => {
     await expect(dialog(page).getByRole("button", { name: /^Odeslat/ })).toBeDisabled();
   });
 
-  test("[MAIL-008] hromadně z výběru odejdou 3 zprávy po potvrzení", async ({
+  test("[MAIL-008] [INV-024] hromadně z výběru odejdou 3 zprávy po potvrzení", async ({
     page,
     freshApp,
     smtp,

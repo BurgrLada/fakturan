@@ -244,7 +244,7 @@ test("[TST-015] [TST-018] faktura od nuly po stažené PDF s dekódovaným QR", 
   expect(payload).toContain("ACC:CZ");
 });
 
-test("[PDF-009] hromadné PDF dá ZIP vybraných dokladů", async ({ page, freshApp }) => {
+test("[PDF-009] [INV-024] hromadné PDF dá ZIP vybraných dokladů", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
   await ready(page, baseURL);
   await cashIssued(page, baseURL, "První");

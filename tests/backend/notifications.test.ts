@@ -100,7 +100,7 @@ describe("zakládání", () => {
 });
 
 describe("zvonek", () => {
-  test("zvonek ukáže počet a přečtení ho sníží", () => {
+  test("[UI-011] zvonek ukáže počet a přečtení ho sníží", () => {
     const id = seed();
     const first = add(id);
     add(id);

@@ -67,7 +67,7 @@ function due(owner: string, customerId: string, dueDate: string, status = "sent"
 }
 
 describe("dueAlerts", () => {
-  test("rozdělí faktury po splatnosti a do 3 dnů, zbytek ne", () => {
+  test("[UI-011] rozdělí faktury po splatnosti a do 3 dnů, zbytek ne", () => {
     const { owner, customerId } = account();
     const late = due(owner, customerId, "2026-03-09");
     const today = due(owner, customerId, TODAY);

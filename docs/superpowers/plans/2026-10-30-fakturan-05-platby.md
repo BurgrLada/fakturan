@@ -65,9 +65,9 @@ Uživatel chtěl plány bez čekání, proto je plán rozhodl sám. Na `[R-n]` s
 - **[R-19] Maskování.** `text_masked` má v souvislých číslech nad 6 číslic viditelné poslední 4, protiúčet se ukládá jen maskovaně. Plné číslo cílového účtu se neukládá, stačí `bank_account_id` a maskovaná podoba. VS, KS, jméno a zpráva pro příjemce zůstávají, jsou potřeba k ručnímu přiřazení, a mizí po 90 dnech. `Platba` nese vlastní datum, částku a poznámku, takže přežije čištění (BNK-017).
 - **[R-20] Selhání schránky je provozní stav, ne chyba kódu.** Ukládá se jen kód `auth`, `blocked_host`, `timeout`, `tls`, `folder`, `decrypt`, `other`, nikdy text odpovědi serveru. Úloha neselhává a další pokus je další pětiminutovka. Po 3 selháních po sobě vznikne upozornění, první úspěch ho vyřeší. Sentry dostane jen pád parseru nebo služby, a to bez obsahu zprávy.
 - **[R-21] Hlavní vypínač ani vypnutá automatika nezastaví čtení a párování,** řídí jen odesílání (SET-043). Deaktivovaný účet se nečte.
-- **[R-22] Vrácení (BNK-014) je jedna funkce** `undoNotice`: smaže všechny platby avíza, přepočítá stav a avízo vrátí do fronty s důvodem `undone`, ze které se samo znovu nespáruje. Zvýšení `revision` zadrží případné potvrzení ve frontě. Odeslané potvrzení vzít zpět nejde, UI na to před vrácením upozorní.
+- **[R-22] Vrácení (BNK-014) je jedna funkce** `undoNotice`: smaže všechny platby avíza, přepočítá stav a avízo vrátí do fronty s důvodem `undone`, ze které se samo znovu nespáruje. Smazání platby zadrží případné potvrzení ve frontě **[R-24]**. Odeslané potvrzení vzít zpět nejde, UI na to před vrácením upozorní.
 - **[R-23] Rozdělení musí sečíst celou částku avíza.** Zbytek by byly peníze bez evidence. Kdo chce zbytek ignorovat, přiřadí ho přeplatkem. Částky jsou v měně avíza. Přiřazení jde na `AWAITING_PAYMENT` a `paid`, přeplatek je povolený a ukázaný (PAY-004).
-- **[R-24] Potvrzení platby automaticky jen u plateb z avíza,** automaticky spárovaných i přiřazených z fronty. Ruční platba a hromadné „označit jako uhrazené“ automaticky nic neposílají, nabídnou tlačítko „Poslat potvrzení“ přes dialog odeslání. Datum avíza starší 3 dnů potvrzení nezaloží, takže první běh s 30 dny historie nerozešle hromadu zpráv ani upozornění. Klíč `mail:receipt:<paymentId>`, `plannedFor` je datum platby, `automation: 'paymentReceipt'`.
+- **[R-24] Potvrzení platby automaticky jen u plateb z avíza,** automaticky spárovaných i přiřazených z fronty. Ruční platba a hromadné „označit jako uhrazené“ automaticky nic neposílají, nabídnou tlačítko „Poslat potvrzení“ přes dialog odeslání. Datum avíza starší 3 dnů potvrzení nezaloží, takže první běh s 30 dny historie nerozešle hromadu zpráv ani upozornění. Klíč `mail:receipt:<paymentId>`, `plannedFor` je datum platby, `automation: 'paymentReceipt'`. Klíč i záznam nesou id platby (`email_log.payment_id`). Dvě rychlé platby na jeden doklad jsou dvě potvrzení: nesmí narazit na `email_log_running_idx`, proto index dostane `payment_id` (`coalesce(payment_id, '')`), a druhá platba nesmí první potvrzení zadržet, protože sama zvýší `revision`. U `payment_receipt` proto `refusal` místo revize ověřuje, že platba záznamu pořád existuje.
 - **[R-25] Proměnná `{{prijato}}`** existuje jen v šabloně `payment_receipt`, `{{zbyva}}` jde použít jako jinde. Výchozí texty ji uvádějí. Bez ní by potvrzení u dílčí platby neřeklo, co přišlo.
 - **[R-26] Testovací IMAP server je vlastní pomůcka** `tests/helpers/imap.ts` nad `node:net`, jen příkazy, které `imapflow` skutečně pošle, zjištěné proti balíčku. Staré balíčky `hoodiecrow` a spol. nejsou udržované a TLS se testuje v `host-guard`. Pomůcka umí chybu přihlášení, zablokování, změnu `UIDVALIDITY` a výpis příkazů, takže test dokáže, že se nic nezapisuje.
 - **[R-27] Upozornění.** Počty čekajících a nerozpoznaných jsou odvozené přes `registerDerivedAlerts` a samy zmizí po vyřízení. Událostmi v `notification` jsou výpadek napojení a potvrzení, které neodešlo. UI-011 má po tomto plánu test, „blížící se limity“ doplní plán 8, proto přechází do `tests/spec-partial.txt`.
@@ -170,7 +170,7 @@ Pravidla:
 - „Uzavřít jako uhrazené“ je jen u `partially_paid`, dialog ukáže rozdíl a vyžaduje potvrzení.
 - Formulář úpravy dokladu ukáže varování `balanceWarning` po uložení a stav po přepočtu. Výběr měny je u dokladu s platbou vypnutý s vysvětlením, stráž na serveru zůstává.
 - Tlačítko storna se u dokladu s platbou nenabízí a vysvětlení uvede proč.
-- Hromadně: „Označit jako uhrazené“ v panelu výběru, potvrzení ukáže počet a součet podle měn, výsledek počet hotových a přeskočených. Nic neodesílá. INV-024 čeká na export v plánu 8, ID zůstává v pending a testy ho v názvu nenesou.
+- Hromadně: „Označit jako uhrazené“ v panelu výběru, potvrzení ukáže počet a součet podle měn, výsledek počet hotových a přeskočených. Nic neodesílá. INV-024 čeká na export v plánu 8, ID zůstává v `tests/spec-partial.txt`, nové testy ho nesou v názvu.
 - Karta zákazníka ukáže průměrnou dobu úhrady nebo pomlčku.
 
 - [ ] **Step 1: Napiš testy**
@@ -463,12 +463,12 @@ Pravidla:
 - `AUTOMATIONS`: `paymentReceipt` má `available: true`, `advanceInvoice` zůstává vypnutá do plánu 6. Dialog zapnutí řekne, co a komu odejde, a že zpráva jde jen u plateb z avíz. `automationImpact` uvede počet zákazníků s adresou.
 - `queueAutomaticReceipt` běží ve stejné transakci jako `insertPayment`, až po `applyPayments`, takže `email_log.invoice_revision` nese novou revizi. Volá ji automatické spárování i přiřazení z fronty, u rozdělení jednou za doklad.
 - Pořadí kontrol: `automaticSendAllowed`, datum nejvýš 3 dny staré, adresa zákazníka. Vypnutá automatika a staré datum tiše skončí. Chybějící adresa dá upozornění `receipt_no_address`.
-- `queueMail` s výsledkem `null` kvůli běžícímu potvrzení na tentýž doklad dá upozornění `receipt_skipped`, nezkouší se znovu, další zpráva ve stejné chvíli by klientovi nic nepřinesla.
-- `deliverMail` ověřuje svolení a revizi před SMTP beze změny. Vrácení avíza, další platba i úprava dokladu dají `held`. `refusal` přidá pro `payment_receipt` kontrolu, že `paid_minor` je nad nulou.
+- `queueMail` s výsledkem `null` je jen opakování téže platby (stejný klíč), nic se nepošle ani nehlásí. Běžící potvrzení jiné platby téhož dokladu výsledek `null` nedá **[R-24]**.
+- `deliverMail` ověřuje svolení před SMTP beze změny. Revizi ověřuje u všech druhů kromě `payment_receipt`, tam `refusal` kontroluje existenci platby a že `paid_minor` je nad nulou **[R-24]**. Vrácení avíza dá `held`, další platba první potvrzení nezadrží, úprava dokladu ano jen u jiných druhů zpráv.
 - `payment_receipt` nesmí spustit `applySent`, drží to stávající podmínka, nově to pokrývá test.
 - Ruční tlačítko „Poslat potvrzení“ je v panelu plateb a otevírá `send-dialog.tsx` s druhem `payment_receipt` přes `sendPrefill`. Hlavní vypínač ho neblokuje, je to kliknutí.
 - `{{prijato}}` validuje jen šablona `payment_receipt`, v jiném druhu je neznámá proměnná. Změna výchozích textů se netýká uložených vlastních šablon.
-- Do `armed` v `tests/backend/silence.test.ts` přidej `paymentReceipt`. Maticí pak prochází každé spárování. TST-016 zůstává v pending kvůli `advanceInvoice`, test ID nenese.
+- Do `armed` v `tests/backend/silence.test.ts` přidej `paymentReceipt`. Maticí pak prochází každé spárování. TST-016 zůstává v `tests/spec-partial.txt` kvůli `advanceInvoice`.
 
 - [ ] **Step 1: Napiš testy**
 
@@ -483,7 +483,7 @@ test('[MAIL-003] {{prijato}} jde použít jen v potvrzení platby', ...)
 test('ruční platba a hromadné označení nic neodešlou', ...)
 test('avízo staré 4 dny potvrzení nezaloží', ...)
 test('vrácení avíza zadrží potvrzení ve frontě', ...)
-test('druhá platba zadrží první potvrzení a upozorní', ...)
+test('dvě rychlé platby dají dvě potvrzení a druhá první nezadrží', ...)
 test('zákazník bez adresy založí upozornění', ...)
 test('potvrzení na vystavenou fakturu nenastaví sent_at', ...)
 test('ruční potvrzení jde přes dialog a nic neodejde bez kliknutí', ...) // e2e
@@ -516,13 +516,13 @@ Pravidla:
 - `freshApp` předá `ALLOW_PRIVATE_MAIL_HOSTS=1` jen tam, kde běží testovací IMAP.
 - Docker test ověří, že v obrazu jde načíst `imapflow` i `mailparser`, skutečným spojením na `TestImap` z kontejneru, stejně jako `docker-scheduler` u SMTP.
 - `.env.example` a README: nastavení Fio, schránka jen ke čtení, doporučení samostatné schránky, význam `require_confirmation`, prozatímní česká varianta. Spec kap. 24 se nemění, otevřený bod zůstává.
-- Z `tests/spec-pending.txt` vypadnou: PAY-001 až 005, PAY-007, BNK-001 až 004, BNK-006 až 017, CUS-006, INV-023. PAY-006, BNK-005, TST-006 a UI-011 přecházejí do `tests/spec-partial.txt`. V pending zůstávají INV-024, CRN-005, TST-016 a vše z jiných plánů.
+- Z `tests/spec-pending.txt` vypadnou: PAY-001 až 005, PAY-007, BNK-001 až 004, BNK-006 až 017, CUS-006, INV-023. PAY-006, BNK-005 a TST-006 přecházejí do `tests/spec-partial.txt`. V pending zůstává CRN-005 a vše z jiných plánů.
 - `tests/spec-partial.txt` po uzavření, sloupce jsou odděleny tabulátorem:
   - přidat `BNK-005`: Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; plán: po dodání vzorku od zadavatele
   - přidat `TST-006`: České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem; plán: po dodání vzorku od zadavatele
   - přidat `PAY-006`: Chybí předvyplnění kurzem ČNB; plán: plán 6
-  - přidat `UI-011`: Chybí blížící se limity, spec je nedefinuje; plán: plán 8
-  - odebrat `QR-005`, `QR-006`, `SEC-007`, po změřeném skóre i `TST-013`
+  - upravit `UI-011`: Chybí blížící se limity, spec je nedefinuje; plán: plán 8
+  - odebrat `QR-005`, `QR-006`, `SEC-007`, `REM-006`, po změřeném skóre i `TST-013`
   - `TST-018` přepsat na „Kontrola nepokrývá přehledy“, plán 7
 - Když skóre jádra 90 % nejde v limitu ověřit, `TST-013` zůstává s přesným důvodem a výčtem změřených souborů.
 
@@ -563,7 +563,7 @@ test('[OPS-004] obraz: čtení schránky běží a health je ok', ...) // docker
 | QR-005, QR-006 | 1, 2 | Testy nad skutečnými platbami, ruší partial |
 | CRN-005 | 1 | Připravený přes `amountDue` a `deriveStatus`, opravné faktury přinese plán 6, zůstává v pending |
 | INV-023 | 1, 2 | Stav v `applyChange`, platí i pro obnovení verze |
-| INV-024 | 2 | Označení uhrazené hotové, export v plánu 8, zůstává v pending |
+| INV-024 | 2 | Označení uhrazené hotové, export v plánu 8, zůstává v partial |
 | CUS-006 | 1, 2 | **[R-28]** |
 | 5.5, SET-050 až 054 | 7 | Potvrzení jde stejným `resolveTransport`, Cc a Bcc z `composeMail` |
 | SET-040 až 043 | 7 | Třetí ze čtyř automatik, poslední v plánu 6 |
