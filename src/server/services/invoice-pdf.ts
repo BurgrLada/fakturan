@@ -1,14 +1,19 @@
 import "server-only";
+import { zipSync, type Zippable } from "fflate";
+import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import type { InvoiceDocument } from "@/lib/invoice-document";
 import { calendarDateInPrague } from "@/lib/number-format";
+import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { LABELS } from "../pdf/labels";
 import { renderInvoicePdf } from "../pdf/render";
 import { buildInvoiceView } from "../pdf/view";
+import { RATE_RULES } from "../rate-limit";
+import { enforceRateLimit, ServiceError } from "./access";
 import { FileNotFoundError, readOwnedFile } from "./files";
 import { loadInvoiceDocument } from "./invoice-document";
-import { getInvoice } from "./invoices";
+import { getInvoice, ownerOf } from "./invoices";
 import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
 
@@ -75,4 +80,50 @@ export function recordPdfDownload(actor: Actor, ownerId: string, id: string): vo
       after: { number: row.number },
     }),
   );
+}
+
+// Compared without case, because archives are often unpacked on case-insensitive file systems.
+export function uniqueFileNames(names: string[]): string[] {
+  const taken = new Set<string>();
+  return names.map((name) => {
+    const stem = name.replace(/\.pdf$/i, "");
+    let candidate = name;
+    for (let n = 2; taken.has(candidate.toLocaleLowerCase("cs")); n += 1) {
+      candidate = `${stem} (${n}).pdf`;
+    }
+    taken.add(candidate.toLocaleLowerCase("cs"));
+    return candidate;
+  });
+}
+
+export async function invoicesZip(
+  actor: Actor,
+  ids: string[],
+): Promise<{ data: Uint8Array<ArrayBuffer>; fileName: string }> {
+  const ownerId = ownerOf(actor);
+  const unique = [...new Set(ids)];
+  if (unique.length > MAX_BULK_DOCUMENTS) {
+    throw new ServiceError(TEXTS.invoices.list.bulk.tooMany(MAX_BULK_DOCUMENTS));
+  }
+  for (const id of unique) {
+    const row = getInvoice(ownerId, id);
+    if (!row || row.status === "draft") throw new InvoicePdfNotFoundError();
+  }
+  enforceRateLimit(actor, RATE_RULES.exportUser);
+
+  // One at a time: rendering is CPU heavy and would otherwise block every other request.
+  const pdfs: Awaited<ReturnType<typeof invoicePdf>>[] = [];
+  for (const id of unique) pdfs.push(await invoicePdf(ownerId, id));
+  for (const id of unique) recordPdfDownload(actor, ownerId, id);
+
+  const names = uniqueFileNames(pdfs.map((pdf) => pdf.fileName));
+  const entries: Zippable = {};
+  // PDF streams are already compressed.
+  names.forEach((name, index) => {
+    entries[name] = [new Uint8Array(pdfs[index]!.data), { level: 0 }];
+  });
+  return {
+    data: new Uint8Array(zipSync(entries)),
+    fileName: `faktury-${calendarDateInPrague(clock.now())}.zip`,
+  };
 }

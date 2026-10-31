@@ -1,4 +1,5 @@
 import { normalizeIban } from "@/lib/iban";
+import type { InvoiceDocument } from "@/lib/invoice-document";
 
 export type QrReason =
   | "disabled"
@@ -132,4 +133,48 @@ export function planQr(input: QrInput): QrPlan {
     return epc(input, iban, bic, recipient);
   }
   return { kind: "none", reason: "currency" };
+}
+
+export type QrState =
+  | "spayd"
+  | "epc"
+  | "turned_off"
+  | "other_payment"
+  | "no_account"
+  | "settled"
+  | Exclude<QrReason, "disabled">;
+
+type QrDocument = Pick<
+  InvoiceDocument,
+  "status" | "currency" | "totals" | "snapshot" | "appearance" | "paymentMethod" | "variableSymbol"
+>;
+
+function offReason(doc: QrDocument): QrState | null {
+  if (doc.status === "cancelled" || doc.status === "credited") return "settled";
+  if (!doc.appearance.showQr) return "turned_off";
+  if (doc.paymentMethod !== "transfer") return "other_payment";
+  return doc.snapshot.account ? null : "no_account";
+}
+
+export function documentQrInput(doc: QrDocument, message: string): QrInput {
+  const account = doc.snapshot.account;
+  return {
+    currency: doc.currency,
+    dueMinor: amountDue(doc.totals),
+    iban: account?.iban ?? null,
+    bic: account?.swift ?? null,
+    variableSymbol: doc.variableSymbol,
+    message,
+    recipient: doc.snapshot.supplier?.name ?? "",
+    enabled: offReason(doc) === null,
+    paid: doc.status === "paid",
+  };
+}
+
+export function qrStateOf(doc: QrDocument): QrState {
+  const off = offReason(doc);
+  if (off) return off;
+  const plan = planQr(documentQrInput(doc, ""));
+  if (plan.kind !== "none") return plan.kind;
+  return plan.reason === "disabled" ? "turned_off" : plan.reason;
 }

@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { EntityHistory } from "@/components/audit/entity-history";
 import { CustomerActions } from "@/components/customers/customer-actions";
 import { CustomerForm, type CustomerValues } from "@/components/customers/customer-form";
+import { CustomerInvoices } from "@/components/customers/customer-invoices";
 import { VatVerify } from "@/components/customers/vat-verify";
 import { PageLoading } from "@/components/page-loading";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -68,9 +69,9 @@ async function CustomerContent({ params }: Pick<PageProps<"/zakaznici/[id]">, "p
         <VatVerify id={row.id} hasVatId={row.dic !== ""} />
       </section>
       <section className="flex flex-col gap-3 sm:max-w-xl">
-        <p className="text-sm text-muted-foreground">{T.stats}</p>
         <CustomerActions id={row.id} archived={row.archivedAt !== null} />
       </section>
+      <CustomerInvoices customerId={row.id} ownerId={user.id} />
       <section className="flex flex-col gap-3 sm:max-w-xl">
         <h2 className="text-lg">{T.historyTitle}</h2>
         <EntityHistory entity="customer" entityId={row.id} />

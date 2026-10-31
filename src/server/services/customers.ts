@@ -120,7 +120,7 @@ function findOwned(q: Reader, ownerId: string, id: string): Customer {
   return row;
 }
 
-function escapeLike(value: string): string {
+export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 

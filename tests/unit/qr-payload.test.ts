@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { amountDue, planQr } from "@/lib/qr-payload";
+import { amountDue, planQr, qrStateOf } from "@/lib/qr-payload";
 
 const CZ_IBAN = "CZ6508000000192000145399";
 const DE_IBAN = "DE89370400440532013000";
@@ -333,5 +333,43 @@ describe("amountDue", () => {
     expect(plan.payload).toContain("*AM:1000.00*");
     const epc = planQr({ ...eur, dueMinor }) as { payload: string };
     expect(epc.payload.split("\n")[7]).toBe("EUR1000.00");
+  });
+});
+
+describe("qrStateOf", () => {
+  const account = { iban: "CZ6508000000192000145399", swift: "GIBACZPX" };
+  const doc = (over: object = {}) =>
+    ({
+      status: "issued",
+      currency: "CZK",
+      paymentMethod: "transfer",
+      variableSymbol: "2026001",
+      totals: { totalMinor: 100_000, paidMinor: 0 },
+      appearance: { showQr: true },
+      snapshot: { account, supplier: { name: "Jan Novák" } },
+      ...over,
+    }) as unknown as Parameters<typeof qrStateOf>[0];
+
+  test("[QR-002] každý důvod chybějícího QR má vlastní stav", () => {
+    expect(qrStateOf(doc())).toBe("spayd");
+    expect(qrStateOf(doc({ currency: "EUR" }))).toBe("epc");
+    expect(qrStateOf(doc({ status: "cancelled" }))).toBe("settled");
+    expect(qrStateOf(doc({ status: "credited" }))).toBe("settled");
+    expect(qrStateOf(doc({ status: "paid" }))).toBe("paid");
+    expect(qrStateOf(doc({ paymentMethod: "cash" }))).toBe("other_payment");
+    expect(qrStateOf(doc({ appearance: { showQr: false } }))).toBe("turned_off");
+    expect(qrStateOf(doc({ currency: "USD" }))).toBe("currency");
+    expect(qrStateOf(doc({ totals: { totalMinor: 0, paidMinor: 0 } }))).toBe("zero");
+    expect(
+      qrStateOf(
+        doc({
+          currency: "EUR",
+          snapshot: { account: { iban: account.iban, swift: "" }, supplier: { name: "J" } },
+        }),
+      ),
+    ).toBe("missing_iban_bic");
+    expect(qrStateOf(doc({ snapshot: { account: null, supplier: { name: "Jan Novák" } } }))).toBe(
+      "no_account",
+    );
   });
 });

@@ -420,3 +420,18 @@ export function markSent(actor: Actor, id: string): void {
     return { status: "sent", sentAt: clock.now() };
   });
 }
+
+// A batch stops for nobody: one document already changed elsewhere must not block the others.
+export function markSentMany(actor: Actor, ids: string[]): { done: number; skipped: number } {
+  let done = 0;
+  const unique = [...new Set(ids)];
+  for (const id of unique) {
+    try {
+      markSent(actor, id);
+      done += 1;
+    } catch (error) {
+      if (!(error instanceof ServiceError)) throw error;
+    }
+  }
+  return { done, skipped: unique.length - done };
+}

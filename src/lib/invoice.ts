@@ -61,11 +61,18 @@ export function daysBetween(from: CalendarDate, to: CalendarDate): number {
   return Math.round((Date.parse(to) - Date.parse(from)) / MS_PER_DAY);
 }
 
-const AWAITING_PAYMENT: readonly InvoiceStatus[] = ["issued", "sent", "partially_paid"];
+// Bulk actions render or change documents one by one, so the batch has to stay bounded.
+export const MAX_BULK_DOCUMENTS = 200;
+
+export const AWAITING_PAYMENT = ["issued", "sent", "partially_paid"] as const;
 
 export function isOverdue(
   row: { status: InvoiceStatus; dueDate: CalendarDate | null },
   today: CalendarDate,
 ): boolean {
-  return AWAITING_PAYMENT.includes(row.status) && row.dueDate !== null && row.dueDate < today;
+  return (
+    (AWAITING_PAYMENT as readonly InvoiceStatus[]).includes(row.status) &&
+    row.dueDate !== null &&
+    row.dueDate < today
+  );
 }

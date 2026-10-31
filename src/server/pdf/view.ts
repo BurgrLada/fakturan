@@ -3,7 +3,7 @@ import type { Currency } from "@/lib/currency";
 import type { DocumentLine, InvoiceDocument } from "@/lib/invoice-document";
 import type { CalendarDate } from "@/lib/number-format";
 import type { Language } from "@/lib/preferences";
-import { amountDue, planQr } from "@/lib/qr-payload";
+import { amountDue, documentQrInput, planQr } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { imageToPng } from "./assets";
 import { getDesign } from "./designs";
@@ -208,20 +208,7 @@ async function paymentQr(
   title: string,
   opts: ViewOptions,
 ): Promise<{ qr: Buffer | null; qrPending: boolean }> {
-  const account = doc.snapshot.account;
-  const settled = doc.status === "cancelled" || doc.status === "credited";
-  const plan = planQr({
-    currency: doc.currency,
-    dueMinor: amountDue(doc.totals),
-    iban: account?.iban ?? null,
-    bic: account?.swift ?? null,
-    variableSymbol: doc.variableSymbol,
-    message: title,
-    recipient: doc.snapshot.supplier?.name ?? "",
-    enabled:
-      doc.appearance.showQr && doc.paymentMethod === "transfer" && account !== null && !settled,
-    paid: doc.status === "paid",
-  });
+  const plan = planQr(documentQrInput(doc, title));
   if (plan.kind === "none") return { qr: null, qrPending: false };
   // A draft has neither number nor variable symbol, so a code printed now could not be matched.
   if (opts.draft) return { qr: null, qrPending: true };

@@ -1,127 +1,22 @@
 import { join } from "node:path";
-import type { Page } from "@playwright/test";
 import Database from "better-sqlite3";
-import { pdfText } from "../helpers/pdf";
 import { expect, test } from "./fixtures";
-
-const PASSWORD = "správné-kůň-baterie-sponka";
-const CUSTOMER = "Alfa s.r.o.";
-
-// Marking as sent gets its button in Task 10, so the state comes straight from the database.
-function markSent(dataDir: string, id: string) {
-  const sqlite = new Database(join(dataDir, "fakturan.db"));
-  try {
-    sqlite.prepare("UPDATE invoice SET status = 'sent' WHERE id = ?").run(id);
-  } finally {
-    sqlite.close();
-  }
-}
-
-async function register(page: Page, baseURL: string) {
-  await page.goto(`${baseURL}/registrace`);
-  await page.getByLabel("Jméno").fill("Jan Novák");
-  await page.getByLabel("E-mail").fill("jan@example.cz");
-  await page.getByLabel("Heslo").fill(PASSWORD);
-  await page.getByRole("button", { name: "Vytvořit účet" }).click();
-  await expect(page.getByRole("heading", { name: "Přehled" })).toBeVisible();
-}
-
-async function addSupplier(page: Page, baseURL: string) {
-  await page.goto(`${baseURL}/nastaveni/dodavatel`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Jméno nebo firma").fill("Jan Novák");
-  await page.getByLabel("Ulice a číslo").fill("Dlouhá 1");
-  await page.getByLabel("Město").fill("Praha");
-  await page.getByLabel("PSČ").fill("110 00");
-  await page.getByLabel("IČO").fill("27082440");
-  await page.getByRole("button", { name: "Uložit" }).first().click();
-  await expect(page.getByText("Uloženo.").first()).toBeVisible();
-}
-
-async function addCustomer(page: Page, baseURL: string, name = CUSTOMER) {
-  await page.goto(`${baseURL}/zakaznici/novy`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Název nebo jméno").fill(name);
-  await page.getByRole("button", { name: "Uložit" }).click();
-  await expect(page.getByRole("heading", { name: "Karta zákazníka" })).toBeVisible();
-}
-
-async function addCatalogItem(page: Page, baseURL: string, name: string, currency = "CZK") {
-  await page.goto(`${baseURL}/cenik/novy`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Název").fill(name);
-  await page.getByLabel("Jednotka").selectOption("hod.");
-  await page.getByLabel("Cena za jednotku").fill("1500");
-  await page.getByLabel("Měna").selectOption(currency);
-  await page.getByRole("button", { name: "Uložit" }).click();
-  await expect(page).toHaveURL(/\/cenik\/(?!novy)[\w-]+$/);
-}
-
-async function openForm(page: Page, baseURL: string) {
-  await page.goto(`${baseURL}/faktury/nova`);
-  await page.waitForLoadState("networkidle");
-}
-
-async function chooseCustomer(page: Page, name = CUSTOMER) {
-  await page.getByRole("combobox", { name: "Zákazník" }).fill(name.slice(0, 3));
-  await page.getByRole("option", { name }).click();
-}
-
-const saved = (page: Page) => expect(page.getByTestId("save-status")).toHaveText("Uloženo");
-
-// Waits past the debounce, because "Uloženo" may still describe the previous write.
-async function settled(page: Page) {
-  await expect(page.getByTestId("save-status")).toHaveText(/Čeká|Ukládám|Uloženo/);
-  await page.waitForTimeout(100);
-  await saved(page);
-}
-
-async function fillLine(page: Page, index: number, name: string, price: string) {
-  await page.getByRole("combobox", { name: "Název položky" }).nth(index).fill(name);
-  await page.getByLabel("Cena za jednotku").nth(index).fill(price);
-}
-
-async function issue(page: Page) {
-  await page.getByRole("button", { name: "Vystavit" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Vystavit" }).click();
-  await page.waitForURL(/\/faktury\/[^/]+$/);
-}
-
-async function issuedPdf(page: Page) {
-  const response = await page.request.get(`${page.url()}/pdf`);
-  expect(response.status()).toBe(200);
-  return (await pdfText(await response.body())).join("\n");
-}
-
-async function draftPdf(page: Page) {
-  const src = await page.getByTitle("Náhled faktury").getAttribute("src");
-  const response = await page.request.get(new URL(src!, page.url()).href);
-  expect(response.status()).toBe(200);
-  return (await pdfText(await response.body())).join("\n");
-}
-
-async function invite(page: Page, email: string, baseURL: string): Promise<string> {
-  await page.goto(`${baseURL}/administrace`);
-  await page.waitForLoadState("networkidle");
-  await page.getByRole("tab", { name: "Pozvánky" }).click();
-  await page.getByLabel("E-mail pozvaného").fill(email);
-  await page.getByRole("button", { name: "Pozvat" }).click();
-  const link = page.getByLabel("Odkaz pozvánky");
-  await expect(link).toBeVisible();
-  return link.inputValue();
-}
-
-async function ready(page: Page, baseURL: string) {
-  await register(page, baseURL);
-  await addSupplier(page, baseURL);
-  await addCustomer(page, baseURL);
-}
-
-async function cashInvoice(page: Page) {
-  await chooseCustomer(page);
-  await page.getByLabel("Způsob platby").selectOption("cash");
-  await fillLine(page, 0, "Konzultace", "1000");
-}
+import {
+  PASSWORD,
+  CUSTOMER,
+  register,
+  addCatalogItem,
+  openForm,
+  chooseCustomer,
+  settled,
+  fillLine,
+  issue,
+  issuedPdf,
+  draftPdf,
+  invite,
+  ready,
+  cashInvoice,
+} from "./invoice-helpers";
 
 test("[INV-010] vyberu zákazníka, položku z ceníku a vystavím", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
@@ -129,7 +24,7 @@ test("[INV-010] vyberu zákazníka, položku z ceníku a vystavím", async ({ pa
   await addCatalogItem(page, baseURL, "Vývoj webu");
 
   await page.goto(`${baseURL}/faktury`);
-  await page.getByRole("link", { name: "Nová faktura" }).click();
+  await page.getByRole("link", { name: "Nová faktura" }).first().click();
   await page.waitForURL(/upravit$/);
   await page.waitForLoadState("networkidle");
 
@@ -557,10 +452,11 @@ test("[INV-020] úprava odeslané faktury upozorní", async ({ page, freshApp })
   await expect(page.getByText("Změny jsou uložené.")).toBeVisible();
   await expect(page.getByText("zvažte opětovné odeslání")).toBeHidden();
 
-  const id = detail.split("/").at(-1)!;
-  markSent(freshApp.dataDir, id);
-
-  await page.reload();
+  await page.goto(detail);
+  await page.getByRole("button", { name: "Označit jako odeslanou" }).click();
+  await expect(page.getByText("Odeslaná", { exact: true })).toBeVisible();
+  await page.goto(`${detail}/upravit`);
+  await page.waitForLoadState("networkidle");
   await expect(page.getByText("už byla odeslaná")).toBeVisible();
   await page.getByLabel("Poznámka").fill("Znovu");
   await page.getByRole("button", { name: "Uložit změny" }).click();
@@ -668,7 +564,7 @@ test("[INV-017] adresa i strom sedí po prvním uložení a Zpět nevyvolá odm�
   const { baseURL } = freshApp;
   await register(page, baseURL);
   await page.goto(`${baseURL}/faktury`);
-  await page.getByRole("link", { name: "Nová faktura" }).click();
+  await page.getByRole("link", { name: "Nová faktura" }).first().click();
   await page.waitForURL(/upravit$/);
   await page.waitForLoadState("networkidle");
   const url = page.url();
@@ -942,7 +838,7 @@ test("[INV-017] skrytý předchozí formulář nedrží stejná id", async ({ pa
   await page.waitForLoadState("networkidle");
 
   for (const note of ["první", "druhá"]) {
-    await page.getByRole("link", { name: "Nová faktura" }).click();
+    await page.getByRole("link", { name: "Nová faktura" }).first().click();
     await page.waitForURL(/upravit$/);
     await expect(page.getByLabel("Poznámka")).toHaveValue("");
     await page.getByLabel("Poznámka").fill(note);

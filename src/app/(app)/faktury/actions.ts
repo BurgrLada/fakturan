@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
-import { daysBetween } from "@/lib/invoice";
+import { daysBetween, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import type { CustomerDefaults } from "@/lib/invoice-form";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
@@ -11,15 +11,24 @@ import { ServiceError } from "@/server/services/access";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
 import { customerInputSchema, saveCustomer, searchCustomers } from "@/server/services/customers";
 import {
+  cancelInvoice,
   checkIssuable,
   issueInvoice,
+  markSent,
+  markSentMany,
   NotIssuableError,
   previewIssue,
+  restoreInvoice,
   type IssueProblem,
 } from "@/server/services/invoice-lifecycle";
-import { updateIssuedInvoice } from "@/server/services/invoice-versions";
+import {
+  refreshCustomerSnapshot,
+  restoreVersion,
+  updateIssuedInvoice,
+} from "@/server/services/invoice-versions";
 import {
   draftInputSchema,
+  duplicateInvoice,
   issuedInputSchema,
   newDraftDefaults,
   ownerOf,
@@ -44,6 +53,9 @@ const id = z.string(V.invalid).min(1, V.invalid);
 const tags = z.array(z.string(V.invalid), V.invalid);
 
 const idInput = z.object({ id });
+const idsInput = z.object({
+  ids: z.array(id, V.invalid).min(1, V.invalid).max(MAX_BULK_DOCUMENTS, V.invalid),
+});
 const searchInput = z.object({ q: z.string(V.invalid).max(100, V.tooLong) });
 const customerInput = z.object({ customerId: id });
 const draftInput = z.object({ draft: draftInputSchema, tags });
@@ -175,4 +187,65 @@ export async function searchCatalogAction(raw: unknown) {
       currency: item.currency,
     })),
   }));
+}
+
+function changedInvoices() {
+  revalidatePath("/faktury", "layout");
+  revalidatePath("/zakaznici", "layout");
+}
+
+export async function markSentAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    markSent(actor, invoiceId);
+    changedInvoices();
+    return {};
+  });
+}
+
+export async function markSentManyAction(raw: unknown) {
+  return run(idsInput, raw, ({ ids }, actor) => {
+    const result = markSentMany(actor, ids);
+    changedInvoices();
+    return result;
+  });
+}
+
+export async function cancelInvoiceAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    cancelInvoice(actor, invoiceId);
+    changedInvoices();
+    return {};
+  });
+}
+
+export async function restoreInvoiceAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    restoreInvoice(actor, invoiceId);
+    changedInvoices();
+    return {};
+  });
+}
+
+export async function duplicateInvoiceAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    const copy = duplicateInvoice(actor, invoiceId);
+    changedInvoices();
+    return copy;
+  });
+}
+
+export async function refreshCustomerAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    const result = refreshCustomerSnapshot(actor, invoiceId);
+    changedInvoices();
+    return result;
+  });
+}
+
+export async function restoreVersionAction(raw: unknown) {
+  return run(idInput, raw, ({ id: versionId }, actor) => {
+    const result = restoreVersion(actor, versionId);
+    changedInvoices();
+    return result;
+  });
 }

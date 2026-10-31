@@ -4,9 +4,11 @@ import { auth } from "@/server/auth";
 import { recordAdminDenial } from "@/server/auth/session";
 import { getCatalogItem } from "@/server/services/catalog";
 import { getCustomer } from "@/server/services/customers";
+import { getVersion } from "@/server/services/invoice-versions";
 import { getInvoice, isFreeDraftId } from "@/server/services/invoices";
 
 const DETAIL = /^\/(?:(zakaznici|cenik)\/([^/]+)|(faktury)\/([^/]+)(?:\/upravit)?)$/;
+const VERSION = /^\/faktury\/([^/]+)\/verze\/([^/]+)$/;
 const NEW_PAGES = new Set(["/zakaznici/novy", "/cenik/novy"]);
 const NEW_INVOICE = "/faktury/nova";
 const FINDERS = {
@@ -42,6 +44,18 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(target);
   }
 
+  const version = VERSION.exec(pathname);
+  if (version && session && request.method === "GET") {
+    let found: boolean;
+    try {
+      const row = getVersion(session.user.id, decodeURIComponent(version[2]!));
+      found = row?.invoiceId === decodeURIComponent(version[1]!);
+    } catch {
+      found = false;
+    }
+    return found ? NextResponse.next() : notFound();
+  }
+
   const detail = DETAIL.exec(pathname);
   const section = (detail?.[1] ?? detail?.[3]) as keyof typeof FINDERS | undefined;
   const id = detail?.[2] ?? detail?.[4];
@@ -72,5 +86,6 @@ export const config = {
     "/cenik/:id",
     "/faktury/:id",
     "/faktury/:id/upravit",
+    "/faktury/:id/verze/:versionId",
   ],
 };

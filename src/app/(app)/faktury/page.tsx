@@ -1,19 +1,105 @@
+import { FileText } from "lucide-react";
+import type { Metadata } from "next";
 import Link from "next/link";
-import { PlannedSection, plannedMetadata } from "@/components/planned-section";
+import { Suspense } from "react";
+import { EmptyState } from "@/components/empty-state";
+import { InvoiceFilters } from "@/components/invoices/invoice-filters";
+import { Remount } from "@/components/invoices/remount";
+import { InvoiceSummary } from "@/components/invoices/invoice-summary";
+import { InvoiceTable } from "@/components/invoices/invoice-table";
+import { PageLoading } from "@/components/page-loading";
 import { buttonVariants } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
+import { requireSession } from "@/server/auth/session";
+import {
+  invoiceFilterOptions,
+  invoiceQuery,
+  invoiceSortLinks,
+  invoiceSummary,
+  isFiltered,
+  listInvoices,
+  parseInvoiceFilter,
+} from "@/server/services/invoices";
 
-export const metadata = plannedMetadata("invoices");
+const T = TEXTS.invoices.list;
 
-export default function Page() {
+export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
+
+// Not a Link: the client router replays its cached redirect to the previous draft's id, which shows
+// that draft for a moment and lets typing land in it, even with prefetch off.
+function NewInvoiceLink({ variant }: { variant?: "outline" }) {
+  return (
+    <a href="/faktury/nova" className={buttonVariants({ variant })}>
+      {TEXTS.invoices.add}
+    </a>
+  );
+}
+
+async function InvoicesContent({ searchParams }: Pick<PageProps<"/faktury">, "searchParams">) {
+  const { user } = await requireSession();
+  const filter = parseInvoiceFilter(await searchParams);
+  const result = listInvoices(user.id, filter);
+  const filtered = isFiltered(filter);
   return (
     <>
-      <PlannedSection navKey="invoices" />
-      <div>
-        <Link href="/faktury/nova" prefetch={false} className={buttonVariants()}>
-          {TEXTS.invoices.add}
-        </Link>
+      <Remount on={invoiceQuery(filter)}>
+        <InvoiceFilters filter={filter} options={invoiceFilterOptions(user.id)} />
+      </Remount>
+      <InvoiceSummary rows={invoiceSummary(user.id, filter)} />
+      {result.rows.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title={filtered ? T.emptyFiltered : T.empty}
+          description={filtered ? "" : T.emptyBody}
+          action={
+            filtered ? (
+              <Link href="/faktury" className={buttonVariants({ variant: "outline" })}>
+                {T.reset}
+              </Link>
+            ) : (
+              <NewInvoiceLink variant="outline" />
+            )
+          }
+        />
+      ) : (
+        <InvoiceTable
+          key={invoiceQuery(filter)}
+          rows={result.rows}
+          sortLinks={invoiceSortLinks(filter)}
+        />
+      )}
+      <div className="flex gap-2">
+        {result.page > 1 && (
+          <Link
+            href={`/faktury${invoiceQuery({ ...filter, page: result.page - 1 })}`}
+            className={buttonVariants({ variant: "outline" })}
+          >
+            {T.newer}
+          </Link>
+        )}
+        {result.hasNext && (
+          <Link
+            href={`/faktury${invoiceQuery({ ...filter, page: result.page + 1 })}`}
+            className={buttonVariants({ variant: "outline" })}
+          >
+            {T.older}
+          </Link>
+        )}
       </div>
+    </>
+  );
+}
+
+export default function InvoicesPage({ searchParams }: PageProps<"/faktury">) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-brand text-2xl">{T.title}</h1>
+        <NewInvoiceLink />
+      </div>
+      <Suspense fallback={<PageLoading />}>
+        <InvoicesContent searchParams={searchParams} />
+      </Suspense>
     </>
   );
 }

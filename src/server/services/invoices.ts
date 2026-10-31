@@ -1,11 +1,35 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  lt,
+  lte,
+  notInArray,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { z } from "zod";
-import { CURRENCIES } from "@/lib/currency";
+import { CURRENCIES, type Currency } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
-import { addDays, appearanceFrom, daysBetween, INVOICE_TYPES, toDiscount } from "@/lib/invoice";
+import {
+  addDays,
+  appearanceFrom,
+  AWAITING_PAYMENT,
+  daysBetween,
+  INVOICE_STATUSES,
+  INVOICE_TYPES,
+  isOverdue,
+  toDiscount,
+  type InvoiceStatus,
+  type InvoiceType,
+} from "@/lib/invoice";
 import { diffLines, lineBody } from "@/lib/invoice-diff";
 import {
   computeTotals,
@@ -29,17 +53,20 @@ import {
   customer,
   invoice,
   invoiceLine,
+  invoiceTag,
   numberSeries,
 } from "../db/schema";
+import { czech } from "../db/collation";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
+import type { Page } from "./audit-read";
 import { defaultAccountFor } from "./bank-accounts";
 import { MAX_PRICE_MINOR } from "./catalog";
-import { customerDefaults } from "./customers";
+import { customerDefaults, escapeLike } from "./customers";
 import { mutate } from "./mutation";
 import { defaultSeriesFor } from "./number-series";
 import { colorSchema, designIdSchema, getPreferences, logoPositionSchema } from "./preferences";
-import { linkTags, tagsOf, type Tag } from "./tags";
+import { linkTags, listTags, tagsOf, type Tag } from "./tags";
 
 const V = TEXTS.invoices.validation;
 const MAX_LINES = 500;
@@ -585,4 +612,313 @@ export function duplicateInvoice(actor: Actor, id: string): { id: string } {
     });
     return { id: copyId };
   });
+}
+
+export const INVOICE_SORTS = [
+  "number",
+  "customer",
+  "issueDate",
+  "dueDate",
+  "total",
+  "status",
+] as const;
+export type InvoiceSort = (typeof INVOICE_SORTS)[number];
+export type SortDirection = "asc" | "desc";
+export type InvoiceStatusFilter = InvoiceStatus | "overdue";
+
+export type InvoiceFilter = {
+  q?: string;
+  status?: InvoiceStatusFilter;
+  customerId?: string;
+  from?: string;
+  to?: string;
+  currency?: Currency;
+  type?: InvoiceType;
+  tagId?: string;
+  external?: boolean;
+  sort?: InvoiceSort;
+  dir?: SortDirection;
+  page?: number;
+  pageSize?: number;
+};
+
+export type InvoiceRow = {
+  id: string;
+  status: InvoiceStatus;
+  number: string | null;
+  customerId: string | null;
+  customerName: string;
+  issueDate: string | null;
+  dueDate: string | null;
+  currency: Currency;
+  totalMinor: number;
+  paidMinor: number;
+  overdue: boolean;
+};
+
+export type InvoiceSummaryRow = {
+  currency: Currency;
+  invoicedMinor: number;
+  paidMinor: number;
+  overdueMinor: number;
+};
+
+export type SortLink = { href: string; active: SortDirection | null };
+export type InvoiceFilterOptions = { customers: { id: string; name: string }[]; tags: Tag[] };
+
+export const INVOICE_STATUS_PARAM: Record<InvoiceStatusFilter, string> = {
+  draft: "koncept",
+  issued: "vystavena",
+  sent: "odeslana",
+  partially_paid: "castecne-uhrazena",
+  paid: "uhrazena",
+  cancelled: "stornovana",
+  credited: "dobropisovana",
+  overdue: "po-splatnosti",
+};
+export const INVOICE_STATUS_FILTERS = [...INVOICE_STATUSES, "overdue"] as const;
+
+const SORT_PARAM: Record<InvoiceSort, string> = {
+  number: "cislo",
+  customer: "zakaznik",
+  issueDate: "vystaveno",
+  dueDate: "splatnost",
+  total: "castka",
+  status: "stav",
+};
+
+const LIST_PAGE_SIZE = 25;
+const MAX_LIST_PAGE_SIZE = 100;
+const MAX_QUERY_CHARS = 100;
+const MAX_ID_CHARS = 100;
+const CUSTOMER_CARD_ROWS = 10;
+const NOT_IN_TOTALS = ["draft", "cancelled"] as const satisfies InvoiceStatus[];
+
+function keyOf<K extends string>(map: Record<K, string>, value: string | undefined): K | undefined {
+  return (Object.keys(map) as K[]).find((key) => map[key] === value);
+}
+
+export function parseInvoiceFilter(
+  raw: Record<string, string | string[] | undefined>,
+): InvoiceFilter {
+  const one = (key: string) => {
+    const value = raw[key];
+    return Array.isArray(value) ? value[0] : value;
+  };
+  const date = (key: string) => {
+    const value = one(key);
+    return value && isCalendarDate(value) ? value : undefined;
+  };
+  const id = (key: string) => one(key)?.slice(0, MAX_ID_CHARS) || undefined;
+  const page = Number(one("strana"));
+  const dir = one("smer");
+  const entries = {
+    q: one("q")?.trim().slice(0, MAX_QUERY_CHARS) || undefined,
+    status: keyOf(INVOICE_STATUS_PARAM, one("stav")),
+    customerId: id("zakaznik"),
+    from: date("od"),
+    to: date("do"),
+    currency: CURRENCIES.find((currency) => currency === one("mena")),
+    type: INVOICE_TYPES.find((type) => type === one("typ")),
+    tagId: id("stitek"),
+    external: one("jinde") === "1" ? true : undefined,
+    sort: keyOf(SORT_PARAM, one("razeni")),
+    dir: dir === "asc" || dir === "desc" ? dir : undefined,
+    page: Number.isInteger(page) && page > 1 && page <= 100_000 ? page : undefined,
+  };
+  return Object.fromEntries(
+    Object.entries(entries).filter(([, value]) => value !== undefined),
+  ) as InvoiceFilter;
+}
+
+function sortOf(filter: InvoiceFilter): { sort: InvoiceSort; dir: SortDirection } {
+  return {
+    sort: filter.sort ?? "issueDate",
+    dir: filter.dir ?? (filter.sort ? "asc" : "desc"),
+  };
+}
+
+export function invoiceSortParams(filter: InvoiceFilter): Record<string, string> {
+  return {
+    ...(filter.sort && { razeni: SORT_PARAM[filter.sort] }),
+    ...(filter.dir && { smer: filter.dir }),
+  };
+}
+
+export function invoiceQuery(filter: InvoiceFilter): string {
+  const params = new URLSearchParams({
+    ...(filter.q && { q: filter.q }),
+    ...(filter.status && { stav: INVOICE_STATUS_PARAM[filter.status] }),
+    ...(filter.customerId && { zakaznik: filter.customerId }),
+    ...(filter.from && { od: filter.from }),
+    ...(filter.to && { do: filter.to }),
+    ...(filter.currency && { mena: filter.currency }),
+    ...(filter.type && { typ: filter.type }),
+    ...(filter.tagId && { stitek: filter.tagId }),
+    ...(filter.external && { jinde: "1" }),
+    ...invoiceSortParams(filter),
+    ...(filter.page && filter.page > 1 && { strana: String(filter.page) }),
+  });
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+export function invoiceSortLinks(filter: InvoiceFilter): Record<InvoiceSort, SortLink> {
+  const current = sortOf(filter);
+  const link = (sort: InvoiceSort): SortLink => {
+    const active = current.sort === sort ? current.dir : null;
+    const { page: _p, ...rest } = filter;
+    const dir = active === "asc" ? "desc" : "asc";
+    return { href: `/faktury${invoiceQuery({ ...rest, sort, dir })}`, active };
+  };
+  return Object.fromEntries(INVOICE_SORTS.map((sort) => [sort, link(sort)])) as Record<
+    InvoiceSort,
+    SortLink
+  >;
+}
+
+export function isFiltered(filter: InvoiceFilter): boolean {
+  const { sort: _s, dir: _d, page: _p, pageSize: _z, ...rest } = filter;
+  return Object.keys(rest).length > 0;
+}
+
+// The SQL form of isOverdue in lib/invoice; tests compare the two.
+function overdueCondition(today: string): SQL {
+  return and(inArray(invoice.status, AWAITING_PAYMENT), lt(invoice.dueDate, today)) as SQL;
+}
+
+function statusCondition(status: InvoiceStatusFilter): SQL {
+  return status === "overdue"
+    ? overdueCondition(calendarDateInPrague(clock.now()))
+    : eq(invoice.status, status);
+}
+
+function ownedCustomerId(ownerId: string, id: string | undefined): string | undefined {
+  if (!id) return undefined;
+  return db
+    .select({ id: customer.id })
+    .from(customer)
+    .where(scoped(ownerId).where(customer, (t, { eq }) => eq(t.id, id)))
+    .get()?.id;
+}
+
+function invoiceConditions(ownerId: string, filter: InvoiceFilter): SQL {
+  const customerId = ownedCustomerId(ownerId, filter.customerId);
+  const tagId = listTags(ownerId).find((tag) => tag.id === filter.tagId)?.id;
+  return scoped(ownerId).where(invoice, (t, { and, eq }) =>
+    and(
+      filter.q
+        ? sql`${t.searchText} LIKE ${`%${escapeLike(foldText(filter.q))}%`} ESCAPE '\\'`
+        : undefined,
+      filter.status ? statusCondition(filter.status) : undefined,
+      customerId ? eq(t.customerId, customerId) : undefined,
+      filter.from ? gte(t.issueDate, filter.from) : undefined,
+      filter.to ? lte(t.issueDate, filter.to) : undefined,
+      filter.currency ? eq(t.currency, filter.currency) : undefined,
+      filter.type ? eq(t.type, filter.type) : undefined,
+      filter.external ? eq(t.external, true) : undefined,
+      tagId
+        ? exists(
+            db
+              .select({ id: invoiceTag.invoiceId })
+              .from(invoiceTag)
+              .where(and(eq(invoiceTag.invoiceId, t.id), eq(invoiceTag.tagId, tagId))),
+          )
+        : undefined,
+    ),
+  );
+}
+
+const STATUS_RANK = sql`CASE ${invoice.status} ${sql.raw(
+  INVOICE_STATUSES.map((status, rank) => `WHEN '${status}' THEN ${rank}`).join(" "),
+)} END`;
+
+const SORT_COLUMNS = {
+  number: czech(invoice.number),
+  customer: czech(invoice.customerName),
+  issueDate: invoice.issueDate,
+  dueDate: invoice.dueDate,
+  total: invoice.totalMinor,
+  status: STATUS_RANK,
+} satisfies Record<InvoiceSort, unknown>;
+
+function invoiceRows(where: SQL, filter: InvoiceFilter): Page<InvoiceRow> {
+  const page = Math.max(1, Math.floor(filter.page ?? 1));
+  const pageSize = Math.min(MAX_LIST_PAGE_SIZE, Math.max(1, filter.pageSize ?? LIST_PAGE_SIZE));
+  const { sort, dir } = sortOf(filter);
+  const rows = db
+    .select({
+      id: invoice.id,
+      status: invoice.status,
+      number: invoice.number,
+      customerId: invoice.customerId,
+      customerName: invoice.customerName,
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      currency: invoice.currency,
+      totalMinor: invoice.totalMinor,
+      paidMinor: invoice.paidMinor,
+    })
+    .from(invoice)
+    .where(where)
+    .orderBy((dir === "asc" ? asc : desc)(SORT_COLUMNS[sort]), asc(invoice.id))
+    .limit(pageSize + 1)
+    .offset((page - 1) * pageSize)
+    .all();
+  const today = calendarDateInPrague(clock.now());
+  return {
+    rows: rows.slice(0, pageSize).map((row) => ({ ...row, overdue: isOverdue(row, today) })),
+    page,
+    pageSize,
+    hasNext: rows.length > pageSize,
+  };
+}
+
+export function listInvoices(ownerId: string, filter: InvoiceFilter): Page<InvoiceRow> {
+  return invoiceRows(invoiceConditions(ownerId, filter), filter);
+}
+
+export function invoiceSummary(ownerId: string, filter: InvoiceFilter): InvoiceSummaryRow[] {
+  const overdue = overdueCondition(calendarDateInPrague(clock.now()));
+  return db
+    .select({
+      currency: invoice.currency,
+      invoicedMinor: sql<number>`coalesce(sum(${invoice.totalMinor}), 0)`,
+      paidMinor: sql<number>`coalesce(sum(${invoice.paidMinor}), 0)`,
+      overdueMinor: sql<number>`coalesce(sum(CASE WHEN ${overdue} THEN ${invoice.totalMinor} - ${invoice.paidMinor} ELSE 0 END), 0)`,
+    })
+    .from(invoice)
+    .where(and(invoiceConditions(ownerId, filter), notInArray(invoice.status, NOT_IN_TOTALS)))
+    .groupBy(invoice.currency)
+    .orderBy(asc(invoice.currency))
+    .all();
+}
+
+export function customerInvoiceStats(ownerId: string, customerId: string) {
+  const ofCustomer = scoped(ownerId).where(invoice, (t, { eq }) => eq(t.customerId, customerId));
+  const outstanding = inArray(invoice.status, AWAITING_PAYMENT);
+  const sums = db
+    .select({
+      currency: invoice.currency,
+      invoicedMinor: sql<number>`coalesce(sum(${invoice.totalMinor}), 0)`,
+      paidMinor: sql<number>`coalesce(sum(${invoice.paidMinor}), 0)`,
+      outstandingMinor: sql<number>`coalesce(sum(CASE WHEN ${outstanding} THEN ${invoice.totalMinor} - ${invoice.paidMinor} ELSE 0 END), 0)`,
+    })
+    .from(invoice)
+    .where(and(ofCustomer, notInArray(invoice.status, NOT_IN_TOTALS)))
+    .groupBy(invoice.currency)
+    .orderBy(asc(invoice.currency))
+    .all();
+  const { rows, hasNext } = invoiceRows(ofCustomer, { pageSize: CUSTOMER_CARD_ROWS });
+  return { sums, rows, hasMore: hasNext };
+}
+
+export function invoiceFilterOptions(ownerId: string): InvoiceFilterOptions {
+  const customers = db
+    .select({ id: customer.id, name: customer.name })
+    .from(customer)
+    .where(scoped(ownerId).where(customer))
+    .orderBy(asc(czech(customer.name)), asc(customer.id))
+    .all();
+  return { customers, tags: listTags(ownerId) };
 }

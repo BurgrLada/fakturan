@@ -35,9 +35,9 @@ test("[UI-009] nehotová sekce ukáže prázdný stav Připravujeme, neznámá a
   await registerAdmin(page, freshApp.baseURL);
   await page
     .getByRole("navigation", { name: "Hlavní navigace" })
-    .getByRole("link", { name: "Faktury" })
+    .getByRole("link", { name: "Pravidelné" })
     .click();
-  await expect(page.getByRole("heading", { name: "Faktury" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pravidelné" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Připravujeme" })).toBeVisible();
   const missing = await page.goto(`${freshApp.baseURL}/neexistuje`);
   expect(missing?.status()).toBe(404);
@@ -110,7 +110,7 @@ test("[UI-007] navigace funguje na šířce 390 px bez vodorovného posunu", asy
   await page.getByRole("button", { name: "Otevřít nabídku" }).click();
   await expect(nav).toBeVisible();
   await nav.getByRole("link", { name: "Faktury" }).click();
-  await expect(page.getByRole("heading", { name: "Připravujeme" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Faktury" })).toBeVisible();
   await expect(nav).toBeHidden();
 
   for (const path of ["/nastaveni/ucet", "/nastaveni/historie", "/administrace"]) {
