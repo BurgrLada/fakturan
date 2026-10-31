@@ -619,6 +619,71 @@ describe("text a doklad jsou v souladu", () => {
     expect(logsOf(owner)).toEqual([]);
   });
 
+  describe("čerstvá zpráva místo záznamu", () => {
+    async function failedReminder() {
+      const { owner, invoiceId } = account();
+      smtp.rejectNext(550);
+      const logId = mutate(webActor(owner), "invoice.send", (tx, audit) =>
+        queueMail(tx, audit, {
+          userId: owner,
+          invoiceId,
+          kind: "reminder",
+          trigger: "manual",
+          key: `reminder:${randomUUID()}`,
+          message: { to: ["alfa@example.cz"], cc: [], bcc: [], subject: "Upomínka", body: "Text" },
+        }),
+      )!.logId;
+      await drainJobs(WORKER);
+      return { owner, invoiceId, logId };
+    }
+    const kindsOf = (owner: string) => logsOf(owner).map((log) => log.kind);
+
+    test("druh čte z ověřeného záznamu, ne od klienta", async () => {
+      const { owner, invoiceId, logId } = await failedReminder();
+      editNote(owner, invoiceId);
+      const raw = { ...input({ logId, kind: "payment_receipt" }) };
+      sendInvoice(webActor(owner), invoiceId, raw);
+      expect(kindsOf(owner)).toEqual(["reminder", "reminder"]);
+    });
+
+    test("bez logId je druh daný dokladem, podstrčený kind se ignoruje", () => {
+      const { owner, invoiceId } = account();
+      sendInvoice(webActor(owner), invoiceId, input({ kind: "reminder" }));
+      expect(kindsOf(owner)).toEqual(["invoice"]);
+    });
+
+    test("odmítne cizí záznam, záznam jiného dokladu i už vyřešený záznam", async () => {
+      const { owner, invoiceId, logId } = await failedReminder();
+      const other = account();
+      const E = TEXTS.invoiceMail.errors;
+      expect(
+        fail(() => sendInvoice(webActor(other.owner), other.invoiceId, input({ logId }))),
+      ).toBe(E.logNotFound);
+      const second = issuedInvoice(owner);
+      expect(fail(() => sendInvoice(webActor(owner), second, input({ logId })))).toBe(
+        E.logNotFound,
+      );
+
+      sendInvoice(webActor(owner), invoiceId, input({ logId }));
+      await drainJobs(WORKER);
+      expect(fail(() => sendInvoice(webActor(owner), invoiceId, input({ logId })))).toBe(
+        E.superseded,
+      );
+      const delivered = logsOf(owner).find((log) => log.status === "sent")!;
+      expect(
+        fail(() => sendInvoice(webActor(owner), invoiceId, input({ logId: delivered.id }))),
+      ).toBe(E.notResendable);
+    });
+
+    test("opakování doručeného požadavku vrátí původní odeslání", async () => {
+      const { owner, invoiceId, logId } = await failedReminder();
+      const request = input({ logId });
+      const first = sendInvoice(webActor(owner), invoiceId, request);
+      await drainJobs(WORKER);
+      expect(sendInvoice(webActor(owner), invoiceId, request)).toEqual(first);
+    });
+  });
+
   test("zpráva bez revize neprojde", () => {
     const { owner, invoiceId } = account();
     const raw = { ...input(), revision: undefined } as unknown as Parameters<
@@ -813,7 +878,7 @@ describe("hromadné odeslání", () => {
     expect(bulkSend(webActor(owner), ids, randomUUID(), previewed)).toEqual({
       queued: 1,
       skipped: 1,
-      reasons: [B.recipientsChanged],
+      reasons: [{ number: getInvoice(owner, ids[0])?.number, reason: B.recipientsChanged }],
     });
     expect(logsOf(owner).map((log) => log.invoiceId)).toEqual([ids[1]]);
   });
@@ -824,7 +889,11 @@ describe("hromadné odeslání", () => {
     db.$client.exec(`CREATE TEMP TRIGGER refuse_mail BEFORE INSERT ON email_log
       WHEN new.invoice_id = '${ids[0]}' BEGIN SELECT RAISE(ABORT, 'disk spadl'); END`);
     try {
-      expect(bulkSend(webActor(owner), ids, randomUUID())).toMatchObject({ queued: 1, skipped: 1 });
+      expect(bulkSend(webActor(owner), ids, randomUUID())).toEqual({
+        queued: 1,
+        skipped: 1,
+        reasons: [{ number: getInvoice(owner, ids[0])?.number, reason: B.unexpected }],
+      });
     } finally {
       db.$client.exec("DROP TRIGGER refuse_mail");
     }

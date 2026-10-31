@@ -219,11 +219,15 @@ export function sendInvoice(actor: Actor, invoiceId: string, raw: SendInput): { 
   enforceRateLimit(actor, RATE_RULES.sendUser);
   const parsed = sendInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
-  const { requestId, confirmedUnknown = false, revision, kind, ...message } = parsed.data;
+  const { requestId, confirmedUnknown = false, revision, logId, ...message } = parsed.data;
+  const replaced =
+    logId && !loggedRequest(userId, requestKey(userId, requestId))
+      ? replacedLog(userId, invoiceId, logId)
+      : undefined;
   return queueClicked(actor, userId, invoiceId, requestId, message, {
     confirmedUnknown,
     revision,
-    kind,
+    kind: replaced?.kind,
   });
 }
 
@@ -254,6 +258,19 @@ function supersededBy(log: EmailLog): boolean {
   return newer !== undefined;
 }
 
+function assertResendable(log: EmailLog): void {
+  if (!RESENDABLE.includes(log.status)) throw new ServiceError(E.notResendable);
+  if (supersededBy(log)) throw new ServiceError(E.superseded);
+}
+
+// A message rebuilt after a change replaces this record, so its kind comes from here, not the client.
+function replacedLog(userId: string, invoiceId: string, logId: string): EmailLog {
+  const log = readLog(userId, logId);
+  if (log?.invoiceId !== invoiceId) throw new ServiceError(E.logNotFound);
+  assertResendable(log);
+  return log;
+}
+
 export function resendFromLog(
   actor: Actor,
   logId: string,
@@ -266,9 +283,8 @@ export function resendFromLog(
   const logged = loggedRequest(userId, requestKey(userId, opts.requestId));
   if (logged) return { logId: logged };
 
-  if (!RESENDABLE.includes(log.status)) throw new ServiceError(E.notResendable);
+  assertResendable(log);
   if (log.status === "unknown" && !opts.confirmedUnknown) throw new ServiceError(E.confirmUnknown);
-  if (supersededBy(log)) throw new ServiceError(E.superseded);
   const { to, cc, bcc, subject, body } = log;
   return queueClicked(
     actor,
@@ -318,7 +334,6 @@ export function mailStateOf(rows: EmailLogRow[]): {
 export type SendPrefill = MailDraft & {
   requestId: string;
   revision: number;
-  kind: MessageKind;
   unknownPending: boolean;
   paused: boolean;
   log: {
@@ -352,7 +367,6 @@ export function sendPrefill(ownerId: string, invoiceId: string, logId?: string):
       }),
     requestId: randomUUID(),
     revision: row.revision,
-    kind,
     unknownPending: log?.status === "unknown" || hasUnresolvedUnknown(ownerId, invoiceId, kind),
     paused: getAutomation(ownerId).paused,
     log: log ? { id: log.id, status: log.status, reason: log.reason, current } : null,
@@ -420,6 +434,8 @@ export function bulkSendPreview(ownerId: string, ids: string[]) {
   return { ready, skipped };
 }
 
+export type BulkSkip = { number: string; reason: string };
+
 export type BulkPreviewed = Record<string, { to: string[]; copies: string[] }>;
 
 const sameRecipients = (a: BulkPreviewed[string], b: BulkPreviewed[string]) =>
@@ -431,7 +447,7 @@ export function bulkSend(
   ids: string[],
   requestId: string,
   previewed?: BulkPreviewed,
-): { queued: number; skipped: number; reasons: string[] } {
+): { queued: number; skipped: number; reasons: BulkSkip[] } {
   const userId = ownerOf(actor);
   const unique = [...new Set(ids)];
   if (unique.length > MAX_BULK_DOCUMENTS) {
@@ -442,7 +458,7 @@ export function bulkSend(
   if (!mailAvailability(userId).available) throw new ServiceError(E.unavailable);
 
   let queued = 0;
-  const reasons = new Set<string>();
+  const reasons: BulkSkip[] = [];
   for (const invoiceId of unique) {
     const key = `${requestKey(userId, requestId)}:${invoiceId}`;
     if (loggedRequest(userId, key)) {
@@ -475,15 +491,15 @@ export function bulkSend(
       });
       queued += 1;
     } catch (error) {
-      if (error instanceof ServiceError) reasons.add(error.message);
-      else {
-        Sentry.captureException(error);
-        reasons.add(E.invalid);
-      }
+      if (!(error instanceof ServiceError)) Sentry.captureException(error);
+      reasons.push({
+        number: getInvoice(userId, invoiceId)?.number ?? "",
+        reason: error instanceof ServiceError ? error.message : B.unexpected,
+      });
     }
   }
   if (queued > 0) kickWorker();
-  return { queued, skipped: unique.length - queued, reasons: [...reasons] };
+  return { queued, skipped: unique.length - queued, reasons };
 }
 
 export function archivedPdf(

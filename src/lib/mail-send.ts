@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { mailContentSchema, MESSAGE_KINDS } from "./email-template";
+import { mailContentSchema } from "./email-template";
 import type { InvoiceStatus } from "./invoice";
 import { TEXTS } from "./texts";
 
@@ -42,7 +42,7 @@ export const sendInputSchema = mailContentSchema
     bcc: addresses,
     confirmedUnknown: z.boolean(E.invalid).optional(),
     revision: z.number(E.invalid).int(E.invalid),
-    kind: z.enum(MESSAGE_KINDS, E.invalid).optional(),
+    logId: z.string(E.invalid).min(1, E.invalid).optional(),
   })
   .refine(({ to, cc, bcc }) => to.length + cc.length + bcc.length <= MAX_RECIPIENTS, E.recipients);
 

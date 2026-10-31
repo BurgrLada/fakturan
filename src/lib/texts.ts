@@ -810,6 +810,8 @@ export const TEXTS = {
       title: "Odeslat klientovi",
       resendTitle: "Odeslat znovu",
       loading: "Připravuji zprávu…",
+      loadFailed: "Zprávu se nepodařilo připravit.",
+      review: "Před odesláním zkontrolujte příjemce a text.",
       to: "Příjemci",
       cc: "Kopie",
       bcc: "Skrytá kopie",
@@ -853,6 +855,7 @@ export const TEXTS = {
       action: "Odeslat klientům",
       title: "Odeslat hromadně",
       loading: "Kontroluji doklady…",
+      loadFailed: "Souhrn se nepodařilo připravit.",
       summary: (count: number) => `Připraveno k odeslání: ${count}`,
       skippedTitle: (count: number) => `Přeskočeno: ${count}`,
       templateNote: "Odejde výchozí text šablony v jazyce každé faktury s přílohou PDF.",
@@ -861,6 +864,7 @@ export const TEXTS = {
       nothing: "Žádný z vybraných dokladů teď nejde odeslat.",
       confirm: (count: number) => `Odeslat ${count}`,
       cancel: "Zpět",
+      skip: (number: string, reason: string) => (number ? `${number}: ${reason}` : reason),
       done: (queued: number, skipped: number, reasons: string[] = []) =>
         skipped > 0
           ? `Zařazeno k odeslání ${queued}, přeskočeno ${skipped}.${reasons.length > 0 ? ` ${reasons.join(". ")}.` : ""}`
@@ -874,6 +878,7 @@ export const TEXTS = {
         unknown: "Nejasný výsledek předchozího odeslání, vyřešte ho na detailu faktury",
         notFound: "Doklad neexistuje",
         recipientsChanged: "Příjemci se od souhrnu změnili, zkontrolujte je a odešlete znovu",
+        unexpected: "Doklad se nepodařilo zařadit kvůli neočekávané chybě, zkuste to znovu",
       },
     },
     reasons: {

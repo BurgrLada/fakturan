@@ -129,7 +129,7 @@ function Composer({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!draft || blocked) return;
-    const { requestId, revision, kind } = draft;
+    const { requestId, revision } = draft;
     setError(null);
     startTransition(async () => {
       try {
@@ -140,7 +140,7 @@ function Composer({
               message: {
                 requestId,
                 revision,
-                kind,
+                ...(logId && { logId }),
                 to: splitAddresses(to),
                 cc: splitAddresses(cc),
                 bcc: splitAddresses(bcc),
@@ -165,8 +165,9 @@ function Composer({
     <form onSubmit={submit} className="contents">
       <AlertDialogHeader>
         <AlertDialogTitle>{logId ? T.resendTitle : T.title}</AlertDialogTitle>
-        {!draft && !error && <AlertDialogDescription>{T.loading}</AlertDialogDescription>}
-        {recorded && <AlertDialogDescription>{draft?.attachmentName}</AlertDialogDescription>}
+        <AlertDialogDescription>
+          {draft ? (recorded ? draft.attachmentName : T.review) : error ? T.loadFailed : T.loading}
+        </AlertDialogDescription>
       </AlertDialogHeader>
       {draft && recorded && <RecordedMessage draft={draft} />}
       {draft && logId && !recorded && <p className="text-sm">{T.rebuilt}</p>}

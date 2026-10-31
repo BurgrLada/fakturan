@@ -7,6 +7,7 @@ export type CapturedMail = {
   to: string[];
   raw: string;
   text: string;
+  subject: string;
   body: string;
   attachments: CapturedAttachment[];
 };
@@ -85,6 +86,7 @@ export async function startSmtp(): Promise<TestSmtp> {
             to: session.envelope.rcptTo.map((r) => r.address),
             raw: raw.toString("utf8"),
             text: decodeQuotedPrintable(raw.toString("utf8")),
+            subject: parsed.subject ?? "",
             body: parsed.text ?? "",
             attachments: parsed.attachments.map(({ filename, content }) => ({ filename, content })),
           });

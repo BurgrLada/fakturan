@@ -158,7 +158,7 @@ test.describe("se SMTP", () => {
 
     const mail = await smtp.waitFor(CLIENT);
     expect(mail.to.toSorted()).toEqual(["archiv@example.cz", CLIENT]);
-    expect(mail.raw).toContain("Upraven");
+    expect(mail.subject).toBe("Upravený předmět");
     expect(mail.body.trim()).toBe("Upravený text");
     expect(mail.attachments).toHaveLength(1);
   });
@@ -248,7 +248,7 @@ test.describe("se SMTP", () => {
     await submit(page).click();
     await delivered(page);
     expect(smtp.messages).toHaveLength(1);
-    expect(smtp.messages[0].raw).toContain("Ru");
+    expect(smtp.messages[0].subject).toBe("Ruční pokus");
   });
 
   test("po změně dokladu nabídne znovu odeslání čerstvou zprávu a dvě karty nepustí starý text", async ({
@@ -286,9 +286,12 @@ test.describe("se SMTP", () => {
     await page.getByTestId("email-history").getByRole("button", { name: "Odeslat znovu" }).click();
     await expect(dialog(page)).toContainText("sestavená znovu");
     await expect(dialog(page).getByLabel("Předmět")).not.toHaveValue("Starý předmět");
+    const rebuilt = await dialog(page).getByLabel("Předmět").inputValue();
+    expect(rebuilt).not.toBe("");
     await submit(page).click();
     await delivered(page);
-    expect(smtp.messages[0].raw).not.toContain("Star");
+    expect(smtp.messages[0].subject).toBe(rebuilt);
+    expect(smtp.messages[0].subject).not.toBe("Starý předmět");
   });
 
   test("pozdní unknown z jiné karty ukáže v otevřeném dialogu potvrzení", async ({
@@ -377,7 +380,7 @@ test.describe("se SMTP", () => {
     await submit(page).click();
     await delivered(page);
     expect(smtp.messages).toHaveLength(1);
-    expect(smtp.messages[0].raw).toContain("Pro historii");
+    expect(smtp.messages[0].subject).toBe("Pro historii");
   });
 
   test("[INV-020] po úpravě odeslané faktury se nabídne opětovné odeslání a nic neodejde", async ({
@@ -510,6 +513,28 @@ test.describe("se SMTP", () => {
 
     await dialog(page).getByRole("button", { name: "Zpět" }).click();
     await nothingLeaves(page, smtp);
+  });
+
+  test("chyba náhledu hromadného odeslání se ukáže místo věčného načítání", async ({
+    page,
+    context,
+    freshApp,
+    smtp,
+  }) => {
+    const { baseURL } = freshApp;
+    await connected(page, baseURL, smtp);
+    await issued(page, baseURL);
+    await page.goto(`${baseURL}/faktury`);
+    await page.waitForLoadState("networkidle");
+    await page.getByLabel("Vybrat vše na stránce").check();
+
+    await context.clearCookies();
+    await page.getByRole("button", { name: "Odeslat klientům" }).click();
+
+    await expect(dialog(page).getByRole("alert")).toBeVisible();
+    await expect(dialog(page)).toContainText("Souhrn se nepodařilo připravit");
+    await expect(dialog(page)).not.toContainText("Kontroluji doklady");
+    await expect(dialog(page).getByRole("button", { name: /^Odeslat/ })).toBeDisabled();
   });
 
   test("[MAIL-008] hromadně z výběru odejdou 3 zprávy po potvrzení", async ({

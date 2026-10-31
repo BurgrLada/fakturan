@@ -352,7 +352,7 @@ test('[TST-009] izolace šablon e-mailů', ...)
 - Produces:
   - `EMAIL_STATUSES = ['queued','sending','sent','failed','unknown','held','cancelled']`, `SENDABLE_STATUSES = ['issued','sent','partially_paid','paid']`
   - `classifySmtpError(error: unknown): 'retry' | 'permanent' | 'ambiguous'`
-  - `sendInvoice(actor, invoiceId, raw: SendInput): { logId: string }`, `SendInput = { requestId; to; cc; bcc; subject; body }`
+  - `sendInvoice(actor, invoiceId, raw: SendInput): { logId: string }`, `SendInput = { requestId; revision; to; cc; bcc; subject; body; confirmedUnknown?; logId? }`. `revision` je povinná, `logId` určuje druh zprávy ze záznamu téhož uživatele a dokladu
   - `queueMail(tx: Tx, audit, input: QueueInput): { logId: string } | null`, `QueueInput = { userId; invoiceId; kind; trigger: 'manual'|'automatic'|'bulk'; key: string; message; plannedFor?: CalendarDate; automation?: AutomationKey }`
   - `deliverMail(job: Job): Promise<void>`, `recoverMail(job: Job): void`
   - `listEmailLog(ownerId, invoiceId)`, `archivedPdf(actor, logId): { data; fileName }`, `resendFromLog(actor, logId, opts: { confirmedUnknown: boolean; requestId }): { logId }`
@@ -428,8 +428,9 @@ test('jedno odeslání dodrží celkový strop času i na zablokovaném serveru'
 - Consumes: `sendInvoice`, `composeMail`, `listEmailLog`, `resendFromLog`, `mailAvailability`, `MAX_BULK_DOCUMENTS`
 - Produces:
   - actions `sendPrefillAction`, `sendInvoiceAction`, `resendFromLogAction`, `bulkSendPreviewAction`, `bulkSendAction`
-  - `bulkSendPreview(actor, ids): { ready: { id; number; customer; to: string[] }[]; skipped: { id; number; reason }[] }`
-  - `bulkSend(actor, ids, requestId): { queued: number; skipped: number }`
+  - `sendPrefill(ownerId, invoiceId, logId?)`: `MailDraft` a `requestId`, `revision`, `unknownPending`, `paused`, `log`
+  - `bulkSendPreview(ownerId, ids): { ready: { id; number; customer; to: string[]; copies: string[] }[]; skipped: { id; number; reason }[] }`
+  - `bulkSend(actor, ids, requestId, previewed?): { queued: number; skipped: number; reasons: { number; reason }[] }`, `previewed = Record<id, { to; copies }>`, akce ho vyžaduje
 
 Spec: MAIL-001 **[částečně]** **[R-31]**, MAIL-008, INV-020, INV-024 **[částečně]**, SET-053, SEC-001, SEC-002, UI-009.
 
@@ -439,9 +440,10 @@ Pravidla:
 - Odeslání je jen ve frontě, UI ukáže „Odesílá se“ a po doručení `router.refresh`. Detail ukáže poslední selhání, `held` a `unknown` s důvodem. `unknown` nabízí ruční odeslání až po potvrzení, že uživatel ví o riziku duplicity.
 - `sendInvoice` odmítne doklad s nevyřešeným `unknown` stejného druhu textem `E.unknownPending`, dokud nepřijde `confirmedUnknown: true`. Dialog to zjistí přes `hasUnresolvedUnknown` už při otevření a nabídne výslovné potvrzení rizika duplicity. Bez potvrzení neodesílá.
 - `resendFromLog` se volá jen přes tento dialog, nikdy jedním klikem z historie: dialog ukáže příjemce a předmět záznamu a u `unknown` žádá stejné potvrzení. `confirmedUnknown` posílá akce jen po tomto potvrzení.
+- Text patří k revizi dokladu. `sendPrefill` vrací `revision`, `sendInvoice` ji povinně dostává a při neshodě odmítne textem `E.staleDraft`. Záznam se starší revizí `resendFromLog` odmítne stejně, dialog místo něj sestaví čerstvou zprávu a pošle ji přes `sendInvoice` s `logId`. Klient druh zprávy neposílá.
 - Bez SMTP je tlačítko vypnuté a vedle něj je vysvětlení SET-053 s odkazem na nastavení, stažení PDF funguje.
 - Historie je sekce detailu nad historií změn.
-- Hromadně: akce v panelu výběru. Náhled ukáže souhrn příjemců a přeskočené s důvodem (stav, bez adresy, už odesílá se, nejasný výsledek předchozího odeslání). Doklad s `hasUnresolvedUnknown` hromadné odeslání vždy přeskočí, `bulkSend` nikdy neposílá `confirmedUnknown`. Do hromadného odeslání jde jen `issued`. Potvrzení je povinné, server znovu vyhodnotí stav a text je výchozí šablona. Rate limit `sendBulkUser` a `sendUser`, limit `MAX_BULK_DOCUMENTS`. Selhání jednoho dokladu nezastaví ostatní.
+- Hromadně: akce v panelu výběru. Náhled ukáže souhrn příjemců a přeskočené s důvodem (stav, bez adresy, už odesílá se, nejasný výsledek předchozího odeslání). Doklad s `hasUnresolvedUnknown` hromadné odeslání vždy přeskočí, `bulkSend` nikdy neposílá `confirmedUnknown`. Do hromadného odeslání jde jen `issued`. Potvrzení je povinné, server znovu vyhodnotí stav i příjemce proti `previewed` a text je výchozí šablona. Doklad se změněnými příjemci se přeskočí s důvodem, `reasons` nese číslo dokladu a důvod, neočekávaná chyba má vlastní text. Rate limit `sendBulkUser` a `sendUser`, limit `MAX_BULK_DOCUMENTS`. Selhání jednoho dokladu nezastaví ostatní.
 - INV-024 čeká na úhradu a export, ID zůstává v pending a MAIL-001 kvůli ISDOC také. Odpovídající testy ID v názvu nenesou.
 
 - [ ] **Step 1: Napiš testy**

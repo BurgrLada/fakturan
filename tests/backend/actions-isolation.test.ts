@@ -113,6 +113,15 @@ describe("akce pošty", () => {
         id: mine.invoiceId,
         message: { ...message, requestId: "22222222-2222-4222-8222-222222222222" },
       }),
+      await sendInvoiceAction({
+        id: stranger.invoiceId,
+        message: {
+          ...message,
+          requestId: "44444444-4444-4444-8444-444444444444",
+          revision: getInvoice(stranger.owner, stranger.invoiceId)!.revision,
+          logId: sent.logId,
+        },
+      }),
       await resendFromLogAction({
         id: sent.logId,
         requestId: "33333333-3333-4333-8333-333333333333",

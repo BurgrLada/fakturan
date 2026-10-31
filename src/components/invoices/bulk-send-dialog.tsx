@@ -64,7 +64,13 @@ function Summary({
           setError(reply.error);
           return;
         }
-        onDone(T.done(reply.queued, reply.skipped + preview.skipped.length, reply.reasons));
+        onDone(
+          T.done(
+            reply.queued,
+            reply.skipped + preview.skipped.length,
+            reply.reasons.map(({ number, reason }) => T.skip(number, reason)),
+          ),
+        );
       } catch {
         setError(T.failed);
       }
@@ -72,17 +78,15 @@ function Summary({
   }
 
   const copies = preview?.ready[0]?.copies ?? [];
-  const loadFailed = !preview && error !== null;
+  const pendingText = error ? T.loadFailed : T.loading;
 
   return (
     <>
       <AlertDialogHeader>
         <AlertDialogTitle>{T.title}</AlertDialogTitle>
-        {!loadFailed && (
-          <AlertDialogDescription>
-            {preview ? (preview.ready.length > 0 ? T.templateNote : T.nothing) : T.loading}
-          </AlertDialogDescription>
-        )}
+        <AlertDialogDescription>
+          {preview ? (preview.ready.length > 0 ? T.templateNote : T.nothing) : pendingText}
+        </AlertDialogDescription>
       </AlertDialogHeader>
       {preview && preview.ready.length > 0 && (
         <section className="flex flex-col gap-1 text-sm">
