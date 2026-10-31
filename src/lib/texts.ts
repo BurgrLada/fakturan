@@ -777,6 +777,8 @@ export const TEXTS = {
         `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale zákazník nemá e-mail, takže neodešla.`,
       recurring_bad_mail: (p: Record<string, unknown>) =>
         `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale e-mail nešlo odeslat. ${p.problems ?? ""}`.trim(),
+      recurring_conflict: (p: Record<string, unknown>) =>
+        `Plán ${p.plan ?? ""}: termín ${p.date ?? ""} nevznikl, jeho období se kryje s už zapsaným během. Zkontrolujte nastavení plánu.`,
       recurring_upcoming: (p: Record<string, unknown>) =>
         p.sends
           ? `Pravidelná faktura „${p.plan ?? ""}“ se odešle ${p.date ?? ""}.`
@@ -910,7 +912,7 @@ export const TEXTS = {
     startsOnHint:
       "Od tohoto dne se termíny počítají. Posunutí začátku u „Každých N“ posune celé bloky období. Období, za které už běh proběhl, se znovu nefakturuje a uložení takové změny se odmítne.",
     maxCountHint:
-      "Počítají se termíny od založení plánu včetně těch, které už proběhly, ne od data začátku. Když zadáte číslo, které už proběhlo, žádný další termín nevznikne a plán skončí.",
+      "Počítají se skutečné běhy plánu včetně zmeškaných a přeskočených, posun začátku počet nezmění. Když zadáte číslo, které už proběhlo, žádný další termín nevznikne a plán skončí.",
     notifyHint:
       "Několik dní před termínem vám přijde upozornění a u režimu „Vystavit a odeslat“ i e-mail. Nechte prázdné, pokud upozornění nechcete.",
     changeImpact: (what: string, next: string | null) =>

@@ -74,21 +74,27 @@ export const recurringInputSchema = z.object({
 export type RecurringInput = z.input<typeof recurringInputSchema>;
 type ParsedInput = z.output<typeof recurringInputSchema>;
 
-type RuleFields = RecurrenceRule & { createdAt: Date };
-
 function plainRule(row: RecurrenceRule): RecurrenceRule {
   const { frequency, every, issueRule, issueDay, startsOn, endsOn, maxCount, periodOffset } = row;
   return { frequency, every, issueRule, issueDay, startsOn, endsOn, maxCount, periodOffset };
 }
 
-// The computation counts from startsOn, but a plan only owes occurrences from its creation on (R-18).
-export function ruleOf(row: RuleFields): RecurrenceRule {
-  const rule = plainRule(row);
+// The computation counts positions from startsOn, the limit counts what really ran (R-18), so
+// the limit is restated as positions: moving the start can neither repeat nor refund a run.
+function limitedRule(rule: RecurrenceRule, cursor: CalendarDate, used: number): RecurrenceRule {
   if (rule.maxCount === null) return rule;
-  const created = calendarDateInPrague(row.createdAt);
-  const unlimited = { ...rule, maxCount: null };
-  const before = occurrencesBetween(unlimited, null, addDays(created, -1)).length;
-  return { ...rule, maxCount: Math.min(rule.maxCount + before, Number.MAX_SAFE_INTEGER) };
+  const passed = occurrencesBetween({ ...rule, maxCount: null }, null, cursor).length;
+  const left = Math.max(rule.maxCount - used, 0);
+  return { ...rule, maxCount: Math.min(passed + left, Number.MAX_SAFE_INTEGER) };
+}
+
+type PlanPosition = RecurrenceRule & Pick<RecurringInvoice, "id" | "userId" | "cursorDate">;
+
+export function ruleOf(q: Reader, plan: PlanPosition): RecurrenceRule {
+  const rule = plainRule(plan);
+  if (rule.maxCount === null) return rule;
+  const used = new Set(billedPeriods(q, plan.userId, plan.id).map((run) => run.periodKey)).size;
+  return limitedRule(rule, plan.cursorDate, used);
 }
 
 function firstCursor(startsOn: CalendarDate, today: CalendarDate): CalendarDate {
@@ -128,25 +134,22 @@ function parseInput(raw: RecurringInput): ParsedInput {
 
 type BilledPeriod = Pick<RecurringRun, "periodKey" | "periodFrom" | "periodTo">;
 
-function assertNoOverlap(
-  q: Reader,
-  ownerId: string,
-  planId: string,
-  rule: RecurrenceRule,
-  cursor: CalendarDate,
-): void {
+// Every state in which an occurrence is spoken for without a run yet: cancelled and dead jobs turn
+// into missed runs later, and a job and its run overlap until the worker completes the job.
+const OPEN_JOB_STATUSES = ["pending", "running", "cancelled", "dead"] as const;
+
+function billedPeriods(q: Reader, ownerId: string, planId: string): BilledPeriod[] {
   const runs: BilledPeriod[] = q
     .select()
     .from(recurringRun)
     .where(scoped(ownerId).where(recurringRun, (t, { eq }) => eq(t.recurringId, planId)))
     .all();
-  // A queued occurrence has no run yet, but it will bill its period just the same.
   const queued = q
     .select({ payload: job.payload })
     .from(job)
     .where(
       scoped(ownerId).where(job, (t, { and }) =>
-        and(inArray(t.status, ["pending", "running"]), like(t.key, `${runKeyPrefix(planId)}%`)),
+        and(inArray(t.status, OPEN_JOB_STATUSES), like(t.key, `${runKeyPrefix(planId)}%`)),
       ),
     )
     .all()
@@ -155,15 +158,35 @@ function assertNoOverlap(
       periodFrom: String(payload.periodFrom),
       periodTo: String(payload.periodTo),
     }));
-  const taken = [...runs, ...queued];
+  return [...runs, ...queued];
+}
+
+type Span = Pick<RecurringRun, "periodFrom" | "periodTo">;
+
+export function sameBilledPeriod(a: Span, b: Span): boolean {
+  return a.periodFrom === b.periodFrom && a.periodTo === b.periodTo;
+}
+
+function assertNoOverlap(
+  q: Reader,
+  ownerId: string,
+  planId: string,
+  rule: RecurrenceRule,
+  cursor: CalendarDate,
+): void {
+  const taken = billedPeriods(q, ownerId, planId);
   const lastBilled = taken.reduce((last, run) => (run.periodTo > last ? run.periodTo : last), "");
   for (let after = cursor; ;) {
     const next = nextOccurrences(rule, after, 1)[0];
     if (!next || next.billedPeriod.from > lastBilled) return;
     const { from, to } = next.billedPeriod;
-    // The same key meets the unique index, so that occurrence cannot produce a second invoice.
-    const clash = taken.some(
-      (run) => run.periodKey !== next.periodKey && run.periodFrom <= to && run.periodTo >= from,
+    const planned = { periodFrom: from, periodTo: to };
+    // The unique index stops a repeat of the same period, but it would also swallow a different
+    // period under the same key, which then never gets billed.
+    const clash = taken.some((run) =>
+      run.periodKey === next.periodKey
+        ? !sameBilledPeriod(run, planned)
+        : run.periodFrom <= to && run.periodTo >= from,
     );
     if (clash) throw new ServiceError(V.periodOverlap);
     after = next.issueDate;
@@ -204,7 +227,7 @@ function persist(actor: Actor, action: AuditAction, raw: RecurringInput): { id: 
 
     const id = before?.id ?? randomUUID();
     if (before) {
-      const rule = ruleOf({ ...fields, createdAt: before.createdAt });
+      const rule = ruleOf(tx, { ...fields, id, userId, cursorDate: before.cursorDate });
       assertNoOverlap(tx, userId, id, rule, before.cursorDate);
       tx.update(recurringInvoice)
         .set({ ...fields, sendConfirmedAt, updatedAt: now })
@@ -302,7 +325,7 @@ export function listRecurring(ownerId: string): RecurringRow[] {
       nextIssueDate:
         plan.status === "finished"
           ? null
-          : (nextOccurrences(ruleOf(plan), plan.cursorDate, 1)[0]?.issueDate ?? null),
+          : (nextOccurrences(ruleOf(db, plan), plan.cursorDate, 1)[0]?.issueDate ?? null),
     }));
 }
 
@@ -322,9 +345,11 @@ export function listRuns(ownerId: string, id: string): RunRow[] {
 export function previewRecurring(ownerId: string, raw: RecurringInput, count = 12) {
   const input = parseInput(raw);
   const existing = input.id ? findPlan(db, ownerId, input.id) : null;
-  const now = clock.now();
-  const rule = ruleOf({ ...plainRule(input), createdAt: existing?.createdAt ?? now });
-  const cursor = existing?.cursorDate ?? firstCursor(input.startsOn, calendarDateInPrague(now));
+  const cursor =
+    existing?.cursorDate ?? firstCursor(input.startsOn, calendarDateInPrague(clock.now()));
+  const rule = existing
+    ? ruleOf(db, { ...plainRule(input), id: existing.id, userId: ownerId, cursorDate: cursor })
+    : limitedRule(plainRule(input), cursor, 0);
   const customerName = input.customerId
     ? (db
         .select({ name: customer.name })

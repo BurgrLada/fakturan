@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
 import {
   auditLog,
   invoice,
+  notification,
   numberSeries,
   recurringInvoice,
   recurringRun,
@@ -60,6 +61,22 @@ const firstOccurrence = (owner: string, id: string) => {
   const plan = getRecurring(owner, id)!;
   return nextOccurrences(plan, plan.cursorDate, 1)[0]!;
 };
+
+function runNext(owner: string, id: string) {
+  const occurrence = firstOccurrence(owner, id);
+  processOccurrence(owner, id, occurrence);
+  db.update(recurringInvoice)
+    .set({ cursorDate: occurrence.issueDate })
+    .where(eq(recurringInvoice.id, id))
+    .run();
+}
+
+const conflicts = (owner: string) =>
+  db
+    .select()
+    .from(notification)
+    .where(and(eq(notification.userId, owner), eq(notification.kind, "recurring_conflict")))
+    .all();
 
 // A paused plan turns its queued occurrence into a missed run, which is what resolveMissed takes.
 function missedRun(owner: string) {
@@ -190,6 +207,87 @@ describe("uložení plánu", () => {
         planInput(customerId, { ...rule, id, startsOn: "2026-04-01" }),
       ),
     ).toThrow(/období/);
+  });
+
+  test("[REC-030] měsíční plán změněný na čtvrtletní se shodným klíčem a jiným obdobím odmítne uložení", () => {
+    const { owner, customerId } = owned();
+    const rule = { startsOn: "2026-04-01" };
+    const id = savePlan(owner, customerId, rule);
+    runNext(owner, id);
+    const quarterly = { ...rule, id, frequency: "quarterly", issueDay: 20 } as const;
+    expect(() => saveRecurring(webActor(owner), planInput(customerId, quarterly))).toThrow(
+      /období/,
+    );
+    expect(getRecurring(owner, id)?.frequency).toBe("monthly");
+  });
+
+  test("[REC-030] termín s obsazeným klíčem a jiným obdobím neskončí tiše", () => {
+    const { owner, customerId } = owned();
+    const id = savePlan(owner, customerId);
+    const occurrence = firstOccurrence(owner, id);
+    processOccurrence(owner, id, occurrence);
+    const wider = { ...occurrence, billedPeriod: { from: "2026-03-01", to: "2026-05-31" } };
+
+    expect(processOccurrence(owner, id, occurrence)).toBeNull();
+    expect(conflicts(owner)).toHaveLength(0);
+
+    expect(processOccurrence(owner, id, wider)).toBeNull();
+    expect(processOccurrence(owner, id, wider)).toBeNull();
+    expect(conflicts(owner)).toHaveLength(1);
+    expect(listPlanInvoices(owner, id)).toHaveLength(1);
+    expect(listRuns(owner, id)).toHaveLength(1);
+    assertConsistent(db, owner);
+  });
+
+  test("[REC-030] pozastavený plán zapíše konflikt klíče stejně", () => {
+    const { owner, customerId } = owned();
+    const id = savePlan(owner, customerId);
+    const occurrence = firstOccurrence(owner, id);
+    processOccurrence(owner, id, occurrence);
+    pauseRecurring(webActor(owner), id);
+    const wider = { ...occurrence, billedPeriod: { from: "2026-03-01", to: "2026-05-31" } };
+
+    expect(processOccurrence(owner, id, wider)).toBeNull();
+    expect(conflicts(owner)).toHaveLength(1);
+  });
+
+  test("[REC-003] posun začátku nezdvojí faktury, počet odečítá skutečné běhy", () => {
+    const { owner, customerId } = owned();
+    const rule = { startsOn: "2026-03-01", maxCount: 3 };
+    const id = savePlan(owner, customerId, rule);
+    runNext(owner, id);
+    runNext(owner, id);
+
+    const moved = { ...rule, id, startsOn: "2026-06-01" };
+    saveRecurring(webActor(owner), planInput(customerId, moved));
+
+    const preview = previewRecurring(owner, planInput(customerId, moved));
+    expect(preview.map((item) => item.issueDate)).toEqual(["2026-06-10"]);
+    expect(listRecurring(owner)[0]?.nextIssueDate).toBe("2026-06-10");
+  });
+
+  test("[REC-003] počet už vyčerpaný běhy po posunu začátku nedá další termín", () => {
+    const { owner, customerId } = owned();
+    const rule = { startsOn: "2026-03-01", maxCount: 2 };
+    const id = savePlan(owner, customerId, rule);
+    runNext(owner, id);
+    runNext(owner, id);
+
+    saveRecurring(webActor(owner), planInput(customerId, { ...rule, id, startsOn: "2026-06-01" }));
+
+    expect(listRecurring(owner)[0]?.nextIssueDate).toBeNull();
+  });
+
+  test("[REC-003] zařazený termín se do počtu započte jen jednou", () => {
+    const { owner, customerId } = owned();
+    const id = savePlan(owner, customerId, { maxCount: 2 });
+    const occurrence = firstOccurrence(owner, id);
+    planRecurringRuns(T0);
+
+    expect(listRecurring(owner)[0]?.nextIssueDate).toBe("2026-04-10");
+
+    processOccurrence(owner, id, occurrence);
+    expect(listRecurring(owner)[0]?.nextIssueDate).toBe("2026-04-10");
   });
 
   test("[REC-011] automatické odeslání bez zákazníka server odmítne", () => {

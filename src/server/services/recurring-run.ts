@@ -51,7 +51,7 @@ import { mutate, type Audit } from "./mutation";
 import { notify, resolveNotification } from "./notifications";
 import { ensureDefaultSeries } from "./number-series";
 import { getPreferences } from "./preferences";
-import { findPlan, readPlan, ruleOf, runKeyPrefix } from "./recurring";
+import { findPlan, readPlan, ruleOf, runKeyPrefix, sameBilledPeriod } from "./recurring";
 
 const V = TEXTS.recurring.validation;
 const R = TEXTS.recurring.reasons;
@@ -145,13 +145,42 @@ function noticeMissed(tx: Tx, plan: RecurringInvoice, recorded: RunOccurrence[])
   });
 }
 
+// A plan edited under a queued job can bill another period under a key that already has a run.
+// The unique index would drop that occurrence, so somebody has to be told about it.
+function noticeConflict(tx: Tx, plan: RecurringInvoice, occurrence: RunOccurrence): boolean {
+  const { periodKey, issueDate, billedPeriod } = occurrence;
+  const taken = tx
+    .select()
+    .from(recurringRun)
+    .where(
+      scoped(plan.userId).where(recurringRun, (t, { and, eq }) =>
+        and(eq(t.recurringId, plan.id), eq(t.periodKey, periodKey)),
+      ),
+    )
+    .get();
+  const planned = { periodFrom: billedPeriod.from, periodTo: billedPeriod.to };
+  if (!taken || sameBilledPeriod(taken, planned)) return false;
+  notify(tx, {
+    userId: plan.userId,
+    kind: "recurring_conflict",
+    dedupeKey: `recurring:conflict:${plan.id}:${periodKey}:${billedPeriod.from}:${billedPeriod.to}`,
+    params: { plan: plan.name, date: displayDate(plan.userId, issueDate) },
+    entity: { type: "recurring_invoice", id: plan.id },
+  });
+  return true;
+}
+
 function recordMissed(
   tx: Tx,
   plan: RecurringInvoice,
   occurrences: RunOccurrence[],
   reason: string,
 ): number {
-  const recorded = occurrences.filter((item) => insertRun(tx, plan, item, "missed", reason));
+  const recorded = occurrences.filter((item) => {
+    const inserted = insertRun(tx, plan, item, "missed", reason);
+    if (!inserted) noticeConflict(tx, plan, item);
+    return inserted;
+  });
   noticeMissed(tx, plan, recorded);
   return recorded.length;
 }
@@ -185,9 +214,10 @@ export function reviewablePlansOf(q: Reader, ownerId: string): RecurringInvoice[
 // After a pause or deactivation nothing old may run by itself (REC-005, ADM-005). Jobs that never
 // started are taken back too: they would run the old occurrence, or block today's under their key.
 export function markMissed(tx: Tx, audit: Audit, plan: RecurringInvoice, today: CalendarDate) {
+  // Before the jobs go: the limit counts them, and they only become runs further down.
+  const rule = ruleOf(tx, plan);
   const idle = takeIdleJobs(tx, plan.userId, runKeyPrefix(plan.id)).map(occurrenceOf);
   if (plan.status === "finished" && idle.length === 0) return;
-  const rule = ruleOf(plan);
   const yesterday = addDays(today, -1);
   const past = [...idle, ...occurrencesBetween(rule, plan.cursorDate, yesterday)].filter(
     (item) => item.issueDate <= yesterday,
@@ -230,7 +260,7 @@ export function resumeRecurring(actor: Actor, id: string): void {
   mutate(actor, "recurring.resume", (tx, audit) => {
     const plan = findPlan(tx, userId, id);
     if (plan.status === "finished") {
-      if (nextOccurrences(ruleOf(plan), plan.cursorDate, 1).length === 0) {
+      if (nextOccurrences(ruleOf(tx, plan), plan.cursorDate, 1).length === 0) {
         throw new ServiceError(V.nothingLeft);
       }
     } else if (plan.status !== "paused") {
@@ -267,8 +297,8 @@ function sendTimeOf(ownerId: string, sendTime: string | null): string {
   return sendTime ?? getAutomation(ownerId).sendTime;
 }
 
-function planWork(plan: RecurringInvoice, through: CalendarDate) {
-  const rule = ruleOf(plan);
+function planWork(q: Reader, plan: RecurringInvoice, through: CalendarDate) {
+  const rule = ruleOf(q, plan);
   const due = occurrencesBetween(rule, plan.cursorDate, through);
   const cursorDate = through > plan.cursorDate ? through : plan.cursorDate;
   const finished = nextOccurrences(rule, cursorDate, 1).length === 0;
@@ -276,12 +306,12 @@ function planWork(plan: RecurringInvoice, through: CalendarDate) {
 }
 
 function planOne(seen: RecurringInvoice, through: CalendarDate, today: CalendarDate): void {
-  if (planWork(seen, through).idle) return;
+  if (planWork(db, seen, through).idle) return;
   unlessUnchanged(() =>
     mutate(schedulerActor(seen.userId), "recurring.plan", (tx, audit) => {
       const plan = readPlan(tx, seen.userId, seen.id);
       if (plan?.status !== "active") throw new Unchanged(undefined);
-      const { rule, due, cursorDate, idle } = planWork(plan, through);
+      const { rule, due, cursorDate, idle } = planWork(tx, plan, through);
       if (idle) throw new Unchanged(undefined);
       const fresh = due.filter((item) => daysBetween(item.issueDate, today) <= MAX_CATCH_UP_DAYS);
       const stale = due.filter((item) => !fresh.includes(item));
@@ -516,6 +546,17 @@ export function processOccurrence(
       const today = calendarDateInPrague(clock.now());
       const tooOld = daysBetween(occurrence.issueDate, today) > MAX_CATCH_UP_DAYS;
 
+      if (noticeConflict(tx, plan, occurrence)) {
+        audit({
+          entity: "recurring_invoice",
+          entityId: plan.id,
+          ownerId,
+          scope: "user",
+          after: { ...occurrencePayload(occurrence), conflict: true },
+        });
+        return null;
+      }
+
       let result: NonNullable<RunResult>;
       if (plan.status === "paused" || tooOld) {
         const missed = recordMissed(tx, plan, [occurrence], tooOld ? R.tooOld : R.paused);
@@ -663,7 +704,8 @@ export function planRecurringNotices(now: Date): void {
     const after = plan.cursorDate > today ? plan.cursorDate : today;
     const through = addDays(today, plan.notifyDaysBefore!);
     try {
-      for (const item of occurrencesBetween(ruleOf(plan), after, through)) noticePlan(plan, item);
+      for (const item of occurrencesBetween(ruleOf(db, plan), after, through))
+        noticePlan(plan, item);
     } catch (error) {
       reportFailure(error, { task: "recurring-notice", userId: plan.userId });
     }

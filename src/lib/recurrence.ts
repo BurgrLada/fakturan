@@ -66,6 +66,7 @@ const MONTHS_PER_UNIT = { monthly: 1, quarterly: 3, half_yearly: 6, yearly: 12, 
 
 const MAX_PERIOD_OFFSET = 12;
 
+const FIRST_DATE: CalendarDate = "2000-01-01";
 const LAST_DATE: CalendarDate = "2100-12-31";
 
 function isWeekBased(frequency: RecurrenceFrequency): frequency is "weekly" | "every_weeks" {
@@ -82,7 +83,7 @@ function isValidIssueDay({ frequency, issueRule, issueDay }: RecurrenceRule) {
 }
 
 function isDateInRange(date: CalendarDate) {
-  return isCalendarDate(date) && date <= LAST_DATE;
+  return isCalendarDate(date) && date >= FIRST_DATE && date <= LAST_DATE;
 }
 
 // Returns the names of invalid fields. The bounds also guarantee that every computation below ends.
@@ -182,6 +183,8 @@ function firstIssueDate(rule: RecurrenceRule): CalendarDate {
 }
 
 function* occurrences(rule: RecurrenceRule): Generator<Occurrence> {
+  // Not a value a person can enter: it is what remains of a limit the plan has used up.
+  if (rule.maxCount === 0) return;
   const invalid = validateRule(rule);
   if (invalid.length > 0) throw new Error(`Invalid recurrence rule: ${invalid.join(", ")}`);
   const position = anchorPosition(rule);

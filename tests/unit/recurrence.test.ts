@@ -540,6 +540,12 @@ describe("kalendářní hrany", () => {
 });
 
 describe("validateRule", () => {
+  test("[REC-003] začátek a konec plánu nesmí být před rokem 2000", () => {
+    expect(validateRule(rule({ startsOn: "1999-12-31", endsOn: null }))).toEqual(["startsOn"]);
+    expect(validateRule(rule({ startsOn: "0001-01-01", endsOn: null }))).toEqual(["startsOn"]);
+    expect(validateRule(rule({ startsOn: "2000-01-01", endsOn: null }))).toEqual([]);
+  });
+
   test("platná pravidla projdou", () => {
     for (const r of [
       rule(),

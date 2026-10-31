@@ -293,7 +293,7 @@ test("změna začátku a počtu u plánu vysvětlí dopad na další termíny", 
   await expect(page.getByTestId("change-impact")).toContainText("Další termín po uložení:");
   await page.getByLabel("Začátek").fill("2099-01-01");
   await expect(page.getByTestId("change-impact")).toContainText("Změnili jste začátek.");
-  await expect(page.getByText("Počítají se termíny od založení plánu")).toBeVisible();
+  await expect(page.getByText("Počítají se skutečné běhy plánu")).toBeVisible();
 });
 
 test("čtvrtletní pravidelná faktura od plánu po vystavený doklad s předchozím čtvrtletím", async ({

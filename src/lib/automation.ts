@@ -47,6 +47,7 @@ export const NOTIFICATION_KINDS = [
   "recurring_no_address",
   "recurring_bad_mail",
   "recurring_upcoming",
+  "recurring_conflict",
   "reminder_failed",
   "reminder_missed",
   "invoices_overdue",
