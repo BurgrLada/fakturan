@@ -258,7 +258,7 @@ function ratedFor(q: Reader, ownerId: string, row: Invoice): Invoice {
 }
 
 function rateNotes(q: Reader, ownerId: string, row: Invoice): string[] {
-  if (row.currency === "CZK" || !row.exchangeRateMicros) return [];
+  if (row.currency === "CZK" || row.type === "credit_note" || !row.exchangeRateMicros) return [];
   const R = TEXTS.exchangeRates.notes;
   const format = getPreferences(ownerId).dateFormat;
   const day = rateDate(row, getPreferences(ownerId).fxBasis, calendarDateInPrague(clock.now()));

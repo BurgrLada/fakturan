@@ -78,10 +78,10 @@ const CNB_LIST = [
   "",
 ].join("\n");
 
-async function startCnbStub() {
+async function startCnbStub(available: boolean) {
   const server = createHttpServer((_request, response) => {
-    response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    response.end(CNB_LIST);
+    response.writeHead(available ? 200 : 503, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end(available ? CNB_LIST : "");
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as { port: number };
@@ -118,10 +118,12 @@ export const test = base.extend<{
   dockerApp: { baseURL: string; container: string };
   withSmtp: boolean;
   allowPrivateMail: boolean;
+  cnbAvailable: boolean;
   dockerCaFile: string | null;
 }>({
   withSmtp: [false, { option: true }],
   allowPrivateMail: [false, { option: true }],
+  cnbAvailable: [true, { option: true }],
   // A CA the container trusts on top of the public ones, for a test server with a certificate.
   dockerCaFile: [null, { option: true }],
 
@@ -176,9 +178,9 @@ export const test = base.extend<{
     }
   },
 
-  freshApp: async ({ withSmtp, allowPrivateMail }, use) => {
+  freshApp: async ({ withSmtp, allowPrivateMail, cnbAvailable }, use) => {
     const ares = await startAresStub();
-    const cnb = await startCnbStub();
+    const cnb = await startCnbStub(cnbAvailable);
     const smtp = withSmtp ? await startSmtp() : null;
     const dataDir = mkdtempSync(join(tmpdir(), "fakturan-e2e-"));
     const port = await freePort();

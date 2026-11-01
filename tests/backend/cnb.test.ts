@@ -118,6 +118,16 @@ describe("klient ČNB", () => {
     expect(await pending).toBeNull();
   });
 
+  test("[FOR-004] přesměrování se nenásleduje a jeho chyba vrátí null", async () => {
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.redirect === "error") throw new TypeError("redirect");
+      return text(LIST);
+    });
+
+    expect(await fetchDailyRates("2026-10-30", fetcher)).toBeNull();
+    expect(fetcher.mock.calls[0]![1]).toMatchObject({ redirect: "error" });
+  });
+
   test("[OPS-003] adresa se bere z konfigurace a koncové lomítko se ořízne", async () => {
     const fetcher = vi.fn(async (_url: string) => text(LIST));
     await fetchDailyRates("2026-01-05", fetcher);

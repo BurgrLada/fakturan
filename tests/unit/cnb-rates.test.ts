@@ -30,7 +30,7 @@ describe("denní lístek ČNB", () => {
     );
     expect(parsed?.rates).toEqual([{ currency: "EUR", rateMicros: 24_380_000 }]);
     const hungarian = parseDailyRates(`${TITLE}Maďarsko|forint|100|HUF|37,512\n`);
-    expect(hungarian).toEqual({ listDate: "2026-10-30", rates: [] });
+    expect(hungarian).toBeNull();
   });
 
   test("[FOR-003] lístek z víkendu nese datum pátku", () => {
@@ -67,6 +67,18 @@ describe("denní lístek ČNB", () => {
 
   test.each(broken)("[FOR-004] %s dá null", (_name, text) => {
     expect(parseDailyRates(text)).toBeNull();
+  });
+
+  test("[FOR-004] lístek bez eura je null, i když je jinak platný", () => {
+    expect(parseDailyRates(`${TITLE}USA|dolar|1|USD|22,311\n`)).toBeNull();
+    expect(parseDailyRates(`${TITLE}Maďarsko|forint|100|HUF|37,512\n`)).toBeNull();
+  });
+
+  test("[FOR-004] kurz nad stropem je null celého lístku, přesně strop projde", () => {
+    const list = (rate: string) => `${TITLE}EMU|euro|1|EUR|24,380\nUSA|dolar|1|USD|${rate}\n`;
+    expect(parseDailyRates(list("1000000,000"))?.rates).toHaveLength(2);
+    expect(parseDailyRates(list("1000000,001"))).toBeNull();
+    expect(parseDailyRates(list("2000000,000"))).toBeNull();
   });
 
   test("[FOR-004] datum s jednociferným dnem a měsícem se doplní nulami", () => {

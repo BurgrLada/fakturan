@@ -924,6 +924,8 @@ export const TEXTS = {
         `Pravidelná faktura „${p.plan ?? ""}“ nevznikla v termínu ${p.date ?? ""}. Zmeškaných termínů ke kontrole: ${p.count ?? 1}.`,
       rate_last_known: (p: Record<string, unknown>) =>
         `Faktura z plánu „${p.plan ?? ""}“ je v ${p.currency ?? ""} a kurz ČNB k ${p.date ?? ""} nebyl k dispozici. Použil se poslední známý kurz z ${p.listDate ?? ""}, zkontrolujte ho.`,
+      rate_deviation: (p: Record<string, unknown>) =>
+        `Faktura z plánu „${p.plan ?? ""}“ je v ${p.currency ?? ""} s pevným kurzem, který se od kurzu ČNB k ${p.date ?? ""} liší o více než 5 %. Zkontrolujte ho.`,
       recurring_held: (p: Record<string, unknown>) =>
         `Automatika je vypnutá, pravidelná faktura „${p.plan ?? ""}“ zůstala jako koncept.`,
       recurring_no_address: (p: Record<string, unknown>) =>

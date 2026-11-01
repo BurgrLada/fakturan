@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, count, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { kindForInvoice } from "@/lib/email-template";
 import { mailMessageSchema } from "@/lib/mail-send";
-import { rateDate } from "@/lib/fx";
+import { deviationExceeds, rateDate } from "@/lib/fx";
 import { addDays, daysBetween } from "@/lib/invoice";
 import { calendarDateInPrague, isDailyDue, type CalendarDate } from "@/lib/number-format";
 import {
@@ -35,7 +35,7 @@ import { reportFailure } from "../scheduler/report";
 import { ServiceError, type Reader } from "./access";
 import { automaticSendAllowed, getAutomation } from "./automation";
 import { composeMail } from "./email-templates";
-import { ensureRate } from "./exchange-rates";
+import { ensureRate, resolveRate } from "./exchange-rates";
 import { issueIn } from "./invoice-lifecycle";
 import { queueMail } from "./invoice-mail";
 import { draftInputFromDocument } from "./invoice-templates";
@@ -43,6 +43,7 @@ import {
   createDraftIn,
   findOwned,
   ownerOf,
+  type Invoice,
   parseDraft,
   unlessUnchanged,
   Unchanged,
@@ -482,8 +483,27 @@ function queueRecurringMail(
   return { queued: queued !== null };
 }
 
+function noticeFixedDeviation(tx: Tx, plan: RecurringInvoice, issued: Invoice, key: string) {
+  const { userId } = plan;
+  const day = rateDate(issued, getPreferences(userId).fxBasis, issued.issueDate!);
+  const reference = resolveRate(tx, userId, issued.currency, day, clock.now())?.reference;
+  if (reference == null || !deviationExceeds(issued.exchangeRateMicros!, reference)) return;
+  notify(tx, {
+    userId,
+    kind: "rate_deviation",
+    dedupeKey: `${key}:rate`,
+    params: {
+      plan: plan.name,
+      currency: issued.currency,
+      date: displayDate(userId, issued.issueDate!),
+    },
+    entity: { type: "invoice", id: issued.id },
+  });
+}
+
 function noticeLastKnownRate(tx: Tx, plan: RecurringInvoice, invoiceId: string, key: string) {
   const issued = findOwned(tx, plan.userId, invoiceId);
+  if (issued.exchangeRateSource === "fixed") return noticeFixedDeviation(tx, plan, issued, key);
   if (issued.exchangeRateSource !== "last_known") return;
   notify(tx, {
     userId: plan.userId,

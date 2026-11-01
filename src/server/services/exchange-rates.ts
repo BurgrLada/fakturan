@@ -2,6 +2,7 @@ import "server-only";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES, type Currency } from "@/lib/currency";
+import { daysBetween } from "@/lib/invoice";
 import { convertMinor, expectedListDate, RATE_UNIT, type ExchangeRateSource } from "@/lib/fx";
 import {
   calendarDateInPrague,
@@ -16,6 +17,7 @@ import { db } from "../db";
 import { exchangeRate, type Job } from "../db/schema";
 import { fetchDailyRates } from "../external/cnb";
 import type { Fetcher } from "../external/ares";
+import { reportFailure } from "../scheduler/report";
 import { enqueueStandalone } from "../jobs/queue";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, RateLimitError, ServiceError, type Reader } from "./access";
@@ -27,6 +29,7 @@ const E = TEXTS.exchangeRates.errors;
 
 const SYSTEM: Actor = { userId: null, source: "system" };
 const FETCH_FROM = "14:45";
+const STALE_AFTER_DAYS = 5;
 
 export type RateResult = {
   rateMicros: number;
@@ -75,7 +78,7 @@ export function resolveRate(
       rateMicros: fixed,
       source: "fixed",
       listDate: null,
-      reference: listed?.rateMicros ?? null,
+      reference: listed?.exact ? listed.rateMicros : null,
     };
   }
   if (!listed) return null;
@@ -94,6 +97,7 @@ export function cnbRate(q: Reader, currency: Currency, date: CalendarDate): numb
 }
 
 // Never throws: a missing rate only means the caller falls back to the last known one or to manual entry.
+// An unavailable list is the normal case and stays silent; only a failure to store one is reported.
 export async function ensureRate(
   currency: Currency,
   date: CalendarDate,
@@ -131,8 +135,8 @@ export async function ensureRate(
         });
       }),
     );
-  } catch {
-    return;
+  } catch (error) {
+    reportFailure(error, { task: "fx" });
   }
 }
 
@@ -206,6 +210,23 @@ function hasListFor(expected: CalendarDate): boolean {
   return storedRate(db, "EUR", expected) !== null;
 }
 
+let reportedStaleOn: CalendarDate | null = null;
+
+// An outage is not an error, but a list that stays unreadable for days means the source changed
+// its format, and only the code can fix that.
+function reportStale(expected: CalendarDate, today: CalendarDate): void {
+  const newest = db
+    .select({ listDate: sql<string | null>`max(${exchangeRate.listDate})` })
+    .from(exchangeRate)
+    .where(eq(exchangeRate.currency, "EUR"))
+    .get()?.listDate;
+  if (!newest || reportedStaleOn === today) return;
+  const days = daysBetween(newest, expected);
+  if (days < STALE_AFTER_DAYS) return;
+  reportedStaleOn = today;
+  reportFailure(new Error(`Kurzy ČNB se už ${days} dní nepodařilo načíst`), { task: "fx" });
+}
+
 function tableIsEmpty(): boolean {
   return (
     db
@@ -221,6 +242,7 @@ export function planRateFetch(now: Date): void {
   const today = calendarDateInPrague(now);
   const expected = expectedListDate(today, now);
   if (hasListFor(expected)) return;
+  reportStale(expected, today);
   const waiting = expected === today && timeInPrague(now) < FETCH_FROM;
   if (waiting && !tableIsEmpty()) return;
   const hour = timeInPrague(now).slice(0, 2);

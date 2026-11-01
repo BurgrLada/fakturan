@@ -25,6 +25,7 @@ import { drainJobs } from "@/server/jobs/worker";
 import { archiveCustomer } from "@/server/services/customers";
 import { composeMail } from "@/server/services/email-templates";
 import { setAutomation, setPaused } from "@/server/services/automation";
+import { savePreferences } from "@/server/services/preferences";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { issueInvoice } from "@/server/services/invoice-lifecycle";
 import { duplicateInvoice, getInvoice, saveDraft } from "@/server/services/invoices";
@@ -600,6 +601,38 @@ describe("kurzy ČNB u pravidelných faktur", () => {
       date: "10. 3. 2026",
       listDate: "2. 3. 2026",
     });
+  });
+
+  test("[FOR-010] pevný kurz nad 5 % od ČNB vystavení nezastaví, ale upozorní", async () => {
+    const { owner, customerId } = account();
+    seedEur("2026-03-09", 25_000_000);
+    savePreferences(webActor(owner), { fixedRates: { EUR: 26_250_001 } });
+
+    const run = await runJob(owner, eurPlan(owner, customerId));
+
+    expect(run.status).toBe("issued");
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({
+      exchangeRateSource: "fixed",
+      exchangeRateMicros: 26_250_001,
+    });
+    expect(noticesOf(owner).map((row) => row.kind)).toEqual(["rate_deviation"]);
+    expect(noticesOf(owner)[0]!.params).toMatchObject({ currency: "EUR", date: "10. 3. 2026" });
+  });
+
+  test("[FOR-010] pevný kurz přesně na hranici 5 % a bez reference neupozorní", async () => {
+    const { owner, customerId } = account();
+    seedEur("2026-03-09", 25_000_000);
+    savePreferences(webActor(owner), { fixedRates: { EUR: 26_250_000 } });
+    const edge = await runJob(owner, eurPlan(owner, customerId));
+    db.delete(exchangeRate).run();
+    const other = account();
+    savePreferences(webActor(other.owner), { fixedRates: { EUR: 40_000_000 } });
+    const bare = await runJob(other.owner, eurPlan(other.owner, other.customerId));
+
+    expect(edge.status).toBe("issued");
+    expect(bare.status).toBe("issued");
+    expect(noticesOf(owner)).toEqual([]);
+    expect(noticesOf(other.owner)).toEqual([]);
   });
 
   test("[FOR-004] pravidelná faktura při výpadku s prázdnou tabulkou skončí konceptem bez chyby úlohy", async () => {

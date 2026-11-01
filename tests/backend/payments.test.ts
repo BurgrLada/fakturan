@@ -890,6 +890,35 @@ describe("kurz platby", () => {
     expect(rateOf(added.id)).toBeNull();
   });
 
+  test("[PAY-006] úprava jen poznámky kurz platby nepřepočítá", () => {
+    seedRates();
+    const { owner, id } = account();
+    const added = pay(owner, id, {
+      currency: "USD",
+      amountMinor: 1_000,
+      creditedMinor: 22_000,
+      paidOn: "2026-03-19",
+    });
+    db.update(exchangeRate)
+      .set({ rateMicros: 99_000_000 })
+      .where(eq(exchangeRate.currency, "USD"))
+      .run();
+
+    updatePayment(
+      webActor(owner),
+      added.id,
+      input(owner, id, {
+        currency: "USD",
+        amountMinor: 1_000,
+        creditedMinor: 22_000,
+        paidOn: "2026-03-19",
+        note: "jen poznámka",
+      }),
+    );
+
+    expect(rateOf(added.id)).toBe(22_311_000);
+  });
+
   test("[PAY-006] vrácení peněz a označení za uhrazené nesou kurz svého dne", () => {
     seedRates();
     const { owner, id } = account();

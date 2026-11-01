@@ -350,7 +350,10 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
         creditedMinor,
         method,
         note,
-        rateMicros: cnbRate(tx, currency, paidOn),
+        rateMicros:
+          paidOn === before.paidOn && currency === before.currency
+            ? before.rateMicros
+            : cnbRate(tx, currency, paidOn),
         updatedAt: clock.now(),
       })
       .where(scoped(userId).where(payment, (t, { eq }) => eq(t.id, id)))

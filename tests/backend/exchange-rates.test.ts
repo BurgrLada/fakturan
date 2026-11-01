@@ -22,6 +22,9 @@ import {
   previewIssue,
 } from "@/server/services/invoice-lifecycle";
 import { getInvoice, type DraftInput } from "@/server/services/invoices";
+import { createCreditNote } from "@/server/services/credit-notes";
+import { markSent } from "@/server/services/invoice-lifecycle";
+import { addPayment } from "@/server/services/payments";
 import { savePreferences } from "@/server/services/preferences";
 import { assertConsistent } from "../helpers/consistency";
 import { cnbMode, startCnbStub } from "../helpers/cnb";
@@ -32,6 +35,9 @@ vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
 vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
 vi.stubEnv("DATA_DIR", mkdtempSync(join(tmpdir(), "fakturan-rates-")));
+
+const failures = vi.hoisted(() => ({ reportFailure: vi.fn() }));
+vi.mock("@/server/scheduler/report", () => failures);
 
 const stub = await startCnbStub();
 vi.stubEnv("CNB_BASE_URL", stub.url);
@@ -53,6 +59,7 @@ beforeEach(() => {
   seen = fetchAudits().length;
   stub.setMode(cnbMode.ok);
   stub.requests.length = 0;
+  failures.reportFailure.mockClear();
   at = EVENING;
   setClockForTests({ now: () => at });
 });
@@ -141,6 +148,31 @@ describe("stažení kurzů", () => {
       }),
     ).resolves.toBeUndefined();
 
+    expect(db.select().from(exchangeRate).all()).toEqual([]);
+    expect(newAudits()).toEqual([]);
+  });
+
+  test("[FOR-004] nedostupný lístek se nehlásí jako chyba", async () => {
+    stub.setMode(cnbMode.down);
+    await ensureRate("EUR", "2026-10-30");
+    stub.setMode(cnbMode.garbage);
+    await ensureRate("EUR", "2026-10-30");
+
+    expect(failures.reportFailure).not.toHaveBeenCalled();
+  });
+
+  test("[FOR-004] selhání zápisu lístku se nahlásí a nevyhodí", async () => {
+    db.$client.exec(
+      "CREATE TRIGGER fail_rate_insert BEFORE INSERT ON exchange_rate BEGIN SELECT RAISE(ABORT, 'disk plný'); END",
+    );
+    try {
+      await expect(ensureRate("EUR", "2026-10-30")).resolves.toBeUndefined();
+    } finally {
+      db.$client.exec("DROP TRIGGER fail_rate_insert");
+    }
+
+    expect(failures.reportFailure).toHaveBeenCalledTimes(1);
+    expect(failures.reportFailure).toHaveBeenCalledWith(expect.any(Error), { task: "fx" });
     expect(db.select().from(exchangeRate).all()).toEqual([]);
     expect(newAudits()).toEqual([]);
   });
@@ -299,6 +331,11 @@ describe("výběr kurzu", () => {
       reference: null,
     });
     expect(resolveRate(db, other, "EUR", "2026-10-30", EVENING)).toBeNull();
+    seedRate("EUR", "2026-10-26", 24_100_000);
+    expect(resolveRate(db, owner, "EUR", "2026-10-30", EVENING)).toMatchObject({
+      source: "fixed",
+      reference: null,
+    });
   });
 
   test.each([
@@ -397,9 +434,27 @@ describe("vystavení s kurzem", () => {
       exchangeRateSource: "cnb",
       exchangeRateDate: "2026-10-29",
     });
-    seedRate("EUR", "2026-11-02", 30_000_000);
+    // A corrected list and a newer one both appear, then everything that touches the document runs.
+    db.update(exchangeRate)
+      .set({ rateMicros: 30_000_000 })
+      .where(eq(exchangeRate.listDate, "2026-10-29"))
+      .run();
+    seedRate("EUR", "2026-11-02", 31_000_000);
+    markSent(webActor(owner), row.id);
+    addPayment(webActor(owner), row.id, {
+      revision: getInvoice(owner, row.id)!.revision,
+      paidOn: "2026-11-02",
+      amountMinor: 1_000,
+      currency: "EUR",
+      method: "cash",
+      note: "",
+    });
+    createCreditNote(webActor(owner), row.id);
+
+    expect(resolveRate(db, owner, "EUR", "2026-10-29", EVENING)?.rateMicros).toBe(30_000_000);
     expect(getInvoice(owner, row.id)).toMatchObject({
       exchangeRateMicros: 24_900_000,
+      exchangeRateSource: "cnb",
       exchangeRateDate: "2026-10-29",
     });
     assertConsistent(db, owner);
@@ -534,6 +589,15 @@ describe("vystavení s kurzem", () => {
     seedRate("EUR", "2026-10-29", 24_900_000);
     expect(checkIssuable(owner, draft.id)).toEqual([]);
     expect(previewIssue(owner, draft.id).problems).toEqual([]);
+  });
+
+  test("[CRN-001] náhled opravné faktury žádné poznámky ke kurzu nemá", () => {
+    const owner = seedOwner(db, EVENING);
+    const original = issued(owner, { exchangeRateMicros: 20_000_000 });
+    seedRate("EUR", "2026-10-29", 24_900_000);
+    const note = createCreditNote(webActor(owner), original.id);
+
+    expect(previewIssue(owner, note.id).rateNotes).toEqual([]);
   });
 
   test("[FOR-004] náhled ukáže, že se použije poslední známý kurz", () => {
@@ -715,6 +779,29 @@ describe("plánování stahování", () => {
 
     planRateFetch(saturday);
     expect(jobs()).toMatchObject([{ payload: { date: "2026-10-30" } }]);
+  });
+
+  test("[FOR-004] lístek, který se pět dní nedá načíst, se jednou za den nahlásí", () => {
+    seedRate("EUR", "2026-10-23", 24_000_000);
+
+    planRateFetch(new Date("2026-10-27T10:00:00Z"));
+    expect(failures.reportFailure).not.toHaveBeenCalled();
+
+    planRateFetch(new Date("2026-11-02T10:00:00Z"));
+    planRateFetch(new Date("2026-11-02T11:00:00Z"));
+    expect(failures.reportFailure).toHaveBeenCalledTimes(1);
+    expect(failures.reportFailure).toHaveBeenCalledWith(expect.any(Error), { task: "fx" });
+
+    planRateFetch(new Date("2026-11-03T10:00:00Z"));
+    expect(failures.reportFailure).toHaveBeenCalledTimes(2);
+  });
+
+  test("[FOR-004] prázdná tabulka a čerstvý lístek se nehlásí", () => {
+    planRateFetch(MORNING);
+    seedRate("EUR", "2026-10-29", 24_000_000);
+    planRateFetch(new Date("2026-11-02T11:00:00Z"));
+
+    expect(failures.reportFailure).not.toHaveBeenCalled();
   });
 
   test("úloha stáhne lístek a při výpadku skončí bez chyby", async () => {

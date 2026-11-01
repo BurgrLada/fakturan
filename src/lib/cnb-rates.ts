@@ -1,5 +1,5 @@
 import { CURRENCIES, type Currency } from "./currency";
-import { rateFromList } from "./fx";
+import { MAX_EXCHANGE_RATE_MICROS, rateFromList } from "./fx";
 import { isCalendarDate, type CalendarDate } from "./number-format";
 
 export type ParsedRates = {
@@ -22,7 +22,8 @@ function dateOf(line: string): CalendarDate | null {
   return isCalendarDate(iso) ? iso : null;
 }
 
-// All or nothing: a list that fails anywhere is not trusted in part, because a shifted column
+// All or nothing, and a list without the euro is refused as well, because it is the one every
+// account relies on to tell a healthy list from a broken one: a list that fails anywhere is not trusted in part, because a shifted column
 // would store a plausible but wrong rate.
 export function parseDailyRates(text: string): ParsedRates | null {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
@@ -42,8 +43,8 @@ export function parseDailyRates(text: string): ParsedRates | null {
     }
     seen.add(code);
     const rateMicros = rateFromList(rate, Number(amount));
-    if (rateMicros === null) return null;
+    if (rateMicros === null || rateMicros > MAX_EXCHANGE_RATE_MICROS) return null;
     if (KEPT.has(code)) rates.push({ currency: code as Currency, rateMicros });
   }
-  return { listDate, rates };
+  return rates.some((item) => item.currency === "EUR") ? { listDate, rates } : null;
 }

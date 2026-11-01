@@ -43,6 +43,7 @@ export async function fetchDailyRates(
   try {
     const response = await fetcher(`${env.CNB_BASE_URL}/denni_kurz.txt?date=${queryDate(date)}`, {
       signal: controller.signal,
+      redirect: "error",
       headers: { Accept: "text/plain" },
     });
     if (!response.ok) return null;

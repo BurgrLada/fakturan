@@ -491,7 +491,10 @@ test("[INV-019] volitelná pole se propíšou do PDF", async ({ page, freshApp }
   }
 });
 
-test("[FOR-002] měna jde zvolit a cizí měna ukáže ruční kurz", async ({ page, freshApp }) => {
+test("[FOR-002] měna jde zvolit a s dostupným lístkem ČNB se kurz doplní při vystavení", async ({
+  page,
+  freshApp,
+}) => {
   const { baseURL } = freshApp;
   await ready(page, baseURL);
   await openForm(page, baseURL);
@@ -510,16 +513,35 @@ test("[FOR-002] měna jde zvolit a cizí měna ukáže ruční kurz", async ({ p
   await fillLine(page, 0, "Konzultace", "100");
   await page.getByLabel("Měna").selectOption("EUR");
   await settled(page);
-  await expect(page.getByRole("link", { name: "Vyplňte kurz EUR" })).toHaveAttribute(
-    "href",
-    "#field-exchangeRate",
-  );
-
-  await page.getByLabel("Kurz k CZK").fill("24,5");
-  await settled(page);
+  await expect(page.getByLabel("Kurz k CZK")).toBeVisible();
   await expect(page.getByRole("link", { name: "Vyplňte kurz EUR" })).toBeHidden();
   await issue(page);
   expect(await issuedPdf(page)).toContain("100,00 €");
+});
+
+test.describe("bez dostupného lístku ČNB", () => {
+  test.use({ cnbAvailable: false });
+
+  test("[FOR-002] cizí měna bez lístku chce ruční kurz", async ({ page, freshApp }) => {
+    const { baseURL } = freshApp;
+    await ready(page, baseURL);
+    await openForm(page, baseURL);
+    await chooseCustomer(page);
+    await page.getByLabel("Způsob platby").selectOption("cash");
+    await fillLine(page, 0, "Konzultace", "100");
+    await page.getByLabel("Měna").selectOption("EUR");
+    await settled(page);
+    await expect(page.getByRole("link", { name: "Vyplňte kurz EUR" })).toHaveAttribute(
+      "href",
+      "#field-exchangeRate",
+    );
+
+    await page.getByLabel("Kurz k CZK").fill("24,5");
+    await settled(page);
+    await expect(page.getByRole("link", { name: "Vyplňte kurz EUR" })).toBeHidden();
+    await issue(page);
+    expect(await issuedPdf(page)).toContain("100,00 €");
+  });
 });
 
 test("[INV-020] úprava odeslané faktury upozorní", async ({ page, freshApp }) => {
