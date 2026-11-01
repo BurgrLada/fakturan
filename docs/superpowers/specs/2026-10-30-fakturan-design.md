@@ -366,7 +366,7 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 - **MAIL-006** Historie odeslání na faktuře: kdy, komu, předmět, výsledek, archivovaný PDF.
 - **MAIL-007** Odkaz „potvrzení přijetí“ a sledovací pixely se nepoužívají.
 - **MAIL-008** Hromadné odeslání ukáže souhrn příjemců a vyžaduje potvrzení.
-- **MAIL-009** Zprávy klientovi mají kromě prostého textu i HTML verzi z jedné neutrální šablony bez barev Fakturanu a bez značky aplikace. Vzhled čeká na výběr zadavatele.
+- **MAIL-009** Zprávy klientovi mají kromě prostého textu i HTML verzi z jedné neutrální šablony bez barev Fakturanu a bez značky aplikace. Zadavatel preferuje typ Karta, konkrétní vzhled čeká na výběr. HTML zpráva k faktuře může obsahovat QR platbu, pokud ji faktura má.
 
 ## 12. Upomínky (REM)
 
@@ -379,7 +379,9 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 - **REM-007** Stejný stupeň upomínky se k faktuře nepošle dvakrát.
 - **REM-008** Odesílá se v čase nastaveném uživatelem, výchozí 9:00 **[návrh]**.
 - **REM-009** Upozornění pro uživatele na faktury po splatnosti a blížící se splatnost: vždy v centru upozornění a na Přehledu, volitelně denní e-mail uživateli. Výchozí stav e-mailu je vypnuto a nikdy nejde klientovi.
-- **REM-010** Volitelný měsíční souhrn e-mailem uživateli, nastavitelný v Nastavení a ve výchozím stavu vypnutý: fakturováno, přijato, pohledávky, faktury po splatnosti a další termíny pravidelných faktur. Klientovi nejde nikdy.
+- **REM-010** Volitelný pravidelný souhrn e-mailem uživateli, v Nastavení ve výchozím stavu vypnutý, s volbou měsíčně nebo čtvrtletně: fakturováno, přijato, pohledávky, faktury po splatnosti a výhled na další období z otevřených a pravidelných faktur. Klientovi nejde nikdy.
+- **REM-011** Volitelná lednová připomínka s ročním přehledem pro daně, zvlášť zapínaná a ve výchozím stavu vypnutá: příjmy, neuhrazené faktury k 31. 12. a odkaz na daňový přehled.
+- **REM-012** Volitelné upozornění e-mailem při 80 a 95 % limitu pro povinnou registraci k DPH. Limit a prahy jsou pojmenované konstanty na jednom místě, aby šly při změně zákona upravit jednou úpravou.
 
 ## 13. Platby (PAY)
 
