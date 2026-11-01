@@ -7,7 +7,10 @@ import {
   changeForeign,
   changeLanguage,
   changeRate,
+  customerForeign,
   customerOffer,
+  foreignFieldsOpen,
+  foreignOffer,
   discountNotes,
   changeTaxableDate,
   draftFields,
@@ -62,9 +65,9 @@ const form = (over: Partial<FormValues> = {}): FormValues => ({
 });
 
 const accounts = [
-  { id: "czk", currency: "CZK", isDefault: true, iban: true, bic: true },
-  { id: "eur-1", currency: "EUR", isDefault: false, iban: true, bic: true },
-  { id: "eur-2", currency: "EUR", isDefault: true, iban: true, bic: true },
+  { id: "czk", currency: "CZK", isDefault: true, iban: true, czechIban: true, bic: true },
+  { id: "eur-1", currency: "EUR", isDefault: false, iban: true, czechIban: true, bic: true },
+  { id: "eur-2", currency: "EUR", isDefault: true, iban: true, czechIban: true, bic: true },
 ] as const;
 
 describe("formulář faktury", () => {
@@ -538,6 +541,36 @@ describe("zahraniční faktura", () => {
     expect(kept).toMatchObject({ foreign: false, clause: "Moje" });
   });
 
+  const domestic = { ...customer, foreign: false, dic: "" };
+
+  test("[FOR-006] domácí zákazník smaže navrženou doložku, vlastní jen po potvrzení", () => {
+    const suggested = form({ foreign: true, clause: REVERSE_CHARGE_CLAUSE.cs });
+    expect(customerForeign(suggested, domestic, none)).toMatchObject({
+      foreign: false,
+      clause: "",
+    });
+
+    const own = form({ foreign: true, clause: "Moje znění" });
+    expect(customerForeign(own, domestic, none)).toMatchObject({
+      foreign: false,
+      clause: "Moje znění",
+    });
+    expect(foreignOffer(own, domestic, none)).toEqual({ foreign: false, clause: "" });
+    expect(foreignOffer(customerForeign(own, domestic, none), domestic, none)).toEqual({
+      clause: "",
+    });
+    expect(foreignOffer(form(), domestic, none)).toBeNull();
+  });
+
+  test("[FOR-006] doložka na domácím dokladu nezůstane skrytá a odkaz na ni vede", () => {
+    expect(foreignFieldsOpen(form())).toBe(false);
+    expect(foreignFieldsOpen(form({ clause: "Moje" }))).toBe(true);
+    expect(foreignFieldsOpen(form({ clause: "  " }))).toBe(false);
+    expect(foreignFieldsOpen(form({ foreign: true }))).toBe(true);
+    expect(foreignFieldsOpen(form({ currency: "EUR" }))).toBe(true);
+    expect(fieldTarget("clause", form(), 1)).toEqual({ href: "#field-clause", external: false });
+  });
+
   test("[FOR-001] nabídka u uloženého dokladu přenese přepínač, doložku i smazání kurzu", () => {
     const values = form({ currency: "USD", exchangeRate: "22", exchangeRateSource: "manual" });
     expect(customerOffer(values, customer, none, accounts)).toMatchObject({
@@ -574,10 +607,7 @@ describe("zahraniční faktura", () => {
     const typed = form({ currency: "EUR", exchangeRate: "25", exchangeRateSource: "manual" });
     expect(applyRate(typed, result)).toBe(typed);
     expect(applyRate(typed, null)).toBe(typed);
-    expect(applyRate(automatic, null)).toMatchObject({
-      exchangeRate: "",
-      exchangeRateSource: null,
-    });
+    expect(applyRate(automatic, null)).toBe(automatic);
   });
 
   test("[FOR-003] psaní do pole nastaví ruční kurz, smazání vrátí automatiku", () => {
@@ -631,9 +661,9 @@ describe("zahraniční faktura", () => {
 
   test("[QR-002] změna účtu důvod změní", () => {
     const list = [
-      { id: "bare", currency: "EUR", isDefault: true, iban: false, bic: false },
-      { id: "no-bic", currency: "EUR", isDefault: false, iban: true, bic: false },
-      { id: "full", currency: "EUR", isDefault: false, iban: true, bic: true },
+      { id: "bare", currency: "EUR", isDefault: true, iban: false, czechIban: false, bic: false },
+      { id: "no-bic", currency: "EUR", isDefault: false, iban: true, czechIban: true, bic: false },
+      { id: "full", currency: "EUR", isDefault: false, iban: true, czechIban: true, bic: true },
     ];
     const state = (bankAccountId: string | null, currency: FormValues["currency"] = "EUR") =>
       formQrState(form({ currency, bankAccountId }), list);
@@ -644,6 +674,11 @@ describe("zahraniční faktura", () => {
     expect(state("full", "USD")).toBe("currency");
     expect(state("no-bic", "CZK")).toBe("spayd");
     expect(state("bare", "CZK")).toBe("missing_iban_bic");
+    const abroad = [
+      { id: "de", currency: "CZK", isDefault: true, iban: true, czechIban: false, bic: true },
+    ];
+    expect(formQrState(form({ bankAccountId: "de" }), abroad)).toBe("not_czech_account");
+    expect(formQrState(form({ bankAccountId: "de", currency: "EUR" }), abroad)).toBe("epc");
   });
 
   test("[QR-002] vypnuté QR a jiná platba mají vlastní důvod", () => {

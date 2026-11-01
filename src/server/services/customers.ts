@@ -1,3 +1,4 @@
+import { splitVatId } from "@/lib/clauses";
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
@@ -19,7 +20,7 @@ import { db } from "../db";
 import { czech } from "../db/collation";
 import { customer, invoice } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { lookupVies, splitVatId, type ViesState } from "../external/vies";
+import { lookupVies, type ViesState } from "../external/vies";
 import { isDesignId } from "../pdf/designs";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError, type Reader } from "./access";

@@ -170,7 +170,7 @@ function offerRows(offer: CustomerOffer, accounts: InvoiceFormProps["accounts"])
     ...(foreign !== undefined
       ? [`${T.foreignOffer}: ${foreign ? T.foreignOfferOn : T.foreignOfferOff}`]
       : []),
-    ...(clause ? [`${T.clauseOffer}: ${clause}`] : []),
+    ...(clause === undefined ? [] : [clause ? `${T.clauseOffer}: ${clause}` : T.clauseOfferRemove]),
   ];
 }
 
@@ -205,16 +205,18 @@ function Form(props: InvoiceFormProps) {
   const identity = useRef({ exists: props.saved, revision: props.revision });
   const problemsRef = useRef<HTMLDivElement>(null);
   const customerTicket = useRef(0);
+  const takeRate = useRef(false);
   const savedIssued = useRef(
     JSON.stringify([props.initial, props.initialTags, props.number, props.variableSymbol]),
   );
   const needsConfirm = useRef<() => boolean>(() => false);
   const latestValues = useRef(props.initial);
 
+  const [baselineKey] = useState(() => keyOf(payloadOf(type, props.initial, props.initialTags)));
   const [saver] = useState(
     () =>
       new DraftSaver<Payload, Saved>({
-        baseline: keyOf(payloadOf(type, props.initial, props.initialTags)),
+        baseline: baselineKey,
         send: async ({ draft, tags: names }) => {
           const { exists, revision: current } = identity.current;
           const reference = exists ? { id, revision: current } : { clientId: id };
@@ -252,8 +254,17 @@ function Form(props: InvoiceFormProps) {
   useEffect(() => {
     if (mode !== "draft" || !result.ok) return;
     const payload = { draft: draftFields(type, values, result.fields), tags };
+    // A rate the form loaded by itself is no reason to create a draft nobody asked for.
+    if (!identity.current.exists && values.exchangeRateSource !== "manual") {
+      const { exchangeRate, exchangeRateSource } = props.initial;
+      const unrated = payloadOf(type, { ...values, exchangeRate, exchangeRateSource }, tags);
+      if (keyOf(unrated) === baselineKey && unrated) {
+        saver.change(baselineKey, unrated);
+        return;
+      }
+    }
     saver.change(keyOf(payload), payload);
-  }, [mode, type, saver, values, tags, result]);
+  }, [mode, type, saver, values, tags, result, baselineKey, props.initial]);
 
   useEffect(() => {
     latestValues.current = values;
@@ -338,9 +349,17 @@ function Form(props: InvoiceFormProps) {
         );
         return;
       }
+      const applied = applyCustomerDefaults(
+        latestValues.current,
+        reply.defaults,
+        touched.current,
+        accounts,
+      );
       setValues((current) =>
         applyCustomerDefaults(current, reply.defaults, touched.current, accounts),
       );
+      // Everything else is applied, so only a clause that needs a yes can remain.
+      setOffer(customerOffer(applied, reply.defaults, touched.current, accounts));
     } catch {
       setMessage({ ok: false, text: T.network });
     }
@@ -554,7 +573,12 @@ function Form(props: InvoiceFormProps) {
     date: rateDay,
     onResult: (rate) => {
       setRateInfo({ key: rateKey, result: rate });
-      if (canPickRate) setValues((current) => applyRate(current, rate));
+      const released = takeRate.current && rate !== null;
+      takeRate.current = false;
+      if (!canPickRate) return;
+      setValues((current) =>
+        applyRate(released ? { ...current, exchangeRateSource: null } : current, rate),
+      );
     },
     onExpired: () => setLock("expired"),
   });
@@ -852,7 +876,7 @@ function Form(props: InvoiceFormProps) {
                 </NativeSelect>
               </Field>
             </div>
-            {noAccount && (
+            {noAccount && !isNote && (
               <Alert role="status" data-testid="account-missing">
                 <AlertDescription className="flex flex-col items-start gap-2">
                   {TEXTS.invoices.foreign.accountMissing(values.currency)}
@@ -862,7 +886,7 @@ function Form(props: InvoiceFormProps) {
                 </AlertDescription>
               </Alert>
             )}
-            {!QR_SILENT.has(qrState) && !noAccount && (
+            {!QR_SILENT.has(qrState) && !noAccount && !isNote && (
               <p data-testid="form-qr-reason" className="text-sm text-muted-foreground">
                 {TEXTS.invoices.qr[qrState as keyof typeof TEXTS.invoices.qr]}
               </p>
@@ -901,10 +925,16 @@ function Form(props: InvoiceFormProps) {
                 invalid={invalid.has("field-exchangeRate")}
                 locked={props.linkedMoney}
                 lockedNote={T.rateLocked}
-                canUseCnb={canPickRate && values.exchangeRateSource === "manual"}
+                useAutomaticLabel={
+                  canPickRate && values.exchangeRateSource === "manual"
+                    ? listed?.source === "fixed"
+                      ? TEXTS.invoices.foreign.useFixed
+                      : TEXTS.invoices.foreign.useCnb
+                    : null
+                }
                 onChange={(text) => setValues((current) => changeRate(current, text))}
-                onUseCnb={() => {
-                  setValues((current) => ({ ...current, exchangeRateSource: null }));
+                onUseAutomatic={() => {
+                  takeRate.current = true;
                   reloadRate();
                 }}
               />

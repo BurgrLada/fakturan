@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -673,7 +674,7 @@ describe("kurzy ČNB u pravidelných faktur", () => {
     expect(cnb.requests).toHaveLength(1);
   });
 
-  test("[FOR-007] pravidelná faktura v angličtině má doložku anglicky", async () => {
+  test("doložka a jazyk plánu přejdou na vystavenou fakturu beze změny", async () => {
     const { owner, customerId } = account();
     seedEur("2026-03-09");
     const id = savePlan(owner, customerId, {
@@ -695,6 +696,28 @@ describe("kurzy ČNB u pravidelných faktur", () => {
       clause: REVERSE_CHARGE_CLAUSE.en,
       exchangeRateSource: "cnb",
     });
+  });
+
+  test("plán uložený před zahraničními fakturami běží dál", async () => {
+    const { owner, customerId } = account();
+    seedEur("2026-03-09");
+    const id = savePlan(owner, customerId, {
+      mode: "issue",
+      document: planDocument({
+        currency: "EUR",
+        paymentMethod: "cash",
+        foreign: true,
+        clause: "Doložka",
+      }),
+    });
+    db.run(
+      sql`UPDATE recurring_invoice SET document = json_remove(document, '$.foreign', '$.clause') WHERE id = ${id}`,
+    );
+
+    const run = await runJob(owner, id);
+
+    expect(run.status).toBe("issued");
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({ foreign: false, clause: "" });
   });
 
   test("faktura v korunách síť ani kurz nepoužije", async () => {

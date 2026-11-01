@@ -347,6 +347,7 @@ export const TEXTS = {
       foreignOfferOn: "ano",
       foreignOfferOff: "ne",
       clauseOffer: "Doložka",
+      clauseOfferRemove: "Doložka: smazat",
       creditFixedDiscount:
         "Pevná sleva se přenesla z faktury v plné výši a zmenšuje opravu. Při částečné opravě ji snižte, jinak opravíte méně, než jste chtěli.",
     },
@@ -355,6 +356,7 @@ export const TEXTS = {
       currency: "Měna",
       rate: "Kurz k CZK",
       useCnb: "Použít kurz ČNB",
+      useFixed: "Použít pevný kurz",
       sources: {
         cnb: (date: string) => `Kurz ČNB k ${date}`,
         cnbNoDate: "Kurz ČNB",
@@ -365,7 +367,8 @@ export const TEXTS = {
       },
       clause: "Doložka na faktuře",
       clauseHint: "Předvyplněné znění je návrh. Před ostrým použitím ho ověřte s daňovým poradcem.",
-      rateOnIssue: "Kurz se doplní při každém vystavení z kurzu ČNB k rozhodnému dni.",
+      rateOnIssue:
+        "Kurz se doplní při každém vystavení k rozhodnému dni, z pevného kurzu v nastavení, jinak z ČNB.",
       accountMissing: (currency: string) =>
         `Nemáte bankovní účet v ${currency}. Založte ho v nastavení účtů, jinak fakturu nepůjde vystavit převodem.`,
       accountLink: "Nastavení účtů",
@@ -1977,7 +1980,6 @@ export const TEXTS = {
     fixedRates: {
       title: "Pevné kurzy",
       hint: "Vyplněný kurz se použije místo kurzu ČNB. Prázdné pole znamená kurz ČNB.",
-      currency: "Měna",
       rate: (currency: string) => `Pevný kurz ${currency}`,
       invalid: (currency: string) => `Pevný kurz ${currency} musí být kladné číslo`,
     },

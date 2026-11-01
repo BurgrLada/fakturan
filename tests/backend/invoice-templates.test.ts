@@ -512,9 +512,13 @@ describe("šablony faktur", () => {
 describe("zahraniční šablona", () => {
   test("šablona a plán uložené před tímto plánem jdou načíst", () => {
     const owner = newOwner();
-    const { foreign: _f, clause: _c, ...old } = document(owner);
-    const { id } = saveTemplate(actor(owner), input(owner));
+    const { id } = saveTemplate(
+      actor(owner),
+      input(owner, { document: document(owner, { foreign: true, clause: "Doložka" }) }),
+    );
+    const { foreign: _f, clause: _c, ...old } = getTemplate(owner, id)!.document;
     db.update(invoiceTemplate).set({ document: old }).where(eq(invoiceTemplate.id, id)).run();
+    expect(getTemplate(owner, id)!.document).not.toHaveProperty("foreign");
 
     const draft = getInvoice(owner, draftFromTemplate(actor(owner), id).id);
     expect(draft).toMatchObject({ foreign: false, clause: "" });

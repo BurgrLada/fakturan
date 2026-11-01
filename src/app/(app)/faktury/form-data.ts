@@ -3,6 +3,7 @@ import type { InvoiceFormProps } from "@/components/invoices/invoice-form";
 import type { InvoiceType } from "@/lib/invoice";
 import { listBankAccounts } from "@/server/services/bank-accounts";
 import { listUnits } from "@/server/services/catalog";
+import { normalizeIban } from "@/lib/iban";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { clock } from "@/server/clock";
 import { listSeries } from "@/server/services/number-series";
@@ -39,6 +40,7 @@ export function formChoices(
         currency,
         isDefault,
         iban: Boolean(iban.trim()),
+        czechIban: normalizeIban(iban).startsWith("CZ"),
         bic: Boolean(swift.trim()),
       })),
     series: listSeries(ownerId)

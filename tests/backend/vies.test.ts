@@ -2,7 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
-import { lookupVies, splitVatId } from "@/server/external/vies";
+import { splitVatId } from "@/lib/clauses";
+import { lookupVies } from "@/server/external/vies";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");

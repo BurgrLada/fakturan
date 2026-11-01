@@ -9,7 +9,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { CURRENCIES, type Currency } from "@/lib/currency";
 import type { ExchangeRateSource } from "@/lib/fx";
-import type { FormValues } from "@/lib/invoice-form";
+import { foreignFieldsOpen, type FormValues } from "@/lib/invoice-form";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.invoices.foreign;
@@ -28,9 +28,9 @@ export function RateField({
   invalid,
   locked,
   lockedNote,
-  canUseCnb,
+  useAutomaticLabel,
   onChange,
-  onUseCnb,
+  onUseAutomatic,
 }: {
   values: Pick<FormValues, "exchangeRate" | "exchangeRateSource">;
   listDate: string | null;
@@ -38,9 +38,9 @@ export function RateField({
   invalid: boolean;
   locked: boolean;
   lockedNote: string;
-  canUseCnb: boolean;
+  useAutomaticLabel: string | null;
   onChange: (text: string) => void;
-  onUseCnb: () => void;
+  onUseAutomatic: () => void;
 }) {
   const { exchangeRateSource: source } = values;
   return (
@@ -65,10 +65,10 @@ export function RateField({
           {lockedNote}
         </p>
       )}
-      {canUseCnb && (
+      {useAutomaticLabel && (
         <div>
-          <Button type="button" variant="outline" size="sm" onClick={onUseCnb}>
-            {T.useCnb}
+          <Button type="button" variant="outline" size="sm" onClick={onUseAutomatic}>
+            {useAutomaticLabel}
           </Button>
         </div>
       )}
@@ -102,7 +102,7 @@ export function ForeignSection({
   onClause: (text: string) => void;
   children?: ReactNode;
 }) {
-  const open = values.foreign || values.currency !== "CZK";
+  const open = foreignFieldsOpen(values);
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center gap-2">

@@ -1,4 +1,6 @@
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
+import Database from "better-sqlite3";
 import { expect, test } from "./fixtures";
 import {
   addAccount,
@@ -14,6 +16,15 @@ import {
   register,
   settled,
 } from "./invoice-helpers";
+
+function invoiceCount(dataDir: string): number {
+  const sqlite = new Database(join(dataDir, "fakturan.db"), { readonly: true });
+  try {
+    return sqlite.prepare("SELECT count(*) FROM invoice").pluck().get() as number;
+  } finally {
+    sqlite.close();
+  }
+}
 
 const rate = (page: Page) => page.getByLabel("Kurz k CZK");
 const source = (page: Page) => page.getByTestId("rate-source");
@@ -241,6 +252,12 @@ test("[FOR-010] pevný kurz je ve formuláři označený a odchylka nad 5 % uká
   await expect(notes(page)).toContainText("liší o více než 5 %");
   await settled(page);
 
+  await rate(page).fill("26");
+  await page.getByRole("button", { name: "Použít pevný kurz" }).click();
+  await expect(rate(page)).toHaveValue("27");
+  await expect(source(page)).toHaveText("Pevný kurz z nastavení");
+  await settled(page);
+
   await page.getByRole("button", { name: "Vystavit" }).click();
   await expect(page.getByTestId("issue-rate-note")).toContainText("liší o více než 5 %");
 });
@@ -253,6 +270,76 @@ test("[QR-002] formulář konceptu v EUR bez IBAN řekne proč QR není", async 
   await chooseCurrency(page, "EUR");
   await expect(page.getByTestId("form-qr-reason")).toContainText("u EUR navíc BIC");
   await page.getByLabel("Způsob platby").selectOption("cash");
+  await expect(page.getByTestId("form-qr-reason")).toHaveCount(0);
+});
+
+test("automatický kurz sám koncept nezaloží", async ({ page, freshApp }) => {
+  const { baseURL, dataDir } = freshApp;
+  await ready(page, baseURL);
+  await page.goto(`${baseURL}/nastaveni/vychozi`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Měna").selectOption("EUR");
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Uloženo.")).toBeVisible();
+
+  await openForm(page, baseURL);
+  await expect(rate(page)).not.toHaveValue("");
+  await page.waitForTimeout(2000);
+  await expect(page.getByTestId("save-status")).toHaveText("Koncept vznikne první změnou.");
+  expect(invoiceCount(dataDir)).toBe(0);
+
+  await fillLine(page, 0, "Konzultace", "100");
+  await settled(page);
+  expect(invoiceCount(dataDir)).toBe(1);
+});
+
+test("[FOR-007] plán přeloží doložku a uložený plán změnu zákazníka jen nabídne", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await ready(page, baseURL);
+  await identified(page, baseURL);
+  await foreignCustomer(page, baseURL, "Müller GmbH", "DE123456789");
+
+  await page.goto(`${baseURL}/pravidelne/nova`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název plánu").fill("Zahraniční");
+  await fillLine(page, 0, "Consulting", "100");
+  await chooseCustomer(page, "Müller GmbH");
+  const clause = page.getByLabel("Doložka na faktuře");
+  await expect(clause).toHaveValue(/Daň odvede zákazník/);
+  await page.getByLabel("Jazyk faktury").selectOption("en");
+  await expect(clause).toHaveValue(/Reverse charge/);
+
+  await page.getByRole("button", { name: "Uložit plán" }).click();
+  await page.waitForURL(/\/pravidelne\/(?!nova)[\w-]+$/);
+  await page.waitForLoadState("networkidle");
+  await chooseCustomer(page);
+
+  const offer = page.getByTestId("customer-defaults");
+  await expect(offer).toContainText("Doložka: smazat");
+  await expect(clause).toHaveValue(/Reverse charge/);
+  await offer.getByRole("button", { name: "Použít výchozí hodnoty" }).click();
+  await expect(page.getByLabel("Zahraniční faktura")).not.toBeChecked();
+  await expect(clause).toHaveCount(0);
+});
+
+test("opravná faktura v měně bez účtu neukazuje upozornění na účet ani QR", async ({
+  page,
+  freshApp,
+}) => {
+  await ready(page, freshApp.baseURL);
+  await eurCashDraft(page, freshApp.baseURL);
+  await expect(rate(page)).toHaveValue("24,2");
+  await settled(page);
+  await issue(page);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Vytvořit opravnou fakturu" }).click();
+  await expect(page.getByRole("heading", { name: "Koncept opravné faktury" })).toBeVisible();
+  await page.getByLabel("Způsob platby").selectOption("transfer");
+  await expect(page.getByLabel("Způsob platby")).toHaveValue("transfer");
+  await expect(page.getByTestId("account-missing")).toHaveCount(0);
   await expect(page.getByTestId("form-qr-reason")).toHaveCount(0);
 });
 

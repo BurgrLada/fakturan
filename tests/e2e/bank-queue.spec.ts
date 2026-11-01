@@ -23,6 +23,7 @@ type NoticeSeed = {
   amountMinor?: number | null;
   text?: string;
   symbol?: string;
+  currency?: string;
 };
 
 function invoiceSymbol(dataDir: string): string {
@@ -58,7 +59,7 @@ function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
         status,
         reason: recognized ? (seed.reason ?? "unknown_vs") : null,
         amount: recognized ? (seed.amountMinor ?? 100_000) : null,
-        currency: recognized ? "CZK" : null,
+        currency: recognized ? (seed.currency ?? "CZK") : null,
         paidOn: recognized ? "2026-10-30" : null,
         paidTime: recognized ? "14:05" : null,
         vs: recognized ? (seed.symbol ?? "777") : null,
@@ -221,6 +222,27 @@ test.describe("vlastní schránka", () => {
     await page.goto(`${baseURL}/platby`);
     await expect(page.getByTestId("notice-row")).toContainText("Spárování bylo vráceno.");
     await expect(page.getByRole("button", { name: "Přiřadit" })).toBeVisible();
+  });
+
+  test("[PAY-006] přiřazení avíza v jiné měně předvyplní připsanou částku", async ({
+    page,
+    freshApp,
+  }) => {
+    const { baseURL, dataDir } = freshApp;
+    await ready(page, baseURL);
+    await addAccount(page, baseURL);
+    await openForm(page, baseURL);
+    await cashInvoice(page);
+    await settled(page);
+    await issue(page);
+    await page.waitForLoadState("networkidle");
+    seedNotice(dataDir, { currency: "USD", amountMinor: 10_000 });
+
+    await page.goto(`${baseURL}/platby`);
+    await page.getByRole("button", { name: "Přiřadit" }).click();
+    await dialog(page).getByLabel("Doklad", { exact: true }).selectOption({ index: 1 });
+    await expect(dialog(page).getByLabel(/Připsáno/)).toHaveValue("2231,10");
+    await expect(dialog(page).getByText("Předvyplněno kurzy ČNB")).toBeVisible();
   });
 
   test("[BNK-007] avízo na cizí účet jde přiřadit ručně a dialog na to upozorní", async ({

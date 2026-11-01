@@ -193,9 +193,10 @@ describe("vykreslení PDF", () => {
 
   test("[INV-041] doklad bez doložky má shodný text PDF jako dřív", async () => {
     expect((await viewOf(F.short)).clause).toBe("");
-    const blank = await textOf(await render(F.short));
-    const spaced = await textOf(await render({ ...F.short, clause: "" }));
-    expect(spaced).toBe(blank);
+    const without = await textOf(await render(F.short));
+    const withClause = await textOf(await render({ ...F.short, clause: "Doložka navíc" }));
+    expect(without).not.toContain("Doložka navíc");
+    expect(withClause.replace("Doložka navíc\n", "")).toBe(without);
   });
 
   test("[PDF-001] náhled a stažení dají stejný text", async () => {

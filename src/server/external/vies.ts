@@ -7,8 +7,6 @@ export type ViesState = "valid" | "invalid" | "unavailable";
 
 const TIMEOUT_MS = 5_000;
 
-export { splitVatId };
-
 // Unavailability is never an error: it must not block saving the customer (CUS-005).
 export async function lookupVies(
   dic: string,

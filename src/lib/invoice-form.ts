@@ -123,6 +123,7 @@ export type AccountChoice = {
   currency: string;
   isDefault: boolean;
   iban: boolean;
+  czechIban: boolean;
   bic: boolean;
 };
 
@@ -400,10 +401,10 @@ export function changeRate(values: FormValues, exchangeRate: string): FormValues
   return { ...values, exchangeRate, exchangeRateSource: exchangeRate.trim() ? "manual" : null };
 }
 
-// A rate typed by a person stays, only a change of currency or their own action replaces it.
+// A rate typed by a person stays, only a change of currency or their own action replaces it. No
+// answer keeps what is there: an outage must not take a usable rate away, issuing looks again.
 export function applyRate(values: FormValues, result: RateResult): FormValues {
-  if (values.exchangeRateSource === "manual") return values;
-  if (!result) return { ...values, ...NO_RATE };
+  if (values.exchangeRateSource === "manual" || !result) return values;
   return {
     ...values,
     exchangeRate: formatRate(result.rateMicros),
@@ -466,13 +467,28 @@ export function changeIssueDate(
   };
 }
 
+function isOwnClause(
+  values: Pick<FormValues, "clause">,
+  texts: Record<Language, string>,
+  touched: ReadonlySet<TouchedField>,
+): boolean {
+  if (touched.has("clause")) return true;
+  return values.clause.trim() !== "" && !Object.values(texts).includes(values.clause);
+}
+
+export function foreignFieldsOpen(
+  values: Pick<FormValues, "foreign" | "currency" | "clause">,
+): boolean {
+  return values.foreign || values.currency !== "CZK" || values.clause.trim() !== "";
+}
+
 export function customerForeign(
   values: FormValues,
   defaults: Pick<CustomerDefaults, "foreign" | "dic" | "vatIdentified" | "clauseTexts">,
   touched: ReadonlySet<TouchedField>,
 ): FormValues {
   const foreign = touched.has("foreign") ? values.foreign : defaults.foreign;
-  const clause = touched.has("clause")
+  const clause = isOwnClause(values, defaults.clauseTexts, touched)
     ? values.clause
     : suggestedClause({
         foreign,
@@ -482,6 +498,23 @@ export function customerForeign(
         texts: defaults.clauseTexts,
       });
   return { ...values, foreign, clause };
+}
+
+export type ForeignOffer = Partial<Pick<FormValues, "foreign" | "clause">>;
+
+// What a customer would change. A person's own clause on a domestic document goes only through
+// this offer, because customerForeign never deletes it on its own.
+export function foreignOffer(
+  values: FormValues,
+  defaults: Pick<CustomerDefaults, "foreign" | "dic" | "vatIdentified" | "clauseTexts">,
+  touched: ReadonlySet<TouchedField>,
+): ForeignOffer | null {
+  const next = customerForeign(values, defaults, touched);
+  const wanted = { foreign: next.foreign, clause: next.foreign ? next.clause : "" };
+  const changed = Object.entries(wanted).filter(
+    ([field, value]) => value !== values[field as keyof ForeignOffer],
+  );
+  return changed.length > 0 ? Object.fromEntries(changed) : null;
 }
 
 export function applyCustomerDefaults(
@@ -544,7 +577,7 @@ export function customerOffer(
   const wantedDefaults = currencyLocked ? { ...defaults, currency: values.currency } : defaults;
   const next = applyCustomerDefaults(values, wantedDefaults, touched, accounts);
   const { currency, exchangeRate, exchangeRateSource } = next;
-  const { language, paymentMethod, appearance, dueDate, foreign, clause } = next;
+  const { language, paymentMethod, appearance, dueDate } = next;
   const bankAccountId = currency === values.currency ? values.bankAccountId : next.bankAccountId;
   const wanted = {
     currency,
@@ -555,18 +588,18 @@ export function customerOffer(
     appearance,
     dueDate,
     bankAccountId,
-    foreign,
-    clause,
   };
   const changed = Object.entries(wanted).filter(
     ([field, value]) =>
       JSON.stringify(value) !== JSON.stringify(values[field as keyof CustomerOffer]),
   );
-  return changed.length > 0 ? Object.fromEntries(changed) : null;
+  const offer = { ...Object.fromEntries(changed), ...foreignOffer(values, defaults, touched) };
+  return Object.keys(offer).length > 0 ? offer : null;
 }
 
 // Only presence travels to the browser. Any valid numbers stand in, planQr then decides the rest.
 const SAMPLE_IBAN = "CZ6508000000192000145399";
+const SAMPLE_FOREIGN_IBAN = "DE89370400440532013000";
 const SAMPLE_BIC = "GIBACZPX";
 
 export function formQrState(values: FormValues, accounts: readonly AccountChoice[]): QrState {
@@ -577,7 +610,7 @@ export function formQrState(values: FormValues, accounts: readonly AccountChoice
   const plan = planQr({
     currency: values.currency,
     dueMinor: 1,
-    iban: account.iban ? SAMPLE_IBAN : null,
+    iban: account.iban ? (account.czechIban ? SAMPLE_IBAN : SAMPLE_FOREIGN_IBAN) : null,
     bic: account.bic ? SAMPLE_BIC : null,
     variableSymbol: null,
     message: null,

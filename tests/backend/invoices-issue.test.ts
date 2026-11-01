@@ -1316,6 +1316,64 @@ describe("zahraniční faktura při vystavení", () => {
     assertConsistent(db, owner);
   });
 
+  test("[R-18] saveDraft u existujícího konceptu v CZK kurz smaže", () => {
+    seedRate("2026-03-09");
+    const { owner, customerId } = newOwner();
+    const eur = newAccount(owner, "EUR");
+    const { id, revision } = save(owner, customerId, {
+      currency: "EUR",
+      bankAccountId: eur,
+      exchangeRateMicros: 25_000_000,
+    });
+    saveDraft(actor(owner), {
+      ...newDraftDefaults(owner, customerId),
+      id,
+      revision,
+      lines: [line()],
+      currency: "CZK",
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "manual",
+    });
+    expect(getInvoice(owner, id)).toMatchObject({
+      currency: "CZK",
+      exchangeRateMicros: null,
+      exchangeRateSource: null,
+      exchangeRateDate: null,
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("[R-18] obnovení verze v CZK kurz nevrátí, ani když ho uložená verze má", () => {
+    const { owner, customerId, accountId } = newOwner();
+    const { id } = issueNew(owner, customerId, { bankAccountId: accountId });
+    updateIssuedInvoice(actor(owner), id, editOf(owner, id, { note: "změna" }));
+    const version = listVersions(owner, id)[0]!;
+    db.run(
+      sql`UPDATE invoice_version SET document = json_set(document, '$.exchangeRateMicros', 25000000) WHERE id = ${version.id}`,
+    );
+
+    restoreVersion(actor(owner), version.id);
+
+    expect(getInvoice(owner, id)).toMatchObject({
+      exchangeRateMicros: null,
+      exchangeRateSource: null,
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("[AUD-009] audit úpravy zaznamená změnu zdroje kurzu", () => {
+    seedRate("2026-03-09");
+    const { owner, customerId } = newOwner();
+    const eur = newAccount(owner, "EUR");
+    const { id } = issueNew(owner, customerId, { currency: "EUR", bankAccountId: eur });
+    updateIssuedInvoice(actor(owner), id, editOf(owner, id, { exchangeRateMicros: 25_000_000 }));
+
+    expect(audit(id, "invoice.update")).toMatchObject({
+      before: { exchangeRateSource: "cnb", exchangeRateDate: "2026-03-09" },
+      after: { exchangeRateSource: "manual", exchangeRateDate: null },
+    });
+  });
+
   test("[FOR-003] obnovení verze s jiným kurzem nastaví zdroj ručně", () => {
     seedRate("2026-03-09");
     const { owner, customerId } = newOwner();

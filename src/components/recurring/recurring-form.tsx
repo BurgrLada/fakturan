@@ -39,11 +39,13 @@ import {
   changeLanguage,
   computeFormTotals,
   customerForeign,
+  foreignOffer,
   formFromDocument,
   nonEmptyLines,
   toDocumentFields,
   type AccountChoice,
   type ClauseDefaults,
+  type ForeignOffer,
   type FormValues,
   type TouchedField,
 } from "@/lib/invoice-form";
@@ -165,6 +167,7 @@ export function RecurringForm(props: RecurringFormProps) {
   const [customerDic, setCustomerDic] = useState(props.customerDic);
   const touched = useRef(new Set<TouchedField>());
   const customerTicket = useRef(0);
+  const [offer, setOffer] = useState<ForeignOffer | null>(null);
   const [values, setValues] = useState(() => formValuesOf(initial.document, defaultUnit));
   const [dueDays, setDueDays] = useState(String(initial.document.dueDays));
   const [frequency, setFrequency] = useState(initial.frequency);
@@ -192,6 +195,8 @@ export function RecurringForm(props: RecurringFormProps) {
   const [submitted, setSubmitted] = useState(false);
   const [summary, setSummary] = useState<{ email: string; sendTime: string } | null>(null);
 
+  const latestValues = useRef(values);
+  latestValues.current = values;
   const fields = useMemo(() => toDocumentFields(values, type), [values, type]);
   const invalid = useMemo(() => new Set(fields.ok ? [] : fields.invalid), [fields]);
   const totals = useMemo(() => computeFormTotals(values, type), [values, type]);
@@ -200,12 +205,20 @@ export function RecurringForm(props: RecurringFormProps) {
     return new Map(kept.map((line, i) => [line.key, totals?.lines[i]?.netMinor ?? 0]));
   }, [values.lines, totals]);
 
+  // A saved plan already says what it wants, so a new customer only proposes (INV-010).
   async function pickForeignDefaults(id: string) {
     const ticket = ++customerTicket.current;
+    setOffer(null);
     const reply = await customerDefaultsAction({ customerId: id }).catch(() => null);
     if (!reply?.ok || ticket !== customerTicket.current) return;
     setCustomerDic(reply.defaults.dic);
+    if (planId) {
+      setOffer(foreignOffer(latestValues.current, reply.defaults, touched.current));
+      return;
+    }
+    const applied = customerForeign(latestValues.current, reply.defaults, touched.current);
     setValues((current) => customerForeign(current, reply.defaults, touched.current));
+    setOffer(foreignOffer(applied, reply.defaults, touched.current));
   }
 
   const hasEvery = EVERY_FREQUENCIES.includes(frequency);
@@ -524,8 +537,11 @@ export function RecurringForm(props: RecurringFormProps) {
         <CustomerPicker
           name={customerName}
           onNameChange={(next) => {
+            customerTicket.current += 1;
+            setOffer(null);
             setCustomerName(next);
             setCustomerId(null);
+            setCustomerDic("");
           }}
           onPick={(picked) => {
             setCustomerId(picked.id);
@@ -534,6 +550,44 @@ export function RecurringForm(props: RecurringFormProps) {
           }}
           onExpired={() => router.refresh()}
         />
+        {offer && (
+          <Alert role="status" data-testid="customer-defaults">
+            <AlertDescription className="flex flex-col items-start gap-2">
+              <span>{INVOICE.customerOffer.title}</span>
+              <ul className="list-disc pl-4">
+                {offer.foreign !== undefined && (
+                  <li>
+                    {INVOICE.foreignOffer}:{" "}
+                    {offer.foreign ? INVOICE.foreignOfferOn : INVOICE.foreignOfferOff}
+                  </li>
+                )}
+                {offer.clause !== undefined && (
+                  <li>
+                    {offer.clause
+                      ? `${INVOICE.clauseOffer}: ${offer.clause}`
+                      : INVOICE.clauseOfferRemove}
+                  </li>
+                )}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setValues((current) => ({ ...current, ...offer }));
+                    setOffer(null);
+                  }}
+                >
+                  {INVOICE.customerOffer.apply}
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setOffer(null)}>
+                  {INVOICE.customerOffer.keep}
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
       </section>
 
       <div className="flex flex-col gap-8" onFocusCapture={variables.onFocusCapture}>
