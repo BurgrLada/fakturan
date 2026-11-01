@@ -152,7 +152,8 @@ export function isEligibleForReminder(
   if (!REMINDABLE_TYPES.includes(invoice.type) || amountDue(invoice) <= 0) return false;
   if (!invoice.sentAt) return false;
   if (invoice.remindersOff || customer?.remindersEnabled === false) return false;
-  return (
-    invoice.status === "sent" || (invoice.status === "partially_paid" && invoice.remindersPartial)
-  );
+  // A final invoice with a rest after its advance keeps the base status, but it is a part payment.
+  const partial =
+    invoice.status === "partially_paid" || (invoice.status === "sent" && invoice.advanceMinor > 0);
+  return partial ? invoice.remindersPartial : invoice.status === "sent";
 }

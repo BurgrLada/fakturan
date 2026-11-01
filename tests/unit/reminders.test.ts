@@ -186,6 +186,13 @@ describe("isEligibleForReminder", () => {
     expect(isEligibleForReminder(partial, client)).toBe(false);
   });
 
+  test("[REM-006] doplatek po záloze je částečná úhrada, i když stav zůstává odeslaná", () => {
+    const final = { ...row, advanceMinor: 400 };
+    expect(isEligibleForReminder(final, client)).toBe(false);
+    expect(isEligibleForReminder({ ...final, remindersPartial: true }, client)).toBe(true);
+    expect(isEligibleForReminder({ ...final, advanceMinor: 1000 }, client)).toBe(false);
+  });
+
   test("vypnutá nebo plně zaplacená ne", () => {
     expect(isEligibleForReminder({ ...row, remindersOff: true }, client)).toBe(false);
     expect(isEligibleForReminder({ ...row, paidMinor: 1000 }, client)).toBe(false);
