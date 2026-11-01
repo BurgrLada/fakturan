@@ -69,6 +69,12 @@ export const AWAITING_PAYMENT = ["issued", "sent", "partially_paid"] as const;
 
 export const ACTIVE_CREDIT_STATUSES = ["issued", "sent"] as const;
 
+const CREDITABLE_STATUSES: readonly InvoiceStatus[] = ["issued", "sent", "partially_paid", "paid"];
+
+export function isCreditable(row: { type: InvoiceType; status: InvoiceStatus }): boolean {
+  return row.type === "invoice" && CREDITABLE_STATUSES.includes(row.status);
+}
+
 export function isActiveDocument(status: InvoiceStatus): boolean {
   return (ACTIVE_CREDIT_STATUSES as readonly InvoiceStatus[]).includes(status);
 }

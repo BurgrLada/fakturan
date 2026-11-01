@@ -1,6 +1,6 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
-import type { InvoiceStatus, InvoiceType } from "@/lib/invoice";
+import { isActiveDocument, type InvoiceStatus, type InvoiceType } from "@/lib/invoice";
 import { diffLines } from "@/lib/invoice-diff";
 import { discountNotes } from "@/lib/invoice-form";
 import { allowsNegativePrice } from "@/lib/invoice-totals";
@@ -14,8 +14,14 @@ import { bankAccount, catalogItem, invoice, invoiceLine, numberSeries } from "..
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
-import { hasPayments } from "./invoice-balance";
-import { currentParties, renderDocumentTexts, variablesFor } from "./invoice-document";
+import { creditNoteProblem } from "./credit-notes";
+import { hasPayments, refreshBalance } from "./invoice-balance";
+import {
+  currentParties,
+  relatedSnapshotOf,
+  renderDocumentTexts,
+  variablesFor,
+} from "./invoice-document";
 import {
   auditSnapshot,
   findOwned,
@@ -194,8 +200,24 @@ export function documentProblems(
   return found;
 }
 
+// A credit note repeats the account of the original, so hiding that account must not block it.
+function creditProblems(q: Reader, ownerId: string, row: Invoice): IssueProblem[] {
+  if (row.type !== "credit_note") return [];
+  const message = creditNoteProblem(q, ownerId, row);
+  return message ? [{ field: "lines", message }] : [];
+}
+
+function keptAccountOf(q: Reader, ownerId: string, row: Invoice): string | null {
+  if (row.type !== "credit_note" || !row.relatedInvoiceId) return null;
+  return findOwned(q, ownerId, row.relatedInvoiceId).bankAccountId;
+}
+
 function draftProblems(q: Reader, ownerId: string, row: Invoice, lines: InvoiceLine[]) {
-  return [...supplierProblems(ownerId), ...documentProblems(q, ownerId, row, lines)];
+  return [
+    ...supplierProblems(ownerId),
+    ...documentProblems(q, ownerId, row, lines, keptAccountOf(q, ownerId, row)),
+    ...creditProblems(q, ownerId, row),
+  ];
 }
 
 export function checkIssuable(ownerId: string, id: string): IssueProblem[] {
@@ -222,6 +244,7 @@ export type IssuePreview = {
   totalMinor: number;
   currency: Invoice["currency"];
   discountNotes: string[];
+  type: InvoiceType;
 };
 
 function capNotes(row: Invoice, lines: InvoiceLine[]): string[] {
@@ -243,13 +266,14 @@ export function previewIssue(ownerId: string, id: string): IssuePreview {
   return {
     problems: checkIssuable(ownerId, id),
     number,
-    variableSymbol: number && automaticSymbol(ownerId, number),
+    variableSymbol: row.type === "credit_note" ? null : number && automaticSymbol(ownerId, number),
     issueDate: row.issueDate,
     today: calendarDateInPrague(clock.now()),
     customerName: currentParties(db, ownerId, row).snapshot.customer?.name ?? row.customerName,
     totalMinor: row.totalMinor,
     currency: row.currency,
     discountNotes: capNotes(row, linesOf(db, ownerId, id)),
+    type: row.type,
   };
 }
 
@@ -369,15 +393,20 @@ export function issueIn(
     if (line.catalogItemId) recordCatalogUse(tx, userId, line.catalogItemId);
   }
   const catalogUse = catalogUses(tx, userId, lines);
+  const isNote = row.type === "credit_note";
   tx.update(invoice)
     .set({
       ...sumsOf(totals),
       ...texts.images,
       status: "issued",
       number,
-      variableSymbol:
-        manualSymbol === undefined ? automaticSymbol(userId, number) : manualSymbol || null,
-      variableSymbolManual: manualSymbol !== undefined,
+      variableSymbol: isNote
+        ? null
+        : manualSymbol === undefined
+          ? automaticSymbol(userId, number)
+          : manualSymbol || null,
+      variableSymbolManual: !isNote && manualSymbol !== undefined,
+      relatedSnapshot: isNote ? relatedSnapshotOf(tx, userId, row) : row.relatedSnapshot,
       seriesId: picked.series.id,
       customerName: texts.customerName,
       dateFormat: texts.dateFormat,
@@ -419,6 +448,7 @@ export function issueIn(
       ...(catalogUse.length > 0 && { catalogUse }),
     },
   });
+  if (isNote) refreshBalance(tx, audit, userId, row.relatedInvoiceId!);
   return { id, number };
 }
 
@@ -459,20 +489,27 @@ function changeStatus(
       before: { status: row.status, cancelledFrom: row.cancelledFrom },
       after: values,
     });
+    const leftOrReturned = isActiveDocument(row.status) !== isActiveDocument(values.status);
+    if (row.type === "credit_note" && row.relatedInvoiceId && leftOrReturned) {
+      refreshBalance(tx, audit, userId, row.relatedInvoiceId);
+    }
   });
 }
 
 export function cancelInvoice(actor: Actor, id: string): void {
   changeStatus(actor, id, "invoice.cancel", (row, tx) => {
     if (hasPayments(tx, row.userId, id)) throw new ServiceError(V.hasPayments);
+    if (row.creditsMinor < 0) throw new ServiceError(V.hasCredits);
     if (row.status !== "issued" && row.status !== "sent") throw new ServiceError(V.notCancellable);
     return { status: "cancelled", cancelledFrom: row.status };
   });
 }
 
 export function restoreInvoice(actor: Actor, id: string): void {
-  changeStatus(actor, id, "invoice.restore", (row) => {
+  changeStatus(actor, id, "invoice.restore", (row, tx) => {
     if (row.status !== "cancelled" || !row.cancelledFrom) throw new ServiceError(V.notCancelled);
+    const problem = row.type === "credit_note" && creditNoteProblem(tx, row.userId, row);
+    if (problem) throw new ServiceError(problem);
     return { status: row.cancelledFrom, cancelledFrom: null };
   });
 }

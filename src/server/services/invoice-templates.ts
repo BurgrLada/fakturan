@@ -77,6 +77,7 @@ export const templateDocumentSchema = z
   })
   .superRefine(checkDiscount)
   .superRefine(checkPriceSign)
+  .refine((value) => value.type !== "credit_note", TEXTS.invoices.validation.creditNoteCopy)
   .transform(withoutStrayDiscount);
 
 export const templateInputSchema = z.object({
@@ -205,6 +206,8 @@ export function deleteTemplate(actor: Actor, id: string): void {
 export function templateFromInvoice(actor: Actor, invoiceId: string, name: string): { id: string } {
   const userId = ownerOf(actor);
   const source = findOwned(db, userId, invoiceId);
+  if (source.type === "credit_note")
+    throw new ServiceError(TEXTS.invoices.validation.creditNoteCopy);
   const sourceLines = linesOf(db, userId, invoiceId);
   const dueDays =
     source.issueDate && source.dueDate

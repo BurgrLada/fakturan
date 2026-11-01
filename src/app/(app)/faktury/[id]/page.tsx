@@ -9,17 +9,18 @@ import { InvoiceStatusBadge } from "@/components/invoices/invoice-status";
 import { ReminderPanel } from "@/components/invoices/reminder-panel";
 import { VersionList } from "@/components/invoices/version-list";
 import { PaymentPanel } from "@/components/invoices/payment-panel";
+import { RelatedDocuments } from "@/components/invoices/related-documents";
 import { PageLoading } from "@/components/page-loading";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
-import { addDays, isOverdue } from "@/lib/invoice";
+import { addDays, isCreditable, isOverdue } from "@/lib/invoice";
 import { isSendable } from "@/lib/mail-send";
 import { invoiceDocument } from "@/lib/invoice-document";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague } from "@/lib/number-format";
-import { canTakePayment } from "@/lib/payments";
+import { canAmendPayment, canTakePayment } from "@/lib/payments";
 import { amountDue, qrStateOf } from "@/lib/qr-payload";
 import { MAX_SNOOZE_DAYS } from "@/lib/reminders";
 import { formatCalendarDate } from "@/lib/template-vars";
@@ -27,6 +28,7 @@ import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
 import { hasQueuedNotice } from "@/server/services/bank-notices";
+import { relatedDocuments } from "@/server/services/credit-notes";
 import { EDITABLE_STATUSES, listVersions } from "@/server/services/invoice-versions";
 import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
@@ -46,11 +48,12 @@ export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
 
 function StatusSteps({ row, closedMinor }: { row: InvoiceDetail; closedMinor: number }) {
   const left = amountDue(row);
+  const isNote = row.type === "credit_note";
   const settled = row.status === "cancelled" || row.status === "credited";
   const steps = [
     { label: T.steps.issued, value: formatDateTime(row.issuedAt) },
     { label: T.steps.sent, value: formatDateTime(row.sentAt) },
-    { label: T.steps.paid, value: formatMoney(row.paidMinor, row.currency) },
+    ...(isNote ? [] : [{ label: T.steps.paid, value: formatMoney(row.paidMinor, row.currency) }]),
     ...(closedMinor > 0
       ? [
           {
@@ -59,7 +62,7 @@ function StatusSteps({ row, closedMinor }: { row: InvoiceDetail; closedMinor: nu
           },
         ]
       : []),
-    ...(settled && left >= 0
+    ...(isNote || (settled && left >= 0)
       ? []
       : [
           {
@@ -120,7 +123,12 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
   const closedMinor = payments
     .filter((item) => item.kind === "difference")
     .reduce((sum, item) => sum + item.creditedMinor, 0);
-  const takesPayment = canTakePayment(row.status) && row.type !== "credit_note";
+  const isNote = row.type === "credit_note";
+  const takesPayment = canTakePayment(row.status) && !isNote;
+  // A credited invoice takes no money, but its refund must stay reachable to be taken back.
+  const showsPayments =
+    takesPayment || (canAmendPayment(row.status) && !isNote && payments.length > 0);
+  const related = relatedDocuments(user.id, id);
   const plan = row.recurringId ? getRecurring(user.id, row.recurringId) : null;
   const sendable = isSendable(row.status);
   const { available } = mailAvailability(user.id);
@@ -128,7 +136,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-brand text-2xl">
-          {T.title} {row.number}
+          {isNote ? T.creditTitle : T.title} {row.number}
         </h1>
         <InvoiceStatusBadge status={row.status} overdue={isOverdue(row, today)} />
       </div>
@@ -175,6 +183,9 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         editable={editable}
         cancellable={row.status === "issued" || row.status === "sent"}
         hasPayments={takesPayment && payments.length > 0}
+        hasCredits={row.creditsMinor < 0 && row.status !== "cancelled"}
+        creditable={isCreditable(row)}
+        copyable={!isNote}
         restorable={row.status === "cancelled" && row.cancelledFrom !== null}
         markable={
           row.status === "issued" ||
@@ -186,10 +197,13 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
       <section className="flex flex-col gap-3">
         <h2 className="text-lg">{T.statusTitle}</h2>
         <StatusSteps row={row} closedMinor={closedMinor} />
-        <p data-testid="invoice-qr" className="text-sm text-muted-foreground">
-          {TEXTS.invoices.qr[qr]}
-        </p>
+        {!isNote && (
+          <p data-testid="invoice-qr" className="text-sm text-muted-foreground">
+            {TEXTS.invoices.qr[qr]}
+          </p>
+        )}
       </section>
+      <RelatedDocuments parent={related.parent} childDocuments={related.children} />
       {sendable && amountDue(row) > 0 && (
         <ReminderPanel
           invoiceId={id}
@@ -210,7 +224,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           queuedNotice={hasQueuedNotice(user.id, row.variableSymbol)}
         />
       )}
-      {takesPayment && (
+      {showsPayments && (
         <PaymentPanel
           invoiceId={id}
           revision={row.revision}

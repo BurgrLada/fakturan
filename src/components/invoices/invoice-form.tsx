@@ -54,7 +54,7 @@ import {
   type TouchedField,
 } from "@/lib/invoice-form";
 import type { InvoiceType } from "@/lib/invoice";
-import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
+import { allowsNegativePrice, DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { formatMoney } from "@/lib/money";
 import { setLeaveGuard } from "@/lib/leave-guard";
 import { LANGUAGES, PAYMENT_METHODS, type DesignChoice } from "@/lib/preferences";
@@ -83,6 +83,8 @@ export type InvoiceFormProps = {
   saved: boolean;
   mailAvailable: boolean;
   hasPayments: boolean;
+  linkedParty: boolean;
+  linkedMoney: boolean;
   type: InvoiceType;
   mode: "draft" | "issued";
   status: string;
@@ -497,6 +499,8 @@ function Form(props: InvoiceFormProps) {
   }
 
   const showRate = values.currency !== "CZK";
+  const isNote = type === "credit_note";
+  const currencyLocked = props.hasPayments || props.linkedParty || props.linkedMoney;
 
   if (!shown) return null;
 
@@ -590,20 +594,28 @@ function Form(props: InvoiceFormProps) {
         <fieldset disabled={locked} className="flex min-w-0 flex-col gap-6">
           <section className="flex flex-col gap-4">
             <h2 className="text-lg">{T.sections.parties}</h2>
+            {mode === "draft" && props.linkedParty && (
+              <p className="text-sm">
+                <span className="text-muted-foreground">{F.customer}: </span>
+                {customerName}
+              </p>
+            )}
             {mode === "draft" ? (
               <>
-                <CustomerPicker
-                  name={customerName}
-                  invalid={problems.some((problem) => problem.field === "customerId")}
-                  onNameChange={(name) => {
-                    customerTicket.current += 1;
-                    setOffer(null);
-                    setCustomerName(name);
-                    setValues((current) => ({ ...current, customerId: null }));
-                  }}
-                  onPick={pickCustomer}
-                  onExpired={() => setLock("expired")}
-                />
+                {!props.linkedParty && (
+                  <CustomerPicker
+                    name={customerName}
+                    invalid={problems.some((problem) => problem.field === "customerId")}
+                    onNameChange={(name) => {
+                      customerTicket.current += 1;
+                      setOffer(null);
+                      setCustomerName(name);
+                      setValues((current) => ({ ...current, customerId: null }));
+                    }}
+                    onPick={pickCustomer}
+                    onExpired={() => setLock("expired")}
+                  />
+                )}
                 {offer && (
                   <Alert role="status" data-testid="customer-defaults">
                     <AlertDescription className="flex flex-col items-start gap-2">
@@ -666,14 +678,16 @@ function Form(props: InvoiceFormProps) {
                     onChange={(event) => setNumber(event.target.value)}
                   />
                 </Field>
-                <Field id="field-variableSymbol" label={F.variableSymbol}>
-                  <Input
-                    id="field-variableSymbol"
-                    inputMode="numeric"
-                    value={variableSymbol}
-                    onChange={(event) => setVariableSymbol(event.target.value)}
-                  />
-                </Field>
+                {!isNote && (
+                  <Field id="field-variableSymbol" label={F.variableSymbol}>
+                    <Input
+                      id="field-variableSymbol"
+                      inputMode="numeric"
+                      value={variableSymbol}
+                      onChange={(event) => setVariableSymbol(event.target.value)}
+                    />
+                  </Field>
+                )}
               </>
             )}
           </section>
@@ -716,8 +730,8 @@ function Form(props: InvoiceFormProps) {
               <Field id="field-currency" label={F.currency}>
                 <NativeSelect
                   id="field-currency"
-                  disabled={props.hasPayments}
-                  aria-describedby={props.hasPayments ? "field-currency-locked" : undefined}
+                  disabled={currencyLocked}
+                  aria-describedby={currencyLocked ? "field-currency-locked" : undefined}
                   value={values.currency}
                   onChange={(event) => {
                     const currency = event.target.value as Currency;
@@ -733,9 +747,9 @@ function Form(props: InvoiceFormProps) {
                     </option>
                   ))}
                 </NativeSelect>
-                {props.hasPayments && (
+                {currencyLocked && (
                   <p id="field-currency-locked" className="text-xs text-muted-foreground">
-                    {T.currencyLocked}
+                    {props.linkedParty || props.linkedMoney ? T.linkedLocked : T.currencyLocked}
                   </p>
                 )}
               </Field>
@@ -744,6 +758,7 @@ function Form(props: InvoiceFormProps) {
                   <Input
                     id="field-exchangeRate"
                     inputMode="decimal"
+                    disabled={props.linkedMoney}
                     aria-invalid={invalid.has("field-exchangeRate") || undefined}
                     value={values.exchangeRate}
                     onChange={(event) => set("exchangeRate", event.target.value)}
@@ -802,6 +817,7 @@ function Form(props: InvoiceFormProps) {
             <LineEditor
               lines={values.lines}
               currency={values.currency}
+              signedPrice={allowsNegativePrice(type)}
               nets={nets}
               units={units}
               defaultUnit={defaultUnit}
@@ -945,7 +961,7 @@ function Form(props: InvoiceFormProps) {
             <Button type="submit" size="lg" disabled={busy}>
               {mode === "draft" ? T.issue : T.save}
             </Button>
-            {mode === "draft" && (
+            {mode === "draft" && !isNote && (
               <Button
                 type="button"
                 variant="outline"

@@ -26,6 +26,24 @@ function count(db: Db, query: ReturnType<typeof sql>): number {
   return db.get<{ n: number }>(query)?.n ?? 0;
 }
 
+function creditNoteProblems(
+  row: typeof schema.invoice.$inferSelect,
+  rows: (typeof schema.invoice.$inferSelect)[],
+  label: string,
+): string[] {
+  const problems: string[] = [];
+  if (row.totalMinor >= 0) problems.push(`${label}: oprava není záporná`);
+  if (row.variableSymbol !== null) problems.push(`${label}: oprava má variabilní symbol`);
+  const original = rows.find((other) => other.id === row.relatedInvoiceId);
+  if (!original) return [...problems, `${label}: oprava bez původní faktury`];
+  if (!row.relatedSnapshot) problems.push(`${label}: oprava bez zamrzlého odkazu`);
+  if (original.currency !== row.currency) problems.push(`${label}: oprava v jiné měně`);
+  if (original.totalMinor + original.creditsMinor < 0) {
+    problems.push(`${label}: opravy přečerpaly fakturu`);
+  }
+  return problems;
+}
+
 function invoiceProblems(db: Db, ownerId: string): string[] {
   const { invoice, invoiceLine } = schema;
   const problems: string[] = [];
@@ -72,6 +90,7 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
     if (row.paymentMethod === "transfer" && !row.accountSnapshot) {
       problems.push(`${label}: převod bez snapshotu účtu`);
     }
+    if (row.type === "credit_note") problems.push(...creditNoteProblems(row, rows, label));
   }
 
   const numbers = rows.flatMap((row) => row.number ?? []);

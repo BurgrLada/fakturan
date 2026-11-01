@@ -5,8 +5,15 @@ import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import type { PaymentInput } from "@/lib/payments";
 import { setClockForTests } from "@/server/clock";
+import { ServiceError } from "@/server/services/access";
 import { getInvoice } from "@/server/services/invoices";
-import { addPayment, deletePayment, listPayments, updatePayment } from "@/server/services/payments";
+import {
+  addPayment,
+  addRefund,
+  deletePayment,
+  listPayments,
+  updatePayment,
+} from "@/server/services/payments";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { issuedInvoice, seedOwner, webActor } from "../helpers/fixtures-mail";
@@ -22,6 +29,7 @@ const TOTAL = 300_000;
 
 type Step =
   | { kind: "add"; amountMinor: number }
+  | { kind: "refund"; amountMinor: number }
   | { kind: "update"; index: number; amountMinor: number }
   | { kind: "delete"; index: number };
 
@@ -29,6 +37,7 @@ const amount = fc.integer({ min: 1, max: 200_000 });
 const index = fc.nat({ max: 20 });
 const step: fc.Arbitrary<Step> = fc.oneof(
   fc.record({ kind: fc.constant("add" as const), amountMinor: amount }),
+  fc.record({ kind: fc.constant("refund" as const), amountMinor: amount }),
   fc.record({ kind: fc.constant("update" as const), index, amountMinor: amount }),
   fc.record({ kind: fc.constant("delete" as const), index }),
 );
@@ -56,15 +65,24 @@ describe("stav z plateb", () => {
 
         for (const item of steps) {
           const rows = listPayments(owner, id);
-          const target = item.kind === "add" ? undefined : rows[item.index % (rows.length || 1)];
-          if (item.kind === "add") addPayment(actor, id, input(item.amountMinor));
-          else if (target && item.kind === "update") {
-            updatePayment(actor, target.id, input(item.amountMinor));
-          } else if (target) deletePayment(actor, target.id, revision());
+          // Each step may be refused for lowering the sum under zero, which must change nothing.
+          try {
+            if (item.kind === "add") addPayment(actor, id, input(item.amountMinor));
+            else if (item.kind === "refund") addRefund(actor, id, input(item.amountMinor));
+            else {
+              const target = rows[item.index % (rows.length || 1)];
+              if (target && item.kind === "update") {
+                updatePayment(actor, target.id, input(item.amountMinor));
+              } else if (target) deletePayment(actor, target.id, revision());
+            }
+          } catch (error) {
+            if (!(error instanceof ServiceError)) throw error;
+          }
 
           const paid = listPayments(owner, id).reduce((sum, p) => sum + p.creditedMinor, 0);
           const { status, paidMinor } = getInvoice(owner, id)!;
           expect(paidMinor).toBe(paid);
+          expect(paid).toBeGreaterThanOrEqual(0);
           if (paid >= TOTAL) expect(status).toBe("paid");
           else expect(status).toBe(paid > 0 ? "partially_paid" : "issued");
         }

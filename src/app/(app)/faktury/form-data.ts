@@ -1,5 +1,6 @@
 import "server-only";
 import type { InvoiceFormProps } from "@/components/invoices/invoice-form";
+import type { InvoiceType } from "@/lib/invoice";
 import { listBankAccounts } from "@/server/services/bank-accounts";
 import { listUnits } from "@/server/services/catalog";
 import { listSeries } from "@/server/services/number-series";
@@ -11,13 +12,17 @@ type Choices = Pick<
   "accounts" | "series" | "units" | "tagOptions" | "defaultUnit"
 >;
 
-export function formChoices(ownerId: string, keptAccountId: string | null): Choices {
+export function formChoices(
+  ownerId: string,
+  keptAccountId: string | null,
+  type: InvoiceType,
+): Choices {
   return {
     accounts: listBankAccounts(ownerId)
       .filter((account) => !account.hidden || account.id === keptAccountId)
       .map(({ id, name, currency, isDefault }) => ({ id, name, currency, isDefault })),
     series: listSeries(ownerId)
-      .filter((row) => row.documentType === "invoice")
+      .filter((row) => row.documentType === type)
       .map(({ id, name }) => ({ id, name })),
     units: listUnits(ownerId).map((unit) => unit.name),
     tagOptions: listTags(ownerId).map((tag) => tag.name),

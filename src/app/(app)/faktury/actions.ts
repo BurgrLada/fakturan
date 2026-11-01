@@ -14,6 +14,7 @@ import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
 import { getAutomation } from "@/server/services/automation";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
+import { createCreditNote } from "@/server/services/credit-notes";
 import { customerInputSchema, saveCustomer, searchCustomers } from "@/server/services/customers";
 import {
   cancelInvoice,
@@ -52,6 +53,7 @@ import {
 import { ensureDefaultSeries } from "@/server/services/number-series";
 import {
   addPayment,
+  addRefund,
   closeDifference,
   deletePayment,
   markPaid,
@@ -303,6 +305,15 @@ export async function duplicateInvoiceAction(raw: unknown) {
   });
 }
 
+export async function createCreditNoteAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    ensureDefaultSeries(actor);
+    const note = createCreditNote(actor, invoiceId);
+    changedInvoices();
+    return note;
+  });
+}
+
 export async function deleteDraftAction(raw: unknown) {
   return run(idInput, raw, ({ id: invoiceId }, actor) => {
     deleteDraft(actor, invoiceId);
@@ -426,6 +437,14 @@ export async function setPartialRemindersAction(raw: unknown) {
 export async function addPaymentAction(raw: unknown) {
   return run(addPaymentInput, raw, ({ id: invoiceId, payment }, actor) => {
     const added = addPayment(actor, invoiceId, payment);
+    changedInvoices();
+    return added;
+  });
+}
+
+export async function addRefundAction(raw: unknown) {
+  return run(addPaymentInput, raw, ({ id: invoiceId, payment }, actor) => {
+    const added = addRefund(actor, invoiceId, payment);
     changedInvoices();
     return added;
   });

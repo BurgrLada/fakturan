@@ -329,6 +329,9 @@ export function InvoiceTable({
                 >
                   {row.number ?? TEXTS.invoices.statuses.draft}
                 </Link>
+                {row.type === "credit_note" && (
+                  <span className="block text-xs text-muted-foreground">{T.types.credit_note}</span>
+                )}
               </TableCell>
               <TableCell className="whitespace-normal">{row.customerName || "–"}</TableCell>
               <TableCell className={NARROW_HIDDEN}>{shortDate(row.issueDate)}</TableCell>

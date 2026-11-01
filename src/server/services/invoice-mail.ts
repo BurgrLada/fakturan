@@ -5,6 +5,7 @@ import { desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { AutomationKey } from "@/lib/automation";
 import { kindForInvoice, type MessageKind } from "@/lib/email-template";
 import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
+import { isRefund } from "@/lib/payments";
 import type { Language } from "@/lib/preferences";
 import { amountDue } from "@/lib/qr-payload";
 import { isSendable, sendInputSchema, type EmailTrigger, type SendInput } from "@/lib/mail-send";
@@ -178,7 +179,9 @@ export function receiptPayment(
         .where(scoped(ownerId).where(payment, (t, { eq }) => eq(t.id, paymentId)))
         .get()
     : undefined;
-  if (row?.invoiceId !== invoiceId || row.kind !== "payment") throw new ServiceError(E.receiptGone);
+  if (row?.invoiceId !== invoiceId || row.kind !== "payment" || isRefund(row)) {
+    throw new ServiceError(E.receiptGone);
+  }
   const { notificationId } = row;
   const creditedMinor = notificationId
     ? q

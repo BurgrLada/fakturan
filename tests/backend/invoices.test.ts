@@ -35,7 +35,9 @@ import {
   duplicateInvoice,
   getInvoice,
   newDraftDefaults,
+  parseDraft,
   saveDraft,
+  totalsOf,
   type DraftInput,
 } from "@/server/services/invoices";
 import {
@@ -401,14 +403,27 @@ describe("položky a součty", () => {
     }
     expect(db.select({ n: count() }).from(invoice).get()?.n).toBe(0);
 
-    const { totals } = save("i1", { type: "credit_note", rounding: "none", lines: negative });
-    expect(totals.totalMinor).toBe(-375_150);
-    expect(totals.lines[0]?.netMinor).toBe(-375_150);
+    const note = parseDraft({
+      ...draft("i1"),
+      type: "credit_note",
+      rounding: "none",
+      lines: negative,
+    });
+    expect(totalsOf(note.lines, note)).toMatchObject({
+      totalMinor: -375_150,
+      lines: [{ netMinor: -375_150 }],
+    });
   });
 
   test("částka mimo limit je odmítnutá v obou znaménkách i na opravné faktuře", () => {
-    const priced = (unitPriceMinor: number) => () =>
-      save("i1", { type: "credit_note", lines: [line({ unitPriceMinor })] });
+    const priced = (unitPriceMinor: number) => () => {
+      const note = parseDraft({
+        ...draft("i1"),
+        type: "credit_note",
+        lines: [line({ unitPriceMinor })],
+      });
+      return totalsOf(note.lines, note);
+    };
     expect(priced(-1e15)).toThrow("Cena");
     expect(priced(-(MAX_DOCUMENT_MINOR + 1))).toThrow(TEXTS.invoices.validation.amountRange);
     expect(db.select({ n: count() }).from(invoice).get()?.n).toBe(0);

@@ -16,6 +16,7 @@ import {
   issueInvoice,
   markSent,
 } from "@/server/services/invoice-lifecycle";
+import { receiptPayment } from "@/server/services/invoice-mail";
 import { updateIssuedInvoice } from "@/server/services/invoice-versions";
 import {
   customerInvoiceStats,
@@ -25,6 +26,7 @@ import {
 } from "@/server/services/invoices";
 import {
   addPayment,
+  addRefund,
   applyPayments,
   averagePaymentDays,
   closeDifference,
@@ -368,6 +370,51 @@ describe("zápis plateb", () => {
     expect(() =>
       updatePayment(webActor(owner), paymentId, input(owner, id, { paidOn: "2026-03-21" })),
     ).toThrow(E.future);
+  });
+
+  test("vrácení nevstoupí do průměrné doby úhrady", () => {
+    const { owner, customerId, id } = account();
+    const paidOn = "2026-03-20";
+    const { totalMinor } = getInvoice(owner, id)!;
+    pay(owner, id, { paidOn: "2026-03-01", amountMinor: totalMinor });
+    const before = averagePaymentDays(owner, customerId);
+    addRefund(webActor(owner), id, {
+      revision: revisionOf(owner, id),
+      paidOn,
+      amountMinor: 100,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+    addPayment(webActor(owner), id, {
+      revision: revisionOf(owner, id),
+      paidOn: "2026-03-01",
+      amountMinor: 100,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+
+    expect(getInvoice(owner, id)!.status).toBe("paid");
+    expect(averagePaymentDays(owner, customerId)).toBe(before);
+  });
+
+  test("vrácení nejde potvrdit jako platbu", () => {
+    const { owner, id } = account();
+    const { totalMinor } = getInvoice(owner, id)!;
+    pay(owner, id, { amountMinor: totalMinor });
+    const { id: refundId } = addRefund(webActor(owner), id, {
+      revision: revisionOf(owner, id),
+      paidOn: "2026-03-20",
+      amountMinor: 100,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+
+    expect(() => receiptPayment(db, owner, id, refundId)).toThrow(
+      TEXTS.invoiceMail.errors.receiptGone,
+    );
   });
 
   test("platba na koncept, storno a dobropis je odmítnutá", () => {

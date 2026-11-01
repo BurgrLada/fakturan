@@ -461,6 +461,26 @@ export function parseDraft(raw: DraftInput): ParsedDraft {
   return parsed.data;
 }
 
+// Runs before the unchanged comparison: a forged credit note must not pass as a repeated write.
+function assertDraftIdentity(
+  before: Invoice,
+  next: Pick<ParsedDraft, "type" | "customerId" | "currency" | "exchangeRateMicros">,
+): void {
+  if (next.type === "credit_note" && !before.relatedInvoiceId) {
+    throw new ServiceError(V.creditNoteManual);
+  }
+  if (!before.relatedInvoiceId) {
+    if (next.type !== before.type) throw new ServiceError(V.typeLocked);
+    return;
+  }
+  const locked =
+    next.type !== before.type ||
+    next.customerId !== before.customerId ||
+    next.currency !== before.currency ||
+    (before.type === "credit_note" && next.exchangeRateMicros !== before.exchangeRateMicros);
+  if (locked) throw new ServiceError(V.linkedLocked);
+}
+
 export function createDraftIn(
   tx: Tx,
   audit: Audit,
@@ -470,6 +490,7 @@ export function createDraftIn(
   auditNote: Record<string, unknown> = {},
 ): SavedDraft {
   const { id: _i, clientId, revision: _r, lines, ...fields } = input;
+  if (fields.type === "credit_note") throw new ServiceError(V.creditNoteManual);
   const totals = totalsOf(lines, fields);
   const rows = lineRows(lines, totals);
   assertReferencesOwned(tx, userId, input);
@@ -528,6 +549,7 @@ export function saveDraft(
           : null;
       if (!before) return createDraftIn(tx, audit, userId, input, undefined, auditNote);
       if (before.status !== "draft") throw new ServiceError(TEXTS.invoices.stale);
+      assertDraftIdentity(before, fields);
       assertReferencesOwned(tx, userId, input);
 
       const customerName = customerNameOf(tx, userId, fields.customerId);
@@ -620,6 +642,7 @@ export function duplicateInvoice(actor: Actor, id: string): { id: string } {
   const userId = ownerOf(actor);
   return mutate(actor, "invoice.duplicate", (tx, audit) => {
     const source = findOwned(tx, userId, id);
+    if (source.type === "credit_note") throw new ServiceError(V.creditNoteCopy);
     const lines = linesOf(tx, userId, id);
     const totals = totalsOf(lines, source);
     const copyId = randomUUID();

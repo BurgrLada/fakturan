@@ -128,7 +128,7 @@ function candidatesFor(tx: Tx, userId: string, variableSymbol: string | null): M
     .where(
       scoped(userId).where(invoice, (t) =>
         and(
-          inArray(t.status, [...AWAITING_PAYMENT, "paid"]),
+          inArray(t.status, [...AWAITING_PAYMENT, "paid", "credited"]),
           isNotNull(t.number),
           ne(t.type, "credit_note"),
           sql`ltrim(${t.variableSymbol}, '0') = ${symbol}`,

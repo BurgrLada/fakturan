@@ -20,7 +20,8 @@ import { drainJobs } from "@/server/jobs/worker";
 import { RATE_RULES } from "@/server/rate-limit";
 import { enforceRateLimit, RateLimitError, ServiceError } from "@/server/services/access";
 import { archiveSentPdf, deleteFile } from "@/server/services/files";
-import { cancelInvoice, markSent } from "@/server/services/invoice-lifecycle";
+import { createCreditNote } from "@/server/services/credit-notes";
+import { cancelInvoice, issueInvoice, markSent } from "@/server/services/invoice-lifecycle";
 import { getInvoice } from "@/server/services/invoices";
 import { MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import {
@@ -190,6 +191,22 @@ describe("sendInvoice", () => {
       .get()!;
     expect(row.after).toMatchObject({ recipients: 2, subject: "Předmět", trigger: "manual" });
     expect(JSON.stringify(row.after)).not.toContain("example.cz");
+  });
+
+  test("[MAIL-003] oprava jde odeslat šablonou credit_note a nastaví sent", () => {
+    const { owner, invoiceId } = account();
+    const actor = webActor(owner);
+    const { id } = createCreditNote(actor, invoiceId);
+    issueInvoice(actor, id, { revision: getInvoice(owner, id)!.revision });
+
+    expect(sendPrefill(owner, id).subject).toMatch(/^Opravná faktura D\d{4}-001$/);
+    sendInvoice(actor, id, input());
+
+    expect(logsOf(owner)).toMatchObject([{ invoiceId: id, kind: "credit_note" }]);
+    expect(getInvoice(owner, id)).toMatchObject({ status: "issued" });
+    return drainJobs(WORKER).then(() => {
+      expect(getInvoice(owner, id)).toMatchObject({ status: "sent" });
+    });
   });
 
   test("koncept ani storno odeslat nejde", () => {

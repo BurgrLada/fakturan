@@ -32,11 +32,11 @@ export const DEFAULT_MAIL_CONTENT: Record<Language, Record<MessageKind, MailCont
       ].join("\n"),
     },
     credit_note: {
-      subject: "Opravný doklad {{cislo_faktury}}",
+      subject: "Opravná faktura {{cislo_faktury}}",
       body: [
         "Dobrý den,",
         "",
-        "v příloze posílám opravný doklad {{cislo_faktury}} na částku {{castka}}.",
+        "v příloze posílám opravnou fakturu {{cislo_faktury}} na částku {{castka}}.",
         "",
         "S pozdravem",
         "{{dodavatel}}",
@@ -82,11 +82,11 @@ export const DEFAULT_MAIL_CONTENT: Record<Language, Record<MessageKind, MailCont
       ].join("\n"),
     },
     advance: {
-      subject: "Proforma invoice {{cislo_faktury}}",
+      subject: "Advance invoice {{cislo_faktury}}",
       body: [
         "Hello,",
         "",
-        "please find attached proforma invoice {{cislo_faktury}} for {{castka}}, due on {{splatnost}}.",
+        "please find attached advance invoice {{cislo_faktury}} for {{castka}}, due on {{splatnost}}.",
         "The payment reference is {{vs}}.",
         "",
         "Kind regards,",

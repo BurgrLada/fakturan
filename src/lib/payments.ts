@@ -23,6 +23,10 @@ export function canTakePayment(status: InvoiceStatus): boolean {
   return TAKES_PAYMENT.includes(status);
 }
 
+export function isRefund(row: { creditedMinor: number }): boolean {
+  return row.creditedMinor < 0;
+}
+
 export function canAmendPayment(status: InvoiceStatus): boolean {
   return canTakePayment(status) || status === "credited";
 }

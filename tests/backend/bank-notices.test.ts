@@ -33,6 +33,7 @@ import {
   type IngestInput,
 } from "@/server/services/bank-notices";
 import { refreshBalance } from "@/server/services/invoice-balance";
+import { issueInvoice } from "@/server/services/invoice-lifecycle";
 import { getInvoice } from "@/server/services/invoices";
 import {
   addPayment,
@@ -42,6 +43,7 @@ import {
   updatePayment,
 } from "@/server/services/payments";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
+import { createCreditNote } from "@/server/services/credit-notes";
 import { mutate } from "@/server/services/mutation";
 import { seedCreditNote, seedPayment } from "../fixtures/invoices";
 import { assertConsistent } from "../helpers/consistency";
@@ -122,6 +124,20 @@ beforeEach(() => setClockForTests({ now: () => NOW }));
 afterEach(() => setClockForTests(null));
 
 describe("ingestNotice", () => {
+  test("avízo na dobropisovanou fakturu jde do fronty s důvodem closed", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    const actor = webActor(owner);
+    const note = createCreditNote(actor, invoiceId);
+    issueInvoice(actor, note.id, { revision: getInvoice(owner, note.id)!.revision });
+    expect(getInvoice(owner, invoiceId)!.status).toBe("credited");
+
+    ingestNotice(owner, income(parsed()));
+
+    expect(rows(owner)).toMatchObject([{ status: "pending", reason: "closed" }]);
+    expect(getInvoice(owner, invoiceId)).toMatchObject({ paidMinor: 0, status: "credited" });
+    expect(getInvoice(owner, note.id)).toMatchObject({ paidMinor: 0, variableSymbol: null });
+  });
+
   test("[BNK-008] shoda VS, částky a měny na otevřené faktuře uhradí s datem z avíza", () => {
     const { owner, invoiceId } = seedAccount(db, NOW);
 

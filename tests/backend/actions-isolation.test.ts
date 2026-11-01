@@ -56,8 +56,10 @@ import {
 } from "@/app/(app)/nastaveni/automatizace/actions";
 import {
   addPaymentAction,
+  addRefundAction,
   bulkSendAction,
   closeDifferenceAction,
+  createCreditNoteAction,
   deletePaymentAction,
   markPaidAction,
   markPaidManyAction,
@@ -184,6 +186,52 @@ describe("akce pošty", () => {
       paidMinor: 1000,
     });
     expect(listPayments(stranger.owner, stranger.invoiceId)).toEqual([]);
+  });
+
+  test("[TST-009] akce oprav a vrácení odmítnou cizí ID", async () => {
+    const mine = mailAccount();
+    const stranger = mailAccount();
+    session.userId = mine.owner;
+    const before = getInvoice(mine.owner, mine.invoiceId)!;
+    const added = await addPaymentAction({
+      id: mine.invoiceId,
+      payment: {
+        revision: before.revision,
+        paidOn: "2026-01-10",
+        amountMinor: 1000,
+        currency: "CZK",
+        method: "transfer",
+        note: "",
+      },
+    });
+    if (!added.ok) throw new Error(added.error);
+    const { revision } = getInvoice(mine.owner, mine.invoiceId)!;
+
+    session.userId = stranger.owner;
+    const replies = [
+      await createCreditNoteAction({ id: mine.invoiceId }),
+      await addRefundAction({
+        id: mine.invoiceId,
+        payment: {
+          revision,
+          paidOn: "2026-01-10",
+          amountMinor: 100,
+          currency: "CZK",
+          method: "transfer",
+          note: "",
+        },
+      }),
+    ];
+
+    expect(replies).toEqual(replies.map(() => expect.objectContaining({ ok: false })));
+    expect(listInvoices(mine.owner, {}).rows).toHaveLength(1);
+    expect(listInvoices(stranger.owner, {}).rows).toHaveLength(1);
+    expect(getInvoice(mine.owner, mine.invoiceId)).toMatchObject({ paidMinor: 1000, revision });
+
+    session.userId = mine.owner;
+    await expect(createCreditNoteAction({ id: mine.invoiceId })).resolves.toMatchObject({
+      ok: true,
+    });
   });
 
   test("[SEC-002] akce upomínek odmítnou cizí ID", async () => {

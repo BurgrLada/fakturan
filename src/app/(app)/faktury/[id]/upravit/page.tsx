@@ -7,7 +7,10 @@ import { PageLoading } from "@/components/page-loading";
 import { buttonVariants } from "@/components/ui/button";
 import { formFromDocument } from "@/lib/invoice-form";
 import { TEXTS } from "@/lib/texts";
+import { formatMoney } from "@/lib/money";
 import { requireSession } from "@/server/auth/session";
+import { db } from "@/server/db";
+import { creditableMinor } from "@/server/services/credit-notes";
 import { checkIssuable } from "@/server/services/invoice-lifecycle";
 import { EDITABLE_STATUSES } from "@/server/services/invoice-versions";
 import { designChoices } from "@/server/pdf/designs";
@@ -42,8 +45,24 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
   const isDraft = !row || row.status === "draft";
   if (row && !isDraft && !EDITABLE_STATUSES.has(row.status)) redirect(`/faktury/${id}`);
 
-  const choices = formChoices(user.id, row?.bankAccountId ?? null);
-  const title = !row ? T.newTitle : isDraft ? T.draftTitle : T.issuedTitle(row.number ?? "");
+  const type = row?.type ?? "invoice";
+  const choices = formChoices(user.id, row?.bankAccountId ?? null, type);
+  const isNote = type === "credit_note";
+  const title = !row
+    ? T.newTitle
+    : isDraft
+      ? isNote
+        ? T.creditDraftTitle
+        : T.draftTitle
+      : isNote
+        ? T.creditIssuedTitle(row.number ?? "")
+        : T.issuedTitle(row.number ?? "");
+  const creditLeft =
+    isNote && row?.relatedInvoiceId
+      ? T.creditLeft(
+          formatMoney(creditableMinor(db, user.id, row.relatedInvoiceId, row.id), row.currency),
+        )
+      : null;
   return (
     <>
       <Link
@@ -53,12 +72,19 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
         {isDraft ? T.back : T.backToDetail}
       </Link>
       <h1 className="font-brand text-2xl">{title}</h1>
+      {creditLeft && (
+        <p data-testid="credit-left" className="text-sm text-muted-foreground">
+          {creditLeft}
+        </p>
+      )}
       <InvoiceForm
         id={id}
         saved={row !== null}
         mailAvailable={mailAvailability(user.id).available}
         hasPayments={row !== null && !isDraft && listPayments(user.id, id).length > 0}
-        type={row?.type ?? "invoice"}
+        linkedParty={row?.relatedInvoiceId != null}
+        linkedMoney={row !== null && (isNote || row.creditsMinor < 0)}
+        type={type}
         mode={isDraft ? "draft" : "issued"}
         status={row?.status ?? "draft"}
         number={row?.number ?? ""}

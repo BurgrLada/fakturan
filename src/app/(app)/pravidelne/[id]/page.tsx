@@ -42,7 +42,7 @@ async function PlanContent({ params }: { params: Promise<{ id: string }> }) {
   const { user } = await requireSession();
   const plan = getRecurring(user.id, id);
   if (!plan) notFound();
-  const choices = formChoices(user.id, plan.document.bankAccountId);
+  const choices = formChoices(user.id, plan.document.bankAccountId, "invoice");
   const customerName = plan.customerId ? (getCustomer(user.id, plan.customerId)?.name ?? "") : "";
   const runs: RunListRow[] = listRuns(user.id, id).map((run) => ({
     id: run.id,

@@ -248,10 +248,11 @@ export function seedCreditNote(
       `INSERT INTO invoice (id, user_id, type, status, number, customer_id, customer_name,
         bank_account_id, issue_date, due_date, language, currency, payment_method, subtotal_minor,
         total_minor, appearance, supplier_snapshot, customer_snapshot, account_snapshot,
-        date_format, related_invoice_id, created_at, updated_at)
+        date_format, related_invoice_id, related_snapshot, created_at, updated_at)
        SELECT ?, user_id, 'credit_note', ?, ?, customer_id, customer_name, bank_account_id,
         issue_date, issue_date, language, currency, payment_method, ?, ?, appearance,
-        supplier_snapshot, customer_snapshot, account_snapshot, date_format, id, 0, 0
+        supplier_snapshot, customer_snapshot, account_snapshot, date_format, id,
+        json_object('type', type, 'number', number, 'issueDate', issue_date), 0, 0
        FROM invoice WHERE id = ?`,
     )
     .run(id, status, `D-${id}`, totalMinor, totalMinor, invoiceId);

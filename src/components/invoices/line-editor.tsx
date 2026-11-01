@@ -40,6 +40,7 @@ function LineRow({
   line,
   position,
   currency,
+  signedPrice,
   net,
   units,
   invalid,
@@ -51,6 +52,7 @@ function LineRow({
   line: FormLine;
   position: number;
   currency: Currency;
+  signedPrice: boolean;
   net: number | null;
   units: string;
   invalid: ReadonlySet<string>;
@@ -72,6 +74,7 @@ function LineRow({
   const [saving, setSaving] = useState(false);
   const id = (field: string) => `line-${line.key}-${field}`;
   const isInvalid = (field: string) => invalid.has(id(field)) || undefined;
+  const negativePrice = (parseMoney(line.price) ?? 0) < 0;
 
   function pick(item: CatalogChoice) {
     onChange({
@@ -165,7 +168,7 @@ function LineRow({
             <Label htmlFor={id("price")}>{L.price}</Label>
             <Input
               id={id("price")}
-              inputMode="decimal"
+              inputMode={signedPrice ? "text" : "decimal"}
               aria-invalid={isInvalid("price")}
               value={line.price}
               onChange={(event) => onChange({ price: event.target.value })}
@@ -226,15 +229,17 @@ function LineRow({
           {line.catalogItemId ? (
             <span className="text-xs text-muted-foreground">{L.inCatalog}</span>
           ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={saving || !line.name.trim()}
-              onClick={toCatalog}
-            >
-              {saving ? L.toCatalogPending : L.toCatalog}
-            </Button>
+            !negativePrice && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={saving || !line.name.trim()}
+                onClick={toCatalog}
+              >
+                {saving ? L.toCatalogPending : L.toCatalog}
+              </Button>
+            )
           )}
           <Button
             type="button"
@@ -256,6 +261,7 @@ function LineRow({
 export function LineEditor({
   lines,
   currency,
+  signedPrice = false,
   nets,
   units,
   defaultUnit,
@@ -266,6 +272,7 @@ export function LineEditor({
   onExpired: () => void;
   lines: FormLine[];
   currency: Currency;
+  signedPrice?: boolean;
   nets: ReadonlyMap<string, number>;
   units: string[];
   defaultUnit: string;
@@ -334,6 +341,7 @@ export function LineEditor({
                 line={line}
                 position={index + 1}
                 currency={currency}
+                signedPrice={signedPrice}
                 net={nets.get(line.key) ?? null}
                 units="line-units"
                 invalid={invalid}

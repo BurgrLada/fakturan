@@ -13,6 +13,7 @@ import {
   account,
   auditLog,
   auditPurge,
+  invoice,
   instanceMeta,
   invitation,
   rateLimit,
@@ -20,6 +21,8 @@ import {
   user,
   verification,
 } from "@/server/db/schema";
+import { createCreditNote } from "@/server/services/credit-notes";
+import { issueInvoice } from "@/server/services/invoice-lifecycle";
 import { mutate } from "@/server/services/mutation";
 import { listInstanceAudit } from "@/server/services/instance-audit";
 import { createInvitation } from "@/server/services/invitations";
@@ -35,6 +38,13 @@ import {
 import { findUnregisteredOwnedTables } from "../helpers/audit-guard";
 import { Browser, BASE, PASSWORD, type Auth } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
+import {
+  draftFor,
+  issuedInvoice,
+  seedCustomer,
+  seedOwner,
+  webActor,
+} from "../helpers/fixtures-mail";
 
 const requestHeaders = vi.hoisted(() => ({ current: new Headers() }));
 
@@ -261,6 +271,26 @@ describe("role a poslední administrátor", () => {
     expect(() => deactivateUser(admin, ADMIN_ID)).toThrow("Vlastní účet");
     expect(() => deleteUser(admin, ADMIN_ID, "admin@example.cz")).toThrow("Vlastní účet");
     expect(find(ADMIN_ID)?.banned).toBe(false);
+  });
+});
+
+describe("smazání účtu s navázanými doklady", () => {
+  test("[ADM-006] smazání účtu s opravou a zálohou projde", () => {
+    const owner = seedOwner(db, new Date());
+    const actor = webActor(owner);
+    const customerId = seedCustomer(owner);
+    const original = issuedInvoice(owner, customerId);
+    const note = createCreditNote(actor, original);
+    issueInvoice(actor, note.id, { revision: 1 });
+    const advance = draftFor(owner, customerId, { type: "advance", seriesId: null });
+    issueInvoice(actor, advance.id, { revision: advance.revision });
+    const final = issuedInvoice(owner, customerId);
+    db.update(invoice).set({ relatedInvoiceId: advance.id }).where(eq(invoice.id, final)).run();
+
+    deleteUser(admin, owner, `${owner}@example.cz`);
+
+    expect(db.select().from(invoice).where(eq(invoice.userId, owner)).all()).toEqual([]);
+    expect(find(owner)).toBeUndefined();
   });
 });
 

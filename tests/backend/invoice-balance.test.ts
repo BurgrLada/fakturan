@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { isOverdue } from "@/lib/invoice";
-import { documentQrInput } from "@/lib/qr-payload";
+import { documentQrInput, planQr } from "@/lib/qr-payload";
 import { isEligibleForReminder } from "@/lib/reminders";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
@@ -120,9 +120,11 @@ describe("zůstatek po opravě", () => {
   test("[QR-006] částka v QR je 6 000,00 po opravě a platbě", () => {
     const { owner, id } = paidAndCredited();
 
-    const { dueMinor } = documentQrInput(loadInvoiceDocument(owner, id)!, "");
+    const input = documentQrInput(loadInvoiceDocument(owner, id)!, "");
+    const plan = planQr({ ...input, enabled: true, iban: "CZ6508000000192000145399" });
 
-    expect(dueMinor).toBe(600_000);
+    expect(input.dueMinor).toBe(600_000);
+    expect(plan).toMatchObject({ kind: "spayd", payload: expect.stringContaining("*AM:6000.00*") });
   });
 
   test("[CRN-006] 5 000,00 + oprava -5 000,00 bez plateb je credited a nejde na ni upomínka", () => {
@@ -313,6 +315,22 @@ describe("záloha", () => {
     linked(advanceId, finalId);
     return { owner, customerId, advanceId, finalId };
   }
+
+  test("[CRN-005] overdueMinor faktury po částečné záloze počítá zbytek po záloze", () => {
+    const { owner, advanceId, finalId } = seeded();
+    addPayment(webActor(owner), advanceId, {
+      revision: row(owner, advanceId).revision,
+      paidOn: TODAY,
+      amountMinor: 100_000,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+    overdue(finalId);
+
+    expect(row(owner, finalId).advanceMinor).toBe(100_000);
+    expect(invoiceSummary(owner, {})[0]).toMatchObject({ overdueMinor: 200_000 });
+  });
 
   test("úhrada zálohy přepočítá konečnou fakturu", () => {
     const { owner, advanceId, finalId } = seeded();

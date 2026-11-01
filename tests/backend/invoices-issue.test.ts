@@ -375,8 +375,9 @@ describe("záporná cena", () => {
 
   test("kontrola před vystavením zápornou cenu pustí jen u opravné faktury", () => {
     const { owner, customerId, accountId } = newOwner();
-    const negative = { lines: [line({ unitPriceMinor: -100 })], bankAccountId: accountId };
-    const { id } = save(owner, customerId, { ...negative, type: "credit_note" });
+    const { id } = save(owner, customerId, { lines: [line()], bankAccountId: accountId });
+    db.run(sql`UPDATE invoice SET type = 'credit_note' WHERE id = ${id}`);
+    db.run(sql`UPDATE invoice_line SET unit_price_minor = -100 WHERE invoice_id = ${id}`);
     expect(fields(owner, id)).not.toContain("lines.0.unitPriceMinor");
 
     db.run(sql`UPDATE invoice SET type = 'invoice' WHERE id = ${id}`);

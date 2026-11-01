@@ -7,6 +7,7 @@ import {
   canAmendPayment,
   canTakePayment,
   deriveStatus,
+  isRefund,
   paymentInputSchema,
   type PaymentChannel,
   type PaymentInput,
@@ -105,6 +106,7 @@ export function applyPayments(tx: Tx, audit: Audit, userId: string, invoiceId: s
     .from(payment)
     .where(scoped(userId).where(payment, (t, { eq }) => eq(t.invoiceId, invoiceId)))
     .get()!.sum;
+  if (paidMinor < 0) throw new ServiceError(E.refundExceeds);
   tx.update(invoice)
     .set({
       paidMinor,
@@ -256,6 +258,63 @@ export function addPayment(actor: Actor, invoiceId: string, raw: PaymentInput): 
   });
 }
 
+// A closed difference counts in paid_minor but was never received, so it cannot be sent back.
+function receivedMinor(q: Reader, userId: string, invoiceId: string): number {
+  return q
+    .select({ sum: sql<number>`coalesce(sum(${payment.creditedMinor}), 0)` })
+    .from(payment)
+    .where(
+      scoped(userId).where(payment, (t, { and, eq }) =>
+        and(eq(t.invoiceId, invoiceId), eq(t.kind, "payment")),
+      ),
+    )
+    .get()!.sum;
+}
+
+export function addRefund(actor: Actor, invoiceId: string, raw: PaymentInput): { id: string } {
+  const userId = ownerOf(actor);
+  const input = parseInput(raw);
+  return mutate(actor, "payment.refund", (tx, audit) => {
+    const row = findOwned(tx, userId, invoiceId);
+    assertAmendable(row);
+    assertRevision(row, input.revision);
+    const creditedMinor = creditedFor(row, input);
+    if (creditedMinor > receivedMinor(tx, userId, invoiceId)) {
+      throw new ServiceError(E.refundExceeds);
+    }
+    const { paidOn, amountMinor, currency, method, note } = input;
+    const id = randomUUID();
+    const now = clock.now();
+    tx.insert(payment)
+      .values({
+        id,
+        userId,
+        invoiceId,
+        kind: "payment",
+        source: "manual",
+        paidOn,
+        amountMinor: -amountMinor,
+        currency,
+        creditedMinor: -creditedMinor,
+        method,
+        note,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    const after = applyPayments(tx, audit, userId, invoiceId);
+    audit({
+      entity: "payment",
+      entityId: id,
+      ownerId: userId,
+      scope: "user",
+      before: { invoiceId, status: row.status },
+      after: { ...auditFields(readPayment(tx, userId, id)), status: after.status },
+    });
+    return { id };
+  });
+}
+
 // R-10 keeps a notice's money as the bank reported it; a difference is only ever removed whole.
 function assertAmountsEditable(
   before: Payment,
@@ -278,8 +337,10 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
     const row = findOwned(tx, userId, before.invoiceId);
     assertAmendable(row);
     assertRevision(row, input.revision);
-    const { paidOn, amountMinor, currency, method, note } = input;
-    const creditedMinor = creditedFor(row, input);
+    const { paidOn, currency, method, note } = input;
+    const sign = isRefund(before) ? -1 : 1;
+    const amountMinor = sign * input.amountMinor;
+    const creditedMinor = sign * creditedFor(row, input);
     assertAmountsEditable(before, { amountMinor, currency, creditedMinor });
     if (creditedMinor !== before.creditedMinor && hasDifference(tx, userId, [before.invoiceId])) {
       throw new ServiceError(E.differenceClosed);
@@ -429,7 +490,7 @@ export function averagePaymentDays(ownerId: string, customerId: string): number 
       issueDate: invoice.issueDate,
       lastPaidOn: sql<
         string | null
-      >`max(CASE WHEN ${payment.kind} = 'payment' THEN ${payment.paidOn} END)`,
+      >`max(CASE WHEN ${payment.kind} = 'payment' AND ${payment.creditedMinor} > 0 THEN ${payment.paidOn} END)`,
       differences: sql<number>`sum(CASE WHEN ${payment.kind} = 'difference' THEN 1 ELSE 0 END)`,
     })
     .from(payment)

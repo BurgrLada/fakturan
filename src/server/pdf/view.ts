@@ -159,7 +159,15 @@ function customerView(doc: InvoiceDocument, labels: DocumentLabels): PartyView {
 function detailRows(doc: InvoiceDocument, opts: ViewOptions, labels: DocumentLabels) {
   const format = doc.dateFormat ?? "d. M. yyyy";
   const date = (value: CalendarDate | null) => (value ? formatCalendarDate(value, format) : "");
+  const { relatedDocument: related } = doc;
   const rows = [
+    {
+      label: labels.correctsDocument,
+      value:
+        doc.type === "credit_note" && related
+          ? printable(labels.correctsDate(related.number, date(related.issueDate)))
+          : "",
+    },
     { label: labels.issueDate, value: date(doc.issueDate ?? (opts.draft ? opts.today : null)) },
     { label: labels.dueDate, value: date(doc.dueDate) },
     { label: labels.taxableDate, value: doc.appearance.showDuzp ? date(doc.taxableDate) : "" },
@@ -184,7 +192,11 @@ function totalRows(doc: InvoiceDocument, labels: DocumentLabels): TotalRow[] {
     ...(adjusted ? [row(labels.subtotal, amount(totals.subtotalMinor))] : []),
     ...(totals.discountMinor ? [row(labels.discount, amount(-totals.discountMinor))] : []),
     ...(totals.roundingMinor ? [row(labels.rounding, amount(totals.roundingMinor))] : []),
-    row(labels.total, amount(totals.totalMinor), !settled),
+    row(
+      doc.type === "credit_note" ? labels.creditTotal : labels.total,
+      amount(totals.totalMinor),
+      !settled,
+    ),
     ...(totals.creditsMinor ? [row(labels.credits, amount(totals.creditsMinor))] : []),
     ...(totals.advanceMinor ? [row(labels.paidByAdvance, amount(totals.advanceMinor))] : []),
     ...(totals.paidMinor ? [row(labels.paid, amount(totals.paidMinor))] : []),

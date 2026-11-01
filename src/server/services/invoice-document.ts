@@ -5,6 +5,7 @@ import type {
   DocumentImages,
   InvoiceDocument,
   InvoiceSnapshot,
+  RelatedSnapshot,
   SupplierSnapshot,
 } from "@/lib/invoice-document";
 import { invoiceDocument } from "@/lib/invoice-document";
@@ -16,7 +17,7 @@ import { db } from "../db";
 import { bankAccount, customer, supplier } from "../db/schema";
 import { scoped } from "../db/scoped";
 import type { Reader } from "./access";
-import { getInvoice, type Invoice, type InvoiceLine } from "./invoices";
+import { findOwned, getInvoice, type Invoice, type InvoiceLine } from "./invoices";
 import { defaultSeriesFor, listSeries, peekNumber } from "./number-series";
 import { getPreferences } from "./preferences";
 
@@ -145,6 +146,16 @@ export function renderDocumentTexts<L extends Pick<InvoiceLine, "name" | "descri
   };
 }
 
+export function relatedSnapshotOf(
+  q: Reader,
+  ownerId: string,
+  row: Pick<Invoice, "relatedInvoiceId">,
+): RelatedSnapshot | null {
+  if (!row.relatedInvoiceId) return null;
+  const { type, number, issueDate } = findOwned(q, ownerId, row.relatedInvoiceId);
+  return number && issueDate ? { type, number, issueDate } : null;
+}
+
 function previewNumber(ownerId: string, row: Invoice): string {
   const series = row.seriesId
     ? listSeries(ownerId).find((item) => item.id === row.seriesId)
@@ -163,5 +174,13 @@ export function loadInvoiceDocument(ownerId: string, id: string): InvoiceDocumen
   const customerName = snapshot.customer?.name ?? row.customerName;
   const ctx = variablesFor(ownerId, row, previewNumber(ownerId, row), customerName);
   const texts = renderDocumentTexts(row, document.lines, ctx);
-  return { ...document, ...texts, dateFormat: ctx.dateFormat, customerName, snapshot, images };
+  return {
+    ...document,
+    ...texts,
+    dateFormat: ctx.dateFormat,
+    customerName,
+    snapshot,
+    images,
+    relatedDocument: relatedSnapshotOf(db, ownerId, row),
+  };
 }

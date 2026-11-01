@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent } from "react";
-import { addPaymentAction, updatePaymentAction } from "@/app/(app)/faktury/actions";
+import {
+  addPaymentAction,
+  addRefundAction,
+  updatePaymentAction,
+} from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -16,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { CURRENCIES, type Currency } from "@/lib/currency";
 import { formatMoneyInput, parseMoney } from "@/lib/money";
-import { PAYMENT_CHANNELS, type PaymentChannel } from "@/lib/payments";
+import { isRefund, PAYMENT_CHANNELS, type PaymentChannel } from "@/lib/payments";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.payments.dialog;
@@ -51,12 +55,14 @@ function positive(text: string): number | null {
 function Form({
   target,
   payment,
+  refund,
   dirty,
   onClose,
   onDone,
 }: {
   target: PaymentTarget;
   payment: PaymentView | null;
+  refund: boolean;
   dirty: { current: boolean };
   onClose: () => void;
   onDone: () => void;
@@ -67,10 +73,12 @@ function Form({
   const [expired, setExpired] = useState(false);
   const [invalid, setInvalid] = useState<"amount" | "credited" | null>(null);
   const [paidOn, setPaidOn] = useState(payment?.paidOn ?? target.today);
-  const initialAmount = payment?.amountMinor ?? target.suggestedMinor;
+  const initialAmount = Math.abs(payment?.amountMinor ?? target.suggestedMinor);
   const [amount, setAmount] = useState(initialAmount > 0 ? formatMoneyInput(initialAmount) : "");
   const [currency, setCurrency] = useState<Currency>(payment?.currency ?? target.currency);
-  const [credited, setCredited] = useState(payment ? formatMoneyInput(payment.creditedMinor) : "");
+  const [credited, setCredited] = useState(
+    payment ? formatMoneyInput(Math.abs(payment.creditedMinor)) : "",
+  );
   const [method, setMethod] = useState<PaymentChannel>(payment?.method ?? "transfer");
   const [note, setNote] = useState(payment?.note ?? "");
 
@@ -114,9 +122,10 @@ function Form({
     };
     startTransition(async () => {
       try {
+        const save = refund ? addRefundAction : addPaymentAction;
         const reply = payment
           ? await updatePaymentAction({ id: payment.id, payment: body })
-          : await addPaymentAction({ id: target.invoiceId, payment: body });
+          : await save({ id: target.invoiceId, payment: body });
         if (reply.ok) {
           dirty.current = false;
           onDone();
@@ -133,8 +142,19 @@ function Form({
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <AlertDialogHeader>
-        <AlertDialogTitle>{payment ? T.editTitle : T.addTitle}</AlertDialogTitle>
+        <AlertDialogTitle>
+          {payment
+            ? isRefund(payment)
+              ? T.editRefundTitle
+              : T.editTitle
+            : refund
+              ? T.refundTitle
+              : T.addTitle}
+        </AlertDialogTitle>
       </AlertDialogHeader>
+      {(refund || (payment && isRefund(payment))) && (
+        <p className="text-sm text-muted-foreground">{T.refundHint}</p>
+      )}
       {locked && <p className="text-sm text-muted-foreground">{T.noticeLocked}</p>}
       <div className="flex flex-col gap-1">
         <Label htmlFor={`${key}-date`}>{T.paidOn}</Label>
@@ -243,12 +263,14 @@ export function PaymentDialog({
   open,
   target,
   payment,
+  refund = false,
   onClose,
   onDone,
 }: {
   open: boolean;
   target: PaymentTarget;
   payment: PaymentView | null;
+  refund?: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -273,7 +295,14 @@ export function PaymentDialog({
       }}
     >
       <AlertDialogContent className="max-h-[90dvh] overflow-y-auto">
-        <Form target={target} payment={payment} dirty={dirty} onClose={close} onDone={finish} />
+        <Form
+          target={target}
+          payment={payment}
+          refund={refund}
+          dirty={dirty}
+          onClose={close}
+          onDone={finish}
+        />
         {discarding && (
           <Alert role="alert" data-testid="payment-discard">
             <AlertDescription className="flex flex-col items-start gap-2">

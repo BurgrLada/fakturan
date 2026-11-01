@@ -13,6 +13,7 @@ import {
   recurringRun,
   type RecurringInvoice,
 } from "@/server/db/schema";
+import { seedCreditNote } from "../fixtures/invoices";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 
@@ -327,6 +328,19 @@ describe("assertConsistent", () => {
       db.update(invoice).set({ creditsMinor: -500 }).where(eq(invoice.id, id)).run();
 
       expect(() => assertConsistent(db, owner)).toThrow(/credits_minor/);
+    });
+
+    test("[TST-018] opravu bez zamrzlého odkazu a s variabilním symbolem kontrola odhalí", () => {
+      const owner = createUser();
+      const noteId = seedCreditNote(db, paidInvoice(owner), -100);
+
+      db.update(invoice)
+        .set({ relatedSnapshot: null, variableSymbol: "123" })
+        .where(eq(invoice.id, noteId))
+        .run();
+
+      expect(() => assertConsistent(db, owner)).toThrow("oprava bez zamrzlého odkazu");
+      expect(() => assertConsistent(db, owner)).toThrow("oprava má variabilní symbol");
     });
 
     test("[TST-018] nesoulad advance_minor kontrola odhalí", () => {

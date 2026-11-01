@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
   cancelInvoiceAction,
+  createCreditNoteAction,
   duplicateInvoiceAction,
   markSentAction,
   refreshCustomerAction,
@@ -46,6 +47,9 @@ export function InvoiceActions({
   editable,
   cancellable,
   hasPayments,
+  hasCredits,
+  creditable,
+  copyable,
   restorable,
   markable,
   refreshable,
@@ -55,6 +59,9 @@ export function InvoiceActions({
   editable: boolean;
   cancellable: boolean;
   hasPayments: boolean;
+  hasCredits: boolean;
+  creditable: boolean;
+  copyable: boolean;
   restorable: boolean;
   markable: boolean;
   refreshable: boolean;
@@ -88,6 +95,19 @@ export function InvoiceActions({
     });
   }
 
+  function createCredit() {
+    setMessage(null);
+    startTransition(async () => {
+      try {
+        const reply = await createCreditNoteAction({ id });
+        if (reply.ok) router.push(`/faktury/${reply.id}/upravit`);
+        else setMessage({ ok: false, text: reply.error });
+      } catch {
+        setMessage({ ok: false, text: T.failed });
+      }
+    });
+  }
+
   function duplicate() {
     setMessage(null);
     startTransition(async () => {
@@ -112,12 +132,21 @@ export function InvoiceActions({
             {T.edit}
           </Link>
         )}
-        <Button variant="outline" disabled={pending} onClick={duplicate}>
-          {T.duplicate}
-        </Button>
-        <Button variant="outline" disabled={pending} onClick={() => setNaming(true)}>
-          {TPL.trigger}
-        </Button>
+        {creditable && (
+          <Button variant="outline" disabled={pending} onClick={createCredit}>
+            {T.createCredit}
+          </Button>
+        )}
+        {copyable && (
+          <>
+            <Button variant="outline" disabled={pending} onClick={duplicate}>
+              {T.duplicate}
+            </Button>
+            <Button variant="outline" disabled={pending} onClick={() => setNaming(true)}>
+              {TPL.trigger}
+            </Button>
+          </>
+        )}
         <SaveTemplateDialog
           id={id}
           open={naming}
@@ -152,7 +181,7 @@ export function InvoiceActions({
             {T.restore}
           </Button>
         )}
-        {cancellable && !hasPayments && (
+        {cancellable && !hasPayments && !hasCredits && (
           <AlertDialog open={confirming} onOpenChange={setConfirming}>
             <AlertDialogTrigger render={<Button variant="destructive" disabled={pending} />}>
               {T.cancel}
@@ -194,9 +223,9 @@ export function InvoiceActions({
           onSent={sent}
         />
       </div>
-      {hasPayments && (
+      {(hasPayments || hasCredits) && (
         <p data-testid="cancel-blocked" className="text-sm text-muted-foreground">
-          {T.cancelBlocked}
+          {hasPayments ? T.cancelBlocked : T.cancelCredited}
         </p>
       )}
       {mail.sendable && !mail.available && (

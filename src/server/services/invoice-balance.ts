@@ -34,7 +34,12 @@ export function finalOf(q: Reader, ownerId: string, advanceId: string): Invoice 
   );
 }
 
-function creditsOf(q: Reader, ownerId: string, invoiceId: string): number {
+export function creditsOf(
+  q: Reader,
+  ownerId: string,
+  invoiceId: string,
+  exceptNoteId?: string,
+): number {
   return q
     .select({ sum: sql<number>`coalesce(sum(${invoice.totalMinor}), 0)` })
     .from(invoice)
@@ -44,6 +49,7 @@ function creditsOf(q: Reader, ownerId: string, invoiceId: string): number {
           eq(t.type, "credit_note"),
           eq(t.relatedInvoiceId, invoiceId),
           inArray(t.status, ACTIVE_CREDIT_STATUSES),
+          exceptNoteId ? ne(t.id, exceptNoteId) : undefined,
         ),
       ),
     )

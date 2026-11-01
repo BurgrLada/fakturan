@@ -21,7 +21,8 @@ import {
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
-import { hasPayments } from "./invoice-balance";
+import { creditLimitProblem } from "./credit-notes";
+import { hasPayments, refreshBalance } from "./invoice-balance";
 import { currentParties } from "./invoice-document";
 import {
   automaticSymbol,
@@ -86,6 +87,7 @@ function assertEditable(row: Invoice): void {
 
 // Underpaid is the move out of paid: a document already partially paid has nothing new to warn of.
 function balanceWarningOf(row: Invoice, statusBefore: InvoiceStatus): BalanceWarning {
+  if (row.type === "credit_note") return "none";
   if (amountDue(row) < 0) return "overpaid";
   return statusBefore === "paid" && row.status === "partially_paid" ? "underpaid" : "none";
 }
@@ -143,6 +145,29 @@ function writeVersion(tx: Tx, ownerId: string, row: Invoice, lines: InvoiceLine[
   return versionNo;
 }
 
+// In applyChange, so restoring a version cannot get around it. A final invoice locks only its
+// currency: advance_minor is in that currency, while its rate is its own.
+function assertLinkedMoney(tx: Tx, ownerId: string, before: Invoice, values: InvoiceValues): void {
+  const isNote = before.type === "credit_note";
+  const credited = before.creditsMinor < 0;
+  const newCurrency = values.currency !== undefined && values.currency !== before.currency;
+  const newRate =
+    values.exchangeRateMicros !== undefined &&
+    values.exchangeRateMicros !== before.exchangeRateMicros;
+  if (
+    (newCurrency && before.relatedInvoiceId) ||
+    ((isNote || credited) && (newCurrency || newRate))
+  ) {
+    throw new ServiceError(V.currencyHasCredits);
+  }
+  const candidate = { ...before, ...values };
+  if (credited && candidate.totalMinor < -before.creditsMinor) {
+    throw new ServiceError(V.creditsExceedTotal);
+  }
+  const problem = isNote && creditLimitProblem(tx, ownerId, candidate);
+  if (problem) throw new ServiceError(problem);
+}
+
 function applyChange(
   tx: Tx,
   audit: Audit,
@@ -154,6 +179,7 @@ function applyChange(
   // credited_minor is in the document currency, so changing it would silently restate the money.
   const newCurrency = values.currency !== undefined && values.currency !== before.currency;
   if (newCurrency && hasPayments(tx, ownerId, id)) throw new ServiceError(V.currencyHasPayments);
+  assertLinkedMoney(tx, ownerId, before, values);
   const beforeLines = linesOf(tx, ownerId, id);
   const versionNo = writeVersion(tx, ownerId, before, beforeLines);
   const candidate = { ...before, ...values };
@@ -175,7 +201,7 @@ function applyChange(
     recordAddedCatalogUse(tx, ownerId, beforeLines, rows);
   }
 
-  const after = findOwned(tx, ownerId, id);
+  const edited = findOwned(tx, ownerId, id);
   const changes = rows ? diffLines(beforeLines, rows) : null;
   const lineCount = (rows ?? beforeLines).length;
   audit({
@@ -188,13 +214,18 @@ function applyChange(
       ...(changes && { lines: changes.before }),
     },
     after: {
-      ...auditSnapshot(after, lineCount),
+      ...auditSnapshot(edited, lineCount),
       ...note,
       versionNo,
       ...(changes && { lines: changes.after }),
     },
   });
-  return resultOf(after, true, before.status);
+  if (before.relatedInvoiceId && before.type === "credit_note") {
+    if (edited.totalMinor !== before.totalMinor) {
+      refreshBalance(tx, audit, ownerId, before.relatedInvoiceId);
+    }
+  }
+  return resultOf(edited, true, before.status);
 }
 
 function accountSnapshotFor(
@@ -219,6 +250,7 @@ function symbolValues(
   number: string,
   requested: string | null | undefined,
 ): InvoiceValues {
+  if (before.type === "credit_note") return {};
   const automatic = automaticSymbol(ownerId, number);
   const current = before.variableSymbol ?? "";
   const wanted = requested ?? current;

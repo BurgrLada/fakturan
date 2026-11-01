@@ -22,7 +22,7 @@ async function NewPlan() {
   const { user } = await requireSession();
   const defaults = newDraftDefaults(user.id, null);
   const today = calendarDateInPrague(clock.now());
-  const choices = formChoices(user.id, null);
+  const choices = formChoices(user.id, null, "invoice");
   return (
     <RecurringForm
       planId={null}

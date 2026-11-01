@@ -24,6 +24,9 @@ export type DocumentLabels = {
   subtotal: string;
   rounding: string;
   total: string;
+  creditTotal: string;
+  correctsDocument: string;
+  correctsDate: (number: string, date: string) => string;
   credits: string;
   paidByAdvance: string;
   paid: string;
@@ -58,7 +61,7 @@ export const LABELS: Record<Language, DocumentLabels> = {
     documentTypes: {
       invoice: "Faktura",
       advance: "Zálohová faktura",
-      credit_note: "Opravný daňový doklad",
+      credit_note: "Opravná faktura",
     },
     paymentMethods: { transfer: "Převodem", cash: "Hotově", card: "Kartou" },
     draft: "Koncept",
@@ -80,6 +83,9 @@ export const LABELS: Record<Language, DocumentLabels> = {
     subtotal: "Mezisoučet",
     rounding: "Zaokrouhlení",
     total: "Celkem k úhradě",
+    creditTotal: "Celkem opraveno",
+    correctsDocument: "Opravuje doklad",
+    correctsDate: (number, date) => `${number} ze dne ${date}`,
     credits: "Opravné faktury",
     paidByAdvance: "Uhrazeno zálohou",
     paid: "Uhrazeno",
@@ -134,6 +140,9 @@ export const LABELS: Record<Language, DocumentLabels> = {
     subtotal: "Subtotal",
     rounding: "Rounding",
     total: "Total due",
+    creditTotal: "Total credited",
+    correctsDocument: "Corrects document",
+    correctsDate: (number, date) => `${number} of ${date}`,
     credits: "Credit notes",
     paidByAdvance: "Paid by advance",
     paid: "Paid",

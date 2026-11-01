@@ -17,4 +17,4 @@ INV-024	Chybí export (plán 8)	plán 8
 TST-016	Matice kryje pravidelné odeslání, upomínky a potvrzení platby, faktura po záloze přijde s automatikou	plán 6
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
-CRN-006	Chybí tvorba opravy	plán 6, Task 3
+CRN-003	Chybí statistiky a dashboard	plán 7

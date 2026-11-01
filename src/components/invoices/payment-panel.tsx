@@ -24,11 +24,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Currency } from "@/lib/currency";
+import type { InvoiceStatus } from "@/lib/invoice";
 import { formatMoney } from "@/lib/money";
+import { canTakePayment, isRefund } from "@/lib/payments";
 import { amountDue, type Balance } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { PaymentDialog, type PaymentView } from "./payment-dialog";
+import { RefundDialog } from "./refund-dialog";
 import { SendDialog } from "./send-dialog";
 
 const T = TEXTS.payments.panel;
@@ -48,7 +51,7 @@ export function PaymentPanel({
 }: {
   invoiceId: string;
   revision: number;
-  status: string;
+  status: InvoiceStatus;
   currency: Currency;
   balance: Balance;
   today: string;
@@ -62,6 +65,7 @@ export function PaymentPanel({
   const [removing, setRemoving] = useState<PaymentView | null>(null);
   const [returning, setReturning] = useState<PaymentView | null>(null);
   const [closing, setClosing] = useState(false);
+  const [refunding, setRefunding] = useState(false);
   const [expired, setExpired] = useState(false);
   const [receiptFor, setReceiptFor] = useState<string | null>(null);
   const receipt = useMemo(() => (receiptFor ? { paymentId: receiptFor } : undefined), [receiptFor]);
@@ -140,6 +144,7 @@ export function PaymentPanel({
                 </span>
               </span>
               <span className="flex flex-wrap items-center gap-1">
+                {isRefund(item) && <Badge variant="outline">{T.refundBadge}</Badge>}
                 {item.source === "notice" && (
                   <Badge variant="outline">{TEXTS.payments.sources.notice}</Badge>
                 )}
@@ -162,7 +167,7 @@ export function PaymentPanel({
                     {T.edit}
                   </Button>
                 )}
-                {item.kind === "payment" && (
+                {item.kind === "payment" && !isRefund(item) && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -228,14 +233,26 @@ export function PaymentPanel({
             </Button>
           </>
         )}
-        <Button
-          variant="outline"
-          className={TOUCH}
-          disabled={pending}
-          onClick={() => setEditing("new")}
-        >
-          {T.add}
-        </Button>
+        {canTakePayment(status) && (
+          <Button
+            variant="outline"
+            className={TOUCH}
+            disabled={pending}
+            onClick={() => setEditing("new")}
+          >
+            {T.add}
+          </Button>
+        )}
+        {balance.paidMinor > 0 && (
+          <Button
+            variant="outline"
+            className={TOUCH}
+            disabled={pending}
+            onClick={() => setRefunding(true)}
+          >
+            {T.refund}
+          </Button>
+        )}
         {status === "partially_paid" && (
           <Button
             variant="outline"
@@ -275,6 +292,21 @@ export function PaymentPanel({
         onClose={() => setEditing(null)}
         onDone={() => {
           setEditing(null);
+          router.refresh();
+        }}
+      />
+      <RefundDialog
+        open={refunding}
+        target={{
+          invoiceId,
+          revision,
+          currency,
+          today,
+          suggestedMinor: Math.min(Math.max(-due, 0), balance.paidMinor),
+        }}
+        onClose={() => setRefunding(false)}
+        onDone={() => {
+          setRefunding(false);
           router.refresh();
         }}
       />

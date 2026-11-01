@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Currency } from "@/lib/currency";
+import type { InvoiceType } from "@/lib/invoice";
 import { formatMoney } from "@/lib/money";
 import { TEXTS } from "@/lib/texts";
 
@@ -28,6 +29,7 @@ export type IssueSummary = {
   totalMinor: number;
   currency: Currency;
   discountNotes: string[];
+  type: InvoiceType;
 };
 
 export function IssueDialog({
@@ -53,6 +55,7 @@ export function IssueDialog({
     setSymbol(null);
     onCancel();
   };
+  const isNote = summary?.type === "credit_note";
   const wrongMonth = summary?.issueDate?.slice(0, 7) !== summary?.today.slice(0, 7);
 
   return (
@@ -71,8 +74,8 @@ export function IssueDialog({
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>{T.title}</AlertDialogTitle>
-            <AlertDialogDescription>{T.body}</AlertDialogDescription>
+            <AlertDialogTitle>{isNote ? T.creditTitle : T.title}</AlertDialogTitle>
+            <AlertDialogDescription>{isNote ? T.creditBody : T.body}</AlertDialogDescription>
           </AlertDialogHeader>
           {summary?.number && <p className="text-sm font-medium">{T.number(summary.number)}</p>}
           {summary && (
@@ -86,17 +89,19 @@ export function IssueDialog({
               <AlertDescription>{note}</AlertDescription>
             </Alert>
           ))}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="issue-variable-symbol">{T.variableSymbol}</Label>
-            <Input
-              id="issue-variable-symbol"
-              inputMode="numeric"
-              maxLength={10}
-              value={shown}
-              onChange={(event) => setSymbol(event.target.value)}
-            />
-            {!shown && automatic && <p className="text-sm text-muted-foreground">{T.noSymbol}</p>}
-          </div>
+          {!isNote && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="issue-variable-symbol">{T.variableSymbol}</Label>
+              <Input
+                id="issue-variable-symbol"
+                inputMode="numeric"
+                maxLength={10}
+                value={shown}
+                onChange={(event) => setSymbol(event.target.value)}
+              />
+              {!shown && automatic && <p className="text-sm text-muted-foreground">{T.noSymbol}</p>}
+            </div>
+          )}
           {wrongMonth && (
             <Alert>
               <AlertDescription className="flex flex-col items-start gap-2">
