@@ -70,6 +70,7 @@ Není součástí první verze, ale architektura s ním počítá:
 - **2FA (TOTP) a passkeys** přes pluginy Better Auth.
 - **Widget s vlastním kódem** v izolovaném sandboxu: iframe bez přístupu k session, síti a stejnému originu, data dostane jen přes `postMessage`.
 - **Editor rozložení faktur** v aplikaci.
+- **Více HTML šablon e-mailů** na výběr, podobně jako designy faktur.
 - **Další banky** přes nové parsery avíz. **Fio API.** Univerzální open banking.
 - **Souhrnné hlášení** pro identifikované osoby.
 - **Další jazyky faktur**, rozhraní s i18n.
@@ -365,6 +366,7 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 - **MAIL-006** Historie odeslání na faktuře: kdy, komu, předmět, výsledek, archivovaný PDF.
 - **MAIL-007** Odkaz „potvrzení přijetí“ a sledovací pixely se nepoužívají.
 - **MAIL-008** Hromadné odeslání ukáže souhrn příjemců a vyžaduje potvrzení.
+- **MAIL-009** Zprávy klientovi mají kromě prostého textu i HTML verzi z jedné neutrální šablony bez barev Fakturanu a bez značky aplikace. Vzhled čeká na výběr zadavatele.
 
 ## 12. Upomínky (REM)
 
@@ -377,6 +379,7 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 - **REM-007** Stejný stupeň upomínky se k faktuře nepošle dvakrát.
 - **REM-008** Odesílá se v čase nastaveném uživatelem, výchozí 9:00 **[návrh]**.
 - **REM-009** Upozornění pro uživatele na faktury po splatnosti a blížící se splatnost: vždy v centru upozornění a na Přehledu, volitelně denní e-mail uživateli. Výchozí stav e-mailu je vypnuto a nikdy nejde klientovi.
+- **REM-010** Volitelný měsíční souhrn e-mailem uživateli, nastavitelný v Nastavení a ve výchozím stavu vypnutý: fakturováno, přijato, pohledávky, faktury po splatnosti a další termíny pravidelných faktur. Klientovi nejde nikdy.
 
 ## 13. Platby (PAY)
 
