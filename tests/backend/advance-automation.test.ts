@@ -394,7 +394,7 @@ describe("hlavní vypínač a odeslání", () => {
     assertConsistent(db, owner);
   });
 
-  test("[MAIL-003] zpráva faktury po záloze uvede zálohu a zbývá 0,00", () => {
+  test("[MAIL-003] zpráva faktury po záloze uvede zálohu a že je uhrazena", () => {
     const { owner, advanceId } = account("issue", { send: true });
 
     pay(owner, advanceId);
@@ -403,8 +403,9 @@ describe("hlavní vypínač a odeslání", () => {
     const money = (minor: number) => formatMoney(minor, "CZK");
     expect(log!.body).toContain(`se splatností`);
     expect(log!.body).toContain(`záloha ${money(TOTAL)}`);
-    expect(log!.body).toContain(`Zbývá uhradit ${money(0)}`);
-    expect(log!.body.indexOf("S pozdravem")).toBeLessThan(log!.body.indexOf("Zbývá uhradit"));
+    expect(log!.body).toContain("Faktura je tím uhrazena.");
+    expect(log!.body).not.toContain("Zbývá uhradit");
+    expect(log!.body.indexOf("S pozdravem")).toBeLessThan(log!.body.indexOf("uhrazena."));
   });
 
   test("[MAIL-003] dialog odeslání větu o záloze ukáže předem", () => {
@@ -413,7 +414,7 @@ describe("hlavní vypínač a odeslání", () => {
     pay(owner, advanceId);
 
     const { body } = sendPrefill(owner, finalId(owner, advanceId));
-    expect(body).toContain("Zbývá uhradit");
+    expect(body).toContain("Faktura je tím uhrazena.");
   });
 
   test("úhrada stará 4 dny fakturu založí, nepošle a řekne proč", () => {

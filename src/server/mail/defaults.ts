@@ -3,12 +3,23 @@ import type { Language } from "@/lib/preferences";
 
 export type MailContent = { subject: string; body: string };
 
+type AdvanceRest = { dueMinor: number; amount: string };
+
 // {{castka}} of a final invoice is its full total, which this line reconciles with what is left.
-export const ADVANCE_FINAL_LINE: Record<Language, (zbyva: string, zaloha: string) => string> = {
-  cs: (zbyva, zaloha) =>
-    `Na fakturu je započtena uhrazená záloha ${zaloha}. Zbývá uhradit ${zbyva}.`,
-  en: (zbyva, zaloha) =>
-    `The advance payment of ${zaloha} has been deducted. The amount outstanding is ${zbyva}.`,
+// `amount` is the size of the rest: the sign is what picks the sentence, it is never printed.
+export const ADVANCE_FINAL_LINE: Record<Language, (rest: AdvanceRest, zaloha: string) => string> = {
+  cs: ({ dueMinor, amount }, zaloha) => {
+    const counted = `Na fakturu je započtena uhrazená záloha ${zaloha}.`;
+    if (dueMinor > 0) return `${counted} Zbývá uhradit ${amount}.`;
+    if (dueMinor < 0) return `${counted} Přeplatek k vrácení činí ${amount}.`;
+    return `${counted} Faktura je tím uhrazena.`;
+  },
+  en: ({ dueMinor, amount }, zaloha) => {
+    const counted = `The advance payment of ${zaloha} has been deducted.`;
+    if (dueMinor > 0) return `${counted} The amount outstanding is ${amount}.`;
+    if (dueMinor < 0) return `${counted} The overpayment to be refunded is ${amount}.`;
+    return `${counted} The invoice is now paid in full.`;
+  },
 };
 
 // Printed to the client in the invoice's language, so they belong to the document and not to the UI

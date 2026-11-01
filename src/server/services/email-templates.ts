@@ -202,9 +202,10 @@ export function composeMail(
       mustStateRest && !statesRest(chosen) ? DEFAULT_MAIL_CONTENT[doc.language].reminder : chosen;
     const base = variablesFor(ownerId, doc, doc.number ?? "", doc.customerName);
     const ctx = { ...base, dateFormat: doc.dateFormat ?? base.dateFormat };
+    const dueMinor = amountDue(doc.totals);
     const extra = {
       castka: formatMoney(doc.totals.totalMinor, doc.currency),
-      zbyva: formatMoney(amountDue(doc.totals), doc.currency),
+      zbyva: formatMoney(Math.max(dueMinor, 0), doc.currency),
       splatnost: doc.dueDate ? formatCalendarDate(doc.dueDate, ctx.dateFormat) : "",
       vs: doc.variableSymbol ?? "",
       dodavatel: doc.snapshot.supplier?.name ?? "",
@@ -217,7 +218,7 @@ export function composeMail(
     const advanceLine =
       kind === "invoice" && doc.totals.advanceMinor > 0
         ? ADVANCE_FINAL_LINE[doc.language](
-            extra.zbyva,
+            { dueMinor, amount: formatMoney(Math.abs(dueMinor), doc.currency) },
             formatMoney(doc.totals.advanceMinor, doc.currency),
           )
         : null;
