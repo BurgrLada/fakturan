@@ -22,8 +22,9 @@ import { bankNotification, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { findOwned, ownerOf, type Invoice } from "./invoices";
-import { holdQueuedMail } from "./mail-hold";
+import { holdQueuedMail, receiptNoticeKey } from "./mail-hold";
 import { mutate, type Audit } from "./mutation";
+import { resolveNotification } from "./notifications";
 
 const E = TEXTS.payments.errors;
 
@@ -197,6 +198,7 @@ export function undoNoticeIn(tx: Tx, audit: Audit, userId: string, noticeId: str
       });
     }
   }
+  for (const { id } of removed) resolveNotification(tx, userId, receiptNoticeKey(id));
   tx.update(bankNotification)
     .set({ status: "pending", reason: "undone", updatedAt: clock.now() })
     .where(scoped(userId).where(bankNotification, (t, { eq }) => eq(t.id, noticeId)))

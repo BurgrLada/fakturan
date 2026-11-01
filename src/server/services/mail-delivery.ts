@@ -23,8 +23,9 @@ import { getCustomer } from "./customers";
 import { archiveSentPdf, readOwnedFile } from "./files";
 import { applySent } from "./invoice-lifecycle";
 import { invoicePdf } from "./invoice-pdf";
-import { mailNoticeKey as noticeKey, samePayment } from "./invoice-mail";
+import { mailNoticeKey as noticeKey, receiptStale, samePayment } from "./invoice-mail";
 import { getInvoice, type InvoiceDetail } from "./invoices";
+import { receiptNoticeKey } from "./mail-hold";
 import { resolveTransport } from "./mail-settings";
 import { mutate } from "./mutation";
 import { resolveNotification, notify } from "./notifications";
@@ -194,6 +195,10 @@ function refusal(log: EmailLog): Refusal | null {
       ? { status: "held", reason: R.paymentGone, quiet: true }
       : { status: "held", reason: R.revision };
   }
+  // Quiet is out of place here: unlike an edited payment, nobody asked for this message to stop.
+  if (log.kind === "payment_receipt" && receiptStale(db, log, row)) {
+    return { status: "held", reason: R.paymentChanged };
+  }
   if (log.trigger !== "automatic") return null;
   if (!log.automation || !automaticSendAllowed(log.userId, log.automation)) {
     return { status: "held", reason: R.automation };
@@ -315,6 +320,7 @@ function recordSentIn(log: EmailLog, { rejected }: SendResult, messageId: string
       )
       .all();
     for (const { id } of earlier) resolveNotification(tx, log.userId, noticeKey(id));
+    if (log.paymentId) resolveNotification(tx, log.userId, receiptNoticeKey(log.paymentId));
     audit({
       entity: "invoice",
       entityId: log.invoiceId,

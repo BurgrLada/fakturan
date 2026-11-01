@@ -232,6 +232,13 @@
       "when": 1793490602312,
       "tag": "0032_email_log_payment",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1793495058646,
+      "tag": "0033_email_log_receipt_print",
+      "breakpoints": true
     }
   ]
 }

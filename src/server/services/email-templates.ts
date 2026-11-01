@@ -42,7 +42,7 @@ function capSubject(subject: string): string {
   return out.trimEnd();
 }
 
-const statesRest = ({ subject, body }: MailContent) =>
+export const statesRest = ({ subject, body }: MailContent) =>
   /\{\{\s*zbyva\s*\}\}/.test(`${subject}\n${body}`);
 
 export type MailDraft = {

@@ -9,6 +9,7 @@ import { automaticSendAllowed } from "./automation";
 import { composeMail, type MailDraft } from "./email-templates";
 import { queueMail, receiptPayment } from "./invoice-mail";
 import { findOwned } from "./invoices";
+import { receiptNoticeKey } from "./mail-hold";
 import type { Audit } from "./mutation";
 import { notify } from "./notifications";
 
@@ -51,7 +52,7 @@ export function queueAutomaticReceipt(tx: Tx, audit: Audit, input: ReceiptInput)
     notify(tx, {
       userId,
       kind,
-      dedupeKey: `receipt:${paymentId}`,
+      dedupeKey: receiptNoticeKey(paymentId),
       params: { ...params, ...extra },
       entity,
     });

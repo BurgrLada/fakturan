@@ -41,6 +41,8 @@ export const emailTemplate = sqliteTable(
   (t) => [uniqueIndex("email_template_user_kind_language_idx").on(t.userId, t.kind, t.language)],
 );
 
+export type ReceiptPrint = { creditedMinor: number; paidOn: string; dueMinor: number };
+
 export const emailLog = sqliteTable(
   "email_log",
   {
@@ -67,6 +69,8 @@ export const emailLog = sqliteTable(
     stageKey: text("stage_key"),
     // No foreign key: the record has to outlive a removed payment to say why it was held (R-24).
     paymentId: text("payment_id"),
+    // What the text stated when it was queued; a resend must not repeat figures that changed since.
+    receiptPrint: text("receipt_print", { mode: "json" }).$type<ReceiptPrint>(),
     acknowledgedAt: integer("acknowledged_at", { mode: "timestamp_ms" }),
     attempts: integer().notNull().default(0),
     messageId: text("message_id"),

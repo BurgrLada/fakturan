@@ -17,6 +17,7 @@ import {
   notification,
   payment,
 } from "@/server/db/schema";
+import { enqueue } from "@/server/jobs/queue";
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { ServiceError } from "@/server/services/access";
@@ -159,6 +160,26 @@ const manualInput = (revision: number, amountMinor: number, over = {}) => ({
   note: "",
   ...over,
 });
+
+const jobOf = (logId: string) =>
+  db
+    .select()
+    .from(job)
+    .all()
+    .find((row) => row.payload.logId === logId)!;
+
+// Stands for a first attempt that waited out the second payment.
+function reenqueue(owner: string, logId: string): void {
+  db.transaction((tx) =>
+    enqueue(tx, {
+      kind: "mail.send",
+      key: `retest:${logId}`,
+      userId: owner,
+      payload: { logId },
+      maxAttempts: 4,
+    }),
+  );
+}
 
 const revisionOf = (owner: string, invoiceId: string) => getInvoice(owner, invoiceId)!.revision;
 
@@ -561,6 +582,186 @@ describe("souběh a vrácení", () => {
 
     expect(logsOf(owner)[0]).toMatchObject({ status: "sent" });
     expect(getInvoice(owner, invoiceId)).toMatchObject({ sentAt: null });
+  });
+});
+
+describe("[BNK-009] opakované odeslání po změně platby", () => {
+  const REQUEST = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  async function deliveredWithStatus(status: "failed" | "unknown") {
+    const { owner, invoiceId } = account({ enabled: false });
+    const actor = webActor(owner);
+    const { id } = addPayment(actor, invoiceId, manualInput(revisionOf(owner, invoiceId), 100_000));
+    sendReceipt(
+      actor,
+      invoiceId,
+      id,
+      clickInput(owner, invoiceId, "cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+    );
+    db.update(emailLog).set({ status, reason: "x" }).where(eq(emailLog.userId, owner)).run();
+    db.delete(job).where(eq(job.userId, owner)).run();
+    return { owner, invoiceId, id, actor, logId: logsOf(owner)[0]!.id };
+  }
+
+  test.each(["failed", "unknown"] as const)(
+    "%s po změně částky nepošle starý text a nový jde přes sendReceipt",
+    async (status) => {
+      const { owner, invoiceId, id, actor, logId } = await deliveredWithStatus(status);
+      updatePayment(actor, id, manualInput(revisionOf(owner, invoiceId), 120_000));
+
+      const draft = sendPrefill(owner, invoiceId, logId);
+      expect(draft.log).toMatchObject({ current: false, paymentId: id });
+      expect(draft.body).toContain(money(120_000));
+      expect(() =>
+        resendFromLog(actor, logId, { confirmedUnknown: true, requestId: REQUEST }),
+      ).toThrow(TEXTS.invoiceMail.errors.staleDraft);
+
+      const { to, cc, bcc, subject, body, revision, requestId } = draft;
+      sendReceipt(actor, invoiceId, id, {
+        requestId,
+        revision,
+        logId,
+        to,
+        cc,
+        bcc,
+        subject,
+        body,
+        confirmedUnknown: true,
+      });
+      await drainJobs(WORKER);
+
+      expect(toClient()).toHaveLength(1);
+      expect(toClient()[0]!.body).toContain(money(120_000));
+      expect(toClient()[0]!.body).not.toContain(money(100_000));
+    },
+  );
+
+  test("změna data se počítá také", async () => {
+    const { owner, invoiceId, id, actor, logId } = await deliveredWithStatus("failed");
+    updatePayment(
+      actor,
+      id,
+      manualInput(revisionOf(owner, invoiceId), 100_000, { paidOn: "2026-10-31" }),
+    );
+    expect(sendPrefill(owner, invoiceId, logId).log).toMatchObject({ current: false });
+  });
+
+  test("změna připsané částky cizí měny zadrží potvrzení a text se přepíše", async () => {
+    const { owner, invoiceId } = account({ enabled: false });
+    const actor = webActor(owner);
+    const foreign = { currency: "EUR" as const, creditedMinor: 25_000 };
+    const { id } = addPayment(
+      actor,
+      invoiceId,
+      manualInput(revisionOf(owner, invoiceId), 1_000, foreign),
+    );
+    sendReceipt(
+      actor,
+      invoiceId,
+      id,
+      clickInput(owner, invoiceId, "dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+    );
+
+    updatePayment(
+      actor,
+      id,
+      manualInput(revisionOf(owner, invoiceId), 1_000, { ...foreign, creditedMinor: 26_000 }),
+    );
+
+    expect(logsOf(owner)[0]).toMatchObject({ status: "held", reason: R.paymentChanged });
+    expect(sendPrefill(owner, invoiceId, logsOf(owner)[0]!.id).body).toContain(money(26_000));
+  });
+
+  test("záznam bez otisku se bere jako změněný", async () => {
+    const { owner, invoiceId, logId } = await deliveredWithStatus("failed");
+    db.update(emailLog).set({ receiptPrint: null }).where(eq(emailLog.id, logId)).run();
+    expect(sendPrefill(owner, invoiceId, logId).log).toMatchObject({ current: false });
+  });
+
+  test("beze změny se pošle uložený text", async () => {
+    const { owner, invoiceId, actor, logId } = await deliveredWithStatus("failed");
+    expect(sendPrefill(owner, invoiceId, logId).log).toMatchObject({ current: true });
+    resendFromLog(actor, logId, { confirmedUnknown: false, requestId: REQUEST });
+    await drainJobs(WORKER);
+    expect(toClient()).toHaveLength(1);
+  });
+
+  test("cizí záznam přes sendReceipt nejde nahradit", async () => {
+    const { owner, invoiceId, actor, logId } = await deliveredWithStatus("failed");
+    const other = addPayment(actor, invoiceId, manualInput(revisionOf(owner, invoiceId), 1_000));
+    expect(() =>
+      sendReceipt(actor, invoiceId, other.id, {
+        ...clickInput(owner, invoiceId, REQUEST),
+        logId,
+      }),
+    ).toThrow(TEXTS.invoiceMail.errors.logNotFound);
+  });
+});
+
+describe("[BNK-009] {{zbyva}} v potvrzení", () => {
+  const withRest = (owner: string) =>
+    saveEmailTemplate(webActor(owner), {
+      kind: "payment_receipt",
+      language: "cs",
+      subject: "Potvrzení",
+      body: "Přijato {{prijato}}, zbývá {{zbyva}}.",
+    });
+
+  test("další platba zadrží potvrzení, které uvádí zbytek, a nový text ho přepočítá", async () => {
+    const { owner, invoiceId } = account();
+    withRest(owner);
+    partial(owner, invoiceId, 100_000);
+    const first = logsOf(owner)[0]!;
+
+    db.delete(job)
+      .where(eq(job.id, jobOf(first.id).id))
+      .run();
+    partial(owner, invoiceId, 50_000);
+    await drainJobs(WORKER);
+    reenqueue(owner, first.id);
+    await drainJobs(WORKER);
+
+    expect(logsOf(owner).find((log) => log.id === first.id)).toMatchObject({
+      status: "held",
+      reason: R.paymentChanged,
+    });
+    expect(noticesOf(owner)).toMatchObject([{ kind: "mail_held" }]);
+    const due = INVOICE_TOTAL - 150_000;
+    expect(sendPrefill(owner, invoiceId, first.id)).toMatchObject({
+      log: { current: false },
+      body: expect.stringContaining(money(due)),
+    });
+  });
+});
+
+describe("[BNK-009] upozornění na neodeslané potvrzení", () => {
+  function noAddress() {
+    const seeded = account();
+    db.update(customer).set({ email: "" }).where(eq(customer.id, seeded.customerId)).run();
+    const { id } = matched(seeded.owner);
+    db.update(customer).set({ email: CLIENT }).where(eq(customer.id, seeded.customerId)).run();
+    return { ...seeded, noticeId: id };
+  }
+
+  test("odeslané potvrzení upozornění vyřeší", async () => {
+    const { owner, invoiceId } = noAddress();
+    const paymentId = paymentsOf(owner)[0]!.id;
+    sendReceipt(
+      webActor(owner),
+      invoiceId,
+      paymentId,
+      clickInput(owner, invoiceId, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+    );
+    await drainJobs(WORKER);
+
+    expect(toClient()).toHaveLength(1);
+    expect(noticesOf(owner)[0]!.resolvedAt).not.toBeNull();
+  });
+
+  test("vrácení avíza upozornění vyřeší", () => {
+    const { owner, noticeId } = noAddress();
+    undoNotice(webActor(owner), noticeId);
+    expect(noticesOf(owner)[0]!.resolvedAt).not.toBeNull();
   });
 });
 

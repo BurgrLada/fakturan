@@ -163,6 +163,7 @@ function Composer({
           body,
           ...(confirmed && { confirmedUnknown: true }),
         };
+        const paymentId = receipt?.paymentId ?? draft.log?.paymentId;
         const reply = reminder
           ? await sendReminderAction({
               id: invoiceId,
@@ -170,10 +171,10 @@ function Composer({
               confirmedRepeat: repeatConfirmed,
               message,
             })
-          : receipt
-            ? await sendReceiptAction({ id: invoiceId, paymentId: receipt.paymentId, message })
-            : recorded
-              ? await resendFromLogAction({ id: logId, requestId, confirmedUnknown: confirmed })
+          : recorded
+            ? await resendFromLogAction({ id: logId, requestId, confirmedUnknown: confirmed })
+            : paymentId
+              ? await sendReceiptAction({ id: invoiceId, paymentId, message })
               : await sendInvoiceAction({ id: invoiceId, message });
         if (reply.ok) onSent();
         else if (reply.error === E.unknownPending) {

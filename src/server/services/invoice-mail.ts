@@ -13,7 +13,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { emailLog, invoice, job, payment, type EmailLog } from "../db/schema";
+import { emailLog, invoice, job, payment, type EmailLog, type ReceiptPrint } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { enqueue } from "../jobs/queue";
 import { kickWorker } from "../jobs/worker";
@@ -21,7 +21,7 @@ import type { MailContent } from "../mail/defaults";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError, type Reader } from "./access";
 import { getAutomation } from "./automation";
-import { composeMail, type MailDraft } from "./email-templates";
+import { composeMail, getEmailTemplate, statesRest, type MailDraft } from "./email-templates";
 import { FileNotFoundError, readOwnedFile } from "./files";
 import { InvoicePdfNotFoundError } from "./invoice-pdf";
 import { findOwned, getInvoice, type Invoice } from "./invoices";
@@ -125,6 +125,8 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
       automation: input.automation ?? null,
       stageKey: input.stageKey ?? null,
       paymentId: input.paymentId ?? null,
+      receiptPrint:
+        kind === "payment_receipt" ? receiptPrint(tx, userId, row, input.paymentId) : null,
       createdAt: now,
       updatedAt: now,
     })
@@ -190,6 +192,25 @@ export function receiptPayment(
         .get()!.sum
     : row.creditedMinor;
   return { creditedMinor, paidOn: row.paidOn };
+}
+
+function receiptPrint(
+  q: Reader,
+  ownerId: string,
+  row: Invoice,
+  paymentId: string | null | undefined,
+): ReceiptPrint {
+  return { ...receiptPayment(q, ownerId, row.id, paymentId), dueMinor: amountDue(row) };
+}
+
+// A later payment moves only the rest, which matters just to a text that states it (R-24).
+export function receiptStale(q: Reader, log: EmailLog, row: Invoice): boolean {
+  const told = log.receiptPrint;
+  if (!told) return true;
+  const { creditedMinor, paidOn, dueMinor } = receiptPrint(q, log.userId, row, log.paymentId);
+  if (creditedMinor !== told.creditedMinor || paidOn !== told.paidOn) return true;
+  if (dueMinor === told.dueMinor) return false;
+  return statesRest(getEmailTemplate(log.userId, "payment_receipt", row.language));
 }
 
 // Bulk sending must skip such a document: it has nowhere to ask for the confirmation.
@@ -346,12 +367,17 @@ export function sendReceipt(
     requestId,
     confirmedUnknown = false,
     revision,
+    logId,
     to,
     cc,
     bcc,
     subject,
     body,
   } = parseSend(raw);
+  if (logId && !loggedRequest(userId, requestKey(userId, requestId))) {
+    const replaced = replacedLog(userId, invoiceId, logId);
+    if (replaced.paymentId !== paymentId) throw new ServiceError(E.logNotFound);
+  }
   return queueClicked(
     actor,
     userId,
@@ -419,6 +445,12 @@ export function resendFromLog(
 
   assertResendable(log);
   if (log.status === "unknown" && !opts.confirmedUnknown) throw new ServiceError(E.confirmUnknown);
+  if (
+    log.kind === "payment_receipt" &&
+    receiptStale(db, log, findOwned(db, userId, log.invoiceId))
+  ) {
+    throw new ServiceError(E.staleDraft);
+  }
   const { to, cc, bcc, subject, body } = log;
   return queueClicked(
     actor,
@@ -531,6 +563,7 @@ export type SendPrefill = MailDraft & {
     status: EmailLog["status"];
     reason: string | null;
     current: boolean;
+    paymentId: string | null;
   } | null;
 };
 
@@ -557,8 +590,10 @@ export function sendPrefill(
     payment: receipt ? receiptPayment(db, ownerId, invoiceId, paymentId) : undefined,
   });
   // After a change the recorded text describes a document the attachment no longer matches. A
-  // receipt speaks of one payment, and that payment was just proven to still exist.
-  const current = log !== undefined && (receipt || log.invoiceRevision === row.revision);
+  // receipt speaks of one payment, whatever else happened to the document.
+  const current =
+    log !== undefined &&
+    (receipt ? !receiptStale(db, log, row) : log.invoiceRevision === row.revision);
   return {
     ...draft,
     ...(log &&
@@ -574,7 +609,9 @@ export function sendPrefill(
     unknownPending:
       log?.status === "unknown" || hasUnresolvedUnknown(ownerId, invoiceId, kind, paymentId),
     paused: getAutomation(ownerId).paused,
-    log: log ? { id: log.id, status: log.status, reason: log.reason, current } : null,
+    log: log
+      ? { id: log.id, status: log.status, reason: log.reason, current, paymentId: log.paymentId }
+      : null,
   };
 }
 
