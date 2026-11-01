@@ -29,6 +29,10 @@ export function RelatedDocuments({
   replaced: boolean;
 }) {
   if (!parent && childDocuments.length === 0) return null;
+  const isReplacement = (row: RelatedDocument) =>
+    replaced && row.type === "invoice" && row.status !== "cancelled";
+  const replacements = childDocuments.filter(isReplacement);
+  const others = childDocuments.filter((row) => !isReplacement(row));
   return (
     <section data-testid="related-documents" className="flex flex-col gap-2 text-sm sm:max-w-xl">
       <h2 className="text-lg">{T.title}</h2>
@@ -42,11 +46,21 @@ export function RelatedDocuments({
           </ul>
         </>
       )}
-      {childDocuments.length > 0 && (
+      {replacements.length > 0 && (
         <>
-          <h3 className="text-muted-foreground">{replaced ? T.replacedBy : T.children}</h3>
+          <h3 className="text-muted-foreground">{T.replacedBy}</h3>
+          <ul>
+            {replacements.map((row) => (
+              <Row key={row.id} row={row} />
+            ))}
+          </ul>
+        </>
+      )}
+      {others.length > 0 && (
+        <>
+          <h3 className="text-muted-foreground">{T.children}</h3>
           <ul className="flex flex-col gap-1">
-            {childDocuments.map((row) => (
+            {others.map((row) => (
               <Row key={row.id} row={row} />
             ))}
           </ul>

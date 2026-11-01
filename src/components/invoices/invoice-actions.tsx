@@ -47,6 +47,7 @@ export function InvoiceActions({
   id,
   editable,
   cancellable,
+  covered,
   hasPayments,
   hasCredits,
   hasFinal,
@@ -61,6 +62,7 @@ export function InvoiceActions({
   id: string;
   editable: boolean;
   cancellable: boolean;
+  covered: boolean;
   hasPayments: boolean;
   hasCredits: boolean;
   hasFinal: boolean;
@@ -235,6 +237,11 @@ export function InvoiceActions({
       {(hasPayments || hasCredits || hasFinal) && (
         <p data-testid="cancel-blocked" className="text-sm text-muted-foreground">
           {hasPayments ? T.cancelBlocked : hasFinal ? T.cancelFinal : T.cancelCredited}
+        </p>
+      )}
+      {covered && !hasCredits && (
+        <p data-testid="cancel-covered" className="text-sm text-muted-foreground">
+          {T.cancelCovered}
         </p>
       )}
       {mail.sendable && !mail.available && (

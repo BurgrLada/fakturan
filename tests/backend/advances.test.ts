@@ -5,13 +5,14 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ADVANCE_NOTE } from "@/lib/clauses";
 import { isOverdue } from "@/lib/invoice";
-import { documentQrInput, planQr } from "@/lib/qr-payload";
+import { amountDue, documentQrInput, planQr } from "@/lib/qr-payload";
 import { isEligibleForReminder } from "@/lib/reminders";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, invoice, invoiceTag, type bankNotification } from "@/server/db/schema";
 import { convertAdvance } from "@/server/services/advances";
-import { ingestNotice, type IngestInput } from "@/server/services/bank-notices";
+import { ingestNotice, noticeCandidates, type IngestInput } from "@/server/services/bank-notices";
+import { createCreditNote } from "@/server/services/credit-notes";
 import { saveSupplier, getSupplier } from "@/server/services/supplier";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import {
@@ -51,6 +52,13 @@ vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
 vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
 vi.stubEnv("DATA_DIR", mkdtempSync(join(tmpdir(), "fakturan-advances-")));
+
+const hidden = vi.hoisted(() => ({ final: false }));
+vi.mock("@/server/services/invoice-balance", async (original) => {
+  const real = await original<typeof import("@/server/services/invoice-balance")>();
+  const finalOf: typeof real.finalOf = (...args) => (hidden.final ? null : real.finalOf(...args));
+  return { ...real, finalOf };
+});
 
 const db = createTestDb();
 const NOW = new Date("2026-03-20T10:00:00Z");
@@ -347,16 +355,60 @@ describe("konečná faktura", () => {
     assertConsistent(db, owner);
   });
 
-  test("faktura uhrazená jen zálohou přejde po zvýšení celku na partially_paid a varuje", () => {
+  test("faktura uhrazená jen zálohou má po zvýšení celku základní stav a varuje", () => {
     const { owner, advanceId } = paidAdvance();
     const finalId = issue(owner, convert(owner, advanceId));
     markSent(webActor(owner), finalId);
 
     const result = raiseTotal(owner, finalId, 1_210_000);
 
-    expect(result).toMatchObject({ status: "partially_paid", balanceWarning: "underpaid" });
+    expect(result).toMatchObject({ status: "sent", balanceWarning: "underpaid" });
     refreshCustomerSnapshot(webActor(owner), finalId);
-    expect(row(owner, finalId).status).toBe("partially_paid");
+    expect(row(owner, finalId).status).toBe("sent");
+    assertConsistent(db, owner);
+  });
+
+  test("faktura uhrazená zálohou jde stornovat a vrácení storna dopočítá stav", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = issue(owner, convert(owner, advanceId));
+    expect(row(owner, finalId).status).toBe("paid");
+
+    cancelInvoice(webActor(owner), finalId);
+
+    expect(row(owner, finalId)).toMatchObject({ status: "cancelled", cancelledFrom: "paid" });
+    expect(row(owner, advanceId).supersededAt).toBeNull();
+    assertConsistent(db, owner);
+
+    refund(owner, advanceId, 1_000_000);
+    restoreInvoice(webActor(owner), finalId);
+
+    expect(row(owner, finalId)).toMatchObject({ status: "issued", advanceMinor: 0 });
+    assertConsistent(db, owner);
+  });
+
+  test("faktura s vlastní platbou stornovat nejde ani po záloze", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = convert(owner, advanceId);
+    setFinalDraft(owner, finalId, 1_210_000);
+    issue(owner, finalId);
+    pay(owner, finalId, 100_000);
+
+    expect(() => cancelInvoice(webActor(owner), finalId)).toThrow(V.hasPayments);
+  });
+
+  test("[CRN-005] oprava konečné faktury a vrácení na záloze dá credited", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = issue(owner, convert(owner, advanceId));
+    const note = createCreditNote(webActor(owner), finalId);
+    issue(owner, note.id);
+
+    expect(row(owner, finalId)).toMatchObject({ status: "paid", creditsMinor: -1_000_000 });
+    expect(amountDue(row(owner, finalId))).toBe(-1_000_000);
+    assertConsistent(db, owner);
+
+    refund(owner, advanceId, 1_000_000);
+
+    expect(row(owner, finalId)).toMatchObject({ status: "credited", advanceMinor: 0 });
     assertConsistent(db, owner);
   });
 
@@ -546,6 +598,20 @@ describe("nahrazení zálohy", () => {
 
     expect(isFinalConflict(conflict)).toBe(true);
     expect(isFinalConflict(new Error("jiná chyba"))).toBe(false);
+  });
+
+  test("restoreInvoice převede porušení indexu na finalExists", () => {
+    const { owner, advanceId, finalId } = replaced();
+    cancelInvoice(webActor(owner), finalId);
+    convert(owner, advanceId);
+
+    hidden.final = true;
+    try {
+      expect(() => restoreInvoice(webActor(owner), finalId)).toThrow(V.finalExists);
+    } finally {
+      hidden.final = false;
+    }
+    expect(row(owner, finalId).status).toBe("cancelled");
   });
 
   test("zálohu s aktivní fakturou nejde stornovat", () => {
@@ -741,6 +807,19 @@ describe("stejný VS záloh a faktur", () => {
     expect(row(owner, advanceId).paidMinor).toBe(0);
     assertConsistent(db, owner);
   });
+
+  test("nahrazená záloha není mezi kandidáty a pro frontu se nepočítá", () => {
+    const { owner, customerId, bankAccountId } = bankAccount();
+    const advanceId = issuedAdvance(owner, customerId, 1_000_000, { bankAccountId });
+    const finalId = issue(owner, convert(owner, advanceId));
+
+    const notice = ingestNotice(owner, income(555_00));
+
+    expect(notice).toMatchObject<Partial<Notice>>({ status: "pending", reason: "amount" });
+    if (notice.status === "duplicate") throw new Error("avízo je nové");
+    const ids = noticeCandidates(owner, notice.id, "").candidates.map((item) => item.id);
+    expect(ids).toEqual([finalId]);
+  });
 });
 
 describe("kontrola konzistence", () => {
@@ -787,6 +866,22 @@ describe("kontrola konzistence", () => {
     expect(() => assertConsistent(db, owner)).toThrow("jiné měně");
   });
 
+  test("[TST-018] kontrola odhalí jiného zákazníka a nesedící advance_minor", () => {
+    const { owner, customerId } = account();
+    const advanceId = issuedAdvance(owner, customerId);
+    const finalId = issue(owner, convert(owner, advanceId));
+
+    db.update(invoice)
+      .set({ customerId: seedCustomer(owner) })
+      .where(eq(invoice.id, finalId))
+      .run();
+    expect(() => assertConsistent(db, owner)).toThrow("jiného zákazníka");
+    db.update(invoice).set({ customerId }).where(eq(invoice.id, finalId)).run();
+
+    db.update(invoice).set({ advanceMinor: 100 }).where(eq(invoice.id, finalId)).run();
+    expect(() => assertConsistent(db, owner)).toThrow("advance_minor");
+  });
+
   test("[TST-018] stornovaná konečná faktura smí mít advance_minor starý", () => {
     const { owner, customerId } = account();
     const advanceId = issuedAdvance(owner, customerId);
@@ -817,6 +912,5 @@ describe("audit", () => {
 
     expect(actions(finalId)).toContain("invoice.final_from_advance");
     expect(actions(advanceId).filter((item) => item === "invoice.superseded")).toHaveLength(2);
-    expect(actions(advanceId)).toContain("invoice.superseded");
   });
 });

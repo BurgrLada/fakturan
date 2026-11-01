@@ -423,6 +423,8 @@ export const TEXTS = {
       cancelConfirm: "Stornovat fakturu",
       cancelBlocked: "Doklad s platbou stornovat nejde. Nejdřív platby smažte.",
       cancelCredited: "Fakturu s opravnou fakturou stornovat nejde. Nejdřív stornujte opravu.",
+      cancelCovered:
+        "Faktura nemá vlastní platby, je uhrazená zálohou. Storno vrátí zálohu mezi otevřené doklady a platba na ní zůstane.",
       cancelFinal:
         "Zálohu s konečnou fakturou stornovat nejde. Nejdřív stornujte fakturu nebo smažte její koncept.",
       failed: "Akce se nezdařila. Zkuste to znovu.",
@@ -790,6 +792,7 @@ export const TEXTS = {
       paid: "Uhrazeno",
       left: "Zbývá uhradit",
       overpaid: (amount: string) => `Přeplatek k vrácení ${amount}`,
+      overpaidAdvance: "Peníze jsou na záloze, vrácení zapište tam:",
       empty: "Zatím nepřišla žádná platba.",
       refund: "Vrátit peníze",
       refundBadge: "Vrácení",

@@ -90,7 +90,7 @@ function assertEditable(row: Invoice): void {
 function balanceWarningOf(row: Invoice, statusBefore: InvoiceStatus): BalanceWarning {
   if (row.type === "credit_note") return "none";
   if (amountDue(row) < 0) return "overpaid";
-  return statusBefore === "paid" && row.status === "partially_paid" ? "underpaid" : "none";
+  return statusBefore === "paid" && amountDue(row) > 0 ? "underpaid" : "none";
 }
 
 function resultOf(row: Invoice, changed: boolean, statusBefore = row.status): EditResult {

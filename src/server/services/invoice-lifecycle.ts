@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   isActiveDocument,
+  isCancellable,
   isFinalInvoice,
   type InvoiceStatus,
   type InvoiceType,
@@ -583,7 +584,7 @@ export function cancelInvoice(actor: Actor, id: string): void {
     if (row.type === "advance" && finalOf(tx, row.userId, id)) {
       throw new ServiceError(V.hasFinalInvoice);
     }
-    if (row.status !== "issued" && row.status !== "sent") throw new ServiceError(V.notCancellable);
+    if (!isCancellable(row)) throw new ServiceError(V.notCancellable);
     return { status: "cancelled", cancelledFrom: row.status };
   });
 }

@@ -100,6 +100,11 @@ describe("matchNotice", () => {
     });
   });
 
+  test("[BNK-008] samotná nahrazená záloha je pro frontu uzavřená, ne jiná částka", () => {
+    const replaced = candidate({ id: "adv-1", supersededAt: new Date(0) });
+    expect(match(notice({ amountMinor: 777 }), [replaced])).toMatchObject({ reason: "closed" });
+  });
+
   test("[BNK-008] vystavená faktura a úvodní nuly na obou stranách se spárují", () => {
     const issued = candidate({ status: "issued", variableSymbol: "0020260042" });
     expect(match(notice({ variableSymbol: "020260042" }), [issued])).toMatchObject({

@@ -81,8 +81,9 @@ export function matchNotice(
   const sameSymbol = symbol
     ? candidates.filter((row) => normalizeSymbol(row.variableSymbol) === symbol)
     : [];
-  const open = sameSymbol.filter((row) =>
-    (AWAITING_PAYMENT as readonly InvoiceStatus[]).includes(row.status),
+  const open = sameSymbol.filter(
+    (row) =>
+      (AWAITING_PAYMENT as readonly InvoiceStatus[]).includes(row.status) && !row.supersededAt,
   );
 
   const blocked = blockReason(notice, opts.autoAllowed);

@@ -88,6 +88,16 @@ export function isFinalInvoice(row: {
   return row.type === "invoice" && row.relatedInvoiceId !== null;
 }
 
+// A final invoice settled by its advance has no money of its own to protect.
+export function isCancellable(row: {
+  type: InvoiceType;
+  status: InvoiceStatus;
+  relatedInvoiceId: string | null;
+}): boolean {
+  if (row.status === "issued" || row.status === "sent") return true;
+  return isFinalInvoice(row) && (row.status === "paid" || row.status === "partially_paid");
+}
+
 export function isActiveDocument(status: InvoiceStatus): boolean {
   return (ACTIVE_CREDIT_STATUSES as readonly InvoiceStatus[]).includes(status);
 }

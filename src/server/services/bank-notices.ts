@@ -666,6 +666,7 @@ export function noticeCandidates(
           inArray(t.status, [...AWAITING_PAYMENT, "paid"]),
           isNotNull(t.number),
           ne(t.type, "credit_note"),
+          isNull(t.supersededAt),
         ),
       ),
     )

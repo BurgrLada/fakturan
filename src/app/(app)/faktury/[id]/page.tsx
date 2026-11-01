@@ -15,7 +15,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
-import { addDays, isConvertibleAdvance, isCreditable, isOverdue } from "@/lib/invoice";
+import {
+  addDays,
+  isCancellable,
+  isConvertibleAdvance,
+  isCreditable,
+  isOverdue,
+} from "@/lib/invoice";
 import { isSendable } from "@/lib/mail-send";
 import { invoiceDocument } from "@/lib/invoice-document";
 import { formatMoney } from "@/lib/money";
@@ -189,7 +195,10 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
       <InvoiceActions
         id={id}
         editable={editable}
-        cancellable={row.status === "issued" || row.status === "sent"}
+        cancellable={isCancellable(row)}
+        covered={
+          isCancellable(row) && row.status !== "issued" && row.status !== "sent" && !payments.length
+        }
         hasPayments={takesPayment && payments.length > 0}
         hasCredits={row.creditsMinor < 0 && row.status !== "cancelled"}
         hasFinal={final !== null}
@@ -255,6 +264,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
             supersededAt: row.supersededAt,
           }}
           today={today}
+          advance={related.parent?.type === "advance" ? related.parent : null}
           payments={payments.map((item) => ({
             id: item.id,
             kind: item.kind,

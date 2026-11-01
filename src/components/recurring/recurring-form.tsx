@@ -275,7 +275,7 @@ export function RecurringForm(props: RecurringFormProps) {
       name,
       customerId,
       document: {
-        type: type,
+        type,
         bankAccountId: f.bankAccountId,
         dueDays: numbers.dueDays,
         language: f.language,

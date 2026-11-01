@@ -46,11 +46,7 @@ export function deriveStatus(input: {
   const untouched = input.paidMinor === 0 && input.advanceMinor === 0;
   if (input.totalMinor > 0 && input.creditsMinor < 0 && due === 0 && untouched) return "credited";
   if (input.totalMinor > 0 && due <= 0) return "paid";
-  // Raising a final invoice the advance had covered reopens a settled document, unlike a final
-  // invoice issued with a balance, which keeps its base status (R-4).
-  const covered =
-    input.advanceMinor > 0 && (input.status === "paid" || input.status === "partially_paid");
-  if ((input.paidMinor > 0 || covered) && due > 0) return "partially_paid";
+  if (input.paidMinor > 0 && due > 0) return "partially_paid";
   return input.sentAt ? "sent" : "issued";
 }
 

@@ -48,6 +48,7 @@ export function PaymentPanel({
   balance,
   today,
   payments,
+  advance,
 }: {
   invoiceId: string;
   revision: number;
@@ -56,6 +57,7 @@ export function PaymentPanel({
   balance: Balance;
   today: string;
   payments: PaymentView[];
+  advance: { id: string; number: string | null } | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -117,6 +119,14 @@ export function PaymentPanel({
           className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-foreground"
         >
           {T.overpaid(formatMoney(-due, currency))}
+          {advance && (
+            <span className="block font-normal" data-testid="payment-overpaid-advance">
+              {T.overpaidAdvance}{" "}
+              <Link href={`/faktury/${advance.id}`} className="underline underline-offset-4">
+                {advance.number}
+              </Link>
+            </span>
+          )}
         </p>
       )}
       {payments.length === 0 ? (

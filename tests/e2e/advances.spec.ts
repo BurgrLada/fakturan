@@ -63,6 +63,60 @@ test("záloha, úhrada, faktura", async ({ page, freshApp }) => {
   await expect(page.getByTestId("payment-panel")).toBeVisible();
 });
 
+test("faktura uhrazená zálohou: přeplatek odkazuje na zálohu a storno ji vrátí", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await addSupplier(page, baseURL);
+  await addCustomer(page, baseURL);
+  await page.goto(`${baseURL}/faktury`);
+  await page.getByRole("link", { name: "Nová záloha" }).click();
+  await page.waitForLoadState("networkidle");
+  await chooseCustomer(page);
+  await fillLine(page, 0, "Záloha na web", "1000");
+  await page.getByLabel("Způsob platby").selectOption("cash");
+  await settled(page);
+  await issue(page);
+  const advanceUrl = page.url();
+  await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+  await expect(page.getByTestId("payment-paid")).toHaveText(money("1 000,00 Kč"));
+  await page.getByRole("button", { name: "Vytvořit konečnou fakturu" }).click();
+  await expect(page.getByRole("heading", { name: "Koncept faktury" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await issue(page);
+  const finalUrl = page.url();
+
+  await page.getByRole("button", { name: "Vytvořit opravnou fakturu" }).click();
+  await expect(page.getByRole("heading", { name: "Koncept opravné faktury" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Cena za jednotku").fill("-400");
+  await settled(page);
+  await issue(page);
+  const noteUrl = page.url();
+  await page.goto(finalUrl);
+  await expect(page.getByTestId("payment-overpaid-advance").getByRole("link")).toHaveAttribute(
+    "href",
+    new URL(advanceUrl).pathname,
+  );
+
+  await page.goto(noteUrl);
+  await page.getByRole("button", { name: "Stornovat" }).click();
+  await page.getByRole("button", { name: "Stornovat fakturu" }).click();
+  await expect(page.getByText("Stornovaná").first()).toBeVisible();
+
+  await page.goto(finalUrl);
+  await expect(page.getByTestId("cancel-covered")).toBeVisible();
+  await page.getByRole("button", { name: "Stornovat" }).click();
+  await page.getByRole("button", { name: "Stornovat fakturu" }).click();
+  await expect(page.getByRole("button", { name: "Vrátit storno" })).toBeVisible();
+
+  await page.goto(advanceUrl);
+  await expect(page.getByText("Nahrazená")).toHaveCount(0);
+  await expect(page.getByTestId("related-documents")).not.toContainText("Nahrazeno fakturou");
+});
+
 test("plán pravidelné faktury nabízí zálohu a text zálohy jde upravit", async ({
   page,
   freshApp,
