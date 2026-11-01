@@ -13,7 +13,15 @@ import { NoticeSplitDialog } from "./notice-split-dialog";
 const T = TEXTS.bankQueue;
 const TOUCH = "max-sm:h-11 max-sm:min-w-11";
 
-export function NoticeQueue({ rows, total }: { rows: NoticeItem[]; total: number }) {
+export function NoticeQueue({
+  rows,
+  total,
+  receipts,
+}: {
+  rows: NoticeItem[];
+  total: number;
+  receipts: boolean;
+}) {
   const router = useRouter();
   const { pending, error, run } = useNoticeRunner();
   const [assigning, setAssigning] = useState<NoticeItem | null>(null);
@@ -77,6 +85,7 @@ export function NoticeQueue({ rows, total }: { rows: NoticeItem[]; total: number
       )}
       <NoticeAssignDialog
         notice={assigning}
+        receipts={receipts}
         onClose={() => setAssigning(null)}
         onDone={() => {
           setAssigning(null);
@@ -85,6 +94,7 @@ export function NoticeQueue({ rows, total }: { rows: NoticeItem[]; total: number
       />
       <NoticeSplitDialog
         notice={splitting}
+        receipts={receipts}
         onClose={() => setSplitting(null)}
         onDone={() => {
           setSplitting(null);

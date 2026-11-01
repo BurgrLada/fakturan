@@ -2,10 +2,12 @@
 
 import { useEffect, useId, useState, useTransition, type FormEvent } from "react";
 import {
+  receiptPrefillAction,
   reminderPrefillAction,
   resendFromLogAction,
   sendInvoiceAction,
   sendPrefillAction,
+  sendReceiptAction,
   sendReminderAction,
 } from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,6 +32,7 @@ const E = TEXTS.invoiceMail.errors;
 const R = TEXTS.reminders;
 
 export type ReminderChoice = { stageKey: string | null };
+export type ReceiptChoice = { paymentId: string };
 
 function Field({
   label,
@@ -85,12 +88,14 @@ function Composer({
   invoiceId,
   logId,
   reminder,
+  receipt,
   onClose,
   onSent,
 }: {
   invoiceId: string;
   logId?: string;
   reminder?: ReminderChoice;
+  receipt?: ReceiptChoice;
   onClose: () => void;
   onSent: () => void;
 }) {
@@ -109,7 +114,9 @@ function Composer({
     let current = true;
     const prefill = reminder
       ? reminderPrefillAction({ id: invoiceId, stageKey: reminder.stageKey })
-      : sendPrefillAction({ id: invoiceId, logId });
+      : receipt
+        ? receiptPrefillAction({ id: invoiceId, paymentId: receipt.paymentId })
+        : sendPrefillAction({ id: invoiceId, logId });
     prefill.then(
       (reply) => {
         if (!current) return;
@@ -132,7 +139,7 @@ function Composer({
     return () => {
       current = false;
     };
-  }, [invoiceId, logId, reminder]);
+  }, [invoiceId, logId, reminder, receipt]);
 
   const blocked =
     !draft || (draft.unknownPending && !confirmed) || (draft.repeat === true && !repeatConfirmed);
@@ -163,9 +170,11 @@ function Composer({
               confirmedRepeat: repeatConfirmed,
               message,
             })
-          : recorded
-            ? await resendFromLogAction({ id: logId, requestId, confirmedUnknown: confirmed })
-            : await sendInvoiceAction({ id: invoiceId, message });
+          : receipt
+            ? await sendReceiptAction({ id: invoiceId, paymentId: receipt.paymentId, message })
+            : recorded
+              ? await resendFromLogAction({ id: logId, requestId, confirmedUnknown: confirmed })
+              : await sendInvoiceAction({ id: invoiceId, message });
         if (reply.ok) onSent();
         else if (reply.error === E.unknownPending) {
           setDraft({ ...draft, unknownPending: true });
@@ -184,7 +193,7 @@ function Composer({
     <form onSubmit={submit} className="contents">
       <AlertDialogHeader>
         <AlertDialogTitle>
-          {reminder ? R.dialog.title : logId ? T.resendTitle : T.title}
+          {reminder ? R.dialog.title : receipt ? T.receiptTitle : logId ? T.resendTitle : T.title}
         </AlertDialogTitle>
         <AlertDialogDescription>
           {draft ? (recorded ? draft.attachmentName : T.review) : error ? T.loadFailed : T.loading}
@@ -282,6 +291,7 @@ export function SendDialog({
   invoiceId,
   logId,
   reminder,
+  receipt,
   open,
   onClose,
   onSent,
@@ -289,6 +299,7 @@ export function SendDialog({
   invoiceId: string;
   logId?: string;
   reminder?: ReminderChoice;
+  receipt?: ReceiptChoice;
   open: boolean;
   onClose: () => void;
   onSent: () => void;
@@ -305,6 +316,7 @@ export function SendDialog({
           invoiceId={invoiceId}
           logId={logId}
           reminder={reminder}
+          receipt={receipt}
           onClose={onClose}
           onSent={onSent}
         />

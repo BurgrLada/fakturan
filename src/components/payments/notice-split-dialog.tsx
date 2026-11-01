@@ -30,10 +30,12 @@ const EMPTY: Part = { invoiceId: "", amount: "", credited: "" };
 
 function Form({
   notice,
+  receipts,
   onClose,
   onDone,
 }: {
   notice: NoticeItem;
+  receipts: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -81,7 +83,7 @@ function Form({
     <form onSubmit={submit} className="flex flex-col gap-3">
       <AlertDialogHeader>
         <AlertDialogTitle>{T.title}</AlertDialogTitle>
-        <AlertDialogDescription>{A.noMail}</AlertDialogDescription>
+        <AlertDialogDescription>{A.mailNote(receipts)}</AlertDialogDescription>
       </AlertDialogHeader>
       {notice.provisional && (
         <p className="text-xs text-muted-foreground" data-testid="provisional-notice">
@@ -201,10 +203,12 @@ function Form({
 
 export function NoticeSplitDialog({
   notice,
+  receipts,
   onClose,
   onDone,
 }: {
   notice: NoticeItem | null;
+  receipts: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -216,7 +220,15 @@ export function NoticeSplitDialog({
       }}
     >
       <AlertDialogContent className="max-h-[90dvh] overflow-y-auto">
-        {notice && <Form key={notice.id} notice={notice} onClose={onClose} onDone={onDone} />}
+        {notice && (
+          <Form
+            key={notice.id}
+            notice={notice}
+            receipts={receipts}
+            onClose={onClose}
+            onDone={onDone}
+          />
+        )}
       </AlertDialogContent>
     </AlertDialog>
   );

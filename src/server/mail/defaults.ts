@@ -61,7 +61,7 @@ export const DEFAULT_MAIL_CONTENT: Record<Language, Record<MessageKind, MailCont
       body: [
         "Dobrý den,",
         "",
-        "děkuji za platbu faktury {{cislo_faktury}}. Doklad je v příloze.",
+        "děkuji za platbu {{prijato}} k faktuře {{cislo_faktury}}. Doklad je v příloze.",
         "",
         "S pozdravem",
         "{{dodavatel}}",
@@ -123,7 +123,7 @@ export const DEFAULT_MAIL_CONTENT: Record<Language, Record<MessageKind, MailCont
       body: [
         "Hello,",
         "",
-        "thank you for paying invoice {{cislo_faktury}}. The document is attached.",
+        "thank you for your payment of {{prijato}} towards invoice {{cislo_faktury}}. The document is attached.",
         "",
         "Kind regards,",
         "{{dodavatel}}",

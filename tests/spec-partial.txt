@@ -14,6 +14,6 @@ SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 UI-011	Chybí blížící se limity, spec je nedefinuje	plán 8
 INV-024	Chybí export (plán 8)	plán 8
-TST-016	Matice kryje jen pravidelné odeslání a upomínky, potvrzení platby a faktura po záloze přijdou s automatikami	plán 5, plán 6
+TST-016	Matice kryje pravidelné odeslání, upomínky a potvrzení platby, faktura po záloze přijde s automatikou	plán 6
 BNK-005	Česká varianta je prozatímní bez reálného vzorku, automaticky se nepáruje	dodání vzorku zadavatelem
 TST-006	Tok přes testovací IMAP server hotový, chybí skutečný český vzorek	dodání vzorku zadavatelem

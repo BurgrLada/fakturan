@@ -116,10 +116,12 @@ export function CandidateOptions({ candidates }: { candidates: Candidate[] }) {
 
 function Form({
   notice,
+  receipts,
   onClose,
   onDone,
 }: {
   notice: NoticeItem;
+  receipts: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -166,7 +168,7 @@ function Form({
     <form onSubmit={submit} className="flex flex-col gap-3">
       <AlertDialogHeader>
         <AlertDialogTitle>{T.title}</AlertDialogTitle>
-        <AlertDialogDescription>{T.noMail}</AlertDialogDescription>
+        <AlertDialogDescription>{T.mailNote(receipts)}</AlertDialogDescription>
       </AlertDialogHeader>
       {notice.provisional && (
         <p className="text-xs text-muted-foreground" data-testid="provisional-notice">
@@ -252,10 +254,12 @@ function Form({
 
 export function NoticeAssignDialog({
   notice,
+  receipts,
   onClose,
   onDone,
 }: {
   notice: NoticeItem | null;
+  receipts: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -267,7 +271,15 @@ export function NoticeAssignDialog({
       }}
     >
       <AlertDialogContent className="max-h-[90dvh] overflow-y-auto">
-        {notice && <Form key={notice.id} notice={notice} onClose={onClose} onDone={onDone} />}
+        {notice && (
+          <Form
+            key={notice.id}
+            notice={notice}
+            receipts={receipts}
+            onClose={onClose}
+            onDone={onDone}
+          />
+        )}
       </AlertDialogContent>
     </AlertDialog>
   );

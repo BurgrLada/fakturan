@@ -345,3 +345,31 @@ test("[INV-024] hromadné označení přeskočí koncept a storno a nic neodešl
   await page.waitForTimeout(2_500);
   expect(smtp.messages).toHaveLength(0);
 });
+
+test("ruční potvrzení jde přes dialog a nic neodejde bez kliknutí", async ({
+  page,
+  freshApp,
+  smtp,
+}) => {
+  await ready(page, freshApp.baseURL, smtp);
+  const url = await issuedCash(page, freshApp.baseURL);
+  await page.goto(url);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+  await expect(page.getByTestId("payment-row")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Poslat potvrzení" }).click();
+  await expect(dialog(page)).toContainText("Poslat potvrzení platby");
+  await expect(dialog(page).getByLabel("Text", { exact: true })).toHaveValue(/1\s000,00/);
+  await dialog(page).getByRole("button", { name: "Zpět" }).click();
+  await expect(dialog(page)).toBeHidden();
+  expect(smtp.connections()).toBe(0);
+
+  await page.getByRole("button", { name: "Poslat potvrzení" }).click();
+  await expect(dialog(page).getByLabel("Text", { exact: true })).toHaveValue(/1\s000,00/);
+  await dialog(page).getByRole("button", { name: "Odeslat" }).click();
+  await expect(page.getByTestId("payment-panel")).toContainText(
+    "Potvrzení je zařazené k odeslání.",
+  );
+  await expect.poll(() => smtp.messages.length, { timeout: 20_000 }).toBe(1);
+});

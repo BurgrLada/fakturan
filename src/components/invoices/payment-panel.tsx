@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   closeDifferenceAction,
   deletePaymentAction,
@@ -29,6 +29,7 @@ import { amountDue } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { PaymentDialog, type PaymentView } from "./payment-dialog";
+import { SendDialog } from "./send-dialog";
 
 const T = TEXTS.payments.panel;
 const N = TEXTS.bankQueue.paymentPanel;
@@ -64,6 +65,8 @@ export function PaymentPanel({
   const [returning, setReturning] = useState<PaymentView | null>(null);
   const [closing, setClosing] = useState(false);
   const [expired, setExpired] = useState(false);
+  const [receiptFor, setReceiptFor] = useState<string | null>(null);
+  const receipt = useMemo(() => (receiptFor ? { paymentId: receiptFor } : undefined), [receiptFor]);
 
   const due = amountDue({ totalMinor, paidMinor });
 
@@ -138,7 +141,7 @@ export function PaymentPanel({
                   {item.note && ` · ${item.note}`}
                 </span>
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex flex-wrap items-center gap-1">
                 {item.source === "notice" && (
                   <Badge variant="outline">{TEXTS.payments.sources.notice}</Badge>
                 )}
@@ -159,6 +162,17 @@ export function PaymentPanel({
                     onClick={() => setEditing(item)}
                   >
                     {T.edit}
+                  </Button>
+                )}
+                {item.kind === "payment" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={TOUCH}
+                    disabled={pending}
+                    onClick={() => setReceiptFor(item.id)}
+                  >
+                    {T.sendReceipt}
                   </Button>
                 )}
                 {item.notificationId && (
@@ -266,6 +280,19 @@ export function PaymentPanel({
           router.refresh();
         }}
       />
+      {receipt && (
+        <SendDialog
+          invoiceId={invoiceId}
+          receipt={receipt}
+          open
+          onClose={() => setReceiptFor(null)}
+          onSent={() => {
+            setReceiptFor(null);
+            setMessage({ ok: true, text: T.receiptQueued });
+            router.refresh();
+          }}
+        />
+      )}
       <AlertDialog open={closing} onOpenChange={setClosing}>
         <AlertDialogContent>
           <AlertDialogHeader>

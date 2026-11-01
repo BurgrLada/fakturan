@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { PageLoading } from "@/components/page-loading";
 import { EmailTemplateForm } from "@/components/settings/email-template-form";
-import { MAIL_VARIABLE_NAMES } from "@/lib/template-vars";
+import { RECEIPT_VARIABLE_NAMES } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { listEmailTemplates } from "@/server/services/email-templates";
@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
 async function TemplatesContent() {
   const { user } = await requireSession();
   return (
-    <EmailTemplateForm templates={listEmailTemplates(user.id)} variables={MAIL_VARIABLE_NAMES} />
+    <EmailTemplateForm templates={listEmailTemplates(user.id)} variables={RECEIPT_VARIABLE_NAMES} />
   );
 }
 

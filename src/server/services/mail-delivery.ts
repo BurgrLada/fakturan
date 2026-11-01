@@ -12,7 +12,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { emailLog, job, user, type EmailLog, type Job } from "../db/schema";
+import { emailLog, job, payment, user, type EmailLog, type Job } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { completeJob, retryJob } from "../jobs/queue";
 import { RetryLater } from "../jobs/registry";
@@ -23,7 +23,7 @@ import { getCustomer } from "./customers";
 import { archiveSentPdf, readOwnedFile } from "./files";
 import { applySent } from "./invoice-lifecycle";
 import { invoicePdf } from "./invoice-pdf";
-import { mailNoticeKey as noticeKey } from "./invoice-mail";
+import { mailNoticeKey as noticeKey, samePayment } from "./invoice-mail";
 import { getInvoice, type InvoiceDetail } from "./invoices";
 import { resolveTransport } from "./mail-settings";
 import { mutate } from "./mutation";
@@ -166,6 +166,21 @@ function reminderLapsed(log: EmailLog, row: InvoiceDetail): boolean {
   return snoozed || !isEligibleForReminder(row, card);
 }
 
+// A later payment raises the revision too and must not stop the receipt of an earlier one.
+function receiptLapsed(log: EmailLog, row: InvoiceDetail): boolean {
+  const { paymentId } = log;
+  if (!paymentId || row.paidMinor <= 0) return true;
+  const found = db
+    .select({ id: payment.id })
+    .from(payment)
+    .where(scoped(log.userId).where(payment, (t, { eq: is }) => is(t.id, paymentId)))
+    .get();
+  return found === undefined;
+}
+
+const isOutdated = (log: EmailLog, row: InvoiceDetail) =>
+  log.kind === "payment_receipt" ? receiptLapsed(log, row) : row.revision !== log.invoiceRevision;
+
 function refusal(log: EmailLog): Refusal | null {
   if (isDeactivated(log.userId)) return { status: "cancelled", reason: R.deactivated };
   const row = getInvoice(log.userId, log.invoiceId);
@@ -174,7 +189,11 @@ function refusal(log: EmailLog): Refusal | null {
   if (log.kind === "reminder" && reminderLapsed(log, row)) {
     return { status: "held", reason: TEXTS.reminders.held, quiet: true };
   }
-  if (row.revision !== log.invoiceRevision) return { status: "held", reason: R.revision };
+  if (isOutdated(log, row)) {
+    return log.kind === "payment_receipt"
+      ? { status: "held", reason: R.paymentGone, quiet: true }
+      : { status: "held", reason: R.revision };
+  }
   if (log.trigger !== "automatic") return null;
   if (!log.automation || !automaticSendAllowed(log.userId, log.automation)) {
     return { status: "held", reason: R.automation };
@@ -276,7 +295,7 @@ function recordSentIn(log: EmailLog, { rejected }: SendResult, messageId: string
     if (reason) raiseNotice(tx, log, "mail_partial");
     const row = getInvoice(log.userId, log.invoiceId);
     // The message is out and cannot be recalled: the document keeps its state, the owner is told.
-    if (!row || !isSendable(row.status) || row.revision !== log.invoiceRevision) {
+    if (!row || !isSendable(row.status) || isOutdated(log, row)) {
       raiseNotice(tx, log, "mail_stale", `${noticeKey(log.id)}:stale`);
     }
     if (row && log.kind === kindForInvoice(row.type)) applySent(tx, log.userId, log.invoiceId);
@@ -288,6 +307,7 @@ function recordSentIn(log: EmailLog, { rejected }: SendResult, messageId: string
           and(
             is(t.invoiceId, log.invoiceId),
             is(t.kind, log.kind),
+            samePayment(t, log.paymentId),
             log.stageKey === null ? isNull(t.stageKey) : is(t.stageKey, log.stageKey),
             inArray(t.status, ["failed", "unknown", "held", "cancelled"]),
           ),

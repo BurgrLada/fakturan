@@ -33,6 +33,7 @@ import {
   resendFromLog,
   sendInvoice,
   sendPrefill,
+  sendReceipt,
 } from "@/server/services/invoice-mail";
 import {
   refreshCustomerSnapshot,
@@ -105,6 +106,8 @@ const bulkInput = idsInput.extend({
 });
 const stageKey = id.nullable();
 const reminderPrefillInput = z.object({ id, stageKey });
+const receiptPrefillInput = z.object({ id, paymentId: id });
+const receiptInput = receiptPrefillInput.extend({ message: sendInputSchema });
 const reminderInput = z.object({
   id,
   stageKey,
@@ -328,6 +331,23 @@ export async function sendPrefillAction(raw: unknown) {
   return run(prefillInput, raw, ({ id: invoiceId, logId }, actor) => ({
     draft: sendPrefill(ownerOf(actor), invoiceId, logId),
   }));
+}
+
+export async function receiptPrefillAction(raw: unknown) {
+  return run(receiptPrefillInput, raw, ({ id: invoiceId, paymentId }, actor) => ({
+    draft: sendPrefill(ownerOf(actor), invoiceId, undefined, {
+      kind: "payment_receipt",
+      paymentId,
+    }),
+  }));
+}
+
+export async function sendReceiptAction(raw: unknown) {
+  return run(receiptInput, raw, ({ id: invoiceId, paymentId, message }, actor) => {
+    const queued = sendReceipt(actor, invoiceId, paymentId, message);
+    changedInvoices();
+    return queued;
+  });
 }
 
 export async function sendInvoiceAction(raw: unknown) {

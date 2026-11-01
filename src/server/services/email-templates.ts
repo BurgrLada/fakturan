@@ -8,6 +8,7 @@ import {
   type MessageKind,
 } from "@/lib/email-template";
 import { formatMoney } from "@/lib/money";
+import type { CalendarDate } from "@/lib/number-format";
 import { amountDue } from "@/lib/qr-payload";
 import { formatCalendarDate, renderVariables } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
@@ -182,9 +183,11 @@ export function composeMail(
   override?: MailContent,
   // Unlike the override, these go through variables, as the account's own template would.
   texts?: Partial<Record<Language, MailContent>> | null,
+  opts?: { payment?: { creditedMinor: number; paidOn: CalendarDate } },
 ): MailDraft {
   const doc = loadInvoiceDocument(ownerId, invoiceId);
   if (!doc) throw new ServiceError(E.invoiceNotFound);
+  const payment = opts?.payment;
 
   let content: MailContent;
   if (override) {
@@ -205,6 +208,9 @@ export function composeMail(
       splatnost: doc.dueDate ? formatCalendarDate(doc.dueDate, ctx.dateFormat) : "",
       vs: doc.variableSymbol ?? "",
       dodavatel: doc.snapshot.supplier?.name ?? "",
+      ...(payment && {
+        prijato: `${formatMoney(payment.creditedMinor, doc.currency)} (${formatCalendarDate(payment.paidOn, ctx.dateFormat)})`,
+      }),
     };
     content = {
       subject: capSubject(

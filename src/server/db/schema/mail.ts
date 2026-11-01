@@ -65,6 +65,8 @@ export const emailLog = sqliteTable(
     plannedFor: text("planned_for"),
     automation: text({ enum: AUTOMATION_KEYS }),
     stageKey: text("stage_key"),
+    // No foreign key: the record has to outlive a removed payment to say why it was held (R-24).
+    paymentId: text("payment_id"),
     acknowledgedAt: integer("acknowledged_at", { mode: "timestamp_ms" }),
     attempts: integer().notNull().default(0),
     messageId: text("message_id"),
@@ -75,7 +77,7 @@ export const emailLog = sqliteTable(
   (t) => [
     index("email_log_user_invoice_created_idx").on(t.userId, t.invoiceId, t.createdAt),
     uniqueIndex("email_log_running_idx")
-      .on(t.invoiceId, t.kind)
+      .on(t.invoiceId, t.kind, sql`coalesce(payment_id, '')`)
       .where(sql`${t.status} IN ('queued', 'sending')`),
   ],
 );

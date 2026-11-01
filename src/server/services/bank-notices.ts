@@ -37,9 +37,11 @@ import {
   type BankNotification,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { kickWorker } from "../jobs/worker";
 import { ServiceError, type Reader } from "./access";
 import { findOwned, ownerOf } from "./invoices";
 import { mutate, type Audit } from "./mutation";
+import { queueAutomaticReceipt } from "./payment-receipt";
 import { insertPayment, undoNoticeIn } from "./payments";
 
 const FIO_DEFAULT_BANK_CODE = "2010";
@@ -75,6 +77,8 @@ export type IngestResult =
 class AlreadyStored extends Error {}
 
 class OverLimit extends Error {}
+
+const pragueToday = () => calendarDateInPrague(clock.now());
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -192,7 +196,7 @@ function decide(
     {
       autoAllowed: autoMatchAllowed(notice.variant, authResult, requireConfirmation),
       targetAccountId: accountId,
-      today: calendarDateInPrague(clock.now()),
+      today: pragueToday(),
     },
   );
   return match.result === "match"
@@ -327,8 +331,9 @@ function ingestParsed(tx: Tx, audit: Audit, userId: string, input: ParsedInput):
   }
   if (decision.status === "matched") {
     const { invoiceId } = decision;
-    insertPayment(tx, audit, userId, invoiceId, {
-      paidOn: notice.occurredAt.date,
+    const paidOn = notice.occurredAt.date;
+    const { id: paymentId } = insertPayment(tx, audit, userId, invoiceId, {
+      paidOn,
       amountMinor,
       currency,
       creditedMinor: amountMinor,
@@ -336,6 +341,13 @@ function ingestParsed(tx: Tx, audit: Audit, userId: string, input: ParsedInput):
       note: "",
       source: "notice",
       notificationId: id,
+    });
+    queueAutomaticReceipt(tx, audit, {
+      userId,
+      invoiceId,
+      paymentId,
+      paidOn,
+      today: pragueToday(),
     });
     audit({
       ...entry,
@@ -697,9 +709,10 @@ function settle(
   parts: { invoiceId: string; amountMinor: number; creditedMinor?: number | null }[],
   action: "notice.assigned" | "notice.split",
 ): void {
+  const receipts = new Map<string, string>();
   for (const part of parts) {
     const row = findOwned(tx, userId, part.invoiceId);
-    insertPayment(tx, audit, userId, part.invoiceId, {
+    const { id: paymentId } = insertPayment(tx, audit, userId, part.invoiceId, {
       paidOn: notice.paidOn,
       amountMinor: part.amountMinor,
       currency: notice.currency,
@@ -708,6 +721,18 @@ function settle(
       note: "",
       source: "notice",
       notificationId: notice.id,
+    });
+    if (!receipts.has(part.invoiceId)) receipts.set(part.invoiceId, paymentId);
+  }
+  // Only now: a message queued between the parts would carry a revision that is already old.
+  const { paidOn } = notice;
+  for (const [invoiceId, paymentId] of receipts) {
+    queueAutomaticReceipt(tx, audit, {
+      userId,
+      invoiceId,
+      paymentId,
+      paidOn,
+      today: pragueToday(),
     });
   }
   setStatus(tx, userId, notice.id, "matched");
@@ -746,6 +771,7 @@ export function assignNotice(actor: Actor, id: string, raw: AssignInput): void {
       "notice.assigned",
     );
   });
+  kickWorker();
 }
 
 // R-23: money without a record is not allowed, so the parts must add up to the whole notice.
@@ -758,6 +784,7 @@ export function splitNotice(actor: Actor, id: string, raw: SplitInput): void {
     if (total !== notice.amountMinor) throw new ServiceError(E.splitSum);
     settle(tx, audit, userId, notice, parts, "notice.split");
   });
+  kickWorker();
 }
 
 function queueAudit(

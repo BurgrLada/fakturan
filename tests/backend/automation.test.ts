@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { AUTOMATIONS, DEFAULT_SEND_TIME } from "@/lib/automation";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { appearanceFrom } from "@/lib/invoice";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
@@ -80,11 +81,29 @@ describe("výchozí stav", () => {
     const id = seed();
 
     expect(AUTOMATIONS.filter((entry) => !entry.available).map((entry) => entry.key)).toEqual([
-      "paymentReceipt",
       "advanceInvoice",
     ]);
-    expect(() => setAutomation(actor(id), "paymentReceipt", true, confirmed)).toThrow(ServiceError);
+    expect(() => setAutomation(actor(id), "advanceInvoice", true, confirmed)).toThrow(ServiceError);
+    expect(getAutomation(id).advanceInvoice).toBe(false);
+  });
+
+  test("[SET-041] potvrzení platby je na novém účtu vypnuté", () => {
+    expect(getAutomation(seed()).paymentReceipt).toBe(false);
+  });
+
+  test("[SET-042] zapnutí potvrzení vyžaduje potvrzení s popisem", () => {
+    const id = seed();
+    const { body, impact } = TEXTS.automation.keys.paymentReceipt;
+
+    expect(() => setAutomation(actor(id), "paymentReceipt", true, { confirmed: false })).toThrow(
+      ServiceError,
+    );
     expect(getAutomation(id).paymentReceipt).toBe(false);
+    expect(body).toContain("avíz");
+    expect(impact(4)).toContain("4");
+
+    setAutomation(actor(id), "paymentReceipt", true, confirmed);
+    expect(getAutomation(id).paymentReceipt).toBe(true);
   });
 });
 
@@ -162,7 +181,7 @@ describe("zapnutí a potvrzení", () => {
     document(row("h"), { status: "sent", type: "credit_note" });
     row("i");
 
-    expect(automationImpact(id)).toEqual({ plans: 0, customers: 3 });
+    expect(automationImpact(id)).toEqual({ plans: 0, customers: 3, addressed: 8 });
   });
 
   test("[REM-001] zapnutí upomínek si pamatuje den, od kterého platí", () => {
@@ -190,7 +209,7 @@ describe("hlavní vypínač", () => {
       setAutomation(actor(id), entry.key, true, confirmed);
     }
     const open = AUTOMATIONS.filter((entry) => entry.available).map((entry) => entry.key);
-    expect(open.map((key) => automaticSendAllowed(id, key))).toEqual([true, true]);
+    expect(open.map((key) => automaticSendAllowed(id, key))).toEqual([true, true, true]);
 
     setPaused(actor(id), true, { confirmed: false });
 

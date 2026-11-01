@@ -362,6 +362,22 @@ describe("úprava šablon", () => {
     ).toHaveLength(0);
   });
 
+  test("[MAIL-003] {{prijato}} jde použít jen v potvrzení platby", () => {
+    const owner = seed();
+    const save = (kind: (typeof MESSAGE_KINDS)[number]) =>
+      saveEmailTemplate(actor(owner), {
+        kind,
+        language: "cs",
+        subject: "Předmět",
+        body: "Přijato {{prijato}}",
+      });
+
+    expect(() => save("payment_receipt")).not.toThrow();
+    for (const kind of MESSAGE_KINDS.filter((item) => item !== "payment_receipt")) {
+      expect(() => save(kind)).toThrow("{{prijato}}");
+    }
+  });
+
   test("[SEC-006] meze předmětu a těla a neplatné vstupy", () => {
     const owner = seed();
 
@@ -411,6 +427,38 @@ describe("výchozí texty", () => {
         expect(subject.length).toBeLessThanOrEqual(200);
       }
     }
+  });
+});
+
+describe("potvrzení platby", () => {
+  test("[MAIL-003] výchozí texty uvádějí přijatou částku", () => {
+    for (const language of LANGUAGES) {
+      expect(DEFAULT_MAIL_CONTENT[language].payment_receipt.body).toContain("{{prijato}}");
+    }
+  });
+
+  test("[MAIL-003] {{prijato}} nese částku a datum platby, změna výchozích textů nesahá na uložené", () => {
+    const owner = seed();
+    const invoiceId = issued(owner, newCustomer(owner));
+    saveEmailTemplate(actor(owner), {
+      kind: "payment_receipt",
+      language: "cs",
+      subject: "Vlastní",
+      body: "Vlastní text bez částky",
+    });
+
+    const custom = composeMail(owner, invoiceId, "payment_receipt", undefined, null, {
+      payment: { creditedMinor: 12_345, paidOn: "2026-10-30" },
+    });
+    expect(custom.body).toBe("Vlastní text bez částky");
+
+    resetEmailTemplate(actor(owner), "payment_receipt", "cs");
+    const { body } = composeMail(owner, invoiceId, "payment_receipt", undefined, null, {
+      payment: { creditedMinor: 12_345, paidOn: "2026-10-30" },
+    });
+    expect(body).toContain(formatMoney(12_345, "CZK"));
+    expect(body).toContain("30. 10. 2026");
+    expect(body).not.toContain("{{prijato}}");
   });
 });
 

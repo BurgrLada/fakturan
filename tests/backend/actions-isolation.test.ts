@@ -66,7 +66,9 @@ import {
   reminderPrefillAction,
   resendFromLogAction,
   sendInvoiceAction,
+  receiptPrefillAction,
   sendPrefillAction,
+  sendReceiptAction,
   sendReminderAction,
   setPartialRemindersAction,
   setRemindersOffAction,
@@ -86,7 +88,7 @@ import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
 import { nextOccurrences } from "@/lib/recurrence";
 import { getRecurring } from "@/server/services/recurring";
-import { listPayments } from "@/server/services/payments";
+import { listPayments, markPaid } from "@/server/services/payments";
 import { listReminderRules, saveReminderRule } from "@/server/services/reminders";
 import { pauseRecurring, processOccurrence } from "@/server/services/recurring-run";
 import { createTestDb } from "../helpers/db";
@@ -234,11 +236,25 @@ describe("akce pošty", () => {
     const { revision } = getInvoice(mine.owner, mine.invoiceId)!;
     const sent = await sendInvoiceAction({ id: mine.invoiceId, message: { ...message, revision } });
     if (!sent.ok) throw new Error(sent.error);
+    const paid = markPaid({ userId: mine.owner, source: "web" }, mine.invoiceId, {
+      revision: getInvoice(mine.owner, mine.invoiceId)!.revision,
+    });
 
     session.userId = stranger.owner;
     const replies = [
       await sendPrefillAction({ id: mine.invoiceId }),
       await sendPrefillAction({ id: stranger.invoiceId, logId: sent.logId }),
+      await receiptPrefillAction({ id: mine.invoiceId, paymentId: paid.id }),
+      await receiptPrefillAction({ id: stranger.invoiceId, paymentId: paid.id }),
+      await sendReceiptAction({
+        id: stranger.invoiceId,
+        paymentId: paid.id,
+        message: {
+          ...message,
+          revision: getInvoice(stranger.owner, stranger.invoiceId)!.revision,
+          requestId: "99999999-9999-4999-8999-999999999999",
+        },
+      }),
       await sendInvoiceAction({
         id: mine.invoiceId,
         message: { ...message, requestId: "22222222-2222-4222-8222-222222222222" },

@@ -6,11 +6,11 @@ export const AUTOMATION_KEYS = [
 ] as const;
 export type AutomationKey = (typeof AUTOMATION_KEYS)[number];
 
-// Payment receipts and sending after an advance payment arrive in later plans: visible, not switchable.
+// Sending after an advance payment arrives in a later plan: visible, not switchable.
 export const AUTOMATIONS: readonly { key: AutomationKey; available: boolean }[] = [
   { key: "recurringSend", available: true },
   { key: "reminders", available: true },
-  { key: "paymentReceipt", available: false },
+  { key: "paymentReceipt", available: true },
   { key: "advanceInvoice", available: false },
 ];
 
@@ -56,6 +56,8 @@ export const NOTIFICATION_KINDS = [
   "bank_connection_failed",
   "payments_unmatched",
   "notices_unrecognized",
+  "receipt_no_address",
+  "receipt_bad_mail",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

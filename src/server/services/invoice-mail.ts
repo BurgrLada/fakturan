@@ -13,13 +13,13 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { emailLog, invoice, job, type EmailLog } from "../db/schema";
+import { emailLog, invoice, job, payment, type EmailLog } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { enqueue } from "../jobs/queue";
 import { kickWorker } from "../jobs/worker";
 import type { MailContent } from "../mail/defaults";
 import { RATE_RULES } from "../rate-limit";
-import { enforceRateLimit, ServiceError } from "./access";
+import { enforceRateLimit, ServiceError, type Reader } from "./access";
 import { getAutomation } from "./automation";
 import { composeMail, type MailDraft } from "./email-templates";
 import { FileNotFoundError, readOwnedFile } from "./files";
@@ -50,9 +50,14 @@ export type QueueInput = {
   plannedFor?: CalendarDate;
   automation?: AutomationKey;
   stageKey?: string;
+  paymentId?: string;
 };
 
 export const mailNoticeKey = (logId: string) => `mail:${logId}`;
+
+// Receipts of two payments are separate messages: one never answers for or replaces the other.
+export const samePayment = (t: typeof emailLog, paymentId: string | null) =>
+  sql`${t.paymentId} IS ${paymentId}`;
 
 // Part of the deactivating transaction, so no worker can claim the job in between (R-21).
 export function cancelQueuedMail(tx: Tx, userId: string): number {
@@ -118,6 +123,7 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
       plannedFor: input.plannedFor ?? null,
       automation: input.automation ?? null,
       stageKey: input.stageKey ?? null,
+      paymentId: input.paymentId ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -155,11 +161,42 @@ function loggedRequest(userId: string, key: string): string | null {
   return row ? String(row.payload.logId) : null;
 }
 
+// A split of one notice onto one document is one receipt, so it states the whole sum.
+export function receiptPayment(
+  q: Reader,
+  ownerId: string,
+  invoiceId: string,
+  paymentId: string | null | undefined,
+): { creditedMinor: number; paidOn: CalendarDate } {
+  const row = paymentId
+    ? q
+        .select()
+        .from(payment)
+        .where(scoped(ownerId).where(payment, (t, { eq }) => eq(t.id, paymentId)))
+        .get()
+    : undefined;
+  if (row?.invoiceId !== invoiceId || row.kind !== "payment") throw new ServiceError(E.receiptGone);
+  const { notificationId } = row;
+  const creditedMinor = notificationId
+    ? q
+        .select({ sum: sql<number>`sum(${payment.creditedMinor})` })
+        .from(payment)
+        .where(
+          scoped(ownerId).where(payment, (t, { and, eq }) =>
+            and(eq(t.invoiceId, invoiceId), eq(t.notificationId, notificationId)),
+          ),
+        )
+        .get()!.sum
+    : row.creditedMinor;
+  return { creditedMinor, paidOn: row.paidOn };
+}
+
 // Bulk sending must skip such a document: it has nowhere to ask for the confirmation.
 export function hasUnresolvedUnknown(
   ownerId: string,
   invoiceId: string,
   kind: MessageKind,
+  paymentId: string | null = null,
 ): boolean {
   const row = db
     .select({ id: emailLog.id })
@@ -169,11 +206,13 @@ export function hasUnresolvedUnknown(
         and(
           is(t.invoiceId, invoiceId),
           is(t.kind, kind),
+          samePayment(t, paymentId),
           is(t.status, "unknown"),
           isNull(t.acknowledgedAt),
           sql`NOT EXISTS (
             SELECT 1 FROM email_log AS newer
             WHERE newer.invoice_id = email_log.invoice_id AND newer.kind = email_log.kind
+              AND newer.payment_id IS email_log.payment_id
               AND newer.status = 'sent' AND newer.rowid > email_log.rowid
           )`,
         ),
@@ -187,7 +226,9 @@ type ClickOptions = {
   confirmedUnknown: boolean;
   kind?: MessageKind;
   stageKey?: string | null;
-  revision: number;
+  // Null only for a receipt: its text states one payment, whatever else changed on the document.
+  revision: number | null;
+  paymentId?: string | null;
   // Runs in the queueing transaction: a throw takes the queued message back with it.
   alongside?: (tx: Tx, audit: Audit, row: Invoice, logId: string) => void;
 };
@@ -209,13 +250,17 @@ function queueClicked(
     const row = findOwned(tx, userId, invoiceId);
     if (!isSendable(row.status)) throw new ServiceError(E.notSendable);
     // The text was written for one version of the document and the PDF is rendered from the latest.
-    if (row.revision !== opts.revision) throw new ServiceError(E.staleDraft);
+    if (opts.revision !== null && row.revision !== opts.revision) {
+      throw new ServiceError(E.staleDraft);
+    }
     const kind = opts.kind ?? kindForInvoice(row.type);
+    const paymentId = opts.paymentId ?? null;
+    if (kind === "payment_receipt") receiptPayment(tx, userId, invoiceId, paymentId);
     if (kind === "reminder" && amountDue(row) <= 0) {
       throw new ServiceError(TEXTS.reminders.errors.nothingDue);
     }
     if (kind === "reminder" && !row.sentAt) throw new ServiceError(TEXTS.reminders.errors.notSent);
-    if (!opts.confirmedUnknown && hasUnresolvedUnknown(userId, invoiceId, kind)) {
+    if (!opts.confirmedUnknown && hasUnresolvedUnknown(userId, invoiceId, kind, paymentId)) {
       throw new ServiceError(E.unknownPending);
     }
     const result = queueMail(tx, audit, {
@@ -226,6 +271,7 @@ function queueClicked(
       key,
       message,
       stageKey: opts.stageKey ?? undefined,
+      paymentId: paymentId ?? undefined,
     });
     if (!result) throw new ServiceError(E.alreadySending);
     opts.alongside?.(tx, audit, row, result.logId);
@@ -282,7 +328,37 @@ export function sendInvoice(actor: Actor, invoiceId: string, raw: SendInput): { 
     revision,
     kind: replaced?.kind,
     stageKey: replaced?.stageKey,
+    paymentId: replaced?.paymentId,
   });
+}
+
+// The kind never comes from the client, so a receipt has its own way in.
+export function sendReceipt(
+  actor: Actor,
+  invoiceId: string,
+  paymentId: string,
+  raw: SendInput,
+): { logId: string } {
+  const userId = ownerOf(actor);
+  enforceRateLimit(actor, RATE_RULES.sendUser);
+  const {
+    requestId,
+    confirmedUnknown = false,
+    revision,
+    to,
+    cc,
+    bcc,
+    subject,
+    body,
+  } = parseSend(raw);
+  return queueClicked(
+    actor,
+    userId,
+    invoiceId,
+    requestId,
+    { to, cc, bcc, subject, body },
+    { confirmedUnknown, revision, kind: "payment_receipt", paymentId },
+  );
 }
 
 function readLog(userId: string, logId: string): EmailLog | undefined {
@@ -303,6 +379,7 @@ function supersededBy(log: EmailLog): boolean {
         and(
           eq(t.invoiceId, log.invoiceId),
           eq(t.kind, log.kind),
+          samePayment(t, log.paymentId),
           inArray(t.status, ["sent", "unknown"]),
           sql`rowid > (SELECT rowid FROM email_log WHERE id = ${log.id})`,
         ),
@@ -352,7 +429,8 @@ export function resendFromLog(
       confirmedUnknown: opts.confirmedUnknown,
       kind: log.kind,
       stageKey: log.stageKey,
-      revision: log.invoiceRevision,
+      paymentId: log.paymentId,
+      revision: log.kind === "payment_receipt" ? null : log.invoiceRevision,
     },
   );
 }
@@ -390,17 +468,32 @@ const mayHaveLeft = (log: Pick<EmailLog, "status">) =>
   log.status === "sent" || log.status === "unknown";
 
 export function listEmailLog(ownerId: string, invoiceId: string) {
-  const delivered = new Set<MessageKind>();
+  const delivered = new Set<string>();
+  const slot = (row: EmailLog) => `${row.kind}:${row.paymentId ?? ""}`;
+  const payments = new Set(
+    db
+      .select({ id: payment.id })
+      .from(payment)
+      .where(scoped(ownerId).where(payment, (t, { eq }) => eq(t.invoiceId, invoiceId)))
+      .all()
+      .map((row) => row.id),
+  );
+  const lapsed = (row: EmailLog) =>
+    row.kind === "payment_receipt" && !payments.has(row.paymentId ?? "");
   return db
     .select()
     .from(emailLog)
     .where(scoped(ownerId).where(emailLog, (t, { eq }) => eq(t.invoiceId, invoiceId)))
     .orderBy(desc(emailLog.createdAt), sql`rowid DESC`)
     .all()
-    .map(({ fileId, ...row }) => {
+    .map((log) => {
+      const { fileId, ...row } = log;
       const resendable =
-        RESENDABLE.includes(row.status) && !delivered.has(row.kind) && !row.acknowledgedAt;
-      if (mayHaveLeft(row)) delivered.add(row.kind);
+        RESENDABLE.includes(row.status) &&
+        !delivered.has(slot(log)) &&
+        !row.acknowledgedAt &&
+        !lapsed(log);
+      if (mayHaveLeft(row)) delivered.add(slot(log));
       return {
         ...row,
         hasArchive: fileId !== null && mayHaveLeft(row),
@@ -445,7 +538,11 @@ export function sendPrefill(
   ownerId: string,
   invoiceId: string,
   logId?: string,
-  fresh?: { kind: MessageKind; texts: Partial<Record<Language, MailContent>> | null },
+  fresh?: {
+    kind: MessageKind;
+    texts?: Partial<Record<Language, MailContent>> | null;
+    paymentId?: string;
+  },
 ): SendPrefill {
   const row = getInvoice(ownerId, invoiceId);
   if (!row) throw new ServiceError(E.notFound);
@@ -453,9 +550,14 @@ export function sendPrefill(
   const log = logId ? readLog(ownerId, logId) : undefined;
   if (logId && log?.invoiceId !== invoiceId) throw new ServiceError(E.logNotFound);
   const kind = log?.kind ?? fresh?.kind ?? kindForInvoice(row.type);
-  const draft = composeMail(ownerId, invoiceId, kind, undefined, fresh?.texts);
-  // After a change the recorded text describes a document the attachment no longer matches.
-  const current = log?.invoiceRevision === row.revision;
+  const receipt = kind === "payment_receipt";
+  const paymentId = log?.paymentId ?? fresh?.paymentId ?? null;
+  const draft = composeMail(ownerId, invoiceId, kind, undefined, fresh?.texts, {
+    payment: receipt ? receiptPayment(db, ownerId, invoiceId, paymentId) : undefined,
+  });
+  // After a change the recorded text describes a document the attachment no longer matches. A
+  // receipt speaks of one payment, and that payment was just proven to still exist.
+  const current = log !== undefined && (receipt || log.invoiceRevision === row.revision);
   return {
     ...draft,
     ...(log &&
@@ -468,7 +570,8 @@ export function sendPrefill(
       }),
     requestId: randomUUID(),
     revision: row.revision,
-    unknownPending: log?.status === "unknown" || hasUnresolvedUnknown(ownerId, invoiceId, kind),
+    unknownPending:
+      log?.status === "unknown" || hasUnresolvedUnknown(ownerId, invoiceId, kind, paymentId),
     paused: getAutomation(ownerId).paused,
     log: log ? { id: log.id, status: log.status, reason: log.reason, current } : null,
   };

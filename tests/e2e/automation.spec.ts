@@ -25,9 +25,29 @@ test("[SET-040] stránka ukáže všechny 4 automatiky a jejich stav", async ({ 
   ).toHaveCount(4);
   await expect(card(page, "Pravidelné faktury: vystavit a odeslat")).toContainText("Vypnuto");
   await expect(card(page, "Upomínky po splatnosti")).toContainText("Vypnuto");
-  await expect(card(page, "Potvrzení o přijaté platbě")).toContainText("Připravujeme");
+  await expect(card(page, "Potvrzení o přijaté platbě")).toContainText("Vypnuto");
   await expect(card(page, "Odeslání po záloze")).toContainText("Připravujeme");
   await expect(card(page, "Odeslání po záloze").getByRole("button")).toHaveCount(0);
+});
+
+test("[SET-040] stránka ukáže potvrzení platby jako dostupné", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/platby`);
+  await expect(page.getByTestId("queue-mail-note")).toContainText("nic neodešle");
+
+  await page.goto(`${freshApp.baseURL}/nastaveni/automatizace`);
+  await page.waitForLoadState("networkidle");
+  const receipt = card(page, "Potvrzení o přijaté platbě");
+
+  await receipt.getByRole("button", { name: "Zapnout" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("platba z avíza banky");
+  await expect(dialog).toContainText("Potvrzení mohou dostat zákazníci s e-mailem: 0.");
+  await dialog.getByRole("button", { name: "Zapnout a potvrdit" }).click();
+  await expect(receipt).toContainText("Zapnuto");
+
+  await page.goto(`${freshApp.baseURL}/platby`);
+  await expect(page.getByTestId("queue-mail-note")).toContainText("odejde klientovi potvrzení");
 });
 
 test("[SET-042] dialog popíše, co a komu se pošle", async ({ page, freshApp }) => {

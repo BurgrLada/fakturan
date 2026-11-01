@@ -713,6 +713,8 @@ export const TEXTS = {
       login: "Přihlásit se znovu",
       stale: "Doklad se mezitím změnil. Obnovte stránku a zkuste to znovu.",
       marked: "Faktura je označená jako uhrazená.",
+      sendReceipt: "Poslat potvrzení",
+      receiptQueued: "Potvrzení je zařazené k odeslání.",
       closeAction: "Uzavřít jako uhrazené",
       closeTitle: "Uzavřít rozdíl?",
       closeBody: (amount: string) =>
@@ -812,8 +814,8 @@ export const TEXTS = {
       },
       paymentReceipt: {
         title: "Potvrzení o přijaté platbě",
-        body: "Zákazník dostane potvrzení, jakmile platbu spárujete s fakturou.",
-        impact: () => "",
+        body: "Když se platba z avíza banky spáruje s fakturou, zákazník dostane e-mailem potvrzení s přijatou částkou a fakturou v příloze. Platí jen pro platby z avíz, ne starší 3 dnů. Ruční platby a hromadné označení potvrzení samy neposílají.",
+        impact: (customers: number) => `Potvrzení mohou dostat zákazníci s e-mailem: ${customers}.`,
       },
       advanceInvoice: {
         title: "Odeslání po záloze",
@@ -874,6 +876,10 @@ export const TEXTS = {
         `Automatika je vypnutá, pravidelná faktura „${p.plan ?? ""}“ zůstala jako koncept.`,
       recurring_no_address: (p: Record<string, unknown>) =>
         `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale zákazník nemá e-mail, takže neodešla.`,
+      receipt_no_address: (p: Record<string, unknown>) =>
+        `Potvrzení platby k faktuře ${p.invoice ?? ""} neodešlo, zákazník nemá e-mail.`,
+      receipt_bad_mail: (p: Record<string, unknown>) =>
+        `Potvrzení platby k faktuře ${p.invoice ?? ""} neodešlo. ${p.problems ?? ""}`.trim(),
       recurring_bad_mail: (p: Record<string, unknown>) =>
         `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale e-mail nešlo odeslat. ${p.problems ?? ""}`.trim(),
       recurring_conflict: (p: Record<string, unknown>) =>
@@ -1225,6 +1231,7 @@ export const TEXTS = {
       archiveLocked: "Archiv odeslaného dokladu nejde smazat",
       notFound: "Doklad neexistuje",
       staleDraft: "Doklad se mezitím změnil. Zavřete dialog a otevřete ho znovu.",
+      receiptGone: "Platba už u dokladu není, potvrzení nejde poslat",
     },
     statuses: {
       queued: "Odesílá se",
@@ -1238,6 +1245,7 @@ export const TEXTS = {
     dialog: {
       title: "Odeslat klientovi",
       resendTitle: "Odeslat znovu",
+      receiptTitle: "Poslat potvrzení platby",
       loading: "Připravuji zprávu…",
       loadFailed: "Zprávu se nepodařilo připravit.",
       review: "Před odesláním zkontrolujte příjemce a text.",
@@ -1317,6 +1325,7 @@ export const TEXTS = {
       revision: "Doklad se od zařazení do fronty změnil",
       automation: "Automatika je vypnutá",
       tooOld: "Termín odeslání je starší než 3 dny",
+      paymentGone: "Platba už u dokladu není, potvrzení neodešlo",
       deactivated: "Účet je deaktivovaný",
       unavailable: "SMTP není dostupné",
       archive: "PDF se nepodařilo připravit",
@@ -1401,8 +1410,11 @@ export const TEXTS = {
   },
   bankQueue: {
     title: "Platby",
-    intro:
-      "Platby z avíz banky, které se samy nespárovaly s fakturou. Spárování tady nikomu nic neodešle.",
+    intro: "Platby z avíz banky, které se samy nespárovaly s fakturou.",
+    mailNote: (receipts: boolean) =>
+      receipts
+        ? "Potvrzení platby je zapnuté: po spárování avíza ne staršího 3 dnů odejde klientovi potvrzení."
+        : "Potvrzení platby je vypnuté: spárování tady nikomu nic neodešle.",
     errors: {
       invalid: "Neplatné údaje",
       forbidden: "Na tuto akci nemáte oprávnění",
@@ -1516,7 +1528,10 @@ export const TEXTS = {
       badCredited: "Zadejte připsanou částku větší než nula",
       overpaid: (amount: string) => `Přeplatek ${amount}`,
       confirm: "Přiřadit platbu",
-      noMail: "Přiřazení nic neodešle klientovi.",
+      mailNote: (receipts: boolean) =>
+        receipts
+          ? "Potvrzení platby je zapnuté: pokud avízo není starší 3 dnů, klient dostane potvrzení."
+          : "Přiřazení nic neodešle klientovi.",
     },
     split: {
       title: "Rozdělit platbu na více dokladů",
@@ -1665,7 +1680,8 @@ export const TEXTS = {
     subject: "Předmět",
     body: "Text zprávy",
     variables: "Proměnné",
-    variablesHint: "Zapište je včetně složených závorek, například {{cislo_faktury}}.",
+    variablesHint:
+      "Zapište je včetně složených závorek, například {{cislo_faktury}}. Proměnná {{prijato}} platí jen v potvrzení platby.",
     variableLabels: {
       ctvrtleti: "čtvrtletí",
       pololeti: "pololetí",

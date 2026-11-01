@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { InvoiceType } from "./invoice";
 import { LANGUAGES } from "./preferences";
 import { TEXTS } from "./texts";
-import { MAIL_VARIABLE_NAMES, validateVariables } from "./template-vars";
+import { MAIL_VARIABLE_NAMES, RECEIPT_VARIABLE_NAMES, validateVariables } from "./template-vars";
 
 const E = TEXTS.emailTemplates.errors;
 
@@ -47,7 +47,8 @@ export const emailTemplateSchema = z
     body,
   })
   .superRefine((value, ctx) => {
-    const unknown = validateVariables(`${value.subject}\n${value.body}`, MAIL_VARIABLE_NAMES);
+    const names = value.kind === "payment_receipt" ? RECEIPT_VARIABLE_NAMES : MAIL_VARIABLE_NAMES;
+    const unknown = validateVariables(`${value.subject}\n${value.body}`, names);
     if (unknown.length > 0) {
       ctx.addIssue({
         code: "custom",

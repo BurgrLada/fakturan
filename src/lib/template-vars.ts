@@ -23,6 +23,9 @@ export const MAIL_VARIABLE_NAMES = [
   "dodavatel",
 ] as const;
 
+// The one amount a payment receipt adds. Other kinds of message have no single payment to name.
+export const RECEIPT_VARIABLE_NAMES = [...MAIL_VARIABLE_NAMES, "prijato"] as const;
+
 export type VariableName = (typeof VARIABLE_NAMES)[number];
 
 export type VariablePeriod = { from: CalendarDate; to: CalendarDate };

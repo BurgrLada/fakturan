@@ -24,15 +24,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AUTOMATIONS, type AutomationKey, type AutomationSettings } from "@/lib/automation";
 import { TEXTS } from "@/lib/texts";
+import type { AutomationImpact } from "@/server/services/automation";
 
 const T = TEXTS.automation;
 
 type Outcome = { ok: true } | { ok: false; error: string };
 type Message = { ok: boolean; text: string } | null;
 
-function impactText(key: AutomationKey, impact: { plans: number; customers: number }): string {
+function impactText(key: AutomationKey, impact: AutomationImpact): string {
   if (key === "recurringSend") return T.keys.recurringSend.impact(impact.plans);
   if (key === "reminders") return T.keys.reminders.impact(impact.customers);
+  if (key === "paymentReceipt") return T.keys.paymentReceipt.impact(impact.addressed);
   return "";
 }
 
@@ -88,7 +90,7 @@ export function AutomationPanel({
   impact,
 }: {
   settings: AutomationSettings;
-  impact: { plans: number; customers: number };
+  impact: AutomationImpact;
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<Message>(null);
