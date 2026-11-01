@@ -92,6 +92,29 @@ Adresa vlastního serveru je cizí vstup, proto aplikace odmítne privátní, lo
 a kontroluje je znovu při každém spojení, i po překladu DNS (ochrana SSRF). Na vlastní síti to vypne
 `ALLOW_PRIVATE_MAIL_HOSTS=1` (platí i pro IMAP schránku s avízy z banky), což je vhodné jen tam, kde všem uživatelům instance důvěřujete.
 
+## Avíza z banky
+
+Fakturan páruje platby z e-mailových avíz Fio banky. Ve Fio internetbankingu zapněte v Nastavení >
+Oznámení > Uživatelská oznámení posílání příchozích pohybů e-mailem, přesný postup je v aplikaci
+v Nastavení > Avíza z banky. Tam vyplňte i schránku: server IMAP, port 993 s TLS nebo 143 se STARTTLS,
+uživatele a heslo. Heslo je v databázi šifrované přes `ENCRYPTION_KEY`.
+
+Doporučujeme samostatnou schránku jen pro avíza. Aplikace ji čte pouze ke čtení, nic v ní nemaže ani
+neoznačuje a kontroluje ji každých 5 minut. Tělo stahuje jen u zpráv od `automat@fio.cz`, při prvním
+čtení jde nejvýš 30 dní zpět.
+
+Automaticky se uhradí jen avízo, které sedí přesně: variabilní symbol, měna, částka a účet jednoho
+dokladu. Ostatní čekají ve frontě v Platby. Přepínač „Vyžadovat potvrzení“ (`require_confirmation`,
+výchozí stav zapnuto) rozhoduje o avízech, u kterých důvěryhodný server schránky nevyplnil výsledek
+ověření odesílatele: se zapnutým přepínačem jdou do fronty, s vypnutým se párují automaticky. Vypnutí
+znamená, že zaplacení faktury může spustit i zpráva s podvrženým odesílatelem, změna se proto zapisuje
+do auditu zvlášť. Bez vyplněného serveru ověření (authserv-id) jde do fronty každé avízo bez ohledu
+na přepínač.
+
+Česká avíza jsou zatím prozatímní: formát není ověřený na skutečném vzorku, proto se čtou, ale nikdy
+se nepárují automaticky a ve frontě mají štítek „Prozatímní formát“. Automaticky se páruje jen
+anglická varianta.
+
 ## Provoz za reverzní proxy
 
 Za reverzní proxy (Coolify, Traefik, nginx) je nutné nastavit `TRUST_PROXY=1`. Bez něj aplikace

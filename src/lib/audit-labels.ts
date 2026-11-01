@@ -35,6 +35,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "bank_account.unhide": "Zobrazení bankovního účtu",
   "bank_mailbox.check": "Ruční kontrola schránky s avízy",
   "bank_mailbox.clear": "Smazání schránky s avízy",
+  "bank_mailbox.confirmation": "Změna vyžadování potvrzení plateb z avíz",
   "bank_mailbox.save": "Uložení schránky s avízy",
   "bank_mailbox.test": "Ověření schránky s avízy",
   "catalog_item.archive": "Archivace položky ceníku",

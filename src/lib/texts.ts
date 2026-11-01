@@ -1326,6 +1326,7 @@ export const TEXTS = {
       automation: "Automatika je vypnutá",
       tooOld: "Termín odeslání je starší než 3 dny",
       paymentGone: "Platba už u dokladu není, potvrzení neodešlo",
+      paymentChanged: "Částka nebo datum platby se změnily, potvrzení neodešlo",
       deactivated: "Účet je deaktivovaný",
       unavailable: "SMTP není dostupné",
       archive: "PDF se nepodařilo připravit",

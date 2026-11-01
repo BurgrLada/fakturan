@@ -27,6 +27,26 @@ describe("maskování", () => {
     expect(maskDigits("DE00 1111 2222 3333 4444 55")).toBe("DE** **** **** **** **44 55");
   });
 
+  test("[BNK-017] IBAN skryje i malými písmeny a s jiným oddělovačem", () => {
+    expect(maskDigits("iban cz00 1111 2222 3333 4444 5555")).toBe(
+      "iban cz** **** **** **** **** 5555",
+    );
+    expect(maskDigits("Cz00-1111-2222-3333-4444-5555")).toBe("Cz**-****-****-****-****-5555");
+    expect(maskDigits("CZ00.1111.2222.3333.4444.5555")).toBe("CZ**.****.****.****.****.5555");
+    expect(maskDigits("cz00111122223333444455")).toBe("cz****************4455");
+  });
+
+  test("[BNK-017] předčíslí bez kódu banky se skryje", () => {
+    expect(maskDigits("z účtu 19-123456 došlo")).toBe("z účtu **-**3456 došlo");
+    expect(maskDigits("19-2000145399")).toBe("**-******5399");
+  });
+
+  test("[BNK-017] datum s pomlčkami a telefon nejsou předčíslí", () => {
+    expect(maskDigits("2026-10-30 a 30-10-2026 a 777-123-456")).toBe(
+      "2026-10-30 a 30-10-2026 a 777-123-456",
+    );
+  });
+
   test("[BNK-017] datum a částka zůstanou čitelné", () => {
     expect(maskDigits("10/30/2026 30.10.2026 1 234,50")).toBe("10/30/2026 30.10.2026 1 234,50");
   });

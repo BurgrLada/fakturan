@@ -1,7 +1,10 @@
 import type { Page } from "@playwright/test";
+import { addDays } from "@/lib/invoice";
+import { calendarDateInPrague } from "@/lib/number-format";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
 import { expect, test as base } from "./fixtures";
 import {
+  addAccount,
   addCustomer,
   addSupplier,
   chooseCustomer,
@@ -39,16 +42,6 @@ async function ready(page: Page, baseURL: string, smtp: TestSmtp) {
   await page.getByLabel("Heslo").fill("heslo-smtp");
   await page.getByRole("button", { name: "Uložit" }).first().click();
   await expect(page.getByRole("status")).toContainText("Nastavení pošty je uložené");
-}
-
-async function addAccount(page: Page, baseURL: string) {
-  await page.goto(`${baseURL}/nastaveni/ucty`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Název účtu").fill("Hlavní účet");
-  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("2000145399");
-  await page.getByLabel("Kód banky").fill("0800");
-  await page.getByRole("button", { name: "Uložit účet" }).click();
-  await expect(page.getByText("Účet je uložený.")).toBeVisible();
 }
 
 async function issuedCash(page: Page, baseURL: string, price = "1000") {
@@ -193,10 +186,8 @@ test("[INV-023] úprava uhrazené faktury ukáže upozornění a stav po přepo�
   await expect(page.getByText("Stav po přepočtu: Částečně uhrazená.")).toBeVisible();
 });
 
-const prague = (offsetDays: number) =>
-  new Date(Date.now() + offsetDays * 86_400_000).toLocaleDateString("sv-SE", {
-    timeZone: "Europe/Prague",
-  });
+// Calendar days: subtracting 24-hour days lands on the wrong date across a clock change.
+const prague = (offsetDays: number) => addDays(calendarDateInPrague(new Date()), offsetDays);
 
 async function issuedOn(page: Page, baseURL: string, price: string, daysAgo: number) {
   await openForm(page, baseURL);

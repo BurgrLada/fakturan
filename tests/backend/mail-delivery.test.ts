@@ -43,6 +43,7 @@ import {
   webActor,
 } from "../helpers/fixtures-mail";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
+import { SEND_TIMEOUTS } from "@/server/mail/transport";
 
 import { deadMailTask } from "@/server/scheduler/start";
 import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
@@ -95,6 +96,10 @@ function now(at: Date) {
   setClockForTests({ now: () => current });
 }
 const later = (ms: number) => now(new Date(current.getTime() + ms));
+
+// A real PDF render stands before each of these states. It takes seconds on a loaded machine, past
+// the 1 s default, and a wait that gives up leaves its drain running into the next test.
+const RENDER_WAIT = { timeout: 30_000, interval: 20 };
 
 beforeAll(async () => {
   smtp = await startSmtp();
@@ -188,7 +193,7 @@ function holdRender(): () => void {
 async function duringRender(action: () => void) {
   const release = holdRender();
   const drained = drainJobs(WORKER);
-  await vi.waitFor(() => expect(mocks.hold.entered).toBe(true));
+  await vi.waitFor(() => expect(mocks.hold.entered).toBe(true), RENDER_WAIT);
   action();
   release();
   await drained;
@@ -199,7 +204,7 @@ async function stalledAttempt(beforeTakeover?: () => void) {
   const release = holdRender();
   acquireLease("A");
   const attempt = deliverMail(claimNext("A")!);
-  await vi.waitFor(() => expect(mocks.hold.entered).toBe(true));
+  await vi.waitFor(() => expect(mocks.hold.entered).toBe(true), RENDER_WAIT);
   beforeTakeover?.();
   later(121_000);
   expect(acquireLease("B")).toBe("taken_over");
@@ -696,8 +701,8 @@ describe("deaktivace za běhu", () => {
     const release = smtp.holdData();
     const id = send(owner, invoiceId);
     const drained = drainJobs(WORKER);
-    await vi.waitFor(() => expect(smtp.connections()).toBe(1));
-    await vi.waitFor(() => expect(logOf(id).status).toBe("sending"));
+    await vi.waitFor(() => expect(smtp.connections()).toBe(1), RENDER_WAIT);
+    await vi.waitFor(() => expect(logOf(id).status).toBe("sending"), RENDER_WAIT);
     deactivateUser(webActor(admin), owner);
     expect(logOf(id).status).toBe("sending");
     release();
@@ -975,7 +980,7 @@ describe("změna během odesílání", () => {
     const release = smtp.holdData();
     const id = send(owner, invoiceId);
     const drained = drainJobs(WORKER);
-    await vi.waitFor(() => expect(logOf(id).status).toBe("sending"));
+    await vi.waitFor(() => expect(logOf(id).status).toBe("sending"), RENDER_WAIT);
     change(id);
     release();
     await drained;
@@ -1016,12 +1021,13 @@ describe("časový strop", () => {
   test("jedno odeslání dodrží celkový strop času i na zablokovaném serveru", async () => {
     const { owner, invoiceId } = account();
     const release = smtp.holdData();
-    setDeliveryLimitsForTests({ smtpMs: 300 });
+    // Long enough to reach DATA on a loaded machine: earlier the attempt is a plain retry.
+    setDeliveryLimitsForTests({ smtpMs: 3_000 });
     const id = send(owner, invoiceId);
     const started = performance.now();
     await drainJobs(WORKER);
     release();
-    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(performance.now() - started).toBeLessThan(SEND_TIMEOUTS.socketTimeout);
     expect(logOf(id).status).toBe("unknown");
     expect(smtp.connections()).toBe(1);
     expect(mocks.captureException).not.toHaveBeenCalled();

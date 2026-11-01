@@ -1,4 +1,5 @@
-import { createServer, type Server, type Socket } from "node:net";
+import { createServer as createPlainServer, type Server, type Socket } from "node:net";
+import { createServer as createTlsServer } from "node:tls";
 
 export type ImapMessage = { uid: number; raw: string; internalDate: Date };
 
@@ -20,6 +21,8 @@ export type TestImap = {
   holdLogin(): { release(): void };
   openSockets(): number;
   connections(): number;
+  // Connections that dropped during the TLS handshake, a client refusing the certificate.
+  refusedHandshakes(): number;
   close(): Promise<void>;
 };
 
@@ -27,6 +30,10 @@ export type ImapOptions = {
   username?: string;
   password?: string;
   folder?: string;
+  // Interface to listen on; a container needs more than loopback.
+  host?: string;
+  // Implicit TLS from the first byte, as on port 993.
+  tls?: { key: string; cert: string };
 };
 
 type Literal = { size: number; resolve: (text: string) => void };
@@ -70,10 +77,16 @@ function expandSet(set: string, newest: number): number[] {
   return uids;
 }
 
-// Answers only what imapflow sends for the calls in src/server/bank/imap.ts. A plain-text server:
-// TLS is covered by tests/unit/host-guard.test.ts and the option checks in the client tests.
+// Answers only what imapflow sends for the calls in src/server/bank/imap.ts. Plain text unless
+// options.tls is given; certificate checks run in the image, see tests/e2e/docker-imap.spec.ts.
 export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
-  const { username = "avizo", password = "tajne-heslo-imap-4c1d", folder = "INBOX" } = options;
+  const {
+    username = "avizo",
+    password = "tajne-heslo-imap-4c1d",
+    folder = "INBOX",
+    host = "127.0.0.1",
+    tls,
+  } = options;
   const messages: ImapMessage[] = [];
   const commands: string[] = [];
   const logins: TestImap["logins"] = [];
@@ -85,6 +98,7 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
   let loginGate: Promise<void> | null = null;
   let uidValidity = 1000;
   let connections = 0;
+  let refused = 0;
 
   function takeFailure(kind: FailKind): boolean {
     const index = pending.indexOf(kind);
@@ -93,7 +107,7 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
     return true;
   }
 
-  const server: Server = createServer((socket) => {
+  const serve = (socket: Socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => {});
@@ -256,9 +270,14 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
       drain();
     });
     send("* OK IMAP ready");
-  });
+  };
+  const server: Server = tls
+    ? createTlsServer(tls, serve).on("tlsClientError", () => {
+        refused += 1;
+      })
+    : createPlainServer(serve);
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("IMAP server nemá port");
 
@@ -292,6 +311,7 @@ export async function startImap(options: ImapOptions = {}): Promise<TestImap> {
     },
     openSockets: () => sockets.size,
     connections: () => connections,
+    refusedHandshakes: () => refused,
     close: () =>
       new Promise<void>((resolve) => {
         for (const socket of sockets) socket.destroy();

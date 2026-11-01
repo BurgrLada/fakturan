@@ -29,7 +29,13 @@ import {
 } from "@/server/services/invoice-mail";
 import { getInvoice } from "@/server/services/invoices";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
-import { addPayment, deletePayment, markPaid, markPaidMany } from "@/server/services/payments";
+import {
+  addPayment,
+  deletePayment,
+  markPaid,
+  markPaidMany,
+  updatePayment,
+} from "@/server/services/payments";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { INVOICE_TOTAL, seedAccount, TARGET, VS } from "../helpers/fixtures-bank";
@@ -134,6 +140,19 @@ const noticesOf = (owner: string) =>
 const paymentsOf = (owner: string) =>
   db.select().from(payment).where(eq(payment.userId, owner)).all();
 const toClient = () => smtp.messages.filter((message) => message.to.includes(CLIENT));
+
+const manualInput = (revision: number, amountMinor: number, over = {}) => ({
+  revision,
+  paidOn: TODAY,
+  amountMinor,
+  currency: "CZK" as const,
+  creditedMinor: amountMinor,
+  method: "transfer" as const,
+  note: "",
+  ...over,
+});
+
+const revisionOf = (owner: string, invoiceId: string) => getInvoice(owner, invoiceId)!.revision;
 
 const clickInput = (owner: string, invoiceId: string, requestId: string) => {
   const { to, cc, bcc, subject, body, revision } = sendPrefill(owner, invoiceId, undefined, {
@@ -399,6 +418,83 @@ describe("souběh a vrácení", () => {
     expect(held).toMatchObject({ status: "held" });
     expect(sent).toMatchObject({ status: "sent", subject: held!.subject, body: held!.body });
     expect(sent!.paymentId).not.toBe(held!.paymentId);
+  });
+
+  describe("úprava platby s potvrzením ve frontě", () => {
+    function queued() {
+      const { owner, invoiceId } = account({ enabled: false });
+      const actor = webActor(owner);
+      const { id } = addPayment(
+        actor,
+        invoiceId,
+        manualInput(revisionOf(owner, invoiceId), 100_000),
+      );
+      sendReceipt(
+        actor,
+        invoiceId,
+        id,
+        clickInput(owner, invoiceId, "77777777-7777-4777-8777-777777777777"),
+      );
+      return { owner, invoiceId, id, actor };
+    }
+
+    test("změna částky zadrží potvrzení tiše", async () => {
+      const { owner, invoiceId, id, actor } = queued();
+
+      updatePayment(actor, id, manualInput(revisionOf(owner, invoiceId), 120_000));
+      await drainJobs(WORKER);
+
+      expect(smtp.connections()).toBe(0);
+      expect(logsOf(owner)[0]).toMatchObject({ status: "held", reason: R.paymentChanged });
+      expect(noticesOf(owner)).toEqual([]);
+      assertConsistent(db, owner);
+    });
+
+    test("změna data zadrží potvrzení, poznámka ne", async () => {
+      const { owner, invoiceId, id, actor } = queued();
+
+      updatePayment(
+        actor,
+        id,
+        manualInput(revisionOf(owner, invoiceId), 100_000, { note: "jen poznámka" }),
+      );
+      expect(logsOf(owner)[0]).toMatchObject({ status: "queued" });
+
+      updatePayment(
+        actor,
+        id,
+        manualInput(revisionOf(owner, invoiceId), 100_000, { paidOn: "2026-10-31" }),
+      );
+      await drainJobs(WORKER);
+      expect(smtp.connections()).toBe(0);
+      expect(logsOf(owner)[0]).toMatchObject({ status: "held", reason: R.paymentChanged });
+    });
+
+    test("odeslané potvrzení úprava nezmění a jiné platby se nedotkne", async () => {
+      const { owner, invoiceId, id, actor } = queued();
+      await drainJobs(WORKER);
+      expect(logsOf(owner)[0]).toMatchObject({ status: "sent" });
+
+      updatePayment(actor, id, manualInput(revisionOf(owner, invoiceId), 120_000));
+      expect(logsOf(owner)[0]).toMatchObject({ status: "sent" });
+    });
+
+    test("zadržené potvrzení jde poslat znovu s novou částkou", async () => {
+      const { owner, invoiceId, id, actor } = queued();
+      updatePayment(actor, id, manualInput(revisionOf(owner, invoiceId), 120_000));
+      await drainJobs(WORKER);
+
+      sendReceipt(
+        actor,
+        invoiceId,
+        id,
+        clickInput(owner, invoiceId, "88888888-8888-4888-8888-888888888888"),
+      );
+      await drainJobs(WORKER);
+
+      expect(toClient()).toHaveLength(1);
+      expect(toClient()[0]!.body).toContain(money(120_000));
+    });
   });
 
   test("smazání ruční platby zadrží její ruční potvrzení se stejným důvodem", async () => {

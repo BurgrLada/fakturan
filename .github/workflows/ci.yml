@@ -34,6 +34,6 @@ jobs:
       - run: pnpm audit --audit-level=high
       - run: docker build -t fakturan-ci .
       - run: docker run --rm fakturan-ci node scripts/pdf-smoke.mjs
-      - run: pnpm exec playwright test docker-pdf docker-scheduler
+      - run: pnpm exec playwright test docker-pdf docker-scheduler docker-imap
         env:
           E2E_DOCKER_IMAGE: fakturan-ci

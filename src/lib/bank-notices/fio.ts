@@ -194,6 +194,7 @@ function parse(text: string, meta: NoticeMeta): ParsedNotice | null {
 export const fioParser: BankNoticeParser = {
   bank: "fio",
   domain: "fio.cz",
+  variants: [...VARIANT_BY_SUBJECT.values()],
   autoMatchVariants: ["en"],
   classify,
   parse,

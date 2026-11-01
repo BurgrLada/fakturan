@@ -97,14 +97,17 @@ function assertDataDirConsistent(dataDir: string) {
 
 export const test = base.extend<{
   freshApp: App;
-  dockerApp: { baseURL: string };
+  dockerApp: { baseURL: string; container: string };
   withSmtp: boolean;
   allowPrivateMail: boolean;
+  dockerCaFile: string | null;
 }>({
   withSmtp: [false, { option: true }],
   allowPrivateMail: [false, { option: true }],
+  // A CA the container trusts on top of the public ones, for a test server with a certificate.
+  dockerCaFile: [null, { option: true }],
 
-  dockerApp: async ({ allowPrivateMail }, use) => {
+  dockerApp: async ({ allowPrivateMail, dockerCaFile }, use) => {
     const image = process.env.E2E_DOCKER_IMAGE;
     if (!image) throw new Error("Chybí E2E_DOCKER_IMAGE");
     const port = await freePort();
@@ -133,13 +136,21 @@ export const test = base.extend<{
               `${DOCKER_HOST_NAME}:host-gateway`,
             ]
           : []),
+        ...(dockerCaFile
+          ? [
+              "--volume",
+              `${dockerCaFile}:/etc/fakturan-test-ca.pem:ro`,
+              "--env",
+              "NODE_EXTRA_CA_CERTS=/etc/fakturan-test-ca.pem",
+            ]
+          : []),
         image,
       ],
       { encoding: "utf8" },
     ).trim();
     try {
       await waitForContainer(`${baseURL}/api/health`);
-      await use({ baseURL });
+      await use({ baseURL, container });
     } finally {
       execFileSync("docker", ["stop", container], { stdio: "ignore" });
     }

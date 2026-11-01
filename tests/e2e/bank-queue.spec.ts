@@ -4,7 +4,15 @@ import type { Page } from "@playwright/test";
 import Database from "better-sqlite3";
 import { startImap } from "../helpers/imap";
 import { expect, test } from "./fixtures";
-import { cashInvoice, issue, openForm, ready, register, settled } from "./invoice-helpers";
+import {
+  addAccount,
+  cashInvoice,
+  issue,
+  openForm,
+  ready,
+  register,
+  settled,
+} from "./invoice-helpers";
 
 test.setTimeout(90_000);
 
@@ -54,16 +62,6 @@ function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
   } finally {
     sqlite.close();
   }
-}
-
-async function addAccount(page: Page, baseURL: string) {
-  await page.goto(`${baseURL}/nastaveni/ucty`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Název účtu").fill("Hlavní účet");
-  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("2000145399");
-  await page.getByLabel("Kód banky").fill("0800");
-  await page.getByRole("button", { name: "Uložit účet" }).click();
-  await expect(page.getByText("Účet je uložený.")).toBeVisible();
 }
 
 const dialog = (page: Page) => page.getByRole("alertdialog");

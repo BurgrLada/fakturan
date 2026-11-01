@@ -1,7 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
-import { AUTO_MATCH_VARIANTS, BANK_PARSERS, isProvisional, parserFor } from "@/lib/bank-notices";
+import {
+  assertVariantIds,
+  AUTO_MATCH_VARIANTS,
+  BANK_PARSERS,
+  isProvisional,
+  parserFor,
+} from "@/lib/bank-notices";
 import { fioParser } from "@/lib/bank-notices/fio";
 import type { BankNoticeParser, NoticeMeta, ParsedNotice } from "@/lib/bank-notices/types";
 
@@ -260,6 +266,7 @@ describe("třídění", () => {
     const other: BankNoticeParser = {
       bank: "jina",
       domain: "jina.cz",
+      variants: ["jina_txt"],
       autoMatchVariants: ["jina_txt"],
       classify: ({ from }) => (from[0] === "avizo@jina.cz" ? "income" : null),
       parse: () => null,
@@ -272,6 +279,23 @@ describe("třídění", () => {
     });
     expect(parserFor(EN, parsers)).toEqual({ parser: fioParser, kind: "income" });
     expect(parserFor(meta("x", ["x@y.cz"]), parsers)).toBeNull();
+  });
+
+  test("[BNK-016] id varianty je unikátní napříč bankami", () => {
+    const named = (variants: string[], autoMatchVariants: string[] = []): BankNoticeParser => ({
+      bank: "jina",
+      domain: "jina.cz",
+      variants,
+      autoMatchVariants,
+      classify: () => null,
+      parse: () => null,
+    });
+    expect(() => assertVariantIds(BANK_PARSERS)).not.toThrow();
+    // An "en" from another bank would inherit Fio's permission to pay invoices alone.
+    expect(() => assertVariantIds([fioParser, named(["en"])])).toThrow("en");
+    expect(() => assertVariantIds([named(["a", "a"])])).toThrow("a");
+    expect(() => assertVariantIds([named(["a"], ["b"])])).toThrow("b");
+    expect(fioParser.variants).toEqual(["en", "cs_block", "cs_sentence"]);
   });
 });
 

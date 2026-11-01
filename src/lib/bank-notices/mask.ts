@@ -12,10 +12,19 @@ export function maskAccount(value: string): string {
   return [masked.reverse().join(""), ...bankCode].join("/");
 }
 
-// IBAN in groups, Czech account with a bank code, then any long run. A shorter account
-// or an IBAN split by spaces has no run long enough for the last alternative alone.
-const SENSITIVE =
-  /\b[A-Z]{2}\d{2}(?:[ \u00A0]?[A-Z\d]{4})+(?:[ \u00A0]?[A-Z\d]{1,3})?\b|(?:\d{1,6}-)?\d{1,10}\/\d{4}\b|\d{7,}/g;
+// IBAN in groups in any letter case, Czech account with a bank code, a prefix without one, then any
+// long run. A date cannot pass for a prefix: the part after the hyphen needs five digits. A word
+// caught as an IBAN group stays as it was, masking only touches digits.
+const SEP = "[ \\t\\u00A0\\u202F.\\-]";
+const SENSITIVE = new RegExp(
+  [
+    `\\b[A-Za-z]{2}\\d{2}(?:${SEP}?[A-Za-z\\d]{4}){1,8}(?:${SEP}?[A-Za-z\\d]{1,3})?\\b`,
+    "(?:\\d{1,6}-)?\\d{1,10}\\/\\d{4}\\b",
+    "\\b\\d{1,6}-\\d{5,10}\\b",
+    "\\d{7,}",
+  ].join("|"),
+  "g",
+);
 
 export function maskDigits(text: string): string {
   return text.replace(SENSITIVE, maskAccount);

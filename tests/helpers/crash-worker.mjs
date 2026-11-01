@@ -10,6 +10,8 @@ const stub = pathToFileURL(join(root, "tests/helpers/server-only.ts")).href;
 const designsStub = pathToFileURL(join(root, "tests/helpers/designs-stub.ts")).href;
 
 const MAILER = "crash:nodemailer";
+// Packages have their own src folders, so a bare "/src/" would match their relative requires.
+const ownSource = (url) => url?.startsWith(pathToFileURL(join(root, "src")).href + "/");
 
 function withExtension(path) {
   if (existsSync(`${path}.ts`)) return `${path}.ts`;
@@ -19,7 +21,7 @@ function withExtension(path) {
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "server-only") return { url: stub, shortCircuit: true };
-    if (specifier === "nodemailer" && context.parentURL?.includes("/src/")) {
+    if (specifier === "nodemailer" && ownSource(context.parentURL)) {
       return { url: MAILER, shortCircuit: true };
     }
     if (/\/(pdf\/)?(designs|render)$/.test(specifier) && !specifier.startsWith("/")) {
@@ -29,7 +31,7 @@ registerHooks({
       const path = withExtension(join(root, "src", specifier.slice(2)));
       return { url: pathToFileURL(path).href, shortCircuit: true };
     }
-    if (specifier.startsWith(".") && context.parentURL?.includes("/src/")) {
+    if (specifier.startsWith(".") && ownSource(context.parentURL)) {
       const path = withExtension(join(dirname(fileURLToPath(context.parentURL)), specifier));
       return { url: pathToFileURL(path).href, shortCircuit: true };
     }
@@ -62,6 +64,7 @@ const { setClockForTests } = await import("@/server/clock");
 const { createDb, setDbForTests } = await import("@/server/db");
 const { registerJob } = await import("@/server/jobs/registry");
 const { drainJobs } = await import("@/server/jobs/worker");
+const { pollMailbox } = await import("@/server/services/bank-poll");
 const { deliverMail, recoverMail } = await import("@/server/services/mail-delivery");
 const { runRecurringJob } = await import("@/server/services/recurring-run");
 
@@ -70,12 +73,20 @@ setDbForTests(db);
 setClockForTests({ now: () => new Date(now) });
 registerJob("mail.send", { run: deliverMail, recover: recoverMail });
 registerJob("recurring.run", { run: runRecurringJob });
+registerJob("bank.poll", { run: pollMailbox });
 
-if (killAt === "in_run_tx") {
-  // Fires once the number is taken, inside the transaction of the run.
-  db.$client.function("crash_now", () => die());
-  db.$client.exec(`CREATE TEMP TRIGGER crash_in_run AFTER UPDATE OF number ON main.invoice
-    WHEN new.number IS NOT NULL BEGIN SELECT crash_now(); END`);
+db.$client.function("crash_now", () => die());
+// Each fires in the transaction of its own write: the number taken, the payment of a notice, and
+// the cursor moving past a notice that is already committed.
+const TRIGGERS = {
+  in_run_tx: `AFTER UPDATE OF number ON main.invoice WHEN new.number IS NOT NULL`,
+  in_notice_tx: `AFTER INSERT ON main.payment`,
+  after_notice_tx: `BEFORE UPDATE OF last_uid ON main.bank_mailbox WHEN new.last_uid IS NOT NULL`,
+};
+if (TRIGGERS[killAt]) {
+  db.$client.exec(
+    `CREATE TEMP TRIGGER crash_point ${TRIGGERS[killAt]} BEGIN SELECT crash_now(); END`,
+  );
 }
 
 await drainJobs("mrtvy-proces");

@@ -60,7 +60,12 @@ export function runJobWorkers<T>(
   return runGatedWorkers("./job-worker.mjs", "result", jobs, databasePath);
 }
 
-export type CrashPoint = "after_sending" | "after_smtp" | "in_run_tx";
+export type CrashPoint =
+  | "after_sending"
+  | "after_smtp"
+  | "in_run_tx"
+  | "in_notice_tx"
+  | "after_notice_tx";
 
 // A real process, because a worker thread cannot receive SIGKILL. `now` drives the child's clock.
 export function runCrashWorker(input: {

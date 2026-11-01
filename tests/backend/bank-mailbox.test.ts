@@ -5,6 +5,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { auditActionLabel } from "@/lib/audit-labels";
+import { TEXTS } from "@/lib/texts";
 import { openMailbox } from "@/server/bank/imap";
 import { setClockForTests } from "@/server/clock";
 import { encryptSecret } from "@/server/crypto";
@@ -398,6 +400,55 @@ describe("tajemství a audit", () => {
     expect(view?.hasCredentials).toBe(true);
     expect(JSON.stringify(view)).not.toContain(PASSWORD);
     expect(JSON.stringify(view)).not.toContain(stored?.passwordEnc);
+  });
+
+  test("[AUD-004] změna vyžadování potvrzení má vlastní auditní záznam", async () => {
+    const id = seed();
+    const env = allowPrivate();
+    await saveBankMailbox(actor(id), own(), env);
+    await saveBankMailbox(actor(id), own({ password: "", folder: "INBOX" }), env);
+    const changes = () => audits(id).filter((item) => item.action === "bank_mailbox.confirmation");
+    expect(changes()).toEqual([]);
+
+    await saveBankMailbox(actor(id), own({ password: "", requireConfirmation: false }), env);
+    expect(changes()).toMatchObject([
+      { entity: "bank_mailbox", before: { requireConfirmation: true } },
+    ]);
+    expect(changes()[0]).toMatchObject({ after: { requireConfirmation: false } });
+
+    await saveBankMailbox(actor(id), own({ password: "", requireConfirmation: false }), env);
+    expect(changes()).toHaveLength(1);
+    await saveBankMailbox(actor(id), own({ password: "", requireConfirmation: true }), env);
+    expect(changes()).toHaveLength(2);
+    expect(auditActionLabel("bank_mailbox.confirmation")).toBe(
+      "Změna vyžadování potvrzení plateb z avíz",
+    );
+  });
+
+  test("[AUD-004] nová schránka bez potvrzení se audituje jako změna výchozího stavu", async () => {
+    const id = seed();
+    await saveBankMailbox(actor(id), own({ requireConfirmation: false }), allowPrivate());
+    expect(audits(id).map((item) => item.action)).toContain("bank_mailbox.confirmation");
+  });
+
+  test("test připojení neověří cíl, který se mezitím změnil", async () => {
+    const id = seed();
+    const env = allowPrivate();
+    await saveBankMailbox(actor(id), own(), env);
+    const login = imap.holdLogin();
+    const testing = testBankMailbox(actor(id), env);
+    await vi.waitFor(() => expect(imap.logins).toHaveLength(1));
+
+    const other = await startImap();
+    try {
+      await saveBankMailbox(actor(id), own({ port: String(other.port) }), env);
+      login.release();
+      await expect(testing).rejects.toThrow(TEXTS.bankMailbox.errors.testFailed);
+    } finally {
+      await other.close();
+    }
+    expect(row(id)?.verifiedAt).toBeNull();
+    expect(audits(id).map((item) => item.action)).not.toContain("bank_mailbox.test");
   });
 
   test("[AUD-004] heslo IMAP se nedostane do auditu", async () => {

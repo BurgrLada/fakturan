@@ -18,7 +18,7 @@ import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { bankNotification, invoice, payment } from "../db/schema";
+import { bankNotification, emailLog, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { findOwned, ownerOf, type Invoice } from "./invoices";
@@ -257,6 +257,23 @@ function assertAmountsEditable(
   if (!same) throw new ServiceError(E.noticeLocked);
 }
 
+// {{prijato}} is already rendered into the queued message, so it would state the old values. Only
+// `queued`: what is sending or sent can no longer be recalled.
+function holdQueuedReceipts(tx: Tx, userId: string, paymentId: string): void {
+  tx.update(emailLog)
+    .set({
+      status: "held",
+      reason: TEXTS.invoiceMail.reasons.paymentChanged,
+      updatedAt: clock.now(),
+    })
+    .where(
+      scoped(userId).where(emailLog, (t, { and, eq }) =>
+        and(eq(t.paymentId, paymentId), eq(t.status, "queued")),
+      ),
+    )
+    .run();
+}
+
 export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id: string } {
   const userId = ownerOf(actor);
   const input = parseInput(raw);
@@ -273,6 +290,11 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
       .set({ paidOn, amountMinor, currency, creditedMinor, method, note, updatedAt: clock.now() })
       .where(scoped(userId).where(payment, (t, { eq }) => eq(t.id, id)))
       .run();
+    const told =
+      paidOn === before.paidOn &&
+      amountMinor === before.amountMinor &&
+      currency === before.currency;
+    if (!told) holdQueuedReceipts(tx, userId, id);
     const after = applyPayments(tx, userId, before.invoiceId);
     audit({
       entity: "payment",

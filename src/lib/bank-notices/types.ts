@@ -4,7 +4,7 @@ import type { CalendarDate } from "../number-format";
 // from holds bare addresses, one per mailbox in the From header, never "Name <address>".
 export type NoticeMeta = { from: string[]; subject: string };
 
-// Each parser owns its variant ids; they must stay unique across banks.
+// Stored without the bank and judged alone by isProvisional, so ids are unique across banks.
 export type NoticeVariant = string;
 
 export type NoticeKind = "income" | "expense" | "unknown";
@@ -28,6 +28,7 @@ export type ParsedNotice = {
 export type BankNoticeParser = {
   bank: string;
   domain: string;
+  variants: readonly NoticeVariant[];
   autoMatchVariants: readonly NoticeVariant[];
   classify(meta: NoticeMeta): NoticeKind | null;
   parse(text: string, meta: NoticeMeta): ParsedNotice | null;

@@ -5,6 +5,7 @@ import { bankMailboxSchema, type BankFailureCode, type BankTlsMode } from "@/lib
 import { TEXTS } from "@/lib/texts";
 import { classifyImapError, openMailbox, type MailboxSession } from "../bank/imap";
 import type { Actor } from "../audit/context";
+import { recordAudit } from "../audit/record";
 import { clock } from "../clock";
 import { decryptSecret, encryptSecret } from "../crypto";
 import { db } from "../db";
@@ -150,6 +151,19 @@ export async function saveBankMailbox(
       .onConflictDoUpdate({ target: bankMailbox.userId, set: next })
       .run();
     if (!input.enabled) resolveNotificationsOf(tx, userId, ALERT);
+    const required = auditSnapshot(row).requireConfirmation;
+    // Off means an unverified notice may settle an invoice, so it must be findable on its own.
+    if (required !== input.requireConfirmation) {
+      recordAudit(tx, {
+        action: "bank_mailbox.confirmation",
+        entity: "bank_mailbox",
+        entityId: userId,
+        ownerId: userId,
+        scope: "user",
+        before: { requireConfirmation: required },
+        after: { requireConfirmation: input.requireConfirmation },
+      });
+    }
     audit({
       entity: "bank_mailbox",
       entityId: userId,
@@ -184,12 +198,27 @@ export function clearBankMailbox(actor: Actor): void {
   });
 }
 
-function markVerified(actor: Actor, userId: string): void {
+// The test ran against a snapshot: a save in the meantime must not inherit its verdict.
+function markVerified(actor: Actor, tested: Row): void {
+  const userId = tested.userId;
   mutate(actor, "bank_mailbox.test", (tx, audit) => {
-    tx.update(bankMailbox)
+    const { changes } = tx
+      .update(bankMailbox)
       .set({ verifiedAt: clock.now() })
-      .where(scoped(userId).where(bankMailbox))
+      .where(
+        scoped(userId).where(bankMailbox, (t, { and, eq }) =>
+          and(
+            eq(t.host, tested.host),
+            eq(t.port, tested.port),
+            eq(t.tls, tested.tls),
+            eq(t.username, tested.username),
+            eq(t.folder, tested.folder),
+            eq(t.passwordEnc, tested.passwordEnc),
+          ),
+        ),
+      )
       .run();
+    if (changes === 0) throw new ServiceError(E.testFailed);
     audit({ entity: "bank_mailbox", entityId: userId, ownerId: userId, scope: "user" });
   });
 }
@@ -239,6 +268,6 @@ export async function testBankMailbox(
     logger.warn("Test schránky s avízy selhal", { code: classifyImapError(error) });
     throw new ServiceError(E.testFailed);
   }
-  markVerified(actor, userId);
+  markVerified(actor, row);
   return { suggestedAuthServId };
 }

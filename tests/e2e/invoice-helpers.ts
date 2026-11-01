@@ -46,6 +46,16 @@ export async function addCatalogItem(page: Page, baseURL: string, name: string, 
   await expect(page).toHaveURL(/\/cenik\/(?!novy)[\w-]+$/);
 }
 
+export async function addAccount(page: Page, baseURL: string) {
+  await page.goto(`${baseURL}/nastaveni/ucty`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název účtu").fill("Hlavní účet");
+  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("2000145399");
+  await page.getByLabel("Kód banky").fill("0800");
+  await page.getByRole("button", { name: "Uložit účet" }).click();
+  await expect(page.getByText("Účet je uložený.")).toBeVisible();
+}
+
 export async function openForm(page: Page, baseURL: string) {
   await page.goto(`${baseURL}/faktury/nova`);
   await page.waitForLoadState("networkidle");

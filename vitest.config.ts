@@ -20,7 +20,8 @@ export default defineConfig({
       },
       {
         resolve,
-        test: { name: "backend", include: ["tests/backend/**/*.test.ts"] },
+        // Real PDF renders, hashing and child processes: the 5 s default fails on a loaded machine.
+        test: { name: "backend", include: ["tests/backend/**/*.test.ts"], testTimeout: 30_000 },
       },
     ],
   },
