@@ -18,6 +18,7 @@ import {
 } from "@/server/services/credit-notes";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import {
+  applySent,
   cancelInvoice,
   checkIssuable,
   issueInvoice,
@@ -259,6 +260,29 @@ describe("vznik opravy", () => {
     expect(row(owner, id)).toMatchObject({ creditsMinor: -210_000, status: "issued" });
   });
 
+  test("[CRN-002] pevná sleva 100,00 zůstane při částečné opravě celá a -500,00 dá -400,00", () => {
+    const { owner, id } = setup(0, {
+      discountKind: "amount",
+      discountValue: 10_000,
+      lines: [line(100_000)],
+    });
+    expect(row(owner, id).totalMinor).toBe(90_000);
+    const noteId = noteOf(owner, id);
+    expect(row(owner, noteId).totalMinor).toBe(-90_000);
+
+    const { totals } = saveDraft(
+      webActor(owner),
+      draftInput(owner, noteId, { lines: [line(-50_000)] }),
+    );
+    expect(totals.totalMinor).toBe(-40_000);
+
+    saveDraft(
+      webActor(owner),
+      draftInput(owner, noteId, { discountKind: "none", discountValue: 0 }),
+    );
+    expect(row(owner, noteId).totalMinor).toBe(-50_000);
+  });
+
   test("[CRN-003] oprava sníží fakturováno v seznamu i na kartě zákazníka z 1 000,00 na 600,00", () => {
     const { owner, customerId, id } = setup();
     expect(invoiceSummary(owner, {})[0]).toMatchObject({ invoicedMinor: 100_000 });
@@ -406,14 +430,40 @@ describe("vrácení peněz", () => {
     }
   });
 
-  test("vrácení přes uzavřený rozdíl nesmí překročit skutečně přijaté peníze", () => {
+  test("vrácení při uzavřeném rozdílu je odmítnuté, po smazání rozdílu projde", () => {
     const { owner, id, actor } = setup(100_000);
     pay(owner, id, 90_000);
-    closeDifference(actor, id, { revision: row(owner, id).revision, confirmed: true });
+    const difference = closeDifference(actor, id, {
+      revision: row(owner, id).revision,
+      confirmed: true,
+    });
 
-    expect(() => refund(owner, id, 90_001)).toThrow(E.refundExceeds);
+    expect(() => refund(owner, id, 1000)).toThrow(E.refundDifference);
+
+    deletePayment(actor, difference.id, row(owner, id).revision);
     refund(owner, id, 90_000);
-    expect(row(owner, id).paidMinor).toBe(10_000);
+    expect(row(owner, id)).toMatchObject({ paidMinor: 0, status: "issued" });
+    assertConsistent(db, owner);
+  });
+
+  test("oprava při uzavřeném rozdílu nejde vystavit ani vrátit ze storna", () => {
+    const { owner, id, actor } = setup(100_000);
+    pay(owner, id, 90_000);
+    const cancelled = issuedNote(owner, id, -1000);
+    cancelInvoice(actor, cancelled);
+    const waiting = noteOf(owner, id, -1000);
+    const difference = closeDifference(actor, id, {
+      revision: row(owner, id).revision,
+      confirmed: true,
+    });
+
+    expect(checkIssuable(owner, waiting).map((item) => item.message)).toContain(V.creditDifference);
+    expect(() => issue(owner, waiting)).toThrow(V.creditDifference);
+    expect(() => restoreInvoice(actor, cancelled)).toThrow(V.creditDifference);
+
+    deletePayment(actor, difference.id, row(owner, id).revision);
+    issue(owner, waiting);
+    expect(row(owner, id).creditsMinor).toBe(-1000);
   });
 });
 
@@ -544,6 +594,29 @@ describe("stav původní faktury", () => {
     );
 
     expect(() => issue(owner, noteId)).toThrow(V.currencyHasCredits);
+  });
+
+  test("vyčerpaná faktura s platbou další opravu nedovolí", () => {
+    const { owner, id, actor } = setup();
+    pay(owner, id, 100_000);
+    issuedNote(owner, id);
+
+    expect(row(owner, id).status).toBe("paid");
+    expect(() => createCreditNote(actor, id)).toThrow(V.notCreditable);
+  });
+
+  test("odeslání dobropisované faktury zapíše sentAt a storno opravy vrátí sent", () => {
+    const { owner, id, actor } = setup();
+    const noteId = issuedNote(owner, id);
+    expect(row(owner, id)).toMatchObject({ status: "credited", sentAt: null });
+
+    db.transaction((tx) => applySent(tx, owner, id));
+    expect(row(owner, id).status).toBe("credited");
+    expect(row(owner, id).sentAt).toEqual(NOW);
+
+    cancelInvoice(actor, noteId);
+    expect(row(owner, id).status).toBe("sent");
+    assertConsistent(db, owner);
   });
 
   test("[INV-002] faktura s opravou nejde stornovat", () => {
@@ -725,7 +798,7 @@ describe("stav původní faktury", () => {
     expect(row(owner, noteId).status).toBe("issued");
   });
 
-  test("banka opravu nikdy nepáruje", () => {
+  test("oprava nemá variabilní symbol ani po přečíslování", () => {
     const { owner, id } = setup(100_000);
     const noteId = issuedNote(owner, id, -10_000);
     expect(row(owner, noteId)).toMatchObject({ variableSymbol: null, variableSymbolManual: false });
@@ -779,11 +852,17 @@ describe("PDF opravy", () => {
       value: "2026-001 ze dne 20. 3. 2026",
     });
     expect(built.totals.at(-1)).toMatchObject({ label: "Celkem opraveno", strong: true });
+    expect(built.totals.at(-1)!.value).toMatch(/^-\s?100,00\sKč$/);
+    expect(built.lines[0]).toMatchObject({
+      unitPrice: expect.stringMatching(/^-\s?100,00\sKč$/),
+      total: expect.stringMatching(/^-\s?100,00\sKč$/),
+    });
     expect(built.payment.qr).toBeNull();
     expect(built.payment.rows.map((item) => item.label)).not.toContain("Variabilní symbol");
     expect(planQr(documentQrInput(doc, "")).kind).toBe("none");
     expect(text).toContain("Opravná faktura");
     expect(text).toContain("2026-001");
+    expect(text).toMatch(/Celkem opraveno[\s\S]*-\s?100,00\sKč/);
     expect(text).not.toContain("Celkem k úhradě");
   });
 

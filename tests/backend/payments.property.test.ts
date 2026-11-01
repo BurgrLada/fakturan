@@ -4,6 +4,7 @@ import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import type { PaymentInput } from "@/lib/payments";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { ServiceError } from "@/server/services/access";
 import { getInvoice } from "@/server/services/invoices";
@@ -76,7 +77,10 @@ describe("stav z plateb", () => {
               } else if (target) deletePayment(actor, target.id, revision());
             }
           } catch (error) {
-            if (!(error instanceof ServiceError)) throw error;
+            const refused =
+              error instanceof ServiceError &&
+              error.message === TEXTS.payments.errors.refundExceeds;
+            if (!refused) throw error;
           }
 
           const paid = listPayments(owner, id).reduce((sum, p) => sum + p.creditedMinor, 0);

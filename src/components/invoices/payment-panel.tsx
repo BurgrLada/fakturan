@@ -71,6 +71,9 @@ export function PaymentPanel({
   const receipt = useMemo(() => (receiptFor ? { paymentId: receiptFor } : undefined), [receiptFor]);
 
   const due = amountDue(balance);
+  const receivedMinor = payments
+    .filter((item) => item.kind === "payment")
+    .reduce((sum, item) => sum + item.creditedMinor, 0);
 
   function perform(work: () => Promise<Reply>, done?: string) {
     setMessage(null);
@@ -302,7 +305,7 @@ export function PaymentPanel({
           revision,
           currency,
           today,
-          suggestedMinor: Math.min(Math.max(-due, 0), balance.paidMinor),
+          suggestedMinor: Math.min(Math.max(-due, 0), receivedMinor),
         }}
         onClose={() => setRefunding(false)}
         onDone={() => {
@@ -352,11 +355,13 @@ export function PaymentPanel({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{T.removeTitle}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {removing && isRefund(removing) ? T.removeRefundTitle : T.removeTitle}
+            </AlertDialogTitle>
             <AlertDialogDescription data-testid="remove-payment-body">
               {removing &&
-                T.removeBody(
-                  `${formatMoney(removing.amountMinor, removing.currency)} ze dne ${formatCalendarDate(removing.paidOn, "d. M. yyyy")}`,
+                (isRefund(removing) ? T.removeRefundBody : T.removeBody)(
+                  `${formatMoney(Math.abs(removing.amountMinor), removing.currency)} ze dne ${formatCalendarDate(removing.paidOn, "d. M. yyyy")}`,
                 )}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -370,7 +375,7 @@ export function PaymentPanel({
                 if (target) perform(() => deletePaymentAction({ id: target.id, revision }));
               }}
             >
-              {T.removeConfirm}
+              {removing && isRefund(removing) ? T.removeRefundConfirm : T.removeConfirm}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

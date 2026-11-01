@@ -560,10 +560,11 @@ export function restoreInvoice(actor: Actor, id: string): void {
   });
 }
 
-// A document paid before it left still has to record sending, or removing the payment would put
-// it back to issued although the client has it.
+// A document settled before it left still has to record sending, or removing the payment or the
+// credit note would put it back to issued although the client has it.
 function paidBeforeSending(row: Invoice): boolean {
-  return (row.status === "partially_paid" || row.status === "paid") && row.sentAt === null;
+  const settled = ["partially_paid", "paid", "credited"].includes(row.status);
+  return settled && row.sentAt === null;
 }
 
 export function markSent(actor: Actor, id: string): void {

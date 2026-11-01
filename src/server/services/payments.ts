@@ -167,7 +167,7 @@ export function insertPayment(
 
 // A closed difference was computed from the money received: changing that money would leave a
 // paid document whose difference no longer matches.
-function hasDifference(q: Reader, userId: string, invoiceIds: string[]): boolean {
+export function hasDifference(q: Reader, userId: string, invoiceIds: string[]): boolean {
   const closed = q
     .select({ id: payment.id })
     .from(payment)
@@ -268,19 +268,6 @@ export function addPayment(actor: Actor, invoiceId: string, raw: PaymentInput): 
   });
 }
 
-// A closed difference counts in paid_minor but was never received, so it cannot be sent back.
-function receivedMinor(q: Reader, userId: string, invoiceId: string): number {
-  return q
-    .select({ sum: sql<number>`coalesce(sum(${payment.creditedMinor}), 0)` })
-    .from(payment)
-    .where(
-      scoped(userId).where(payment, (t, { and, eq }) =>
-        and(eq(t.invoiceId, invoiceId), eq(t.kind, "payment")),
-      ),
-    )
-    .get()!.sum;
-}
-
 export function addRefund(actor: Actor, invoiceId: string, raw: PaymentInput): { id: string } {
   const userId = ownerOf(actor);
   const input = parseInput(raw);
@@ -288,10 +275,8 @@ export function addRefund(actor: Actor, invoiceId: string, raw: PaymentInput): {
     const row = findOwned(tx, userId, invoiceId);
     assertAmendable(row);
     assertRevision(row, input.revision);
+    if (hasDifference(tx, userId, [invoiceId])) throw new ServiceError(E.refundDifference);
     const creditedMinor = creditedFor(row, input);
-    if (creditedMinor > receivedMinor(tx, userId, invoiceId)) {
-      throw new ServiceError(E.refundExceeds);
-    }
     const { paidOn, amountMinor, currency, method, note } = input;
     const id = randomUUID();
     const now = clock.now();

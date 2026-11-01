@@ -46,6 +46,7 @@ import {
   discountNotes,
   draftFields,
   fieldTarget,
+  hasFixedDiscount,
   nonEmptyLines,
   toDocumentFields,
   type AccountChoice,
@@ -759,10 +760,16 @@ function Form(props: InvoiceFormProps) {
                     id="field-exchangeRate"
                     inputMode="decimal"
                     disabled={props.linkedMoney}
+                    aria-describedby={props.linkedMoney ? "field-rate-locked" : undefined}
                     aria-invalid={invalid.has("field-exchangeRate") || undefined}
                     value={values.exchangeRate}
                     onChange={(event) => set("exchangeRate", event.target.value)}
                   />
+                  {props.linkedMoney && (
+                    <p id="field-rate-locked" className="text-xs text-muted-foreground">
+                      {T.rateLocked}
+                    </p>
+                  )}
                 </Field>
               )}
               <Field id="field-language" label={F.language}>
@@ -904,6 +911,11 @@ function Form(props: InvoiceFormProps) {
               </dl>
             ) : (
               <p className="text-sm text-muted-foreground">{T.totalsUnavailable}</p>
+            )}
+            {isNote && hasFixedDiscount(values) && (
+              <Alert role="status" data-testid="credit-fixed-discount">
+                <AlertDescription>{T.creditFixedDiscount}</AlertDescription>
+              </Alert>
             )}
             {notes.length > 0 && (
               <Alert role="status" data-testid="discount-notes">

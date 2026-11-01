@@ -184,12 +184,15 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         cancellable={row.status === "issued" || row.status === "sent"}
         hasPayments={takesPayment && payments.length > 0}
         hasCredits={row.creditsMinor < 0 && row.status !== "cancelled"}
-        creditable={isCreditable(row)}
+        creditable={isCreditable(row) && row.totalMinor + row.creditsMinor > 0}
         copyable={!isNote}
         restorable={row.status === "cancelled" && row.cancelledFrom !== null}
         markable={
           row.status === "issued" ||
-          ((row.status === "partially_paid" || row.status === "paid") && row.sentAt === null)
+          ((row.status === "partially_paid" ||
+            row.status === "paid" ||
+            row.status === "credited") &&
+            row.sentAt === null)
         }
         refreshable={editable && row.customerId !== null}
         mail={{ sendable, available, sending, problem, offer: sendOffer(query, available) }}

@@ -124,6 +124,22 @@ beforeEach(() => setClockForTests({ now: () => NOW }));
 afterEach(() => setClockForTests(null));
 
 describe("ingestNotice", () => {
+  test("banka opravu nikdy nepáruje", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    const actor = webActor(owner);
+    const note = createCreditNote(actor, invoiceId);
+    issueInvoice(actor, note.id, { revision: getInvoice(owner, note.id)!.revision });
+    db.update(invoice).set({ variableSymbol: "555" }).where(eq(invoice.id, note.id)).run();
+
+    expect(ingestNotice(owner, income(parsed({ variableSymbol: "555" })))).toMatchObject({
+      status: "pending",
+    });
+
+    expect(rows(owner)).toMatchObject([{ status: "pending", reason: "unknown_vs" }]);
+    expect(payments(owner)).toEqual([]);
+    expect(getInvoice(owner, note.id)!.paidMinor).toBe(0);
+  });
+
   test("avízo na dobropisovanou fakturu jde do fronty s důvodem closed", () => {
     const { owner, invoiceId } = seedAccount(db, NOW);
     const actor = webActor(owner);

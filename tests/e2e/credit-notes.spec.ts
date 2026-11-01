@@ -58,8 +58,8 @@ test("opravná faktura od tlačítka po přeplatek a vrácení", async ({ page, 
 
   await page.getByRole("button", { name: "Vrátit peníze" }).click();
   const dialog = page.getByRole("alertdialog");
-  await expect(dialog.getByLabel("Částka", { exact: true })).toHaveValue(/^400/);
-  await dialog.getByRole("button", { name: "Uložit platbu" }).click();
+  await expect(dialog.getByLabel("Vrácená částka", { exact: true })).toHaveValue(/^400/);
+  await dialog.getByRole("button", { name: "Uložit vrácení" }).click();
 
   await expect(page.getByTestId("payment-paid")).toHaveText(money("600,00 Kč"));
   await expect(page.getByTestId("payment-overpaid")).toHaveCount(0);
@@ -80,12 +80,12 @@ test("úplná oprava a vrácení všeho nechá panel plateb a vrácení jde smaz
   await page.goto(invoiceUrl);
 
   await page.getByRole("button", { name: "Vrátit peníze" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Uložit platbu" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Uložit vrácení" }).click();
   await expect(page.getByText("Dobropisovaná").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Přidat platbu" })).toHaveCount(0);
 
   const refund = page.getByTestId("payment-row").filter({ hasText: "Vrácení" });
   await refund.getByRole("button", { name: "Smazat" }).click();
-  await page.getByRole("button", { name: "Smazat platbu" }).click();
+  await page.getByRole("button", { name: "Smazat vrácení" }).click();
   await expect(page.getByTestId("payment-paid")).toHaveText(money("1 000,00 Kč"));
 });

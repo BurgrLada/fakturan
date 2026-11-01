@@ -26,6 +26,7 @@ import {
 } from "./invoices";
 import { mutate } from "./mutation";
 import { defaultSeriesFor } from "./number-series";
+import { hasDifference } from "./payments";
 
 const V = TEXTS.invoices.validation;
 
@@ -57,6 +58,8 @@ export function creditNoteProblem(
   if (!note.relatedInvoiceId) return V.notCreditable;
   const original = findOwned(q, ownerId, note.relatedInvoiceId);
   if (!isCreditable(original)) return V.notCreditable;
+  // The difference was computed from the old balance, a correction would leave it wrong.
+  if (hasDifference(q, ownerId, [original.id])) return V.creditDifference;
   const sameMoney =
     original.currency === note.currency && original.exchangeRateMicros === note.exchangeRateMicros;
   return sameMoney ? creditLimitProblem(q, ownerId, note) : V.currencyHasCredits;
@@ -66,7 +69,8 @@ export function createCreditNote(actor: Actor, invoiceId: string): { id: string 
   const userId = ownerOf(actor);
   return mutate(actor, "invoice.credit_note", (tx, audit) => {
     const source = findOwned(tx, userId, invoiceId);
-    if (!isCreditable(source)) throw new ServiceError(V.notCreditable);
+    const exhausted = creditableMinor(tx, userId, invoiceId) <= 0;
+    if (!isCreditable(source) || exhausted) throw new ServiceError(V.notCreditable);
     // 0 - price, not -price: a free line would become -0. The catalog link stays behind, because
     // a correction is not another use of the item.
     const lines = linesOf(tx, userId, invoiceId).map(

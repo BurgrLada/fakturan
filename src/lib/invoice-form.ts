@@ -297,6 +297,12 @@ export function discountNotes(
   ];
 }
 
+export function hasFixedDiscount(values: Pick<FormValues, "discountKind" | "lines">): boolean {
+  return (
+    values.discountKind === "amount" || values.lines.some((line) => line.discountKind === "amount")
+  );
+}
+
 export function computeFormTotals(values: FormValues, type: InvoiceType): Totals | null {
   const result = toDocumentFields(values, type);
   if (!result.ok) return null;

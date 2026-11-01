@@ -337,7 +337,10 @@ export const TEXTS = {
       underpaid: "Přijaté platby jsou nižší než nová částka faktury.",
       statusAfter: (status: string) => `Stav po přepočtu: ${status}.`,
       currencyLocked: "Doklad už má platbu, měnu změnit nejde.",
-      linkedLocked: "Doklad je navázaný na jiný doklad, měnu a kurz změnit nejde.",
+      linkedLocked: "Doklad je navázaný na jiný doklad, měnu změnit nejde.",
+      rateLocked: "Doklad je navázaný na jiný doklad, kurz změnit nejde.",
+      creditFixedDiscount:
+        "Pevná sleva se přenesla z faktury v plné výši a zmenšuje opravu. Při částečné opravě ji snižte, jinak opravíte méně, než jste chtěli.",
     },
     issueDialog: {
       title: "Vystavit fakturu?",
@@ -360,7 +363,7 @@ export const TEXTS = {
       createCredit: "Vytvořit opravnou fakturu",
       related: {
         title: "Související doklady",
-        parent: "Opravuje",
+        parent: "Původní doklad",
         children: "Navázané doklady",
       },
       back: "Zpět na faktury",
@@ -612,6 +615,8 @@ export const TEXTS = {
       creditNoteManual: "Opravná faktura vzniká jen z vystavené faktury",
       creditNoteCopy: "Opravnou fakturu nejde duplikovat ani uložit jako šablonu",
       creditNotNegative: "Celková částka opravné faktury musí být záporná",
+      creditDifference:
+        "Na faktuře je uzavřený rozdíl počítaný z původní částky. Nejdřív rozdíl smažte, potom jde fakturu opravit.",
       creditExceeds: "Oprava je vyšší než částka, která na faktuře zbývá opravit",
       linkedLocked: "Typ, zákazníka, měnu ani kurz navázaného dokladu změnit nejde",
       typeLocked: "Typ konceptu změnit nejde",
@@ -720,6 +725,8 @@ export const TEXTS = {
       noticeLocked: "U platby z avíza jde změnit jen datum, způsob a poznámku",
       noticeDelete: "Platbu z avíza jde odebrat jen vrácením celého avíza",
       refundExceeds: "Vrácená částka nesmí být vyšší než přijaté platby",
+      refundDifference:
+        "Na dokladu je uzavřený rozdíl počítaný z přijatých plateb. Nejdřív rozdíl smažte, potom jde peníze vrátit.",
     },
     methods: { transfer: "Převodem", cash: "Hotově", other: "Jinak" },
     sources: { manual: "Ručně", notice: "Z avíza", import: "Import" },
@@ -756,6 +763,10 @@ export const TEXTS = {
         `Smazat platbu ${what}? Stav faktury se přepočte podle zbývajících plateb.`,
       removeBack: "Zpět",
       removeConfirm: "Smazat platbu",
+      removeRefundTitle: "Smazat vrácení?",
+      removeRefundBody: (what: string) =>
+        `Smazat vrácení ${what}? Stav faktury se přepočte podle zbývajících plateb.`,
+      removeRefundConfirm: "Smazat vrácení",
       closedDifference: "Uzavřený rozdíl",
     },
     dialog: {
@@ -763,7 +774,12 @@ export const TEXTS = {
       editTitle: "Upravit platbu",
       refundTitle: "Vrátit peníze",
       editRefundTitle: "Upravit vrácení",
-      refundHint: "Zadejte vrácenou částku kladně, uloží se jako záporná platba.",
+      refundHint: "Zadejte vrácenou částku bez znaménka, v seznamu plateb se ukáže jako záporná.",
+      refundOn: "Datum vrácení",
+      refundAmount: "Vrácená částka",
+      refundCurrency: "Měna vrácení",
+      refundMethod: "Způsob vrácení",
+      saveRefund: "Uložit vrácení",
       paidOn: "Datum úhrady",
       amount: "Částka",
       currency: "Měna platby",

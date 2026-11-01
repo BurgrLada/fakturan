@@ -95,6 +95,7 @@ function Form({
       note !== first.note;
   }, [dirty, paidOn, amount, currency, credited, method, note]);
 
+  const refundForm = refund || (payment !== null && isRefund(payment));
   const foreign = currency !== target.currency;
   const locked = payment?.source === "notice";
   const { prefilled, typed } = useCreditPrefill({
@@ -161,12 +162,10 @@ function Form({
               : T.addTitle}
         </AlertDialogTitle>
       </AlertDialogHeader>
-      {(refund || (payment && isRefund(payment))) && (
-        <p className="text-sm text-muted-foreground">{T.refundHint}</p>
-      )}
+      {refundForm && <p className="text-sm text-muted-foreground">{T.refundHint}</p>}
       {locked && <p className="text-sm text-muted-foreground">{T.noticeLocked}</p>}
       <div className="flex flex-col gap-1">
-        <Label htmlFor={`${key}-date`}>{T.paidOn}</Label>
+        <Label htmlFor={`${key}-date`}>{refundForm ? T.refundOn : T.paidOn}</Label>
         <Input
           id={`${key}-date`}
           type="date"
@@ -177,7 +176,7 @@ function Form({
       </div>
       <div className="grid grid-cols-[1fr_auto] gap-2">
         <div className="flex flex-col gap-1">
-          <Label htmlFor={`${key}-amount`}>{T.amount}</Label>
+          <Label htmlFor={`${key}-amount`}>{refundForm ? T.refundAmount : T.amount}</Label>
           <Input
             id={`${key}-amount`}
             inputMode="decimal"
@@ -188,7 +187,7 @@ function Form({
           />
         </div>
         <div className="flex flex-col gap-1">
-          <Label htmlFor={`${key}-currency`}>{T.currency}</Label>
+          <Label htmlFor={`${key}-currency`}>{refundForm ? T.refundCurrency : T.currency}</Label>
           <NativeSelect
             id={`${key}-currency`}
             disabled={locked}
@@ -224,7 +223,7 @@ function Form({
         </div>
       )}
       <div className="flex flex-col gap-1">
-        <Label htmlFor={`${key}-method`}>{T.method}</Label>
+        <Label htmlFor={`${key}-method`}>{refundForm ? T.refundMethod : T.method}</Label>
         <NativeSelect
           id={`${key}-method`}
           value={method}
@@ -264,7 +263,7 @@ function Form({
           {T.back}
         </Button>
         <Button type="submit" className="max-sm:h-11" disabled={pending}>
-          {T.save}
+          {refundForm ? T.saveRefund : T.save}
         </Button>
       </AlertDialogFooter>
     </form>

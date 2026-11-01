@@ -14,6 +14,7 @@ import {
   formFromDocument,
   isEmptyLine,
   parseRate,
+  hasFixedDiscount,
   toDocumentFields,
   type FormValues,
 } from "@/lib/invoice-form";
@@ -96,7 +97,13 @@ describe("formulář faktury", () => {
     expect(toDocumentFields(form({ lines: [line] }), "invoice")).toMatchObject({ ok: false });
   });
 
-  // CRN-002 stays pending: prefilled negative lines only arrive with createCreditNote.
+  test("pevnou slevu pozná na dokladu i na položce, procentní ne", () => {
+    const line = { ...blankLine("ks"), discountKind: "amount" as const };
+    expect(hasFixedDiscount(form({ discountKind: "amount" }))).toBe(true);
+    expect(hasFixedDiscount(form({ lines: [line] }))).toBe(true);
+    expect(hasFixedDiscount(form({ discountKind: "percent" }))).toBe(false);
+  });
+
   test("formulář přijme -100 jen u opravné faktury", () => {
     const line = { ...blankLine("ks"), name: "Vratka", price: "-100" };
     const values = form({ lines: [line] });
