@@ -75,7 +75,7 @@ async function PaymentsContent() {
         {history.length === 0 ? (
           <p className="text-sm text-muted-foreground">{T.history.empty}</p>
         ) : (
-          <NoticeList rows={history} mode="history" label={T.history.list} />
+          <NoticeList rows={history} mode="history" label={T.history.list} receipts={receipts} />
         )}
       </section>
     </>

@@ -26,6 +26,7 @@ import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
+import { hasQueuedNotice } from "@/server/services/bank-notices";
 import { EDITABLE_STATUSES, listVersions } from "@/server/services/invoice-versions";
 import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
@@ -206,6 +207,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           latestSnooze={addDays(today, MAX_SNOOZE_DAYS)}
           canSend={available && !sending}
           sent={row.sentAt !== null}
+          queuedNotice={hasQueuedNotice(user.id, row.variableSymbol)}
         />
       )}
       {takesPayment && (

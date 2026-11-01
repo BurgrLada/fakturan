@@ -606,6 +606,23 @@ export function noticeCounts(ownerId: string): { pending: number; unrecognized: 
   return { pending: of("pending"), unrecognized: of("unrecognized") };
 }
 
+// Bears on a reminder: the client may have paid already, only the money waits for the user.
+export function hasQueuedNotice(ownerId: string, variableSymbol: string | null): boolean {
+  const symbol = normalizeSymbol(variableSymbol);
+  if (!symbol) return false;
+  const row = db
+    .select({ id: bankNotification.id })
+    .from(bankNotification)
+    .where(
+      scoped(ownerId).where(bankNotification, (t) =>
+        and(eq(t.status, "pending"), sql`ltrim(${t.variableSymbol}, '0') = ${symbol}`),
+      ),
+    )
+    .limit(1)
+    .get();
+  return row !== undefined;
+}
+
 export type NoticeCandidate = {
   id: string;
   number: string | null;
@@ -689,12 +706,19 @@ type OpenNotice = BankNotification & {
   paidOn: string;
 };
 
-// The status is the guard against a double click: the second call finds a notice that is no
-// longer pending.
-function pendingNotice(tx: Tx, userId: string, id: string): OpenNotice {
+const ASSIGNABLE: readonly NoticeStatus[] = ["pending", "ignored"];
+
+// The status is the guard against a double click: the second call finds a notice that is settled.
+// An ignored notice stays assignable: the account may just be missing from the settings.
+function assignableNotice(tx: Tx, userId: string, id: string): OpenNotice {
   const row = readNotice(tx, userId, id);
   const { amountMinor, currency, paidOn } = row;
-  if (row.status !== "pending" || amountMinor === null || currency === null || paidOn === null) {
+  if (
+    !ASSIGNABLE.includes(row.status) ||
+    amountMinor === null ||
+    currency === null ||
+    paidOn === null
+  ) {
     throw new ServiceError(E.notPending);
   }
   return { ...row, amountMinor, currency, paidOn };
@@ -778,7 +802,7 @@ export function assignNotice(actor: Actor, id: string, raw: AssignInput): void {
   const userId = ownerOf(actor);
   const input = parseOrThrow(assignInputSchema, raw);
   mutate(actor, "notice.assigned", (tx, audit) => {
-    const notice = pendingNotice(tx, userId, id);
+    const notice = assignableNotice(tx, userId, id);
     settle(
       tx,
       audit,
@@ -802,7 +826,7 @@ export function splitNotice(actor: Actor, id: string, raw: SplitInput): void {
   const userId = ownerOf(actor);
   const { parts } = parseOrThrow(splitInputSchema, raw);
   mutate(actor, "notice.split", (tx, audit) => {
-    const notice = pendingNotice(tx, userId, id);
+    const notice = assignableNotice(tx, userId, id);
     const total = parts.reduce((sum, part) => sum + part.amountMinor, 0);
     if (total !== notice.amountMinor) throw new ServiceError(E.splitSum);
     settle(tx, audit, userId, notice, parts, "notice.split");

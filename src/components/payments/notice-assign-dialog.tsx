@@ -170,6 +170,11 @@ function Form({
         <AlertDialogTitle>{T.title}</AlertDialogTitle>
         <AlertDialogDescription>{T.mailNote(receipts)}</AlertDialogDescription>
       </AlertDialogHeader>
+      {notice.status === "ignored" && (
+        <Alert data-testid="foreign-account-warning">
+          <AlertDescription>{T.foreignAccount}</AlertDescription>
+        </Alert>
+      )}
       {notice.provisional && (
         <p className="text-xs text-muted-foreground" data-testid="provisional-notice">
           {TEXTS.bankQueue.provisionalHint}

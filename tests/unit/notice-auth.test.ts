@@ -47,6 +47,14 @@ describe("Authentication-Results", () => {
     expect(check(results("dkim=none", "spf=none"))).toBe("none");
   });
 
+  // Ruling: indistinguishable from a forged message, so require_confirmation has no say here.
+  test("[BNK-013] přeposlaná zpráva bez podpisu je fail, s platným podpisem pass", () => {
+    expect(check(results("dkim=none", "spf=fail smtp.mailfrom=fio.cz"))).toBe("fail");
+    expect(check(results("dkim=pass header.d=fio.cz", "spf=fail smtp.mailfrom=fio.cz"))).toBe(
+      "pass",
+    );
+  });
+
   test("[BNK-013] každý jiný výsledek jde do fronty", () => {
     for (const result of ["fail", "softfail", "neutral", "temperror", "permerror"]) {
       expect(check(results(`spf=${result} smtp.mailfrom=fio.cz`))).toBe("fail");

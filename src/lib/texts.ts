@@ -1183,6 +1183,9 @@ export const TEXTS = {
       manualStage: "Bez stupně",
       send: "Odeslat upomínku",
       unsent: "Upomínku jde poslat až po odeslání faktury, klient zatím nemá co připomínat.",
+      queuedNotice:
+        "Ve frontě plateb čeká avízo se stejným variabilním symbolem, klient už možná zaplatil. Automatickou upomínku to nezastaví.",
+      queuedNoticeLink: "Zkontrolovat platby",
       snooze: "Odložit do",
       snoozeHint: "Nejvýš 30 dní od dneška.",
       snoozeSave: "Odložit",
@@ -1533,6 +1536,8 @@ export const TEXTS = {
       badCredited: "Zadejte připsanou částku větší než nula",
       overpaid: (amount: string) => `Přeplatek ${amount}`,
       confirm: "Přiřadit platbu",
+      foreignAccount:
+        "Avízo přišlo na účet, který ve Fakturanu nemáte. Přiřaďte ho, jen pokud peníze opravdu patří k dokladu.",
       mailNote: (receipts: boolean) =>
         receipts
           ? "Potvrzení platby je zapnuté: pokud avízo není starší 3 dnů, klient dostane potvrzení."
@@ -1613,7 +1618,7 @@ export const TEXTS = {
       enabled: "Číst schránku a zpracovávat avíza",
       requireConfirmation: "Vyžadovat potvrzení, když nejde ověřit odesílatele",
       requireConfirmationHint:
-        "Zapnuto (doporučeno): avízo, u kterého váš poštovní server nic neověřil, počká ve frontě na vaše potvrzení. Vypnuto: takové avízo uhradí fakturu samo, jde to jen s vyplněným serverem ověření níže. Kdo zná číslo vaší faktury, může poslat zprávu, která vypadá jako avízo.",
+        "Zapnuto (doporučeno): avízo, u kterého váš poštovní server nic neověřil, počká ve frontě na vaše potvrzení. Vypnuto: takové avízo uhradí fakturu samo, jde to jen s vyplněným serverem ověření níže. Kdo zná číslo vaší faktury, může poslat zprávu, která vypadá jako avízo. Přeposlaná zpráva bez platného podpisu banky ověřením neprojde a na vaše potvrzení počká vždy, přepínač na ni nemá vliv.",
       authServId: "Server ověření (authserv-id)",
       authServIdHint:
         "Název, kterým se váš poštovní server podepisuje v hlavičce Authentication-Results. Bez něj jde každé avízo do fronty, protože hlavičku může napsat i odesílatel. Zkouška připojení ho z posledního avíza nabídne.",

@@ -111,6 +111,11 @@ znamená, že zaplacení faktury může spustit i zpráva s podvrženým odesíl
 do auditu zvlášť. Bez vyplněného serveru ověření (authserv-id) jde do fronty každé avízo bez ohledu
 na přepínač.
 
+Přeposílání: nejlépe nechte Fio posílat avíza přímo do čtené schránky. Přeposláním na jinou adresu
+přestane sedět SPF, projde jen podpis DKIM, pokud ho přeposílající server nezmění. Zpráva bez platného
+podpisu vypadá stejně jako podvržená, skončí jako neověřená s výsledkem `fail` a čeká ve frontě bez
+ohledu na přepínač. Server ověření musí být ten, který zprávu přijal do čtené schránky.
+
 Česká avíza jsou zatím prozatímní: formát není ověřený na skutečném vzorku, proto se čtou, ale nikdy
 se nepárují automaticky a ve frontě mají štítek „Prozatímní formát“. Automaticky se páruje jen
 anglická varianta.

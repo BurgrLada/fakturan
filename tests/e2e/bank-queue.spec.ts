@@ -17,16 +17,26 @@ import {
 test.setTimeout(90_000);
 
 type NoticeSeed = {
-  status?: "pending" | "unrecognized";
+  status?: "pending" | "unrecognized" | "ignored";
   variant?: string | null;
   reason?: string | null;
   amountMinor?: number | null;
   text?: string;
+  symbol?: string;
 };
+
+function invoiceSymbol(dataDir: string): string {
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  try {
+    return sqlite.prepare("SELECT variable_symbol FROM invoice").pluck().get() as string;
+  } finally {
+    sqlite.close();
+  }
+}
 
 function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
   const status = seed.status ?? "pending";
-  const recognized = status === "pending";
+  const recognized = status !== "unrecognized";
   const sqlite = new Database(join(dataDir, "fakturan.db"));
   try {
     const owner = sqlite.prepare("SELECT id FROM user").pluck().get() as string;
@@ -51,7 +61,7 @@ function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
         currency: recognized ? "CZK" : null,
         paidOn: recognized ? "2026-10-30" : null,
         paidTime: recognized ? "14:05" : null,
-        vs: recognized ? "777" : null,
+        vs: recognized ? (seed.symbol ?? "777") : null,
         name: recognized ? "Ukázková firma" : null,
         message: recognized ? "Za konzultaci" : null,
         instruction: recognized ? id : null,
@@ -211,5 +221,46 @@ test.describe("vlastní schránka", () => {
     await page.goto(`${baseURL}/platby`);
     await expect(page.getByTestId("notice-row")).toContainText("Spárování bylo vráceno.");
     await expect(page.getByRole("button", { name: "Přiřadit" })).toBeVisible();
+  });
+
+  test("[BNK-007] avízo na cizí účet jde přiřadit ručně a dialog na to upozorní", async ({
+    page,
+    freshApp,
+  }) => {
+    const { baseURL, dataDir } = freshApp;
+    await ready(page, baseURL);
+    await addAccount(page, baseURL);
+    await openForm(page, baseURL);
+    await cashInvoice(page);
+    await settled(page);
+    await issue(page);
+    await page.waitForLoadState("networkidle");
+    seedNotice(dataDir, { status: "ignored", reason: "foreign_account" });
+
+    await page.goto(`${baseURL}/platby`);
+    await page.getByRole("button", { name: "Přiřadit" }).click();
+    await expect(dialog(page).getByTestId("foreign-account-warning")).toBeVisible();
+    await dialog(page).getByLabel("Doklad", { exact: true }).selectOption({ index: 1 });
+    await dialog(page).getByRole("button", { name: "Přiřadit platbu" }).click();
+    await expect(dialog(page)).toBeHidden();
+    await expect(page.getByTestId("notice-row")).toContainText("Spárováno");
+  });
+
+  test("[REM-003] avízo ve frontě ukáže varování v panelu upomínek", async ({ page, freshApp }) => {
+    const { baseURL, dataDir } = freshApp;
+    await ready(page, baseURL);
+    await addAccount(page, baseURL);
+    await openForm(page, baseURL);
+    await cashInvoice(page);
+    await settled(page);
+    await issue(page);
+    await page.waitForLoadState("networkidle");
+    const invoiceUrl = page.url();
+    await expect(page.getByTestId("reminder-queued-notice")).toHaveCount(0);
+
+    seedNotice(dataDir, { symbol: invoiceSymbol(dataDir) });
+
+    await page.goto(invoiceUrl);
+    await expect(page.getByTestId("reminder-queued-notice")).toBeVisible();
   });
 });

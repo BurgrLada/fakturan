@@ -735,6 +735,12 @@ describe("server ověření", () => {
     expect(row(id)!.authServId).toBeNull();
     expect(getBankMailbox(id)!.authServId).toBe("");
 
+    const changes = audits(id).filter((item) => item.action === "bank_mailbox.auth_serv_id");
+    expect(changes.map((item) => item.after)).toEqual(
+      expect.arrayContaining([{ authServId: "mx.example.cz" }, { authServId: null }]),
+    );
+    expect(auditActionLabel("bank_mailbox.auth_serv_id")).toBe("Změna serveru ověření avíz");
+
     await expect(
       saveBankMailbox(actor(id), own({ authServId: "a b" }), allowPrivate()),
     ).rejects.toThrow("jeden název");

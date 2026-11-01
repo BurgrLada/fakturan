@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
@@ -37,6 +38,7 @@ export function ReminderPanel({
   latestSnooze,
   canSend,
   sent,
+  queuedNotice,
 }: {
   invoiceId: string;
   rules: ReminderRule[];
@@ -56,6 +58,7 @@ export function ReminderPanel({
   latestSnooze: CalendarDate;
   canSend: boolean;
   sent: boolean;
+  queuedNotice: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -81,6 +84,16 @@ export function ReminderPanel({
       <h2 id="reminders-title" className="text-lg">
         {T.title}
       </h2>
+      {queuedNotice && (
+        <Alert data-testid="reminder-queued-notice">
+          <AlertDescription>
+            {T.queuedNotice}{" "}
+            <Link href="/platby" className="underline underline-offset-4">
+              {T.queuedNoticeLink}
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
       {error && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error}</AlertDescription>

@@ -21,6 +21,7 @@ import { ServiceError } from "@/server/services/access";
 import {
   assignNotice,
   dismissNotice,
+  hasQueuedNotice,
   ingestNotice,
   listNotices,
   noticeCandidates,
@@ -522,6 +523,43 @@ describe("rozhodnutí po kontrole", () => {
     expect(rows(owner)[0]!.purgedAt).toBeNull();
   });
 
+  test("[BNK-007] avízo na cizí účet jde přiřadit ručně", () => {
+    const foreign = parsed({ targetAccount: "1234567899/2010" });
+    const assigned = seedAccount(db, NOW);
+    const first = ingestNotice(assigned.owner, income(foreign)) as { id: string };
+    assignNotice({ userId: assigned.owner, source: "web" }, first.id, {
+      invoiceId: assigned.invoiceId,
+    });
+    expect(rows(assigned.owner)[0]).toMatchObject({ status: "matched" });
+    expect(getInvoice(assigned.owner, assigned.invoiceId)!.paidMinor).toBe(INVOICE_TOTAL);
+    assertConsistent(db, assigned.owner);
+  });
+
+  test("[BNK-012] zahozené ani nerozpoznané avízo přiřadit nejde", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    const { id } = ingestNotice(owner, unrecognized()) as { id: string };
+    expect(() => assignNotice({ userId: owner, source: "web" }, id, { invoiceId })).toThrow(
+      TEXTS.bankQueue.errors.notPending,
+    );
+  });
+
+  test("avízo ve frontě se najde podle VS bez úvodních nul a vyřízené se nepočítá", () => {
+    const { owner } = seedAccount(db, NOW);
+    expect(hasQueuedNotice(owner, VS)).toBe(false);
+    const { id } = ingestNotice(
+      owner,
+      income(parsed({ amountMinor: 5, variableSymbol: `00${VS}` })),
+    ) as { id: string };
+
+    expect(hasQueuedNotice(owner, VS)).toBe(true);
+    expect(hasQueuedNotice(owner, "1")).toBe(false);
+    expect(hasQueuedNotice(owner, null)).toBe(false);
+    expect(hasQueuedNotice(seedAccount(db, NOW).owner, VS)).toBe(false);
+
+    dismissNotice({ userId: owner, source: "web" }, id);
+    expect(hasQueuedNotice(owner, VS)).toBe(false);
+  });
+
   test("[BNK-012] nad strop 50 za den zůstane záznam bez obsahu a trvalé upozornění", () => {
     const { owner } = seedAccount(db, NOW);
     for (let i = 0; i < 50; i += 1) {
@@ -859,14 +897,12 @@ describe("fronta", () => {
     ]);
   });
 
-  test("ignorované avízo z cizího účtu přiřadit ani zahodit nejde", () => {
-    const { owner, invoiceId } = seedAccount(db, NOW);
+  test("ignorované avízo z cizího účtu zahodit nejde", () => {
+    const { owner } = seedAccount(db, NOW);
     ingestNotice(owner, income(parsed({ targetAccount: "1234567899/2010" })));
     const id = rows(owner)[0]!.id;
 
-    expect(() => assignNotice(actor(owner), id, { invoiceId })).toThrow(ServiceError);
     expect(() => dismissNotice(actor(owner), id)).toThrow(ServiceError);
-    expect(payments(owner)).toEqual([]);
   });
 
   test("[BNK-011] přijetí částečné platby z fronty dá partially_paid", () => {

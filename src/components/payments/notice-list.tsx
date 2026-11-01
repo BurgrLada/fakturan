@@ -25,6 +25,7 @@ import { formatDateTime } from "@/lib/format";
 import { formatMoney } from "@/lib/money";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
+import { NoticeAssignDialog } from "./notice-assign-dialog";
 
 const T = TEXTS.bankQueue;
 const TOUCH = "max-sm:h-11 max-sm:min-w-11";
@@ -229,13 +230,17 @@ export function NoticeList({
   rows,
   mode,
   label,
+  receipts = false,
 }: {
   rows: NoticeItem[];
   mode: "unrecognized" | "history";
   label: string;
+  receipts?: boolean;
 }) {
+  const router = useRouter();
   const { pending, error, run } = useNoticeRunner();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [assigning, setAssigning] = useState<NoticeItem | null>(null);
 
   function perform({ kind, item }: Confirm) {
     setConfirm(null);
@@ -278,6 +283,17 @@ export function NoticeList({
                   {T.actions.undo}
                 </Button>
               )}
+              {mode === "history" && item.status === "ignored" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={TOUCH}
+                  disabled={pending}
+                  onClick={() => setAssigning(item)}
+                >
+                  {T.actions.assign}
+                </Button>
+              )}
               {mode === "history" && item.status === "dismissed" && (
                 <Button
                   variant="outline"
@@ -303,6 +319,15 @@ export function NoticeList({
         pending={pending}
         onClose={() => setConfirm(null)}
         onConfirm={perform}
+      />
+      <NoticeAssignDialog
+        notice={assigning}
+        receipts={receipts}
+        onClose={() => setAssigning(null)}
+        onDone={() => {
+          setAssigning(null);
+          router.refresh();
+        }}
       />
     </div>
   );

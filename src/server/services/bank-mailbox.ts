@@ -164,6 +164,19 @@ export async function saveBankMailbox(
         after: { requireConfirmation: input.requireConfirmation },
       });
     }
+    const trustedServer = auditSnapshot(row).authServId;
+    // Whoever names this server decides whose verdict can settle an invoice.
+    if (trustedServer !== next.authServId) {
+      recordAudit(tx, {
+        action: "bank_mailbox.auth_serv_id",
+        entity: "bank_mailbox",
+        entityId: userId,
+        ownerId: userId,
+        scope: "user",
+        before: { authServId: trustedServer },
+        after: { authServId: next.authServId },
+      });
+    }
     audit({
       entity: "bank_mailbox",
       entityId: userId,
