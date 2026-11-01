@@ -366,7 +366,7 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 - **MAIL-007** Odkaz „potvrzení přijetí“ a sledovací pixely se nepoužívají.
 - **MAIL-008** Hromadné odeslání ukáže souhrn příjemců a vyžaduje potvrzení.
 - **MAIL-009** Zprávy klientovi mají kromě prostého textu i HTML verzi. Uživatel v Nastavení vybírá ze sedmi vzhledů podle `docs/superpowers/mockups/email-sablony.html`: B1 až B5, A a C. Výchozí je B4 Tmavá hlavička, vše bez barev a značky Fakturanu.
-- **MAIL-010** V Nastavení jde k HTML zprávě zadat vlastní úvodní text, podpis a logo. Logo je ve výchozím stavu to z profilu dodavatele, jde nahradit vlastním. Hodnoty platí pro všechny typy zpráv, text konkrétní zprávy jde dál upravit v dialogu odeslání. Vzhledy s místem pro QR ho ukážou, pokud ho faktura má.
+- **MAIL-010** V Nastavení jde k HTML zprávě zadat vlastní úvodní text, podpis a logo. Logo je ve výchozím stavu to z profilu dodavatele, jde nahradit vlastním nebo vypnout. Bez loga se v hlavičce zobrazí jméno dodavatele a každý vzhled funguje stejně. Hodnoty platí pro všechny typy zpráv, text konkrétní zprávy jde dál upravit v dialogu odeslání. Vzhledy s místem pro QR ho ukážou, pokud ho faktura má.
 
 ## 12. Upomínky (REM)
 
