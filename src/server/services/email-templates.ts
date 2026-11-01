@@ -17,12 +17,12 @@ import { clock } from "../clock";
 import { db } from "../db";
 import { emailTemplate } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { DEFAULT_MAIL_CONTENT, type MailContent } from "../mail/defaults";
+import { ADVANCE_FINAL_LINE, DEFAULT_MAIL_CONTENT, type MailContent } from "../mail/defaults";
+import { fileNameFor } from "../pdf/file-name";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError } from "./access";
 import { getCustomer } from "./customers";
 import { loadInvoiceDocument, variablesFor } from "./invoice-document";
-import { fileNameFor } from "./invoice-pdf";
 import { getMailSettings } from "./mail-settings";
 import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
@@ -212,11 +212,20 @@ export function composeMail(
         prijato: `${formatMoney(payment.creditedMinor, doc.currency)} (${formatCalendarDate(payment.paidOn, ctx.dateFormat)})`,
       }),
     };
+    const body = renderVariables(template.body, ctx, extra);
+    // After the signature: a template is free text, so there is no marked place before it.
+    const advanceLine =
+      kind === "invoice" && doc.totals.advanceMinor > 0
+        ? ADVANCE_FINAL_LINE[doc.language](
+            extra.zbyva,
+            formatMoney(doc.totals.advanceMinor, doc.currency),
+          )
+        : null;
     content = {
       subject: capSubject(
         renderVariables(template.subject, ctx, extra).replace(/[\r\n\u0085\u2028\u2029]+/g, " "),
       ),
-      body: renderVariables(template.body, ctx, extra),
+      body: advanceLine ? `${body}\n\n${advanceLine}` : body,
     };
   }
 

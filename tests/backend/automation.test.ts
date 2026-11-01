@@ -77,18 +77,33 @@ describe("výchozí stav", () => {
     });
   });
 
-  test("[SET-040] nedostupné automatiky jdou vidět, ale nejdou zapnout", () => {
-    const id = seed();
-
-    expect(AUTOMATIONS.filter((entry) => !entry.available).map((entry) => entry.key)).toEqual([
-      "advanceInvoice",
-    ]);
-    expect(() => setAutomation(actor(id), "advanceInvoice", true, confirmed)).toThrow(ServiceError);
-    expect(getAutomation(id).advanceInvoice).toBe(false);
+  test("[SET-040] všechny automatiky jdou zapnout", () => {
+    expect(AUTOMATIONS.filter((entry) => !entry.available)).toEqual([]);
   });
 
   test("[SET-041] potvrzení platby je na novém účtu vypnuté", () => {
     expect(getAutomation(seed()).paymentReceipt).toBe(false);
+  });
+
+  test("[SET-041] odeslání po záloze je na novém účtu vypnuté", () => {
+    expect(getAutomation(seed()).advanceInvoice).toBe(false);
+  });
+
+  test("[SET-042] zapnutí vyžaduje potvrzení s popisem a podmínkou režimu", () => {
+    const id = seed();
+
+    expect(() => setAutomation(actor(id), "advanceInvoice", true, { confirmed: false })).toThrow(
+      TEXTS.automation.errors.confirmRequired,
+    );
+    expect(getAutomation(id).advanceInvoice).toBe(false);
+    const text = TEXTS.automation.keys.advanceInvoice;
+    expect(text.body).toContain("e-mailem");
+    expect(text.body).toContain("PDF");
+    expect(text.impact(3)).toContain("„Vystavit“");
+    expect(text.impact(3)).toContain("3");
+
+    setAutomation(actor(id), "advanceInvoice", true, confirmed);
+    expect(getAutomation(id).advanceInvoice).toBe(true);
   });
 
   test("[SET-042] zapnutí potvrzení vyžaduje potvrzení s popisem", () => {
@@ -209,7 +224,7 @@ describe("hlavní vypínač", () => {
       setAutomation(actor(id), entry.key, true, confirmed);
     }
     const open = AUTOMATIONS.filter((entry) => entry.available).map((entry) => entry.key);
-    expect(open.map((key) => automaticSendAllowed(id, key))).toEqual([true, true, true]);
+    expect(open.map((key) => automaticSendAllowed(id, key))).toEqual([true, true, true, true]);
 
     setPaused(actor(id), true, { confirmed: false });
 

@@ -92,6 +92,32 @@ export function issuedInvoice(owner: string, customerId = seedCustomer(owner)): 
   return id;
 }
 
+export function issuedAdvance(
+  owner: string,
+  customerId = seedCustomer(owner),
+  total = 1_000_000,
+  over: Partial<DraftInput> = {},
+) {
+  const { id, revision } = draftFor(owner, customerId, {
+    ...newDraftDefaults(owner, customerId, "advance"),
+    lines: [
+      {
+        catalogItemId: null,
+        name: "Záloha",
+        description: "",
+        quantityMilli: 1000,
+        unit: "ks",
+        unitPriceMinor: total,
+        discountKind: "none",
+        discountValue: 0,
+      },
+    ],
+    ...over,
+  });
+  issueInvoice(webActor(owner), id, { revision });
+  return id;
+}
+
 export function ownSmtp(
   db: Db,
   owner: string,

@@ -40,6 +40,7 @@ import {
   deletePayment,
   listPayments,
 } from "@/server/services/payments";
+import { savePreferences } from "@/server/services/preferences";
 import { setInvoiceTags } from "@/server/services/tags";
 import { buildInvoiceView } from "@/server/pdf/view";
 import { assertConsistent } from "../helpers/consistency";
@@ -555,6 +556,7 @@ describe("nahrazení zálohy", () => {
   test("vrácení storna konečné faktury zálohu znovu nahradí a dopočítá zůstatek", () => {
     const { owner, advanceId, finalId } = replaced();
     cancelInvoice(webActor(owner), finalId);
+    savePreferences(webActor(owner), { advanceFinalMode: "off" });
     pay(owner, advanceId, 1_000_000);
     expect(row(owner, finalId)).toMatchObject({ advanceMinor: 0, status: "cancelled" });
     assertConsistent(db, owner);
@@ -691,6 +693,7 @@ describe("souhrny", () => {
 
   test("[ADV-005] úhrada v prosinci a faktura v lednu mají příjem k datu úhrady", () => {
     const { owner, customerId } = account();
+    savePreferences(webActor(owner), { advanceFinalMode: "off" });
     setClockForTests({ now: () => new Date("2026-12-20T10:00:00Z") });
     const advanceId = issuedAdvance(owner, customerId);
     pay(owner, advanceId, 1_000_000, "2026-12-20");

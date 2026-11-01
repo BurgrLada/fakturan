@@ -21,6 +21,7 @@ import { setAutomation, setPaused } from "@/server/services/automation";
 import { ingestNotice } from "@/server/services/bank-notices";
 import { deliverDigest } from "@/server/services/due-alerts";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
+import { savePreferences } from "@/server/services/preferences";
 import { deliverUserNotice, runRecurringJob } from "@/server/services/recurring-run";
 import { saveReminderRule, snoozeReminders } from "@/server/services/reminders";
 import { deactivateUser, reactivateUser } from "@/server/services/users";
@@ -28,6 +29,7 @@ import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { seedBankAccount, TARGET, VS } from "../helpers/fixtures-bank";
 import {
+  issuedAdvance,
   issuedInvoice,
   ownSmtp,
   seedCustomer,
@@ -152,10 +154,11 @@ function pairNotice(owner: string, invoiceId: string, accountId: string, symbol:
 
 // Paired after the switch was thrown: with the one from `armed`, the matrix covers both a message
 // already queued and a payment matched while sending is forbidden.
-function pairSecond(owner: string): void {
+function pairSecond(owner: string, key: AutomationKey): void {
   const first = db.select().from(invoice).where(eq(invoice.variableSymbol, VS));
   const { customerId, bankAccountId } = first.all().find((row) => row.userId === owner)!;
-  pairNotice(owner, issuedInvoice(owner, customerId!), bankAccountId!, "20260043");
+  const document = key === "advanceInvoice" ? issuedAdvance : issuedInvoice;
+  pairNotice(owner, document(owner, customerId!), bankAccountId!, "20260043");
 }
 
 // A single term and a single stage: nothing later exists that could legitimately go out.
@@ -168,6 +171,9 @@ function armed(key: AutomationKey) {
     savePlan(owner, customerId, { mode: "send", confirmSend: true, maxCount: 1 });
   } else if (key === "paymentReceipt") {
     pairNotice(owner, issuedInvoice(owner, customerId), seedBankAccount(db, owner, T0), VS);
+  } else if (key === "advanceInvoice") {
+    savePreferences(webActor(owner), { advanceFinalMode: "issue" });
+    pairNotice(owner, issuedAdvance(owner, customerId), seedBankAccount(db, owner, T0), VS);
   } else {
     current = new Date(T0.getTime() - 60 * DAY);
     saveReminderRule(webActor(owner), { offsetDays: 7, texts: null });
@@ -228,7 +234,7 @@ describe("[TST-016] matice ticha", () => {
     async (key, _name, situation) => {
       const owner = armed(key);
       situation.prepare(owner, key);
-      if (key === "paymentReceipt") pairSecond(owner);
+      if (key === "paymentReceipt" || key === "advanceInvoice") pairSecond(owner, key);
 
       await situation.pass(owner);
 

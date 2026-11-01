@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { daysBetween, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { daysBetween, isFinalInvoice, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
   canAmendPayment,
@@ -23,6 +23,7 @@ import { db, type Tx } from "../db";
 import { bankNotification, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
+import { advanceBalanceDropped, afterAdvancePaid, resolveFinalReview } from "./advance-automation";
 import { cnbRate } from "./exchange-rates";
 import { finalOf, refreshBalance } from "./invoice-balance";
 import { findOwned, ownerOf, type Invoice } from "./invoices";
@@ -117,11 +118,34 @@ export function applyPayments(tx: Tx, audit: Audit, userId: string, invoiceId: s
     })
     .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, userId)))
     .run();
-  if (row.type === "advance") {
-    const final = finalOf(tx, userId, invoiceId);
-    if (final) refreshBalance(tx, audit, userId, final.id);
+  // Only a real change: a new revision would hold a message queued for the final invoice.
+  const final =
+    row.type === "advance" && paidMinor !== row.paidMinor ? finalOf(tx, userId, invoiceId) : null;
+  if (final) {
+    refreshBalance(tx, audit, userId, final.id);
+    if (paidMinor < row.paidMinor) advanceBalanceDropped(tx, userId, final.id);
+    else resolveFinalReview(tx, userId, final.id);
   }
+  if (isFinalInvoice(row)) resolveFinalReview(tx, userId, invoiceId);
   return findOwned(tx, userId, invoiceId);
+}
+
+function lastPaidOn(tx: Tx, userId: string, invoiceId: string): CalendarDate {
+  return tx
+    .select({ day: sql<CalendarDate>`max(${payment.paidOn})` })
+    .from(payment)
+    .where(
+      scoped(userId).where(payment, (t, { and, eq }) =>
+        and(eq(t.invoiceId, invoiceId), gt(t.creditedMinor, 0)),
+      ),
+    )
+    .get()!.day;
+}
+
+function settleAdvance(tx: Tx, audit: Audit, userId: string, before: Invoice, after: Invoice) {
+  if (before.status === "paid" || after.status !== "paid" || after.type !== "advance") return;
+  const paidOn = lastPaidOn(tx, userId, after.id);
+  afterAdvancePaid(tx, audit, { userId, advanceId: after.id, paidOn, today: today() });
 }
 
 export function insertPayment(
@@ -163,6 +187,7 @@ export function insertPayment(
     before: { invoiceId, status: before.status },
     after: { ...auditFields(readPayment(tx, userId, id)), status: after.status },
   });
+  settleAdvance(tx, audit, userId, before, after);
   return { id };
 }
 
@@ -380,6 +405,7 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
       before: { ...auditFields(before), status: row.status },
       after: { ...auditFields(readPayment(tx, userId, id)), status: after.status },
     });
+    settleAdvance(tx, audit, userId, row, after);
     return { id };
   });
 }

@@ -1,3 +1,6 @@
+const rateOrigin = (p: Record<string, unknown>) =>
+  p.plan ? `Faktura z plánu „${p.plan}“` : `Faktura ${p.invoice ?? ""}`;
+
 export const TEXTS = {
   appName: "Fakturan",
   nav: {
@@ -927,8 +930,17 @@ export const TEXTS = {
       },
       advanceInvoice: {
         title: "Odeslání po záloze",
-        body: "Po přijetí zálohy se zákazníkovi automaticky odešle navazující doklad.",
-        impact: () => "",
+        body: "Po úhradě zálohy odejde zákazníkovi e-mailem vystavená faktura s PDF v příloze. Úhrada starší 3 dnů nic neodešle.",
+        impact: (n: number) =>
+          `Platí jen v režimu „Vystavit“, jinak neodejde nic. Fakturu mohou dostat zákazníci s e-mailem: ${n}.`,
+      },
+    },
+    advanceMode: {
+      label: "Po úhradě zálohy",
+      options: {
+        off: "Nevytvářet fakturu",
+        draft: "Založit koncept",
+        issue: "Vystavit",
       },
     },
     on: "Zapnuto",
@@ -981,9 +993,9 @@ export const TEXTS = {
       recurring_missed: (p: Record<string, unknown>) =>
         `Pravidelná faktura „${p.plan ?? ""}“ nevznikla v termínu ${p.date ?? ""}. Zmeškaných termínů ke kontrole: ${p.count ?? 1}.`,
       rate_last_known: (p: Record<string, unknown>) =>
-        `Faktura z plánu „${p.plan ?? ""}“ je v ${p.currency ?? ""} a kurz ČNB k ${p.date ?? ""} nebyl k dispozici. Použil se poslední známý kurz z ${p.listDate ?? ""}, zkontrolujte ho.`,
+        `${rateOrigin(p)} je v ${p.currency ?? ""} a kurz ČNB k ${p.date ?? ""} nebyl k dispozici. Použil se poslední známý kurz z ${p.listDate ?? ""}, zkontrolujte ho.`,
       rate_deviation: (p: Record<string, unknown>) =>
-        `Faktura z plánu „${p.plan ?? ""}“ je v ${p.currency ?? ""} s pevným kurzem, který se od kurzu ČNB k ${p.date ?? ""} liší o více než 5 %. Zkontrolujte ho.`,
+        `${rateOrigin(p)} je v ${p.currency ?? ""} s pevným kurzem, který se od kurzu ČNB k ${p.date ?? ""} liší o více než 5 %. Zkontrolujte ho.`,
       recurring_held: (p: Record<string, unknown>) =>
         `Automatika je vypnutá, pravidelná faktura „${p.plan ?? ""}“ zůstala jako koncept.`,
       recurring_no_address: (p: Record<string, unknown>) =>
@@ -992,6 +1004,16 @@ export const TEXTS = {
         `Potvrzení platby k faktuře ${p.invoice ?? ""} neodešlo, zákazník nemá e-mail.`,
       receipt_bad_mail: (p: Record<string, unknown>) =>
         `Potvrzení platby k faktuře ${p.invoice ?? ""} neodešlo. ${p.problems ?? ""}`.trim(),
+      advance_final_failed: (p: Record<string, unknown>) =>
+        `Po úhradě zálohy ${p.advance ?? ""} se fakturu nepodařilo ${p.draft ? "vystavit, zůstala jako koncept" : "založit"}. ${p.problems ?? ""}`.trim(),
+      advance_final_held: (p: Record<string, unknown>) =>
+        `Automatika je pozastavená, faktura po úhradě zálohy ${p.advance ?? ""} zůstala jako koncept.`,
+      advance_final_no_address: (p: Record<string, unknown>) =>
+        `Faktura ${p.invoice ?? ""} po úhradě zálohy je vystavená, ale zákazník nemá e-mail, takže neodešla.`,
+      advance_final_bad_mail: (p: Record<string, unknown>) =>
+        `Faktura ${p.invoice ?? ""} po úhradě zálohy je vystavená, ale e-mail nešlo odeslat. ${p.problems ?? ""}`.trim(),
+      advance_final_review: (p: Record<string, unknown>) =>
+        `Platba zálohy se vrátila, faktura ${p.invoice ?? ""} opět chce doplatek. Zkontrolujte ji, případná zpráva ve frontě se zadržela.`,
       recurring_bad_mail: (p: Record<string, unknown>) =>
         `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale e-mail nešlo odeslat. ${p.problems ?? ""}`.trim(),
       recurring_conflict: (p: Record<string, unknown>) =>
@@ -2020,6 +2042,7 @@ export const TEXTS = {
       rounding: "Neplatné zaokrouhlení",
       pdfFileName: "Neplatný název souboru PDF",
       fxBasis: "Neplatný základ pro kurz",
+      advanceFinalMode: "Neplatný režim po úhradě zálohy",
       fixedRates: "Pevný kurz musí být kladné číslo a měna nesmí být koruna",
     },
   },

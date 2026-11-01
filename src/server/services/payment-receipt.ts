@@ -14,7 +14,7 @@ import type { Audit } from "./mutation";
 import { notify } from "./notifications";
 
 // The first read covers 30 days of history, which must not turn into a burst of old thank-yous.
-const MAX_AGE_DAYS = 3;
+export const MAX_PAYMENT_AGE_DAYS = 3;
 
 export type ReceiptInput = {
   userId: string;
@@ -44,7 +44,7 @@ function draftReceipt(
 export function queueAutomaticReceipt(tx: Tx, audit: Audit, input: ReceiptInput): void {
   const { userId, invoiceId, paymentId, paidOn, today } = input;
   if (!automaticSendAllowed(userId, "paymentReceipt")) return;
-  if (daysBetween(paidOn, today) > MAX_AGE_DAYS) return;
+  if (daysBetween(paidOn, today) > MAX_PAYMENT_AGE_DAYS) return;
 
   const params = { invoice: findOwned(tx, userId, invoiceId).number };
   const entity = { type: "invoice", id: invoiceId };

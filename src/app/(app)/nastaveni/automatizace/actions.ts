@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AUTOMATION_KEYS } from "@/lib/automation";
+import { ADVANCE_FINAL_MODES } from "@/lib/preferences";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
 import {
@@ -11,6 +12,7 @@ import {
   setPaused,
   setSendTime,
 } from "@/server/services/automation";
+import { savePreferences } from "@/server/services/preferences";
 import { deleteReminderRule, saveReminderRule } from "@/server/services/reminders";
 
 type Outcome = { ok: true } | { ok: false; error: string };
@@ -55,6 +57,13 @@ export async function setSendTimeAction(value: string): Promise<Outcome> {
 export async function setDailyDigestAction(enabled: boolean): Promise<Outcome> {
   await requireSession();
   return guarded((actor) => setDailyDigest(actor, enabled === true));
+}
+
+export async function setAdvanceFinalModeAction(raw: unknown): Promise<Outcome> {
+  await requireSession();
+  const parsed = z.enum(ADVANCE_FINAL_MODES).safeParse(raw);
+  if (!parsed.success) return { ok: false, error: "Neplatný požadavek" };
+  return guarded((actor) => savePreferences(actor, { advanceFinalMode: parsed.data }));
 }
 
 export async function saveReminderRuleAction(raw: unknown): Promise<Outcome> {

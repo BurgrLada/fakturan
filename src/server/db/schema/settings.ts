@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import {
+  ADVANCE_FINAL_MODES,
   DATE_FORMATS,
   DEFAULT_PREFERENCES as D,
   FX_BASES,
@@ -53,6 +54,9 @@ export const preferences = sqliteTable("preferences", {
   rounding: text({ enum: ROUNDING_MODES }).notNull().default(D.rounding),
   pdfFileName: text("pdf_file_name").notNull().default(D.pdfFileName),
   fxBasis: text("fx_basis", { enum: FX_BASES }).notNull().default(D.fxBasis),
+  advanceFinalMode: text("advance_final_mode", { enum: ADVANCE_FINAL_MODES })
+    .notNull()
+    .default(D.advanceFinalMode),
   fixedRates: text("fixed_rates", { mode: "json" })
     .$type<Record<string, number>>()
     .notNull()

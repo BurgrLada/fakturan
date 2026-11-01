@@ -6,12 +6,11 @@ export const AUTOMATION_KEYS = [
 ] as const;
 export type AutomationKey = (typeof AUTOMATION_KEYS)[number];
 
-// Sending after an advance payment arrives in a later plan: visible, not switchable.
 export const AUTOMATIONS: readonly { key: AutomationKey; available: boolean }[] = [
   { key: "recurringSend", available: true },
   { key: "reminders", available: true },
   { key: "paymentReceipt", available: true },
-  { key: "advanceInvoice", available: false },
+  { key: "advanceInvoice", available: true },
 ];
 
 export const DEFAULT_SEND_TIME = "09:00";
@@ -61,6 +60,11 @@ export const NOTIFICATION_KINDS = [
   "notices_over_limit",
   "receipt_no_address",
   "receipt_bad_mail",
+  "advance_final_failed",
+  "advance_final_held",
+  "advance_final_no_address",
+  "advance_final_bad_mail",
+  "advance_final_review",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

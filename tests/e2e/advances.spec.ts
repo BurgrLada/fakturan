@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import {
   addCustomer,
@@ -12,6 +13,13 @@ import {
 test.setTimeout(90_000);
 
 const money = (text: string) => new RegExp(text.replace(/ /g, "\\s"));
+
+// The default mode leaves a draft behind the payment, so there is nothing left to convert by hand.
+async function openAutomaticDraft(page: Page) {
+  await expect(page.getByRole("button", { name: "Vytvořit konečnou fakturu" })).toHaveCount(0);
+  await page.getByTestId("related-documents").getByRole("link", { name: "Koncept" }).click();
+  await expect(page.getByRole("heading", { name: "Koncept faktury" })).toBeVisible();
+}
 
 test("záloha, úhrada, faktura", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
@@ -39,8 +47,7 @@ test("záloha, úhrada, faktura", async ({ page, freshApp }) => {
   await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
   await expect(page.getByTestId("payment-paid")).toHaveText(money("10 000,00 Kč"));
 
-  await page.getByRole("button", { name: "Vytvořit konečnou fakturu" }).click();
-  await expect(page.getByRole("heading", { name: "Koncept faktury" })).toBeVisible();
+  await openAutomaticDraft(page);
   await expect(page.getByRole("combobox", { name: "Zákazník" })).toHaveCount(0);
   await page.waitForLoadState("networkidle");
   await issue(page);
@@ -82,8 +89,7 @@ test("faktura uhrazená zálohou: přeplatek odkazuje na zálohu a storno ji vr�
   const advanceUrl = page.url();
   await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
   await expect(page.getByTestId("payment-paid")).toHaveText(money("1 000,00 Kč"));
-  await page.getByRole("button", { name: "Vytvořit konečnou fakturu" }).click();
-  await expect(page.getByRole("heading", { name: "Koncept faktury" })).toBeVisible();
+  await openAutomaticDraft(page);
   await page.waitForLoadState("networkidle");
   await issue(page);
   const finalUrl = page.url();

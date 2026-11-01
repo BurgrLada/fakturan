@@ -157,6 +157,48 @@ describe("předvyplnění", () => {
     expect(czech.body).not.toMatch(/\{\{/);
   });
 
+  describe("faktura po záloze", () => {
+    function finalAfterAdvance(language: "cs" | "en") {
+      const owner = seed();
+      const customerId = newCustomer(owner);
+      const id = issued(owner, customerId, { language });
+      db.run(sql`UPDATE invoice SET advance_minor = 100000 WHERE id = ${id}`);
+      return { owner, id };
+    }
+
+    test("[MAIL-003] věta o záloze je v jazyce dokladu a srovná částku se zbytkem", () => {
+      const czech = finalAfterAdvance("cs");
+      const english = finalAfterAdvance("en");
+
+      expect(composeMail(czech.owner, czech.id, "invoice").body).toMatch(
+        new RegExp(
+          `S pozdravem\\nJan Novák\\n\\n.*záloha ${formatMoney(100_000, "CZK")}.*Zbývá uhradit ${formatMoney(200_000, "CZK")}\\.$`,
+        ),
+      );
+      expect(composeMail(english.owner, english.id, "invoice").body).toContain(
+        `advance payment of ${formatMoney(100_000, "CZK")}`,
+      );
+    });
+
+    test("[MAIL-003] věta se nepřidá k upomínce, přepsanému textu ani uložené šabloně", () => {
+      const { owner, id } = finalAfterAdvance("cs");
+      saveEmailTemplate(actor(owner), input({ body: "Vlastní text." }));
+
+      expect(composeMail(owner, id, "invoice").body).toMatch(/^Vlastní text\.\n\nNa fakturu/);
+      expect(composeMail(owner, id, "reminder").body).not.toContain("Na fakturu");
+      const override = { subject: "Faktura", body: "Ručně." };
+      expect(composeMail(owner, id, "invoice", override).body).toBe("Ručně.");
+      expect(getEmailTemplate(owner, "invoice", "cs").body).toBe("Vlastní text.");
+    });
+
+    test("[MAIL-003] běžná faktura větu nemá", () => {
+      const owner = seed();
+      const id = issued(owner, newCustomer(owner));
+
+      expect(composeMail(owner, id, "invoice").body).not.toContain("Zbývá uhradit");
+    });
+  });
+
   test("[MAIL-002] datum splatnosti má formát dokladu a zpráva nese stálé kopie", async () => {
     const owner = seed();
     await saveMailSettings(actor(owner), {

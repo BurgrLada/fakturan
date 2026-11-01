@@ -39,8 +39,10 @@ type ChoiceKey =
 
 export type ChoiceOption = { value: string; label: string };
 
-// Owned by /nastaveni/designy: saving this form must not put back what was stale here.
-const LOOK_FIELDS: readonly string[] = [
+// Owned by /nastaveni/designy and /nastaveni/automatizace: saving this form must not put back what
+// was stale here.
+const OWNED_ELSEWHERE: readonly string[] = [
+  "advanceFinalMode",
   "designId",
   "accentColor",
   "surfaceColor",
@@ -159,7 +161,7 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
       return;
     }
     startTransition(async () => {
-      const owned = Object.entries(values).filter(([key]) => !LOOK_FIELDS.includes(key));
+      const owned = Object.entries(values).filter(([key]) => !OWNED_ELSEWHERE.includes(key));
       const result = await savePreferencesAction({
         ...Object.fromEntries(owned),
         dueDays: dueDays.trim() === "" ? Number.NaN : Number(dueDays),

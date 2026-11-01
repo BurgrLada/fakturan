@@ -16,7 +16,8 @@ import { checkRateLimit, RATE_RULES } from "@/server/rate-limit";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { saveCustomer } from "@/server/services/customers";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
-import { fileNameFor, invoicePdf } from "@/server/services/invoice-pdf";
+import { fileNameFor } from "@/server/pdf/file-name";
+import { invoicePdf } from "@/server/services/invoice-pdf";
 import { cancelInvoice, checkIssuable, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { listVersions, updateIssuedInvoice } from "@/server/services/invoice-versions";
 import {

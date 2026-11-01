@@ -3,6 +3,14 @@ import type { Language } from "@/lib/preferences";
 
 export type MailContent = { subject: string; body: string };
 
+// {{castka}} of a final invoice is its full total, which this line reconciles with what is left.
+export const ADVANCE_FINAL_LINE: Record<Language, (zbyva: string, zaloha: string) => string> = {
+  cs: (zbyva, zaloha) =>
+    `Na fakturu je započtena uhrazená záloha ${zaloha}. Zbývá uhradit ${zbyva}.`,
+  en: (zbyva, zaloha) =>
+    `The advance payment of ${zaloha} has been deducted. The amount outstanding is ${zbyva}.`,
+};
+
 // Printed to the client in the invoice's language, so they belong to the document and not to the UI
 // texts. Plain text only: there is no link or image to track or confirm anything with (MAIL-007).
 export const DEFAULT_MAIL_CONTENT: Record<Language, Record<MessageKind, MailContent>> = {

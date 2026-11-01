@@ -1,0 +1,1 @@
+ALTER TABLE `preferences` ADD `advance_final_mode` text DEFAULT 'draft' NOT NULL;

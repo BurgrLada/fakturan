@@ -2,6 +2,7 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import {
+  setAdvanceFinalModeAction,
   setAutomationAction,
   setDailyDigestAction,
   setPausedAction,
@@ -22,7 +23,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { AUTOMATIONS, type AutomationKey, type AutomationSettings } from "@/lib/automation";
+import { ADVANCE_FINAL_MODES, type AdvanceFinalMode } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import type { AutomationImpact } from "@/server/services/automation";
 
@@ -35,7 +38,7 @@ function impactText(key: AutomationKey, impact: AutomationImpact): string {
   if (key === "recurringSend") return T.keys.recurringSend.impact(impact.plans);
   if (key === "reminders") return T.keys.reminders.impact(impact.customers);
   if (key === "paymentReceipt") return T.keys.paymentReceipt.impact(impact.addressed);
-  return "";
+  return T.keys.advanceInvoice.impact(impact.addressed);
 }
 
 function Confirm({
@@ -88,9 +91,11 @@ function Confirm({
 export function AutomationPanel({
   settings,
   impact,
+  advanceFinalMode,
 }: {
   settings: AutomationSettings;
   impact: AutomationImpact;
+  advanceFinalMode: AdvanceFinalMode;
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<Message>(null);
@@ -175,6 +180,26 @@ export function AutomationPanel({
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">{text.body}</p>
+              {key === "advanceInvoice" && (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="advance-final-mode">{T.advanceMode.label}</Label>
+                  <NativeSelect
+                    id="advance-final-mode"
+                    value={advanceFinalMode}
+                    disabled={pending}
+                    onChange={(event) => {
+                      const mode = event.target.value;
+                      perform(() => setAdvanceFinalModeAction(mode), T.saved);
+                    }}
+                  >
+                    {ADVANCE_FINAL_MODES.map((mode) => (
+                      <option key={mode} value={mode}>
+                        {T.advanceMode.options[mode]}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+              )}
               {available && (
                 <div>
                   {enabled ? (

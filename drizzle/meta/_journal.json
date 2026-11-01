@@ -267,6 +267,13 @@
       "when": 1793512686084,
       "tag": "0037_advance_invoice",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1793517360841,
+      "tag": "0038_advance_final_mode",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { CURRENCIES } from "@/lib/currency";
 import { MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
 import { ROUNDING_MODES } from "@/lib/invoice-totals";
 import {
+  ADVANCE_FINAL_MODES,
   DATE_FORMATS,
   DEFAULT_PREFERENCES,
   FX_BASES,
@@ -76,6 +77,7 @@ export const preferencesSchema = z.object({
       .max(MAX_EXCHANGE_RATE_MICROS, V.fixedRates),
     V.fixedRates,
   ),
+  advanceFinalMode: z.enum(ADVANCE_FINAL_MODES, V.advanceFinalMode),
 });
 
 export const preferencesPatchSchema = preferencesSchema.partial();

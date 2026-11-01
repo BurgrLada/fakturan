@@ -13,6 +13,8 @@ export class ServiceError extends Error {}
 
 export class RateLimitError extends ServiceError {}
 
+export class InvoicePdfNotFoundError extends Error {}
+
 export function assertAdmin(q: Reader, actor: Actor): void {
   const row = actor.userId
     ? q

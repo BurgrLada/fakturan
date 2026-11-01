@@ -26,8 +26,33 @@ test("[SET-040] stránka ukáže všechny 4 automatiky a jejich stav", async ({ 
   await expect(card(page, "Pravidelné faktury: vystavit a odeslat")).toContainText("Vypnuto");
   await expect(card(page, "Upomínky po splatnosti")).toContainText("Vypnuto");
   await expect(card(page, "Potvrzení o přijaté platbě")).toContainText("Vypnuto");
-  await expect(card(page, "Odeslání po záloze")).toContainText("Připravujeme");
-  await expect(card(page, "Odeslání po záloze").getByRole("button")).toHaveCount(0);
+  await expect(card(page, "Odeslání po záloze")).toContainText("Vypnuto");
+});
+
+test("[SET-040] stránka ukáže odeslání po záloze jako dostupné", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/automatizace`);
+  await page.waitForLoadState("networkidle");
+  const advance = card(page, "Odeslání po záloze");
+
+  const mode = advance.getByLabel("Po úhradě zálohy");
+  await expect(mode).toHaveValue("draft");
+  await mode.selectOption("issue");
+  await expect(page.getByRole("status").filter({ hasText: "Uloženo." })).toBeVisible();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+
+  await advance.getByRole("button", { name: "Zapnout" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("e-mailem");
+  await expect(dialog).toContainText("„Vystavit“");
+  await expect(dialog).toContainText("zákazníci s e-mailem: 0");
+  await dialog.getByRole("button", { name: "Zapnout a potvrdit" }).click();
+  await expect(advance).toContainText("Zapnuto");
+
+  await page.reload();
+  await expect(card(page, "Odeslání po záloze").getByLabel("Po úhradě zálohy")).toHaveValue(
+    "issue",
+  );
 });
 
 test("[SET-040] stránka ukáže potvrzení platby jako dostupné", async ({ page, freshApp }) => {
