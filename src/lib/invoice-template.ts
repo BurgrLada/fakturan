@@ -31,5 +31,8 @@ export type TemplateDocument = {
   discountValue: number;
   rounding: RoundingMode;
   appearance: Appearance;
+  // Optional: templates and plans stored before foreign invoices do not have them.
+  foreign?: boolean;
+  clause?: string;
   lines: TemplateLine[];
 };

@@ -42,6 +42,8 @@ const short: InvoiceDocument = {
   language: "cs",
   currency: "CZK",
   exchangeRateMicros: null,
+  foreign: false,
+  clause: "",
   paymentMethod: "transfer",
   orderRef: "OBJ-77",
   reference: "Zakázka Vltava",

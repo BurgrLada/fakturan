@@ -11,6 +11,7 @@ import { formatMoney } from "@/lib/money";
 import { requireSession } from "@/server/auth/session";
 import { db } from "@/server/db";
 import { creditableMinor } from "@/server/services/credit-notes";
+import { getCustomer } from "@/server/services/customers";
 import { checkIssuable } from "@/server/services/invoice-lifecycle";
 import { EDITABLE_STATUSES } from "@/server/services/invoice-versions";
 import { designChoices } from "@/server/pdf/designs";
@@ -48,6 +49,10 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
   const type = row?.type ?? "invoice";
   const choices = formChoices(user.id, row?.bankAccountId ?? null, type);
   const isNote = type === "credit_note";
+  const customerDic =
+    row?.customerSnapshot?.dic ??
+    (row?.customerId ? getCustomer(user.id, row.customerId)?.dic : undefined) ??
+    "";
   const title = !row
     ? T.newTitle
     : isDraft
@@ -91,6 +96,8 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
         variableSymbol={row?.variableSymbol ?? ""}
         revision={row?.revision ?? 0}
         customerName={row?.customerName ?? ""}
+        customerDic={customerDic}
+        rateListDate={row?.exchangeRateDate ?? null}
         initial={formFromDocument(row ?? newDocument(user.id), choices.defaultUnit)}
         initialTags={row?.tags.map((tag) => tag.name) ?? []}
         initialProblems={row && isDraft ? checkIssuable(user.id, id) : []}

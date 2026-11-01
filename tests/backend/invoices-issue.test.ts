@@ -14,7 +14,9 @@ import {
   invoiceLine,
   numberSeries,
   numberSeriesCounter,
+  supplier,
   user,
+  exchangeRate,
 } from "@/server/db/schema";
 import { saveBankAccount, hideBankAccount } from "@/server/services/bank-accounts";
 import { getCatalogItem, saveCatalogItem } from "@/server/services/catalog";
@@ -31,13 +33,20 @@ import {
   restoreInvoice,
   storeLines,
 } from "@/server/services/invoice-lifecycle";
-import { updateIssuedInvoice } from "@/server/services/invoice-versions";
+import { createCreditNote } from "@/server/services/credit-notes";
+import {
+  listVersions,
+  restoreVersion,
+  updateIssuedInvoice,
+} from "@/server/services/invoice-versions";
 import {
   deleteDraft,
+  duplicateInvoice,
   getInvoice,
   newDraftDefaults,
   saveDraft,
   type DraftInput,
+  type IssuedInput,
 } from "@/server/services/invoices";
 import {
   allocateNumber,
@@ -1136,5 +1145,241 @@ describe("obrázky vystavených dokladů", () => {
     clearSupplierImage(actor(owner), "logo");
 
     expect(() => readOwnedFile(actor(owner), logo)).toThrow();
+  });
+});
+
+describe("zahraniční faktura při vystavení", () => {
+  const seedRate = (listDate: string, rateMicros = 24_380_000) =>
+    db
+      .insert(exchangeRate)
+      .values({ currency: "EUR", listDate, rateMicros, fetchedAt: NOW })
+      .onConflictDoNothing()
+      .run();
+
+  const vatOwner = (customerDic = "DE123456789") => {
+    const { owner } = newOwner();
+    saveSupplier(actor(owner), { ...supplierInput, vatIdentified: true, dic: "CZ27082440" });
+    const customerId = saveCustomer(actor(owner), {
+      ...customerInput("Müller GmbH"),
+      country: "Německo",
+      dic: customerDic,
+    }).id;
+    return { owner, customerId };
+  };
+
+  const editOf = (owner: string, id: string, over: Partial<IssuedInput> = {}): IssuedInput => {
+    const row = getInvoice(owner, id)!;
+    return { ...row, number: row.number!, lines: row.lines, ...over };
+  };
+
+  test("[FOR-001] zákazník z Německa zapne přepínač, zákazník z Česka ne", () => {
+    const { owner, customerId } = vatOwner();
+    expect(newDraftDefaults(owner, customerId).foreign).toBe(true);
+    expect(newDraftDefaults(owner, newCustomer(owner, "Beta")).foreign).toBe(false);
+  });
+
+  test("[FOR-006] identifikovaná osoba a německé VAT ID dostanou doložku předvyplněnou", () => {
+    const { owner, customerId } = vatOwner();
+    expect(newDraftDefaults(owner, customerId).clause).toContain("přenesení daňové povinnosti");
+    const { owner: plain, customerId: czech } = newOwner();
+    expect(newDraftDefaults(plain, czech).clause).toBe("");
+  });
+
+  test("[FOR-006] doložka jde upravit a smazat", () => {
+    const { owner, customerId } = vatOwner();
+    const { id, revision } = save(owner, customerId, { clause: "Vlastní znění", currency: "CZK" });
+    expect(getInvoice(owner, id)?.clause).toBe("Vlastní znění");
+    saveDraft(actor(owner), { ...newDraftDefaults(owner, customerId), id, revision, clause: "" });
+    expect(getInvoice(owner, id)?.clause).toBe("");
+  });
+
+  test("[FOR-006] vystavení s doložkou chce DIČ obou stran", () => {
+    const { owner, customerId } = vatOwner("");
+    const accountId = newAccount(owner);
+    const { id, revision } = save(owner, customerId, {
+      foreign: true,
+      clause: "Doložka",
+      bankAccountId: accountId,
+    });
+    expect(fields(owner, id)).toEqual(["clause"]);
+    expect(() => issueInvoice(actor(owner), id, { revision })).toThrow(/DIČ zákazníka/);
+
+    db.update(supplier).set({ dic: "" }).where(eq(supplier.userId, owner)).run();
+    expect(fields(owner, id)).toEqual(["supplier.dic", "clause"]);
+  });
+
+  test("[FOR-006] neplátce bez identifikace DIČ pro doložku nepotřebuje", () => {
+    const { owner, customerId, accountId } = newOwner();
+    const { id } = save(owner, customerId, { clause: "Doložka", bankAccountId: accountId });
+    expect(fields(owner, id)).toEqual([]);
+  });
+
+  test("[SET-011] vystavená faktura drží doložku i po změně nastavení", () => {
+    const { owner, customerId } = vatOwner();
+    const accountId = newAccount(owner);
+    const clause = newDraftDefaults(owner, customerId).clause!;
+    const { id } = issueNew(owner, customerId, { bankAccountId: accountId });
+    saveSupplier(actor(owner), {
+      ...supplierInput,
+      vatIdentified: true,
+      dic: "CZ27082440",
+      reverseChargeCs: "Jiné znění",
+    });
+    expect(loadInvoiceDocument(owner, id)?.clause).toBe(clause);
+    expect(newDraftDefaults(owner, customerId).clause).toBe("Jiné znění");
+  });
+
+  test("[R-18] CZK nikdy nedrží kurz ani z přímého volání služby", () => {
+    const { owner, customerId, accountId } = newOwner();
+    const { id, revision } = save(owner, customerId, {
+      bankAccountId: accountId,
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "cnb",
+    });
+    expect(getInvoice(owner, id)).toMatchObject({
+      exchangeRateMicros: null,
+      exchangeRateSource: null,
+      exchangeRateDate: null,
+    });
+    const issued = issueInvoice(actor(owner), id, { revision });
+    updateIssuedInvoice(
+      actor(owner),
+      issued.id,
+      editOf(owner, id, {
+        exchangeRateMicros: 25_000_000,
+        exchangeRateSource: "manual",
+        note: "x",
+      }),
+    );
+    expect(getInvoice(owner, id)).toMatchObject({
+      exchangeRateMicros: null,
+      exchangeRateSource: null,
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("[FOR-003] kurz bez zdroje z formuláře je ruční a automatický při vystavení nahradí lístek", () => {
+    seedRate("2026-03-09");
+    const { owner, customerId } = newOwner();
+    const eur = newAccount(owner, "EUR");
+    const typed = save(owner, customerId, {
+      currency: "EUR",
+      bankAccountId: eur,
+      exchangeRateMicros: 25_000_000,
+    });
+    expect(getInvoice(owner, typed.id)?.exchangeRateSource).toBe("manual");
+    issueInvoice(actor(owner), typed.id, { revision: typed.revision });
+    expect(getInvoice(owner, typed.id)).toMatchObject({
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "manual",
+      exchangeRateDate: null,
+    });
+
+    const automatic = save(owner, customerId, {
+      currency: "EUR",
+      bankAccountId: eur,
+      exchangeRateMicros: 20_000_000,
+      exchangeRateSource: "cnb",
+    });
+    issueInvoice(actor(owner), automatic.id, { revision: automatic.revision });
+    expect(getInvoice(owner, automatic.id)).toMatchObject({
+      exchangeRateMicros: 24_380_000,
+      exchangeRateSource: "cnb",
+      exchangeRateDate: "2026-03-09",
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("[FOR-003] úprava vystavené faktury: jiný kurz je ruční, shodný nechá zdroj", () => {
+    seedRate("2026-03-09");
+    const { owner, customerId } = newOwner();
+    const eur = newAccount(owner, "EUR");
+    const { id } = issueNew(owner, customerId, { currency: "EUR", bankAccountId: eur });
+
+    updateIssuedInvoice(actor(owner), id, editOf(owner, id, { note: "beze změny kurzu" }));
+    expect(getInvoice(owner, id)).toMatchObject({
+      exchangeRateSource: "cnb",
+      exchangeRateDate: "2026-03-09",
+    });
+
+    const revision = getInvoice(owner, id)!.revision;
+    updateIssuedInvoice(
+      actor(owner),
+      id,
+      editOf(owner, id, { exchangeRateMicros: 25_000_000, exchangeRateSource: "cnb", revision }),
+    );
+    expect(getInvoice(owner, id)).toMatchObject({
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "manual",
+      exchangeRateDate: null,
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("[FOR-003] obnovení verze s jiným kurzem nastaví zdroj ručně", () => {
+    seedRate("2026-03-09");
+    const { owner, customerId } = newOwner();
+    const eur = newAccount(owner, "EUR");
+    const { id } = issueNew(owner, customerId, { currency: "EUR", bankAccountId: eur });
+    updateIssuedInvoice(actor(owner), id, editOf(owner, id, { exchangeRateMicros: 25_000_000 }));
+
+    restoreVersion(actor(owner), listVersions(owner, id).at(-1)!.id);
+
+    expect(getInvoice(owner, id)).toMatchObject({
+      exchangeRateMicros: 24_380_000,
+      exchangeRateSource: "manual",
+      exchangeRateDate: null,
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("[FOR-010] [FOR-004] náhled vystavení vrací upozornění ke kurzu", () => {
+    seedRate("2026-03-09", 25_000_000);
+    const { owner, customerId } = newOwner();
+    const eur = newAccount(owner, "EUR");
+    const { id } = save(owner, customerId, {
+      currency: "EUR",
+      bankAccountId: eur,
+      exchangeRateMicros: 26_250_001,
+    });
+    expect(previewIssue(owner, id).rateNotes).toEqual([expect.stringContaining("5 %")]);
+  });
+
+  test("[FOR-010] pevný kurz odebraný z nastavení zůstane na dokladu jako ruční", () => {
+    db.delete(exchangeRate).run();
+    const { owner, customerId } = newOwner();
+    const eur = newAccount(owner, "EUR");
+    const { id, revision } = save(owner, customerId, {
+      currency: "EUR",
+      bankAccountId: eur,
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "fixed",
+    });
+    issueInvoice(actor(owner), id, { revision });
+    expect(getInvoice(owner, id)).toMatchObject({
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "manual",
+    });
+    assertConsistent(db, owner);
+  });
+
+  test("oprava a kopie přenesou příznak a doložku, kopie bez kurzu", () => {
+    seedRate("2026-03-09");
+    const { owner, customerId } = vatOwner();
+    const eur = newAccount(owner, "EUR");
+    const { id } = issueNew(owner, customerId, { currency: "EUR", bankAccountId: eur });
+    const original = getInvoice(owner, id)!;
+    expect(original).toMatchObject({ foreign: true });
+    expect(original.clause).not.toBe("");
+
+    const note = getInvoice(owner, createCreditNote(actor(owner), id).id)!;
+    expect(note).toMatchObject({ foreign: true, clause: original.clause });
+    const copy = getInvoice(owner, duplicateInvoice(actor(owner), id).id)!;
+    expect(copy).toMatchObject({
+      foreign: true,
+      clause: original.clause,
+      exchangeRateMicros: null,
+      exchangeRateSource: null,
+    });
   });
 });

@@ -1,3 +1,4 @@
+import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -101,6 +102,23 @@ describe("profil dodavatele", () => {
 
     expect(() => saveSupplier(actor("s3"), input({ ico: "12345678" }))).toThrow("IČO");
     expect(getSupplier("s3")).toBeNull();
+  });
+
+  test("[SET-012] výchozí text doložky jde upravit v obou jazycích", () => {
+    seed("s-clause");
+    saveSupplier(actor("s-clause"), input());
+    expect(getSupplier("s-clause")).toMatchObject({
+      reverseChargeCs: REVERSE_CHARGE_CLAUSE.cs,
+      reverseChargeEn: REVERSE_CHARGE_CLAUSE.en,
+    });
+    saveSupplier(
+      actor("s-clause"),
+      input({ reverseChargeCs: "Česky", reverseChargeEn: "English" }),
+    );
+    expect(getSupplier("s-clause")).toMatchObject({
+      reverseChargeCs: "Česky",
+      reverseChargeEn: "English",
+    });
   });
 
   test("[SET-011] identifikovaná osoba vyžaduje DIČ", () => {

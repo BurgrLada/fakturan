@@ -53,6 +53,8 @@ const {
   discountValue,
   rounding,
   appearance,
+  foreign,
+  clause,
   lines,
 } = documentFields;
 
@@ -73,6 +75,8 @@ export const templateDocumentSchema = z
     discountValue,
     rounding,
     appearance,
+    foreign,
+    clause,
     lines,
   })
   .superRefine(checkDiscount)
@@ -232,6 +236,8 @@ export function templateFromInvoice(actor: Actor, invoiceId: string, name: strin
       discountValue: source.discountValue,
       rounding: source.rounding,
       appearance: source.appearance,
+      foreign: source.foreign,
+      clause: source.clause,
       lines: sourceLines.map((line) => ({
         catalogItemId: line.catalogItemId,
         name: line.name,
@@ -309,6 +315,8 @@ export function draftInputFromDocument(
     discountValue: document.discountValue,
     rounding: document.rounding,
     appearance: document.appearance,
+    foreign: document.foreign ?? false,
+    clause: document.clause ?? "",
     lines: document.lines.map((line) => ({
       ...line,
       catalogItemId:

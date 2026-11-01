@@ -179,6 +179,31 @@ describe("assertConsistent", () => {
     expect(() => assertConsistent(db, owner)).toThrow(/koncept má číslo/);
   });
 
+  test("[TST-018] CZK s kurzem kontrola odhalí", () => {
+    const owner = createUser();
+    createInvoice(owner, { exchangeRateMicros: 25_000_000 });
+    expect(() => assertConsistent(db, owner)).toThrow("doklad v CZK drží kurz");
+  });
+
+  test("[TST-018] vystavený doklad v cizí měně bez kurzu, zdroje a data kontrola odhalí", () => {
+    const owner = createUser();
+    createInvoice(owner, {
+      status: "issued",
+      number: "F-1",
+      currency: "EUR",
+      exchangeRateSource: "cnb",
+    });
+    expect(() => assertConsistent(db, owner)).toThrow(/nemá kurz[\s\S]*nemá datum/);
+    const other = createUser();
+    createInvoice(other, {
+      status: "issued",
+      number: "F-2",
+      currency: "EUR",
+      exchangeRateMicros: 25_000_000,
+    });
+    expect(() => assertConsistent(db, other)).toThrow("nemá zdroj kurzu");
+  });
+
   test("[TST-018] odhalí vystavený doklad bez čísla", () => {
     const owner = createUser();
     createInvoice(owner, issued);

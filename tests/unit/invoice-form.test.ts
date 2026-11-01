@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
+import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import {
   applyCustomerDefaults,
+  applyRate,
+  changeCurrency,
+  changeForeign,
+  changeLanguage,
+  changeRate,
   customerOffer,
   discountNotes,
   changeTaxableDate,
@@ -12,6 +18,8 @@ import {
   fieldTarget,
   formatRate,
   formFromDocument,
+  formQrState,
+  formRateNotes,
   isEmptyLine,
   parseRate,
   hasFixedDiscount,
@@ -54,9 +62,9 @@ const form = (over: Partial<FormValues> = {}): FormValues => ({
 });
 
 const accounts = [
-  { id: "czk", currency: "CZK", isDefault: true },
-  { id: "eur-1", currency: "EUR", isDefault: false },
-  { id: "eur-2", currency: "EUR", isDefault: true },
+  { id: "czk", currency: "CZK", isDefault: true, iban: true, bic: true },
+  { id: "eur-1", currency: "EUR", isDefault: false, iban: true, bic: true },
+  { id: "eur-2", currency: "EUR", isDefault: true, iban: true, bic: true },
 ] as const;
 
 describe("formulář faktury", () => {
@@ -267,6 +275,10 @@ describe("formulář faktury", () => {
   });
 
   const defaults = {
+    foreign: false,
+    dic: "",
+    vatIdentified: false,
+    clauseTexts: REVERSE_CHARGE_CLAUSE,
     dueDays: 30,
     language: "en",
     currency: "EUR",
@@ -331,6 +343,10 @@ describe("formulář faktury", () => {
       currency: "CZK",
       paymentMethod: "transfer",
       appearance: document.appearance,
+      foreign: false,
+      dic: "",
+      vatIdentified: false,
+      clauseTexts: REVERSE_CHARGE_CLAUSE,
     } as const;
 
     expect(customerOffer(form(), same, new Set(), accounts)).toBeNull();
@@ -453,5 +469,227 @@ describe("formulář faktury", () => {
     expect(fieldTarget("lines.0.name", values, 1).href).toBe(`#line-${kept.key}-name`);
     expect(fieldTarget("lines.0.quantityMilli", values, 1).href).toBe(`#line-${kept.key}-quantity`);
     expect(fieldTarget("lines", values, 1).href).toBe("#field-lines");
+  });
+});
+
+const clauses = {
+  vatIdentified: true,
+  customerDic: "DE123456789",
+  texts: REVERSE_CHARGE_CLAUSE,
+};
+const none = new Set<never>();
+const customer = {
+  dueDays: 14,
+  language: "cs",
+  currency: "EUR",
+  paymentMethod: "transfer",
+  appearance: document.appearance,
+  foreign: true,
+  dic: "DE123456789",
+  vatIdentified: true,
+  clauseTexts: REVERSE_CHARGE_CLAUSE,
+} as const;
+
+describe("zahraniční faktura", () => {
+  test("[FOR-001] zapnutí navrhne doložku, vypnutí vrátí měnu a smaže kurz i doložku", () => {
+    const on = changeForeign(form(), true, { ...clauses, currency: "CZK" }, none, accounts);
+    expect(on).toMatchObject({ foreign: true, clause: REVERSE_CHARGE_CLAUSE.cs, currency: "CZK" });
+    const off = changeForeign(
+      { ...on, currency: "EUR", exchangeRate: "25", exchangeRateSource: "manual" },
+      false,
+      { ...clauses, currency: "CZK" },
+      none,
+      accounts,
+    );
+    expect(off).toMatchObject({
+      foreign: false,
+      clause: "",
+      currency: "CZK",
+      exchangeRate: "",
+      exchangeRateSource: null,
+      bankAccountId: "czk",
+    });
+  });
+
+  test("[FOR-001] zamčená měna přepínač nevypne a vypnutí ji nezmění", () => {
+    const values = form({ foreign: true, currency: "EUR", exchangeRate: "25" });
+    const off = changeForeign(
+      values,
+      false,
+      { ...clauses, currency: "CZK", currencyLocked: true },
+      none,
+      accounts,
+    );
+    expect(off).toMatchObject({ foreign: false, currency: "EUR", exchangeRate: "25" });
+  });
+
+  test("[FOR-001] zákazník přenese přepínač a doložku, ručně upravené nechá", () => {
+    expect(applyCustomerDefaults(form(), customer, none, accounts)).toMatchObject({
+      foreign: true,
+      clause: REVERSE_CHARGE_CLAUSE.cs,
+      currency: "EUR",
+    });
+    const kept = applyCustomerDefaults(
+      form({ clause: "Moje" }),
+      customer,
+      new Set(["clause", "foreign"] as const),
+      accounts,
+    );
+    expect(kept).toMatchObject({ foreign: false, clause: "Moje" });
+  });
+
+  test("[FOR-001] nabídka u uloženého dokladu přenese přepínač, doložku i smazání kurzu", () => {
+    const values = form({ currency: "USD", exchangeRate: "22", exchangeRateSource: "manual" });
+    expect(customerOffer(values, customer, none, accounts)).toMatchObject({
+      foreign: true,
+      clause: REVERSE_CHARGE_CLAUSE.cs,
+      currency: "EUR",
+      exchangeRate: "",
+      exchangeRateSource: null,
+    });
+  });
+
+  test("[FOR-003] změna EUR na USD smaže i ruční kurz a načte nový", () => {
+    const values = form({ currency: "EUR", exchangeRate: "25", exchangeRateSource: "manual" });
+    expect(changeCurrency(values, "USD", none, accounts)).toMatchObject({
+      currency: "USD",
+      exchangeRate: "",
+      exchangeRateSource: null,
+    });
+    expect(changeCurrency(values, "EUR", none, accounts).exchangeRate).toBe("25");
+  });
+
+  test("[FOR-003] změna data přenačte automatický kurz, ruční zůstane", () => {
+    const result = {
+      rateMicros: 24_380_000,
+      source: "cnb",
+      listDate: "2026-10-30",
+      reference: 24_380_000,
+    } as const;
+    const automatic = form({ currency: "EUR", exchangeRate: "24", exchangeRateSource: "cnb" });
+    expect(applyRate(automatic, result)).toMatchObject({
+      exchangeRate: "24,38",
+      exchangeRateSource: "cnb",
+    });
+    const typed = form({ currency: "EUR", exchangeRate: "25", exchangeRateSource: "manual" });
+    expect(applyRate(typed, result)).toBe(typed);
+    expect(applyRate(typed, null)).toBe(typed);
+    expect(applyRate(automatic, null)).toMatchObject({
+      exchangeRate: "",
+      exchangeRateSource: null,
+    });
+  });
+
+  test("[FOR-003] psaní do pole nastaví ruční kurz, smazání vrátí automatiku", () => {
+    expect(changeRate(form(), "25,5")).toMatchObject({
+      exchangeRate: "25,5",
+      exchangeRateSource: "manual",
+    });
+    expect(changeRate(form(), " ").exchangeRateSource).toBeNull();
+  });
+
+  test("[FOR-003] rozepsaný kurz starší uložený bez zdroje se bere jako ruční", () => {
+    const saved = formFromDocument(
+      {
+        ...document,
+        currency: "EUR",
+        exchangeRateMicros: 25_000_000,
+        customerId: null,
+        seriesId: null,
+        lines: [],
+      },
+      "ks",
+    );
+    expect(saved.exchangeRateSource).toBe("manual");
+  });
+
+  test("[FOR-001] zdroj kurzu u CZK a prázdného kurzu do dokumentu nejde", () => {
+    const fields = (over: Partial<FormValues>) => {
+      const result = toDocumentFields(form(over), "invoice");
+      return result.ok ? result.fields : null;
+    };
+    expect(fields({ exchangeRateSource: "cnb" })?.exchangeRateSource).toBeNull();
+    expect(
+      fields({ currency: "EUR", exchangeRate: "", exchangeRateSource: "cnb" })?.exchangeRateSource,
+    ).toBeNull();
+  });
+
+  test("[FOR-007] změna jazyka přeloží neupravenou doložku, upravenou nechá", () => {
+    const shown = form({ foreign: true, clause: REVERSE_CHARGE_CLAUSE.cs });
+    expect(changeLanguage(shown, "en", clauses, none)).toMatchObject({
+      language: "en",
+      clause: REVERSE_CHARGE_CLAUSE.en,
+    });
+    const edited = { ...shown, clause: "Vlastní znění" };
+    expect(changeLanguage(edited, "en", clauses, none).clause).toBe("Vlastní znění");
+    expect(changeLanguage(shown, "en", clauses, new Set(["clause"] as const)).clause).toBe(
+      REVERSE_CHARGE_CLAUSE.cs,
+    );
+    const removed = { ...shown, clause: "" };
+    expect(changeLanguage(removed, "en", clauses, none).clause).toBe("");
+  });
+
+  test("[QR-002] změna účtu důvod změní", () => {
+    const list = [
+      { id: "bare", currency: "EUR", isDefault: true, iban: false, bic: false },
+      { id: "no-bic", currency: "EUR", isDefault: false, iban: true, bic: false },
+      { id: "full", currency: "EUR", isDefault: false, iban: true, bic: true },
+    ];
+    const state = (bankAccountId: string | null, currency: FormValues["currency"] = "EUR") =>
+      formQrState(form({ currency, bankAccountId }), list);
+    expect(state("bare")).toBe("missing_iban_bic");
+    expect(state("no-bic")).toBe("missing_iban_bic");
+    expect(state("full")).toBe("epc");
+    expect(state(null)).toBe("no_account");
+    expect(state("full", "USD")).toBe("currency");
+    expect(state("no-bic", "CZK")).toBe("spayd");
+    expect(state("bare", "CZK")).toBe("missing_iban_bic");
+  });
+
+  test("[QR-002] vypnuté QR a jiná platba mají vlastní důvod", () => {
+    const values = form({ bankAccountId: "czk" });
+    const hidden = { ...values, appearance: { ...values.appearance, showQr: false } };
+    expect(formQrState(hidden, accounts)).toBe("turned_off");
+    expect(formQrState({ ...values, paymentMethod: "cash" }, accounts)).toBe("other_payment");
+  });
+
+  test("[FOR-004] [FOR-010] upozornění u kurzu ve formuláři", () => {
+    const base = { currency: "EUR", dateFormat: "d. M. yyyy" } as const;
+    expect(
+      formRateNotes({
+        ...base,
+        rateMicros: 24_000_000,
+        source: "last_known",
+        listDate: "2026-10-29",
+        reference: 24_000_000,
+      }),
+    ).toEqual([expect.stringContaining("29. 10. 2026")]);
+    expect(
+      formRateNotes({
+        ...base,
+        rateMicros: 26_250_000,
+        source: "fixed",
+        listDate: null,
+        reference: 25_000_000,
+      }),
+    ).toEqual([]);
+    expect(
+      formRateNotes({
+        ...base,
+        rateMicros: 26_250_001,
+        source: "manual",
+        listDate: null,
+        reference: 25_000_000,
+      }),
+    ).toEqual([expect.stringContaining("5 %")]);
+    expect(
+      formRateNotes({
+        ...base,
+        rateMicros: 26_000_000,
+        source: "manual",
+        listDate: null,
+        reference: null,
+      }),
+    ).toEqual([expect.stringContaining("nešlo ověřit")]);
   });
 });

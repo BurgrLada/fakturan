@@ -1,5 +1,7 @@
+import { suggestedClause } from "./clauses";
 import type { Currency } from "./currency";
 import { isHexColor } from "./contrast";
+import { deviationExceeds, type ExchangeRateSource } from "./fx";
 import { addDays, daysBetween, toDiscount, type Appearance, type InvoiceType } from "./invoice";
 import {
   allowsNegativePrice,
@@ -13,7 +15,10 @@ import {
   type TotalsLine,
 } from "./invoice-totals";
 import { AmountOutOfRangeError, formatMoneyInput, parseMoney } from "./money";
-import type { Language, PaymentMethod } from "./preferences";
+import type { CalendarDate } from "./number-format";
+import type { DateFormat, Language, PaymentMethod } from "./preferences";
+import { planQr, type QrState } from "./qr-payload";
+import { formatCalendarDate } from "./template-vars";
 import { TEXTS } from "./texts";
 
 export type FormLine = {
@@ -39,6 +44,9 @@ export type FormValues = {
   language: Language;
   currency: Currency;
   exchangeRate: string;
+  exchangeRateSource: ExchangeRateSource | null;
+  foreign: boolean;
+  clause: string;
   paymentMethod: PaymentMethod;
   orderRef: string;
   reference: string;
@@ -86,8 +94,20 @@ export type DocumentFields = Omit<
 
 type FormDocument = Omit<
   DocumentFields,
-  "lines" | "bankAccountId" | "appearance" | "language" | "currency" | "paymentMethod"
+  | "lines"
+  | "bankAccountId"
+  | "appearance"
+  | "language"
+  | "currency"
+  | "paymentMethod"
+  | "exchangeRateSource"
+  | "foreign"
+  | "clause"
 > & {
+  // Optional: a template or plan stored before these fields existed has none of them.
+  exchangeRateSource?: ExchangeRateSource | null;
+  foreign?: boolean;
+  clause?: string;
   bankAccountId: string | null;
   appearance: Appearance;
   language: Language;
@@ -98,7 +118,13 @@ type FormDocument = Omit<
   lines: readonly DocumentLine[];
 };
 
-export type AccountChoice = { id: string; currency: string; isDefault: boolean };
+export type AccountChoice = {
+  id: string;
+  currency: string;
+  isDefault: boolean;
+  iban: boolean;
+  bic: boolean;
+};
 
 export type CustomerDefaults = {
   dueDays: number;
@@ -106,10 +132,30 @@ export type CustomerDefaults = {
   currency: Currency;
   paymentMethod: PaymentMethod;
   appearance: Appearance;
+  foreign: boolean;
+  dic: string;
+  vatIdentified: boolean;
+  clauseTexts: Record<Language, string>;
 };
+
+export type ClauseDefaults = {
+  vatIdentified: boolean;
+  customerDic: string;
+  texts: Record<Language, string>;
+};
+
+export type ForeignDefaults = ClauseDefaults & { currency: Currency; currencyLocked?: boolean };
+
+export type RateResult = {
+  rateMicros: number;
+  source: Exclude<ExchangeRateSource, "manual">;
+  listDate: CalendarDate | null;
+  reference: number | null;
+} | null;
 
 const RATE = /^(\d+)(?:[.,](\d{1,6}))?$/;
 const MICROS = 1_000_000;
+const NO_RATE = { exchangeRate: "", exchangeRateSource: null } as const;
 
 let addedLines = 0;
 
@@ -178,6 +224,11 @@ export function formFromDocument(document: FormDocument, defaultUnit: string): F
     language: document.language,
     currency: document.currency,
     exchangeRate: formatRate(document.exchangeRateMicros),
+    // A rate saved before sources existed was typed by a person.
+    exchangeRateSource:
+      document.exchangeRateSource ?? (document.exchangeRateMicros === null ? null : "manual"),
+    foreign: document.foreign ?? false,
+    clause: document.clause ?? "",
     paymentMethod: document.paymentMethod,
     orderRef: document.orderRef,
     reference: document.reference,
@@ -253,6 +304,7 @@ export function toDocumentFields(values: FormValues, type: InvoiceType): FieldsR
     exchangeRateMicros: usesRate
       ? checked("field-exchangeRate", parseRate(values.exchangeRate), null)
       : null,
+    exchangeRateSource: usesRate ? values.exchangeRateSource : null,
     discountValue:
       values.discountKind === "none"
         ? 0
@@ -333,13 +385,60 @@ export function changeCurrency(
   touched: ReadonlySet<TouchedField>,
   accounts: readonly AccountChoice[],
 ): FormValues {
+  const rate = currency === values.currency ? {} : NO_RATE;
   return {
     ...values,
+    ...rate,
     currency,
     bankAccountId: touched.has("bankAccountId")
       ? values.bankAccountId
       : defaultAccountId(accounts, currency),
   };
+}
+
+export function changeRate(values: FormValues, exchangeRate: string): FormValues {
+  return { ...values, exchangeRate, exchangeRateSource: exchangeRate.trim() ? "manual" : null };
+}
+
+// A rate typed by a person stays, only a change of currency or their own action replaces it.
+export function applyRate(values: FormValues, result: RateResult): FormValues {
+  if (values.exchangeRateSource === "manual") return values;
+  if (!result) return { ...values, ...NO_RATE };
+  return {
+    ...values,
+    exchangeRate: formatRate(result.rateMicros),
+    exchangeRateSource: result.source,
+  };
+}
+
+export function changeForeign(
+  values: FormValues,
+  on: boolean,
+  defaults: ForeignDefaults,
+  touched: ReadonlySet<TouchedField>,
+  accounts: readonly AccountChoice[],
+): FormValues {
+  if (on) {
+    const { customerDic, vatIdentified, texts } = defaults;
+    const language = values.language;
+    const clause =
+      values.clause ||
+      suggestedClause({ foreign: true, language, vatIdentified, customerDic, texts });
+    return { ...values, foreign: true, clause };
+  }
+  const off = { ...values, foreign: false, clause: "" };
+  return defaults.currencyLocked ? off : changeCurrency(off, defaults.currency, touched, accounts);
+}
+
+// Only the exact default text is ours to translate, whatever the person wrote stays.
+export function changeLanguage(
+  values: FormValues,
+  language: Language,
+  defaults: ClauseDefaults,
+  touched: ReadonlySet<TouchedField>,
+): FormValues {
+  const untouched = !touched.has("clause") && values.clause === defaults.texts[values.language];
+  return { ...values, language, clause: untouched ? defaults.texts[language] : values.clause };
 }
 
 // The PDF prints the date only with showDuzp, and a date just filled in is meant to be printed.
@@ -367,6 +466,24 @@ export function changeIssueDate(
   };
 }
 
+export function customerForeign(
+  values: FormValues,
+  defaults: Pick<CustomerDefaults, "foreign" | "dic" | "vatIdentified" | "clauseTexts">,
+  touched: ReadonlySet<TouchedField>,
+): FormValues {
+  const foreign = touched.has("foreign") ? values.foreign : defaults.foreign;
+  const clause = touched.has("clause")
+    ? values.clause
+    : suggestedClause({
+        foreign,
+        language: values.language,
+        vatIdentified: defaults.vatIdentified,
+        customerDic: defaults.dic,
+        texts: defaults.clauseTexts,
+      });
+  return { ...values, foreign, clause };
+}
+
 export function applyCustomerDefaults(
   values: FormValues,
   defaults: CustomerDefaults,
@@ -390,13 +507,27 @@ export function applyCustomerDefaults(
         ? values.dueDate
         : addDays(values.issueDate, defaults.dueDays),
   };
-  return changeCurrency(next, unlessTouched("currency"), touched, accounts);
+  return changeCurrency(
+    customerForeign(next, defaults, touched),
+    unlessTouched("currency"),
+    touched,
+    accounts,
+  );
 }
 
 export type CustomerOffer = Partial<
   Pick<
     FormValues,
-    "currency" | "bankAccountId" | "language" | "paymentMethod" | "appearance" | "dueDate"
+    | "currency"
+    | "exchangeRate"
+    | "exchangeRateSource"
+    | "bankAccountId"
+    | "language"
+    | "paymentMethod"
+    | "appearance"
+    | "dueDate"
+    | "foreign"
+    | "clause"
   >
 >;
 
@@ -412,14 +543,73 @@ export function customerOffer(
 ): CustomerOffer | null {
   const wantedDefaults = currencyLocked ? { ...defaults, currency: values.currency } : defaults;
   const next = applyCustomerDefaults(values, wantedDefaults, touched, accounts);
-  const { currency, language, paymentMethod, appearance, dueDate } = next;
+  const { currency, exchangeRate, exchangeRateSource } = next;
+  const { language, paymentMethod, appearance, dueDate, foreign, clause } = next;
   const bankAccountId = currency === values.currency ? values.bankAccountId : next.bankAccountId;
-  const wanted = { currency, language, paymentMethod, appearance, dueDate, bankAccountId };
+  const wanted = {
+    currency,
+    exchangeRate,
+    exchangeRateSource,
+    language,
+    paymentMethod,
+    appearance,
+    dueDate,
+    bankAccountId,
+    foreign,
+    clause,
+  };
   const changed = Object.entries(wanted).filter(
     ([field, value]) =>
       JSON.stringify(value) !== JSON.stringify(values[field as keyof CustomerOffer]),
   );
   return changed.length > 0 ? Object.fromEntries(changed) : null;
+}
+
+// Only presence travels to the browser. Any valid numbers stand in, planQr then decides the rest.
+const SAMPLE_IBAN = "CZ6508000000192000145399";
+const SAMPLE_BIC = "GIBACZPX";
+
+export function formQrState(values: FormValues, accounts: readonly AccountChoice[]): QrState {
+  if (!values.appearance.showQr) return "turned_off";
+  if (values.paymentMethod !== "transfer") return "other_payment";
+  const account = accounts.find((item) => item.id === values.bankAccountId);
+  if (!account) return "no_account";
+  const plan = planQr({
+    currency: values.currency,
+    dueMinor: 1,
+    iban: account.iban ? SAMPLE_IBAN : null,
+    bic: account.bic ? SAMPLE_BIC : null,
+    variableSymbol: null,
+    message: null,
+    recipient: "-",
+    enabled: true,
+    paid: false,
+  });
+  if (plan.kind !== "none") return plan.kind;
+  return plan.reason === "disabled" ? "turned_off" : plan.reason;
+}
+
+export function formRateNotes(input: {
+  currency: string;
+  rateMicros: number | null;
+  source: ExchangeRateSource | null;
+  listDate: CalendarDate | null;
+  reference: number | null;
+  dateFormat: DateFormat;
+}): string[] {
+  const { currency, rateMicros, source, listDate, reference, dateFormat } = input;
+  if (currency === "CZK" || !rateMicros) return [];
+  const R = TEXTS.exchangeRates.notes;
+  return [
+    ...(source === "last_known" && listDate
+      ? [R.lastKnown(currency, formatCalendarDate(listDate, dateFormat))]
+      : []),
+    ...(reference === null
+      ? [R.noReference]
+      : deviationExceeds(rateMicros, reference)
+        ? [R.deviation(currency)]
+        : []),
+  ];
 }
 
 const LINE_FIELDS: Record<string, string> = {

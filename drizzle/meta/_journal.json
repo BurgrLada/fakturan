@@ -253,6 +253,13 @@
       "when": 1793504913183,
       "tag": "0035_exchange_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1793510361923,
+      "tag": "0036_foreign_invoice",
+      "breakpoints": true
     }
   ]
 }

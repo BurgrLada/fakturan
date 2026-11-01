@@ -75,6 +75,8 @@ export function samplePreviewDocument(ownerId: string): InvoiceDocument {
     language: prefs.language,
     currency: prefs.currency,
     exchangeRateMicros: null,
+    foreign: false,
+    clause: "",
     paymentMethod: prefs.paymentMethod,
     orderRef: "",
     reference: "",

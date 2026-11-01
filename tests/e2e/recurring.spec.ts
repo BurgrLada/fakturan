@@ -444,7 +444,7 @@ test("[REC-001] [REC-002] četnost a den vystavení se uloží a vrátí v detai
   await expect(page.getByLabel("Konkrétní den")).toHaveValue("3");
 });
 
-test("[REC-010] [REC-021] režim a posun období se uloží, cizí měna upozorní na koncept", async ({
+test("[REC-010] [REC-021] režim a posun období se uloží, cizí měna vezme kurz při vystavení", async ({
   page,
   freshApp,
 }) => {
@@ -458,10 +458,13 @@ test("[REC-010] [REC-021] režim a posun období se uloží, cizí měna upozorn
   const { year, month } = prague(-1);
   await expect(page.getByTestId("preview-row").first()).toContainText(`1. ${month}. ${year} – `);
 
+  await page.getByLabel("Zahraniční faktura").check();
   await page.getByLabel("Měna").selectOption("EUR");
-  await expect(page.getByTestId("foreign-currency")).toContainText("jen koncept");
-  await page.getByLabel("Měna").selectOption("CZK");
-  await expect(page.getByTestId("foreign-currency")).toHaveCount(0);
+  await expect(page.getByTestId("rate-on-issue")).toContainText("při každém vystavení");
+  await expect(page.getByLabel("Kurz k CZK")).toHaveCount(0);
+  await expect(page.getByText("jen koncept")).toHaveCount(0);
+  await page.getByLabel("Zahraniční faktura").uncheck();
+  await expect(page.getByLabel("Měna")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Uložit plán" }).click();
   await page.waitForURL(/\/pravidelne\/(?!nova)[\w-]+$/);

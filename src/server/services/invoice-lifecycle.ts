@@ -2,11 +2,10 @@ import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { isActiveDocument, type InvoiceStatus, type InvoiceType } from "@/lib/invoice";
 import { diffLines } from "@/lib/invoice-diff";
-import { discountNotes } from "@/lib/invoice-form";
-import { deviationExceeds, rateDate } from "@/lib/fx";
+import { discountNotes, formRateNotes } from "@/lib/invoice-form";
+import { rateDate } from "@/lib/fx";
 import { allowsNegativePrice } from "@/lib/invoice-totals";
 import { calendarDateInPrague, variableSymbolFrom } from "@/lib/number-format";
-import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
@@ -105,6 +104,19 @@ export function vatStatementProblems(q: Reader, ownerId: string, row: Invoice): 
   ];
 }
 
+// Judged like the statement above: an issued document by its snapshots (FOR-006).
+function clauseProblems(q: Reader, ownerId: string, row: Invoice): IssueProblem[] {
+  if (!row.clause.trim()) return [];
+  const current = currentParties(q, ownerId, row).snapshot;
+  const profile = row.supplierSnapshot ?? current.supplier;
+  const client = row.customerSnapshot ?? current.customer;
+  if (!profile?.vatIdentified) return [];
+  return [
+    ...(profile.dic.trim() ? [] : [{ field: "supplier.dic", message: T.clauseSupplierDic }]),
+    ...(client && !client.dic.trim() ? [{ field: "clause", message: T.clauseCustomerDic }] : []),
+  ];
+}
+
 type CheckedLine = Pick<
   InvoiceLine,
   "name" | "quantityMilli" | "unitPriceMinor" | "discountKind" | "discountValue"
@@ -193,6 +205,7 @@ export function documentProblems(
     ...dateProblems(row),
     ...accountProblems(q, ownerId, row, keptAccountId),
     ...vatStatementProblems(q, ownerId, row),
+    ...clauseProblems(q, ownerId, row),
   ];
   if (row.currency !== "CZK" && !row.exchangeRateMicros) {
     found.push({
@@ -248,7 +261,11 @@ function ratedFor(q: Reader, ownerId: string, row: Invoice): Invoice {
   if (typed && row.exchangeRateMicros !== null) return row;
   const day = rateDate(row, getPreferences(ownerId).fxBasis, calendarDateInPrague(clock.now()));
   const found = resolveRate(q, ownerId, row.currency, day, clock.now());
-  if (!found) return row;
+  if (!found) {
+    // A rate no list stands behind any more, such as a fixed one removed from the settings.
+    const orphan = row.exchangeRateMicros !== null && row.exchangeRateDate === null;
+    return orphan ? { ...row, exchangeRateSource: "manual" } : row;
+  }
   const fields: RateFields = {
     exchangeRateMicros: found.rateMicros,
     exchangeRateSource: found.source,
@@ -258,20 +275,17 @@ function ratedFor(q: Reader, ownerId: string, row: Invoice): Invoice {
 }
 
 function rateNotes(q: Reader, ownerId: string, row: Invoice): string[] {
-  if (row.currency === "CZK" || row.type === "credit_note" || !row.exchangeRateMicros) return [];
-  const R = TEXTS.exchangeRates.notes;
-  const format = getPreferences(ownerId).dateFormat;
-  const day = rateDate(row, getPreferences(ownerId).fxBasis, calendarDateInPrague(clock.now()));
-  const listed = resolveRate(q, ownerId, row.currency, day, clock.now());
-  const notes: string[] = [];
-  if (row.exchangeRateSource === "last_known" && row.exchangeRateDate) {
-    notes.push(R.lastKnown(row.currency, formatCalendarDate(row.exchangeRateDate, format)));
-  }
-  if (listed?.reference == null) notes.push(R.noReference);
-  else if (deviationExceeds(row.exchangeRateMicros, listed.reference)) {
-    notes.push(R.deviation(row.currency));
-  }
-  return notes;
+  if (row.type === "credit_note") return [];
+  const { dateFormat, fxBasis } = getPreferences(ownerId);
+  const day = rateDate(row, fxBasis, calendarDateInPrague(clock.now()));
+  return formRateNotes({
+    currency: row.currency,
+    rateMicros: row.exchangeRateMicros,
+    source: row.exchangeRateSource,
+    listDate: row.exchangeRateDate,
+    reference: resolveRate(q, ownerId, row.currency, day, clock.now())?.reference ?? null,
+    dateFormat,
+  });
 }
 
 export type IssuePreview = {

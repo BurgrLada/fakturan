@@ -314,7 +314,11 @@ export async function verifyVat(actor: Actor, id: string): Promise<VatStatus> {
   return { state, verifiedAt };
 }
 
-export type CustomerDefaults = Preferences & { remindersEnabled: boolean | null };
+export type CustomerDefaults = Preferences & {
+  remindersEnabled: boolean | null;
+  foreign: boolean;
+  dic: string;
+};
 
 // remindersEnabled only ever blocks: true and null both follow the account switch (R-12).
 export function customerDefaults(
@@ -330,5 +334,7 @@ export function customerDefaults(
     currency: row.currency ?? prefs.currency,
     designId: row.designId ?? prefs.designId,
     remindersEnabled: row.remindersEnabled,
+    foreign: !isDomesticCountry(row.country),
+    dic: row.dic,
   };
 }

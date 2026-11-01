@@ -8,9 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { CURRENCIES } from "@/lib/currency";
+import { formatRate, parseRate } from "@/lib/invoice-form";
 import { ROUNDING_MODES } from "@/lib/invoice-totals";
 import {
   DATE_FORMATS,
+  FX_BASES,
   ISSUE_DATE_MODES,
   LANGUAGES,
   PAYMENT_METHODS,
@@ -18,6 +20,7 @@ import {
   type Preferences,
 } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
+import { FixedRates, FOREIGN_CURRENCIES } from "./fixed-rates";
 
 const T = TEXTS.preferences;
 
@@ -31,7 +34,8 @@ type ChoiceKey =
   | "issueDateMode"
   | "dateFormat"
   | "variableSymbolFormat"
-  | "rounding";
+  | "rounding"
+  | "fxBasis";
 
 export type ChoiceOption = { value: string; label: string };
 
@@ -73,6 +77,7 @@ const CHOICES: Record<
     values: ROUNDING_MODES,
     label: (v) => T.roundings[v as keyof typeof T.roundings],
   },
+  fxBasis: { values: FX_BASES, label: (v) => T.fxBases[v as keyof typeof T.fxBases] },
 };
 
 export function ChoiceField({
@@ -117,6 +122,11 @@ export function ChoiceField({
 export function PreferencesForm({ initial }: { initial: Preferences }) {
   const [values, setValues] = useState<Preferences>(initial);
   const [dueDays, setDueDays] = useState(String(initial.dueDays));
+  const [fixedRates, setFixedRates] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      Object.entries(initial.fixedRates).map(([code, micros]) => [code, formatRate(micros)]),
+    ),
+  );
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -139,11 +149,21 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const rates = FOREIGN_CURRENCIES.flatMap((code) => {
+      const text = fixedRates[code]?.trim();
+      return text ? [[code, parseRate(text)] as const] : [];
+    });
+    const wrong = rates.find(([, micros]) => micros === null);
+    if (wrong) {
+      setMessage({ ok: false, text: T.fixedRates.invalid(wrong[0]) });
+      return;
+    }
     startTransition(async () => {
       const owned = Object.entries(values).filter(([key]) => !LOOK_FIELDS.includes(key));
       const result = await savePreferencesAction({
         ...Object.fromEntries(owned),
         dueDays: dueDays.trim() === "" ? Number.NaN : Number(dueDays),
+        fixedRates: Object.fromEntries(rates),
       });
       setMessage(result.ok ? { ok: true, text: T.saved } : { ok: false, text: result.error });
     });
@@ -204,6 +224,14 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
           name="variableSymbolFormat"
           value={values.variableSymbolFormat}
           onChange={choose}
+        />
+      </section>
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg">{T.sections.foreign}</h2>
+        <ChoiceField name="fxBasis" value={values.fxBasis} onChange={choose} />
+        <FixedRates
+          rates={fixedRates}
+          onChange={(code, text) => setFixedRates((current) => ({ ...current, [code]: text }))}
         />
       </section>
       <div>

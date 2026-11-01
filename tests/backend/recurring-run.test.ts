@@ -1,3 +1,4 @@
+import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -644,6 +645,30 @@ describe("kurzy ČNB u pravidelných faktur", () => {
     expect(getInvoice(owner, run.invoiceId!)).toMatchObject({ status: "draft", number: null });
     expect(noticesOf(owner).map((row) => row.kind)).toEqual(["recurring_failed"]);
     expect(cnb.requests).toHaveLength(1);
+  });
+
+  test("[FOR-007] pravidelná faktura v angličtině má doložku anglicky", async () => {
+    const { owner, customerId } = account();
+    seedEur("2026-03-09");
+    const id = savePlan(owner, customerId, {
+      mode: "issue",
+      document: planDocument({
+        currency: "EUR",
+        paymentMethod: "cash",
+        language: "en",
+        foreign: true,
+        clause: REVERSE_CHARGE_CLAUSE.en,
+      }),
+    });
+
+    const run = await runJob(owner, id);
+
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({
+      foreign: true,
+      language: "en",
+      clause: REVERSE_CHARGE_CLAUSE.en,
+      exchangeRateSource: "cnb",
+    });
   });
 
   test("faktura v korunách síť ani kurz nepoužije", async () => {

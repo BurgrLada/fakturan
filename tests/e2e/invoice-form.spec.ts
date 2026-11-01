@@ -7,6 +7,7 @@ import {
   register,
   addCatalogItem,
   openForm,
+  chooseCurrency,
   chooseCustomer,
   settled,
   fillLine,
@@ -225,7 +226,7 @@ test("[INV-010] výběr zákazníka u uloženého konceptu nic tiše nepřepíš
   const { baseURL } = freshApp;
   await ready(page, baseURL);
   await openForm(page, baseURL);
-  await page.getByLabel("Měna").selectOption("EUR");
+  await chooseCurrency(page, "EUR");
   await page.getByLabel("Způsob platby").selectOption("cash");
   await fillLine(page, 0, "Konzultace", "1000");
   await settled(page);
@@ -499,6 +500,8 @@ test("[FOR-002] měna jde zvolit a s dostupným lístkem ČNB se kurz doplní p�
   await ready(page, baseURL);
   await openForm(page, baseURL);
   await expect(page.getByLabel("Kurz k CZK")).toHaveCount(0);
+  await expect(page.getByLabel("Měna")).toHaveCount(0);
+  await page.getByLabel("Zahraniční faktura").check();
   await expect(page.getByLabel("Měna").locator("option")).toHaveText([
     "CZK",
     "EUR",
@@ -511,9 +514,9 @@ test("[FOR-002] měna jde zvolit a s dostupným lístkem ČNB se kurz doplní p�
   await chooseCustomer(page);
   await page.getByLabel("Způsob platby").selectOption("cash");
   await fillLine(page, 0, "Konzultace", "100");
-  await page.getByLabel("Měna").selectOption("EUR");
+  await chooseCurrency(page, "EUR");
   await settled(page);
-  await expect(page.getByLabel("Kurz k CZK")).toBeVisible();
+  await expect(page.getByLabel("Kurz k CZK")).not.toHaveValue("");
   await expect(page.getByRole("link", { name: "Vyplňte kurz EUR" })).toBeHidden();
   await issue(page);
   expect(await issuedPdf(page)).toContain("100,00 €");
@@ -529,7 +532,7 @@ test.describe("bez dostupného lístku ČNB", () => {
     await chooseCustomer(page);
     await page.getByLabel("Způsob platby").selectOption("cash");
     await fillLine(page, 0, "Konzultace", "100");
-    await page.getByLabel("Měna").selectOption("EUR");
+    await chooseCurrency(page, "EUR");
     await settled(page);
     await expect(page.getByRole("link", { name: "Vyplňte kurz EUR" })).toHaveAttribute(
       "href",

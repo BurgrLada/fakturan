@@ -36,7 +36,9 @@ test("opravná faktura od tlačítka po přeplatek a vrácení", async ({ page, 
   await page.getByRole("button", { name: "Vytvořit opravnou fakturu" }).click();
   await expect(page.getByRole("heading", { name: "Koncept opravné faktury" })).toBeVisible();
   await expect(page.getByTestId("credit-left")).toHaveText(money("Zbývá opravit 1 000,00 Kč."));
+  await page.getByLabel("Zahraniční faktura").check();
   await expect(page.getByLabel("Měna", { exact: true })).toBeDisabled();
+  await page.getByLabel("Zahraniční faktura").uncheck();
   await expect(page.getByRole("combobox", { name: "Zákazník" })).toHaveCount(0);
   await expect(page.getByTestId("invoice-total")).toHaveText(money("-1 000,00 Kč"));
 

@@ -1,7 +1,9 @@
 import "server-only";
 import { eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
+import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { isValidIco } from "@/lib/ico";
+import type { ClauseDefaults } from "@/lib/invoice-form";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -38,6 +40,8 @@ export const supplierInputSchema = z
     footerText: text(1000),
     notVatPayerCs: text(300),
     notVatPayerEn: text(300),
+    reverseChargeCs: text(300).default(REVERSE_CHARGE_CLAUSE.cs),
+    reverseChargeEn: text(300).default(REVERSE_CHARGE_CLAUSE.en),
   })
   .superRefine((value, ctx) => {
     for (const path of ["name", "street", "city", "zip", "country"] as const) {
@@ -54,7 +58,7 @@ export const supplierInputSchema = z
     }
   });
 
-export type SupplierInput = z.infer<typeof supplierInputSchema>;
+export type SupplierInput = z.input<typeof supplierInputSchema>;
 
 const REQUIRED_FIELDS = ["name", "street", "city", "zip", "country", "ico"] as const;
 
@@ -73,6 +77,17 @@ function ownerOf(actor: Actor): string {
 
 export function getSupplier(ownerId: string): SupplierProfile | null {
   return db.select().from(supplier).where(scoped(ownerId).where(supplier)).get() ?? null;
+}
+
+export function clauseDefaultsOf(ownerId: string): Omit<ClauseDefaults, "customerDic"> {
+  const profile = getSupplier(ownerId);
+  return {
+    vatIdentified: profile?.vatIdentified ?? false,
+    texts: {
+      cs: profile?.reverseChargeCs ?? REVERSE_CHARGE_CLAUSE.cs,
+      en: profile?.reverseChargeEn ?? REVERSE_CHARGE_CLAUSE.en,
+    },
+  };
 }
 
 export function missingSupplierKeys(ownerId: string): SupplierField[] {

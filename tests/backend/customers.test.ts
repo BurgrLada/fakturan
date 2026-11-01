@@ -253,8 +253,15 @@ describe("údaje zákazníka", () => {
       language: "en",
       currency: "EUR",
       remindersEnabled: false,
+      foreign: false,
+      dic: expect.any(String),
     });
-    expect(customerDefaults("c1", plain, prefs)).toEqual({ ...prefs, remindersEnabled: null });
+    expect(customerDefaults("c1", plain, prefs)).toEqual({
+      ...prefs,
+      remindersEnabled: null,
+      foreign: false,
+      dic: expect.any(String),
+    });
     expect(() => customerDefaults("c2", plain, prefs)).toThrow("neexistuje");
   });
 

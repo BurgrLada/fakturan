@@ -15,7 +15,12 @@ import { startSmtp, type TestSmtp } from "../helpers/smtp";
 // The name a container reaches a test server on the host by.
 export const DOCKER_HOST_NAME = "host.docker.internal";
 
-type App = { baseURL: string; dataDir: string; smtp: TestSmtp | null };
+type App = {
+  baseURL: string;
+  dataDir: string;
+  smtp: TestSmtp | null;
+  cnb: { setAvailable: (available: boolean) => void };
+};
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -70,22 +75,30 @@ const ARES_REPLY = {
   },
 };
 
-const CNB_LIST = [
-  "30.10.2026 #211",
-  "země|měna|množství|kód|kurz",
-  "EMU|euro|1|EUR|24,380",
-  "USA|dolar|1|USD|22,311",
-  "",
-].join("\n");
+// The EUR rate carries the day of the list, so a test can tell which day the form asked for.
+const cnbList = (date: string) =>
+  [
+    `${date} #211`,
+    "země|měna|množství|kód|kurz",
+    `EMU|euro|1|EUR|24,${date.slice(0, 2)}0`,
+    "USA|dolar|1|USD|22,311",
+    "",
+  ].join("\n");
 
-async function startCnbStub(available: boolean) {
-  const server = createHttpServer((_request, response) => {
+async function startCnbStub(initiallyAvailable: boolean) {
+  let available = initiallyAvailable;
+  const server = createHttpServer((request, response) => {
+    const date = new URL(request.url!, "http://stub").searchParams.get("date") ?? "30.10.2026";
     response.writeHead(available ? 200 : 503, { "Content-Type": "text/plain; charset=utf-8" });
-    response.end(available ? CNB_LIST : "");
+    response.end(available ? cnbList(date) : "");
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as { port: number };
-  return { url: `http://127.0.0.1:${port}`, close: () => server.close() };
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => server.close(),
+    setAvailable: (value: boolean) => void (available = value),
+  };
 }
 
 async function startAresStub() {
@@ -207,7 +220,7 @@ export const test = base.extend<{
     });
     try {
       await waitForReady(baseURL, child);
-      await use({ baseURL, dataDir, smtp });
+      await use({ baseURL, dataDir, smtp, cnb });
       assertDataDirConsistent(dataDir);
     } finally {
       process.kill(-child.pid!, "SIGTERM");

@@ -16,7 +16,13 @@ import { getAutomation } from "@/server/services/automation";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
 import { createCreditNote } from "@/server/services/credit-notes";
 import { creditPreview, loadRate } from "@/server/services/exchange-rates";
-import { customerInputSchema, saveCustomer, searchCustomers } from "@/server/services/customers";
+import {
+  customerInputSchema,
+  getCustomer,
+  saveCustomer,
+  searchCustomers,
+} from "@/server/services/customers";
+import { clauseDefaultsOf } from "@/server/services/supplier";
 import {
   cancelInvoice,
   checkIssuable,
@@ -230,12 +236,17 @@ export async function createCustomerAction(raw: unknown) {
 export async function customerDefaultsAction(raw: unknown) {
   return run(customerInput, raw, ({ customerId }, actor) => {
     const draft = newDraftDefaults(ownerOf(actor), customerId);
+    const { vatIdentified, texts } = clauseDefaultsOf(ownerOf(actor));
     const defaults: CustomerDefaults = {
       dueDays: daysBetween(draft.issueDate!, draft.dueDate!),
       language: draft.language,
       currency: draft.currency,
       paymentMethod: draft.paymentMethod,
       appearance: draft.appearance,
+      foreign: draft.foreign ?? false,
+      dic: getCustomer(ownerOf(actor), customerId)?.dic ?? "",
+      vatIdentified,
+      clauseTexts: texts,
     };
     return { defaults };
   });

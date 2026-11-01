@@ -180,7 +180,9 @@ test("[INV-023] úprava uhrazené faktury ukáže upozornění a stav po přepo�
 
   await page.goto(`${detail}/upravit`);
   await page.waitForLoadState("networkidle");
+  await page.getByLabel("Zahraniční faktura").check();
   await expect(page.getByLabel("Měna", { exact: true })).toBeDisabled();
+  await page.getByLabel("Zahraniční faktura").uncheck();
   await page.getByLabel("Cena za jednotku").first().fill("1500");
   await page.getByRole("button", { name: "Uložit změny" }).click();
 

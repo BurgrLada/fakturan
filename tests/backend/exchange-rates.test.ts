@@ -396,14 +396,26 @@ describe("načtení kurzu pro formulář", () => {
     expect(stub.requests).toHaveLength(60);
   });
 
-  test("[FOR-010] pevný kurz se vrátí bez dotazu na síť", async () => {
+  test("[FOR-010] pevný kurz s lístkem k porovnání se vrátí bez dotazu na síť", async () => {
     const owner = seedOwner(db, EVENING);
+    seedRate("EUR", "2026-10-30", 24_380_000);
     savePreferences(webActor(owner), { fixedRates: { EUR: 25_000_000 } });
 
     expect(await loadRate(webActor(owner), { currency: "EUR", date: "2026-10-30" })).toMatchObject({
       source: "fixed",
+      reference: 24_380_000,
     });
     expect(stub.requests).toEqual([]);
+  });
+
+  test("[FOR-010] pevný kurz bez lístku si ho stáhne, aby šel porovnat s ČNB", async () => {
+    const owner = seedOwner(db, EVENING);
+    savePreferences(webActor(owner), { fixedRates: { EUR: 25_000_000 } });
+
+    const result = await loadRate(webActor(owner), { currency: "EUR", date: "2026-10-30" });
+
+    expect(result).toMatchObject({ rateMicros: 25_000_000, source: "fixed" });
+    expect(result?.reference).not.toBeNull();
   });
 
   test("[FOR-004] neplatná měna nebo datum a anonymní aktér skončí chybou", async () => {

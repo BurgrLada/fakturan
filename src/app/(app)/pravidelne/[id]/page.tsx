@@ -67,6 +67,9 @@ async function PlanContent({ params }: { params: Promise<{ id: string }> }) {
         defaultUnit={choices.defaultUnit}
         recurringSend={getAutomation(user.id).recurringSend}
         designs={designChoices()}
+        homeCurrency={choices.homeCurrency}
+        clauseDefaults={choices.clauseDefaults}
+        customerDic={plan.customerId ? (getCustomer(user.id, plan.customerId)?.dic ?? "") : ""}
         initial={{
           name: plan.name,
           customerId: plan.customerId,

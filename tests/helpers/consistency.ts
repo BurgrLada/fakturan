@@ -1,5 +1,6 @@
 import { asc, eq, getTableColumns, getTableName, is, sql } from "drizzle-orm";
 import { SQLiteTable } from "drizzle-orm/sqlite-core";
+import { EXCHANGE_RATE_SOURCES } from "@/lib/fx";
 import { isActiveDocument, toDiscount } from "@/lib/invoice";
 import { computeTotals } from "@/lib/invoice-totals";
 import { deriveStatus } from "@/lib/payments";
@@ -44,6 +45,29 @@ function creditNoteProblems(
   return problems;
 }
 
+function rateProblems(row: typeof schema.invoice.$inferSelect, label: string): string[] {
+  const { currency, status, exchangeRateMicros: micros } = row;
+  const { exchangeRateSource: source, exchangeRateDate: listDate } = row;
+  const problems: string[] = [];
+  if (source !== null && !EXCHANGE_RATE_SOURCES.includes(source)) {
+    problems.push(`${label}: neznámý zdroj kurzu ${source}`);
+  }
+  if (currency === "CZK") {
+    if (micros !== null || source !== null || listDate !== null) {
+      problems.push(`${label}: doklad v CZK drží kurz`);
+    }
+    return problems;
+  }
+  if (status === "draft") return problems;
+  if (micros === null) problems.push(`${label}: vystavený doklad v cizí měně nemá kurz`);
+  if (source === null) problems.push(`${label}: vystavený doklad v cizí měně nemá zdroj kurzu`);
+  // Only a list has a date: a fixed or typed rate never came from one.
+  if ((source === "cnb" || source === "last_known") && listDate === null) {
+    problems.push(`${label}: kurz z lístku nemá datum`);
+  }
+  return problems;
+}
+
 function invoiceProblems(db: Db, ownerId: string): string[] {
   const { invoice, invoiceLine } = schema;
   const problems: string[] = [];
@@ -78,6 +102,7 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
       problems.push(`${label}: součty nejde spočítat`);
     }
 
+    problems.push(...rateProblems(row, label));
     if (row.status === "draft") {
       if (row.number !== null) problems.push(`${label}: koncept má číslo`);
       continue;

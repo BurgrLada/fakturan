@@ -52,6 +52,8 @@ async function OnboardingContent({ params }: { params: Promise<{ krok?: string |
               footerText: profile.footerText,
               notVatPayerCs: profile.notVatPayerCs,
               notVatPayerEn: profile.notVatPayerEn,
+              reverseChargeCs: profile.reverseChargeCs,
+              reverseChargeEn: profile.reverseChargeEn,
             }
           : EMPTY_SUPPLIER
       }

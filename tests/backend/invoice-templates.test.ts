@@ -508,3 +508,43 @@ describe("šablony faktur", () => {
     expect(USER_OWNED_TABLES).toContain(invoiceTemplate);
   });
 });
+
+describe("zahraniční šablona", () => {
+  test("šablona a plán uložené před tímto plánem jdou načíst", () => {
+    const owner = newOwner();
+    const { foreign: _f, clause: _c, ...old } = document(owner);
+    const { id } = saveTemplate(actor(owner), input(owner));
+    db.update(invoiceTemplate).set({ document: old }).where(eq(invoiceTemplate.id, id)).run();
+
+    const draft = getInvoice(owner, draftFromTemplate(actor(owner), id).id);
+    expect(draft).toMatchObject({ foreign: false, clause: "" });
+  });
+
+  test("[FOR-001] šablona nese přepínač a doložku, kurz doplní až vystavení", () => {
+    const owner = newOwner();
+    const { id } = saveTemplate(
+      actor(owner),
+      input(owner, { document: document(owner, { foreign: true, clause: "Doložka" }) }),
+    );
+    expect(getInvoice(owner, draftFromTemplate(actor(owner), id).id)).toMatchObject({
+      foreign: true,
+      clause: "Doložka",
+      exchangeRateMicros: null,
+      exchangeRateSource: null,
+    });
+  });
+
+  test("[R-18] šablona v CZK kurz nikdy nedostane", () => {
+    const owner = newOwner();
+    const { id } = saveTemplate(
+      actor(owner),
+      input(owner, {
+        document: { ...document(owner), exchangeRateMicros: 25_000_000 },
+      }),
+    );
+    expect(getTemplate(owner, id)?.document).not.toHaveProperty("exchangeRateMicros");
+    expect(
+      getInvoice(owner, draftFromTemplate(actor(owner), id).id)?.exchangeRateMicros,
+    ).toBeNull();
+  });
+});

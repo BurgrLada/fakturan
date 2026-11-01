@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
 import {
   cashInvoice,
+  chooseCurrency,
   chooseCustomer,
   fillLine,
   issue,
@@ -20,7 +21,7 @@ async function saveFormAsTemplate(page: Page, name: string) {
 
 async function eurTemplate(page: Page, baseURL: string) {
   await openForm(page, baseURL);
-  await page.getByLabel("Měna").selectOption("EUR");
+  await chooseCurrency(page, "EUR");
   await page.getByLabel("Způsob platby").selectOption("cash");
   await fillLine(page, 0, "Konzultace", "1000");
   await settled(page);
@@ -182,7 +183,9 @@ test("[INV-010] nabízené výchozí hodnoty zákazníka jde jedním kliknutím 
     .getByRole("button", { name: "Použít výchozí hodnoty" })
     .click();
 
-  await expect(page.getByLabel("Měna")).toHaveValue("CZK");
+  await expect(page.getByLabel("Zahraniční faktura")).not.toBeChecked();
+  await expect(page.getByLabel("Měna")).toHaveCount(0);
+  await expect(page.getByLabel("Kurz k CZK")).toHaveCount(0);
   await expect(page.getByLabel("Způsob platby")).toHaveValue("transfer");
   await expect(page.getByTestId("customer-defaults")).toBeHidden();
 });

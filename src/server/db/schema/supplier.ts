@@ -1,4 +1,5 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { user } from "./auth";
 import { file } from "./file";
 
@@ -24,6 +25,8 @@ export const supplier = sqliteTable("supplier", {
   footerText: text("footer_text").notNull().default(""),
   notVatPayerCs: text("not_vat_payer_cs").notNull().default("Nejsem plátce DPH."),
   notVatPayerEn: text("not_vat_payer_en").notNull().default("I am not a VAT payer."),
+  reverseChargeCs: text("reverse_charge_cs").notNull().default(REVERSE_CHARGE_CLAUSE.cs),
+  reverseChargeEn: text("reverse_charge_en").notNull().default(REVERSE_CHARGE_CLAUSE.en),
   logoFileId: imageRef("logo_file_id"),
   qrLogoFileId: imageRef("qr_logo_file_id"),
   signatureFileId: imageRef("signature_file_id"),

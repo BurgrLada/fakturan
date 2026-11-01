@@ -41,6 +41,8 @@ async function SupplierContent() {
             footerText: profile.footerText,
             notVatPayerCs: profile.notVatPayerCs,
             notVatPayerEn: profile.notVatPayerEn,
+            reverseChargeCs: profile.reverseChargeCs,
+            reverseChargeEn: profile.reverseChargeEn,
           }
         }
         images={{

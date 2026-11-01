@@ -104,6 +104,8 @@ type DocumentHeader = {
   language: Language;
   currency: Currency;
   exchangeRateMicros: number | null;
+  foreign: boolean;
+  clause: string;
   paymentMethod: PaymentMethod;
   orderRef: string;
   reference: string;
@@ -159,6 +161,8 @@ export function invoiceDocument(row: DocumentRow): InvoiceDocument {
     language: row.language,
     currency: row.currency,
     exchangeRateMicros: row.exchangeRateMicros,
+    foreign: row.foreign,
+    clause: row.clause,
     paymentMethod: row.paymentMethod,
     orderRef: row.orderRef,
     reference: row.reference,

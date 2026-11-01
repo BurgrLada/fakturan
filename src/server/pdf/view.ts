@@ -56,6 +56,7 @@ export type InvoiceView = {
   textBefore: string;
   textAfter: string;
   note: string;
+  clause: string;
   vatStatement: string;
   registryNote: string;
   footer: string;
@@ -289,6 +290,7 @@ export async function buildInvoiceView(
     textBefore: printable(doc.textBefore),
     textAfter: printable(doc.textAfter),
     note: printable(doc.note),
+    clause: printable(doc.clause),
     vatStatement: printable(
       (doc.language === "en" ? supplier?.notVatPayerEn : supplier?.notVatPayerCs) ?? "",
     ),

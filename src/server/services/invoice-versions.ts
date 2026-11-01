@@ -39,6 +39,7 @@ import {
   lineRows,
   linesOf,
   matches,
+  normalizedRate,
   ownerOf,
   searchTextOf,
   sumsOf,
@@ -277,6 +278,7 @@ export function updateIssuedInvoice(actor: Actor, id: string, raw: IssuedInput):
 
       const values: InvoiceValues = {
         ...fields,
+        ...normalizedRate(fields, before),
         ...sumsOf(totals),
         accountSnapshot: accountSnapshotFor(tx, userId, before, fields.bankAccountId),
         ...symbolValues(userId, before, fields.number, variableSymbol),
@@ -363,6 +365,8 @@ function completeDocument(document: InvoiceDocument): InvoiceDocument {
   return {
     ...document,
     relatedDocument: document.relatedDocument ?? null,
+    foreign: document.foreign ?? false,
+    clause: document.clause ?? "",
     totals: {
       ...document.totals,
       creditsMinor: creditsMinor ?? 0,
@@ -432,6 +436,7 @@ export function restoreVersion(actor: Actor, versionId: string): EditResult {
       const totals = totalsOf(lines, document);
       const values: InvoiceValues = {
         ...header,
+        ...normalizedRate(document, before),
         ...images,
         ...sumsOf(totals),
         supplierSnapshot: snapshot.supplier,

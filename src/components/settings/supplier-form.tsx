@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MAX_FILE_BYTES } from "@/lib/file-limits";
+import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { DEFAULT_NOT_VAT_PAYER_CS, DEFAULT_NOT_VAT_PAYER_EN } from "@/lib/supplier-defaults";
 import { TEXTS } from "@/lib/texts";
 
@@ -32,6 +33,8 @@ export type SupplierValues = {
   footerText: string;
   notVatPayerCs: string;
   notVatPayerEn: string;
+  reverseChargeCs: string;
+  reverseChargeEn: string;
 };
 
 type ImageKind = "logo" | "qr_logo" | "signature";
@@ -53,6 +56,8 @@ export const EMPTY_SUPPLIER: SupplierValues = {
   footerText: "",
   notVatPayerCs: DEFAULT_NOT_VAT_PAYER_CS,
   notVatPayerEn: DEFAULT_NOT_VAT_PAYER_EN,
+  reverseChargeCs: REVERSE_CHARGE_CLAUSE.cs,
+  reverseChargeEn: REVERSE_CHARGE_CLAUSE.en,
 };
 
 const IMAGE_KINDS: ImageKind[] = ["logo", "qr_logo", "signature"];
@@ -249,6 +254,9 @@ export function SupplierForm({
           <Field name="footerText" value={values.footerText} {...fieldProps} />
           <Field name="notVatPayerCs" value={values.notVatPayerCs} {...fieldProps} />
           <Field name="notVatPayerEn" value={values.notVatPayerEn} {...fieldProps} />
+          <Field name="reverseChargeCs" value={values.reverseChargeCs} {...fieldProps} />
+          <Field name="reverseChargeEn" value={values.reverseChargeEn} {...fieldProps} />
+          <p className="text-sm text-muted-foreground">{TEXTS.supplier.reverseChargeHint}</p>
         </section>
         <div>
           <Button type="submit" disabled={pending}>

@@ -61,6 +61,8 @@ export const invoice = sqliteTable(
     exchangeRateSource: text("exchange_rate_source", { enum: EXCHANGE_RATE_SOURCES }),
     // The date of the CNB list the rate comes from, not of the document.
     exchangeRateDate: text("exchange_rate_date"),
+    foreign: integer({ mode: "boolean" }).notNull().default(false),
+    clause: text().notNull().default(""),
     paymentMethod: text("payment_method", { enum: PAYMENT_METHODS }).notNull(),
     orderRef: text("order_ref").notNull().default(""),
     reference: text().notNull().default(""),

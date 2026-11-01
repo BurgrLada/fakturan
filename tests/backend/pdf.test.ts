@@ -170,6 +170,34 @@ beforeEach(() => {
 afterEach(() => setClockForTests(null));
 
 describe("vykreslení PDF", () => {
+  test("[FOR-006] PDF vytiskne doložku a VAT ID obou stran", async () => {
+    const doc: InvoiceDocument = {
+      ...F.short,
+      language: "en",
+      clause: "Reverse charge clause.",
+      snapshot: {
+        ...F.short.snapshot,
+        supplier: { ...F.short.snapshot.supplier!, dic: "CZ27082440" },
+        customer: { ...F.short.snapshot.customer!, dic: "DE123456789" },
+      },
+    };
+    const text = await textOf(await render(doc));
+    expect(text).toContain("Reverse charge clause.");
+    expect(text).toContain("CZ27082440");
+    expect(text).toContain("DE123456789");
+    expect(text.match(/VAT ID/g)).toHaveLength(2);
+    expect(text.indexOf("Reverse charge clause.")).toBeLessThan(
+      text.indexOf("I am not a VAT payer"),
+    );
+  });
+
+  test("[INV-041] doklad bez doložky má shodný text PDF jako dřív", async () => {
+    expect((await viewOf(F.short)).clause).toBe("");
+    const blank = await textOf(await render(F.short));
+    const spaced = await textOf(await render({ ...F.short, clause: "" }));
+    expect(spaced).toBe(blank);
+  });
+
   test("[PDF-001] náhled a stažení dají stejný text", async () => {
     const { owner, customerId } = newOwner();
     const id = issued(owner, customerId);

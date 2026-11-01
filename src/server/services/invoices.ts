@@ -20,7 +20,8 @@ import {
 import { z } from "zod";
 import { CURRENCIES, type Currency } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
-import { MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
+import { suggestedClause } from "@/lib/clauses";
+import { EXCHANGE_RATE_SOURCES, MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
 import {
   addDays,
   appearanceFrom,
@@ -71,6 +72,7 @@ import { mutate, type Audit } from "./mutation";
 import { defaultSeriesFor } from "./number-series";
 import { averagePaymentDays } from "./payments";
 import { colorSchema, designIdSchema, getPreferences, logoPositionSchema } from "./preferences";
+import { clauseDefaultsOf } from "./supplier";
 import { linkTags, listTags, tagsOf, type Tag } from "./tags";
 
 const V = TEXTS.invoices.validation;
@@ -186,6 +188,9 @@ export const documentFields = {
     .positive(V.exchangeRate)
     .max(MAX_EXCHANGE_RATE_MICROS, V.exchangeRate)
     .nullable(),
+  exchangeRateSource: z.enum(EXCHANGE_RATE_SOURCES, V.exchangeRate).nullable().default(null),
+  foreign: z.boolean(V.invalid).default(false),
+  clause: text(MAX_DOCUMENT_TEXT).default(""),
   paymentMethod: z.enum(PAYMENT_METHODS, V.paymentMethod),
   orderRef: text(MAX_REFERENCE),
   reference: text(MAX_REFERENCE),
@@ -287,7 +292,10 @@ export function isFreeDraftId(id: string): boolean {
 
 export function newDraftDefaults(ownerId: string, customerId: string | null): DraftInput {
   const prefs = getPreferences(ownerId);
-  const defaults = customerId ? customerDefaults(ownerId, customerId, prefs) : prefs;
+  const defaults = customerId
+    ? customerDefaults(ownerId, customerId, prefs)
+    : { ...prefs, foreign: false, dic: "" };
+  const { vatIdentified, texts } = clauseDefaultsOf(ownerId);
   const issueDate = defaultIssueDate(defaults.issueDateMode, clock.now());
   return {
     type: "invoice",
@@ -300,6 +308,14 @@ export function newDraftDefaults(ownerId: string, customerId: string | null): Dr
     language: defaults.language,
     currency: defaults.currency,
     exchangeRateMicros: null,
+    foreign: defaults.foreign,
+    clause: suggestedClause({
+      foreign: defaults.foreign,
+      language: defaults.language,
+      vatIdentified,
+      customerDic: defaults.dic,
+      texts,
+    }),
     paymentMethod: defaults.paymentMethod,
     orderRef: "",
     reference: "",
@@ -461,6 +477,37 @@ export function parseDraft(raw: DraftInput): ParsedDraft {
   return parsed.data;
 }
 
+type RateFields = Pick<Invoice, "exchangeRateMicros" | "exchangeRateSource" | "exchangeRateDate">;
+
+const NO_RATE: RateFields = {
+  exchangeRateMicros: null,
+  exchangeRateSource: null,
+  exchangeRateDate: null,
+};
+
+// CZK never carries a rate, whatever the caller sent (R-18). A rate that stayed keeps where it came
+// from, a different one was set by a person (R-17) unless the form says it came from a lookup. Only
+// the server knows the list date, so a changed source loses it.
+export function normalizedRate(
+  next: Pick<Invoice, "currency" | "exchangeRateMicros">,
+  before: Invoice | null,
+  requested: Invoice["exchangeRateSource"] = null,
+): RateFields {
+  const { currency, exchangeRateMicros } = next;
+  if (currency === "CZK" || exchangeRateMicros === null) return NO_RATE;
+  const kept =
+    before?.currency === currency && before.exchangeRateMicros === exchangeRateMicros
+      ? before
+      : null;
+  const previous = kept ? kept.exchangeRateSource : "manual";
+  const exchangeRateSource = requested ?? previous;
+  return {
+    exchangeRateMicros,
+    exchangeRateSource,
+    exchangeRateDate: exchangeRateSource === previous ? (kept?.exchangeRateDate ?? null) : null,
+  };
+}
+
 // Runs before the unchanged comparison: a forged credit note must not pass as a repeated write.
 function assertDraftIdentity(
   before: Invoice,
@@ -502,6 +549,7 @@ export function createDraftIn(
       id,
       userId,
       ...fields,
+      ...normalizedRate(fields, null, fields.exchangeRateSource),
       ...origin,
       ...sumsOf(totals),
       customerName,
@@ -553,7 +601,12 @@ export function saveDraft(
       assertReferencesOwned(tx, userId, input);
 
       const customerName = customerNameOf(tx, userId, fields.customerId);
-      const values = { ...fields, ...sumsOf(totals), customerName };
+      const values = {
+        ...fields,
+        ...normalizedRate(fields, before, fields.exchangeRateSource),
+        ...sumsOf(totals),
+        customerName,
+      };
       const beforeLines = linesOf(tx, userId, before.id);
       if (
         matches(before, values) &&
@@ -668,6 +721,8 @@ export function duplicateInvoice(actor: Actor, id: string): { id: string } {
         language: source.language,
         currency: source.currency,
         exchangeRateMicros: null,
+        foreign: source.foreign,
+        clause: source.clause,
         paymentMethod: source.paymentMethod,
         orderRef: source.orderRef,
         reference: source.reference,

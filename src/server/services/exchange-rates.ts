@@ -3,7 +3,8 @@ import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES, type Currency } from "@/lib/currency";
 import { daysBetween } from "@/lib/invoice";
-import { convertMinor, expectedListDate, RATE_UNIT, type ExchangeRateSource } from "@/lib/fx";
+import { convertMinor, expectedListDate, RATE_UNIT } from "@/lib/fx";
+import type { RateResult } from "@/lib/invoice-form";
 import {
   calendarDateInPrague,
   isCalendarDate,
@@ -31,12 +32,7 @@ const SYSTEM: Actor = { userId: null, source: "system" };
 const FETCH_FROM = "14:45";
 const STALE_AFTER_DAYS = 5;
 
-export type RateResult = {
-  rateMicros: number;
-  source: Exclude<ExchangeRateSource, "manual">;
-  listDate: CalendarDate | null;
-  reference: number | null;
-} | null;
+export type { RateResult };
 
 type Listed = { rateMicros: number; listDate: CalendarDate; exact: boolean };
 
@@ -170,7 +166,10 @@ export async function loadRate(
   const ownerId = ownerOf(actor);
   const { currency, date } = parseLookup(raw);
   const first = resolveRate(db, ownerId, currency, date, clock.now());
-  if (first && (first.source === "cnb" || first.source === "fixed")) return first;
+  // A fixed rate without a reference still needs the list to tell how far it is from CNB (R-19).
+  if (first?.source === "cnb" || (first?.source === "fixed" && first.reference !== null)) {
+    return first;
+  }
   if (!(await mayFetch(actor))) return first;
   await ensureRate(currency, date, fetcher);
   return resolveRate(db, ownerId, currency, date, clock.now());

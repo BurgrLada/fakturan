@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   deleteRecurringAction,
   pauseRecurringAction,
@@ -10,8 +10,10 @@ import {
   saveRecurringAction,
   sendSummaryAction,
 } from "@/app/(app)/pravidelne/actions";
+import { customerDefaultsAction } from "@/app/(app)/faktury/actions";
 import { AppearanceSection } from "@/components/invoices/appearance-section";
 import { CustomerPicker } from "@/components/invoices/customer-picker";
+import { ForeignSection } from "@/components/invoices/foreign-section";
 import { LineEditor } from "@/components/invoices/line-editor";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -28,17 +30,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { CURRENCIES, type Currency } from "@/lib/currency";
+import type { Currency } from "@/lib/currency";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { LANGUAGES, PAYMENT_METHODS, type DesignChoice } from "@/lib/preferences";
 import {
   changeCurrency,
+  changeForeign,
+  changeLanguage,
   computeFormTotals,
+  customerForeign,
   formFromDocument,
   nonEmptyLines,
   toDocumentFields,
   type AccountChoice,
+  type ClauseDefaults,
   type FormValues,
+  type TouchedField,
 } from "@/lib/invoice-form";
 import type { TemplateDocument } from "@/lib/invoice-template";
 import {
@@ -89,6 +96,9 @@ export type RecurringFormProps = {
   defaultUnit: string;
   recurringSend: boolean;
   designs: DesignChoice[];
+  homeCurrency: Currency;
+  clauseDefaults: Omit<ClauseDefaults, "customerDic">;
+  customerDic: string;
 };
 
 const EVERY_FREQUENCIES: readonly RecurrenceFrequency[] = ["every_weeks", "every_months"];
@@ -148,6 +158,9 @@ export function RecurringForm(props: RecurringFormProps) {
   const [name, setName] = useState(initial.name);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [customerName, setCustomerName] = useState(initial.customerName);
+  const [customerDic, setCustomerDic] = useState(props.customerDic);
+  const touched = useRef(new Set<TouchedField>());
+  const customerTicket = useRef(0);
   const [values, setValues] = useState(() => formValuesOf(initial.document, defaultUnit));
   const [dueDays, setDueDays] = useState(String(initial.document.dueDays));
   const [frequency, setFrequency] = useState(initial.frequency);
@@ -188,6 +201,14 @@ export function RecurringForm(props: RecurringFormProps) {
     const kept = nonEmptyLines(values.lines);
     return new Map(kept.map((line, i) => [line.key, totals?.lines[i]?.netMinor ?? 0]));
   }, [values.lines, totals]);
+
+  async function pickForeignDefaults(id: string) {
+    const ticket = ++customerTicket.current;
+    const reply = await customerDefaultsAction({ customerId: id }).catch(() => null);
+    if (!reply?.ok || ticket !== customerTicket.current) return;
+    setCustomerDic(reply.defaults.dic);
+    setValues((current) => customerForeign(current, reply.defaults, touched.current));
+  }
 
   const hasEvery = EVERY_FREQUENCIES.includes(frequency);
   const weekBased = WEEK_FREQUENCIES.includes(frequency);
@@ -258,6 +279,8 @@ export function RecurringForm(props: RecurringFormProps) {
         discountValue: f.discountValue,
         rounding: f.rounding,
         appearance: f.appearance,
+        foreign: f.foreign,
+        clause: f.clause,
         lines: f.lines,
       },
       frequency,
@@ -299,7 +322,7 @@ export function RecurringForm(props: RecurringFormProps) {
       [payload, name],
     ),
   );
-  const foreignCurrency = values.currency !== "CZK" && mode !== "draft";
+  const clauses = { ...props.clauseDefaults, customerDic };
   const nextDate = preview.kind === "ready" ? (preview.rows[0]?.issueDate ?? null) : null;
 
   const impacts = [
@@ -496,6 +519,7 @@ export function RecurringForm(props: RecurringFormProps) {
           onPick={(picked) => {
             setCustomerId(picked.id);
             setCustomerName(picked.name);
+            void pickForeignDefaults(picked.id);
           }}
           onExpired={() => router.refresh()}
         />
@@ -564,23 +588,6 @@ export function RecurringForm(props: RecurringFormProps) {
       <VariablePicker onInsert={variables.insert} message={variables.message} />
 
       <section className="grid gap-4 sm:grid-cols-3">
-        <Field id="field-currency" label={F.currency}>
-          <NativeSelect
-            id="field-currency"
-            value={values.currency}
-            onChange={(event) =>
-              setValues((current) =>
-                changeCurrency(current, event.target.value as Currency, new Set(), accounts),
-              )
-            }
-          >
-            {CURRENCIES.map((currency) => (
-              <option key={currency} value={currency}>
-                {currency}
-              </option>
-            ))}
-          </NativeSelect>
-        </Field>
         <Field id="field-bankAccountId" label={TEXTS.invoices.form.fields.bankAccount}>
           <NativeSelect
             id="field-bankAccountId"
@@ -609,7 +616,11 @@ export function RecurringForm(props: RecurringFormProps) {
           <NativeSelect
             id="field-language"
             value={values.language}
-            onChange={(event) => set("language", event.target.value as FormValues["language"])}
+            onChange={(event) => {
+              const language = event.target.value as FormValues["language"];
+              touched.current.add("language");
+              setValues((current) => changeLanguage(current, language, clauses, touched.current));
+            }}
           >
             {LANGUAGES.map((language) => (
               <option key={language} value={language}>
@@ -674,11 +685,35 @@ export function RecurringForm(props: RecurringFormProps) {
         </Field>
       </section>
 
-      {foreignCurrency && (
-        <Alert role="status" data-testid="foreign-currency">
-          <AlertDescription>{T.foreignCurrency}</AlertDescription>
-        </Alert>
-      )}
+      <ForeignSection
+        values={values}
+        onForeign={(on) => {
+          touched.current.add("foreign");
+          setValues((current) =>
+            changeForeign(
+              current,
+              on,
+              { ...clauses, currency: props.homeCurrency },
+              touched.current,
+              accounts,
+            ),
+          );
+        }}
+        onCurrency={(currency) => {
+          touched.current.add("currency");
+          setValues((current) => changeCurrency(current, currency, touched.current, accounts));
+        }}
+        onClause={(text) => {
+          touched.current.add("clause");
+          set("clause", text);
+        }}
+      >
+        {values.currency !== "CZK" && (
+          <p data-testid="rate-on-issue" className="self-end text-sm text-muted-foreground">
+            {TEXTS.invoices.foreign.rateOnIssue}
+          </p>
+        )}
+      </ForeignSection>
 
       <AppearanceSection
         value={values.appearance}

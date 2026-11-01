@@ -34,41 +34,59 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { CURRENCIES, type Currency } from "@/lib/currency";
+import type { Currency } from "@/lib/currency";
 import { DraftSaver, type SaveStatus } from "@/lib/draft-saver";
+import { rateDate } from "@/lib/fx";
 import {
   applyCustomerDefaults,
+  applyRate,
   changeCurrency,
+  changeForeign,
   changeIssueDate,
+  changeLanguage,
+  changeRate,
   changeTaxableDate,
   computeFormTotals,
   customerOffer,
   discountNotes,
   draftFields,
   fieldTarget,
+  formQrState,
+  formRateNotes,
   hasFixedDiscount,
   nonEmptyLines,
+  parseRate,
   toDocumentFields,
   type AccountChoice,
+  type ClauseDefaults,
   type CustomerOffer,
   type FormValues,
+  type RateResult,
   type TouchedField,
 } from "@/lib/invoice-form";
 import type { InvoiceType } from "@/lib/invoice";
 import { allowsNegativePrice, DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { formatMoney } from "@/lib/money";
 import { setLeaveGuard } from "@/lib/leave-guard";
-import { LANGUAGES, PAYMENT_METHODS, type DesignChoice } from "@/lib/preferences";
+import {
+  LANGUAGES,
+  PAYMENT_METHODS,
+  type DateFormat,
+  type DesignChoice,
+  type FxBasis,
+} from "@/lib/preferences";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { useRouteShown } from "@/lib/use-route-shown";
 import { AppearanceSection } from "./appearance-section";
 import { CustomerPicker } from "./customer-picker";
+import { ForeignSection, RateField } from "./foreign-section";
 import { IssueDialog, type IssueSummary } from "./issue-dialog";
 import { LineEditor } from "./line-editor";
 import { PdfPreview } from "./pdf-preview";
 import { SaveTemplateDialog, TemplatesLink } from "./save-template-dialog";
 import { TagInput } from "./tag-input";
+import { useRateLoader } from "./use-rate-loader";
 
 const T = TEXTS.invoices.form;
 const F = T.fields;
@@ -102,7 +120,16 @@ export type InvoiceFormProps = {
   tagOptions: string[];
   defaultUnit: string;
   designs: DesignChoice[];
+  fxBasis: FxBasis;
+  dateFormat: DateFormat;
+  today: string;
+  homeCurrency: Currency;
+  clauseDefaults: Omit<ClauseDefaults, "customerDic">;
+  customerDic: string;
+  rateListDate: string | null;
 };
+
+const QR_SILENT = new Set(["spayd", "epc", "turned_off", "other_payment"]);
 
 function payloadOf(type: InvoiceType, values: FormValues, tags: string[]): Payload | null {
   const result = toDocumentFields(values, type);
@@ -129,6 +156,7 @@ function statusText(status: SaveStatus, hasId: boolean): string {
 
 function offerRows(offer: CustomerOffer, accounts: InvoiceFormProps["accounts"]): string[] {
   const { currency, language, paymentMethod, dueDate, bankAccountId, appearance } = offer;
+  const { foreign, clause } = offer;
   const account = accounts.find((item) => item.id === bankAccountId);
   return [
     ...(currency ? [`${F.currency}: ${currency}`] : []),
@@ -139,6 +167,10 @@ function offerRows(offer: CustomerOffer, accounts: InvoiceFormProps["accounts"])
     ...(paymentMethod ? [`${F.paymentMethod}: ${P.paymentMethods[paymentMethod]}`] : []),
     ...(dueDate ? [`${F.dueDate}: ${formatCalendarDate(dueDate, "d. M. yyyy")}`] : []),
     ...(appearance ? [T.appearance] : []),
+    ...(foreign !== undefined
+      ? [`${T.foreignOffer}: ${foreign ? T.foreignOfferOn : T.foreignOfferOff}`]
+      : []),
+    ...(clause ? [`${T.clauseOffer}: ${clause}`] : []),
   ];
 }
 
@@ -150,6 +182,7 @@ function Form(props: InvoiceFormProps) {
   const [number, setNumber] = useState(props.number);
   const [variableSymbol, setVariableSymbol] = useState(props.variableSymbol);
   const [customerName, setCustomerName] = useState(props.customerName);
+  const [customerDic, setCustomerDic] = useState(props.customerDic);
   const [saved, setSaved] = useState(props.saved);
   const [revision, setRevision] = useState(props.revision);
   const [problems, setProblems] = useState(props.initialProblems);
@@ -165,6 +198,7 @@ function Form(props: InvoiceFormProps) {
   const [offer, setOffer] = useState<CustomerOffer | null>(null);
   const [naming, setNaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [rateInfo, setRateInfo] = useState<{ key: string; result: RateResult } | null>(null);
   const { shown, root } = useRouteShown<HTMLDivElement>();
 
   const touched = useRef(new Set<TouchedField>());
@@ -291,6 +325,7 @@ function Form(props: InvoiceFormProps) {
         else setMessage({ ok: false, text: reply.error });
         return;
       }
+      setCustomerDic(reply.defaults.dic);
       if (props.saved) {
         setOffer(
           customerOffer(
@@ -502,8 +537,47 @@ function Form(props: InvoiceFormProps) {
   const showRate = values.currency !== "CZK";
   const isNote = type === "credit_note";
   const currencyLocked = props.hasPayments || props.linkedParty || props.linkedMoney;
+  const canPickRate = mode === "draft" && !props.linkedMoney;
+  const clauses = { ...props.clauseDefaults, customerDic };
+
+  // The day comes from the form: it may differ from what is saved so far.
+  const rateDay = rateDate(
+    { issueDate: values.issueDate || null, taxableDate: values.taxableDate || null },
+    props.fxBasis,
+    props.today,
+  );
+  const rateKey = `${values.currency}:${rateDay}`;
+  // Runs for a typed rate too, because the warning compares it with CNB; applyRate leaves it alone.
+  const reloadRate = useRateLoader({
+    enabled: showRate && !isNote,
+    currency: values.currency,
+    date: rateDay,
+    onResult: (rate) => {
+      setRateInfo({ key: rateKey, result: rate });
+      if (canPickRate) setValues((current) => applyRate(current, rate));
+    },
+    onExpired: () => setLock("expired"),
+  });
 
   if (!shown) return null;
+
+  const listed = rateInfo?.key === rateKey ? rateInfo.result : undefined;
+  const rateListDate = (canPickRate ? listed?.listDate : props.rateListDate) ?? props.rateListDate;
+  const rateNotes =
+    listed === undefined || isNote
+      ? []
+      : formRateNotes({
+          currency: values.currency,
+          rateMicros: parseRate(values.exchangeRate),
+          source: values.exchangeRateSource,
+          listDate: rateListDate,
+          reference: listed?.reference ?? null,
+          dateFormat: props.dateFormat,
+        });
+  const qrState = formQrState(values, accounts);
+  const noAccount =
+    values.paymentMethod === "transfer" &&
+    !accounts.some((account) => account.currency === values.currency);
 
   return (
     <div ref={root} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
@@ -611,6 +685,7 @@ function Form(props: InvoiceFormProps) {
                       customerTicket.current += 1;
                       setOffer(null);
                       setCustomerName(name);
+                      setCustomerDic("");
                       setValues((current) => ({ ...current, customerId: null }));
                     }}
                     onPick={pickCustomer}
@@ -728,57 +803,17 @@ function Form(props: InvoiceFormProps) {
                   }}
                 />
               </Field>
-              <Field id="field-currency" label={F.currency}>
-                <NativeSelect
-                  id="field-currency"
-                  disabled={currencyLocked}
-                  aria-describedby={currencyLocked ? "field-currency-locked" : undefined}
-                  value={values.currency}
-                  onChange={(event) => {
-                    const currency = event.target.value as Currency;
-                    touched.current.add("currency");
-                    setValues((current) =>
-                      changeCurrency(current, currency, touched.current, accounts),
-                    );
-                  }}
-                >
-                  {CURRENCIES.map((currency) => (
-                    <option key={currency} value={currency}>
-                      {currency}
-                    </option>
-                  ))}
-                </NativeSelect>
-                {currencyLocked && (
-                  <p id="field-currency-locked" className="text-xs text-muted-foreground">
-                    {props.linkedParty || props.linkedMoney ? T.linkedLocked : T.currencyLocked}
-                  </p>
-                )}
-              </Field>
-              {showRate && (
-                <Field id="field-exchangeRate" label={F.exchangeRate}>
-                  <Input
-                    id="field-exchangeRate"
-                    inputMode="decimal"
-                    disabled={props.linkedMoney}
-                    aria-describedby={props.linkedMoney ? "field-rate-locked" : undefined}
-                    aria-invalid={invalid.has("field-exchangeRate") || undefined}
-                    value={values.exchangeRate}
-                    onChange={(event) => set("exchangeRate", event.target.value)}
-                  />
-                  {props.linkedMoney && (
-                    <p id="field-rate-locked" className="text-xs text-muted-foreground">
-                      {T.rateLocked}
-                    </p>
-                  )}
-                </Field>
-              )}
               <Field id="field-language" label={F.language}>
                 <NativeSelect
                   id="field-language"
                   value={values.language}
-                  onChange={(event) =>
-                    set("language", event.target.value as FormValues["language"])
-                  }
+                  onChange={(event) => {
+                    const language = event.target.value as FormValues["language"];
+                    touched.current.add("language");
+                    setValues((current) =>
+                      changeLanguage(current, language, clauses, touched.current),
+                    );
+                  }}
                 >
                   {LANGUAGES.map((language) => (
                     <option key={language} value={language}>
@@ -817,7 +852,64 @@ function Form(props: InvoiceFormProps) {
                 </NativeSelect>
               </Field>
             </div>
+            {noAccount && (
+              <Alert role="status" data-testid="account-missing">
+                <AlertDescription className="flex flex-col items-start gap-2">
+                  {TEXTS.invoices.foreign.accountMissing(values.currency)}
+                  <Link className="underline" href="/nastaveni/ucty">
+                    {TEXTS.invoices.foreign.accountLink}
+                  </Link>
+                </AlertDescription>
+              </Alert>
+            )}
+            {!QR_SILENT.has(qrState) && !noAccount && (
+              <p data-testid="form-qr-reason" className="text-sm text-muted-foreground">
+                {TEXTS.invoices.qr[qrState as keyof typeof TEXTS.invoices.qr]}
+              </p>
+            )}
           </section>
+
+          <ForeignSection
+            values={values}
+            currencyLocked={currencyLocked}
+            currencyNote={
+              props.linkedParty || props.linkedMoney ? T.linkedLocked : T.currencyLocked
+            }
+            onForeign={(on) => {
+              touched.current.add("foreign");
+              setValues((current) =>
+                changeForeign(
+                  current,
+                  on,
+                  { ...clauses, currency: props.homeCurrency, currencyLocked },
+                  touched.current,
+                  accounts,
+                ),
+              );
+            }}
+            onCurrency={(currency) => {
+              touched.current.add("currency");
+              setValues((current) => changeCurrency(current, currency, touched.current, accounts));
+            }}
+            onClause={(text) => set("clause", text)}
+          >
+            {showRate && (
+              <RateField
+                values={values}
+                listDate={rateListDate ? formatCalendarDate(rateListDate, props.dateFormat) : null}
+                notes={rateNotes}
+                invalid={invalid.has("field-exchangeRate")}
+                locked={props.linkedMoney}
+                lockedNote={T.rateLocked}
+                canUseCnb={canPickRate && values.exchangeRateSource === "manual"}
+                onChange={(text) => setValues((current) => changeRate(current, text))}
+                onUseCnb={() => {
+                  setValues((current) => ({ ...current, exchangeRateSource: null }));
+                  reloadRate();
+                }}
+              />
+            )}
+          </ForeignSection>
 
           <section className="flex flex-col gap-4">
             <h2 className="text-lg">{T.sections.lines}</h2>

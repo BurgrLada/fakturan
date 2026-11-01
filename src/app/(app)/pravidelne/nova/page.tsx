@@ -32,6 +32,9 @@ async function NewPlan() {
       defaultUnit={choices.defaultUnit}
       recurringSend={getAutomation(user.id).recurringSend}
       designs={designChoices()}
+      homeCurrency={choices.homeCurrency}
+      clauseDefaults={choices.clauseDefaults}
+      customerDic=""
       initial={{
         name: "",
         customerId: null,

@@ -29,6 +29,7 @@ export type IssueSummary = {
   totalMinor: number;
   currency: Currency;
   discountNotes: string[];
+  rateNotes: string[];
   type: InvoiceType;
 };
 
@@ -84,6 +85,11 @@ export function IssueDialog({
               <p>{T.total(formatMoney(summary.totalMinor, summary.currency))}</p>
             </div>
           )}
+          {summary?.rateNotes.map((note) => (
+            <Alert key={note} data-testid="issue-rate-note">
+              <AlertDescription>{note}</AlertDescription>
+            </Alert>
+          ))}
           {summary?.discountNotes.map((note) => (
             <Alert key={note}>
               <AlertDescription>{note}</AlertDescription>

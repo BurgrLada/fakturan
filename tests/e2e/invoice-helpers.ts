@@ -61,6 +61,11 @@ export async function openForm(page: Page, baseURL: string) {
   await page.waitForLoadState("networkidle");
 }
 
+export async function chooseCurrency(page: Page, currency: string) {
+  await page.getByLabel("Zahraniční faktura").check();
+  await page.getByLabel("Měna").selectOption(currency);
+}
+
 export async function chooseCustomer(page: Page, name = CUSTOMER) {
   await page.getByRole("combobox", { name: "Zákazník" }).fill(name.slice(0, 3));
   await page.getByRole("option", { name }).click();
