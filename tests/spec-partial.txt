@@ -1,7 +1,7 @@
 # ID<tab>co chybí<tab>plán. Požadavek má test, ale není splněný celý.
 TST-014	Referenční PNG designů zatím neschválil člověk	schválení uživatelem
 PDF-007	Vizuální reference pokrývají jen první stranu	po schválení TST-014
-TST-009	Matice nemá roli administrátora ani entity dalších plánů	plány 4 až 8
+TST-009	Matice nemá roli administrátora ani entity plánů 6 až 8	plány 6 až 8
 TST-012	Chybí přepočty měn	plán 6
 TST-013	Změřeno jen s unit testy: payments 97,06, payment-matching 99,16, fio 97,81, auth 98,02, mask 100, bank-notices/index 94,74, czech-holidays 100, money 91,53 %; invoice-totals 77,50 a number-format 84,92 % bez backendových testů, recurrence a qr-payload neměřené, celý běh se nevejde do limitu; fronta úloh, lease a tick nejsou ve stryker.config.json	plán 9
 TST-015	Chybí zpětné čtení ISDOC proti schématu	plán 8
@@ -15,5 +15,5 @@ MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 UI-011	Chybí blížící se limity, spec je nedefinuje	plán 8
 INV-024	Chybí export (plán 8)	plán 8
 TST-016	Matice kryje pravidelné odeslání, upomínky a potvrzení platby, faktura po záloze přijde s automatikou	plán 6
-BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky	po dodání vzorku od zadavatele
+BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele

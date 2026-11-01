@@ -668,7 +668,7 @@ Kritické e2e toky: první spuštění a onboarding, pozvánka, faktura od nuly 
 
 | Bod | Dopad | Kdo |
 |---|---|---|
-| Vzorek českého avíza Fio | Bez něj nejde ověřit BNK-005, formát není veřejně popsaný. Staví se proti ověřené anglické variantě, česká je do dodání vzorku prozatímní. | zadavatel |
+| Vzorek českého avíza Fio | Bez něj nejde ověřit BNK-005, formát není veřejně popsaný. Staví se proti anglické variantě známé z veřejných zmínek, česká je do dodání vzorku prozatímní. | zadavatel |
 | Vzorky ISDOC a CSV z Fakturoidu a iDokladu | Fakturovač je ověřený na 40 reálných dokladech, ostatní jen z dokumentace | implementace |
 | Znění doložky FOR-006, náležitosti neplátce, TAX-001, použití pevného kurzu FOR-010 | Daňová správnost, zatím z obecné znalosti | daňový poradce |
 | TanStack Charts | Zdroje se rozcházejí, zda jde o stabilní 1.x, nebo alfu; ověřit před začátkem kapitoly 14 | implementace |
