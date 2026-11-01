@@ -22,9 +22,8 @@ function dateOf(line: string): CalendarDate | null {
   return isCalendarDate(iso) ? iso : null;
 }
 
-// All or nothing, and a list without the euro is refused as well, because it is the one every
-// account relies on to tell a healthy list from a broken one: a list that fails anywhere is not trusted in part, because a shifted column
-// would store a plausible but wrong rate.
+// All or nothing: a shifted column would store a plausible but wrong rate. A list without the euro
+// is refused as well, because every account relies on the euro to tell a healthy list from a broken one.
 export function parseDailyRates(text: string): ParsedRates | null {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   if (lines.at(-1) === "") lines.pop();

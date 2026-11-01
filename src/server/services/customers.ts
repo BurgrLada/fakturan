@@ -1,8 +1,8 @@
-import { splitVatId } from "@/lib/clauses";
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
+import { splitVatId } from "@/lib/clauses";
 import { CURRENCIES } from "@/lib/currency";
 import {
   canonicalCountry,
