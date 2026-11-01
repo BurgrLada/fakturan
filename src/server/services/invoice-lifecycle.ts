@@ -47,6 +47,7 @@ import {
   type InvoiceLine,
 } from "./invoices";
 import { mutate, type Audit } from "./mutation";
+import { resolveEntityNotifications } from "./notifications";
 import { allocateNumber, defaultSeriesFor, peekNumber, type NumberSeries } from "./number-series";
 import { getPreferences } from "./preferences";
 import { missingSupplierKeys } from "./supplier";
@@ -568,11 +569,13 @@ function changeStatus(
     }
     if (isFinalInvoice(row) && values.status === "cancelled") {
       syncSuperseded(tx, audit, userId, id);
+      resolveEntityNotifications(tx, userId, "advance_final_review", id);
     }
     // A cancelled final invoice is left out of balance updates, so it comes back with a stale one.
     if (isFinalInvoice(row) && row.status === "cancelled") {
       refreshBalance(tx, audit, userId, id);
       syncSuperseded(tx, audit, userId, id);
+      resolveEntityNotifications(tx, userId, "advance_final_cancelled", row.relatedInvoiceId!);
     }
   });
 }

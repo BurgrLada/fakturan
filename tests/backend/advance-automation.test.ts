@@ -31,9 +31,10 @@ import {
   type IngestInput,
 } from "@/server/services/bank-notices";
 import { finalOf } from "@/server/services/invoice-balance";
-import { issueInvoice } from "@/server/services/invoice-lifecycle";
+import { cancelInvoice, issueInvoice, restoreInvoice } from "@/server/services/invoice-lifecycle";
 import { sendPrefill } from "@/server/services/invoice-mail";
-import { getInvoice, listInvoices } from "@/server/services/invoices";
+import { createCreditNote } from "@/server/services/credit-notes";
+import { deleteDraft, getInvoice, listInvoices, saveDraft } from "@/server/services/invoices";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import {
   addPayment,
@@ -160,6 +161,11 @@ const income = (notice: ParsedNotice): IngestInput =>
     requireConfirmation: true,
     receivedAt: NOW,
   }) as IngestInput;
+
+function noteDraft(owner: string, id: string, unitPriceMinor: number) {
+  const { lines, ...doc } = row(owner, id);
+  return { ...doc, id, lines: [{ ...lines[0]!, catalogItemId: null, unitPriceMinor }] };
+}
 
 function payable(owner: string, advanceId: string) {
   const bankAccountId = seedBankAccount(db, owner, NOW);
@@ -410,13 +416,48 @@ describe("hlavní vypínač a odeslání", () => {
     expect(body).toContain("Zbývá uhradit");
   });
 
-  test("úhrada stará 4 dny fakturu založí a nepošle", () => {
+  test("úhrada stará 4 dny fakturu založí, nepošle a řekne proč", () => {
     const { owner, advanceId } = account("issue", { send: true });
 
     pay(owner, advanceId, TOTAL, "2026-10-29");
 
-    expect(finalOf(db, owner, advanceId)!.status).toBe("paid");
+    const final = finalOf(db, owner, advanceId)!;
+    expect(final.status).toBe("paid");
     expect(logsOf(owner)).toEqual([]);
+    const [notice] = noticesOf(owner);
+    expect(notice).toMatchObject({ kind: "advance_final_old_payment", entityId: final.id });
+    expect(notificationText("advance_final_old_payment", notice!.params)).toContain(final.number);
+  });
+
+  test("stará úhrada s vypnutou automatikou mlčí, nic odejít nemělo", () => {
+    const { owner, advanceId } = account("issue");
+
+    pay(owner, advanceId, TOTAL, "2026-10-29");
+
+    expect(noticesOf(owner)).toEqual([]);
+  });
+
+  test("režim vystavit s ručním konceptem nic nevystaví a upozorní na koncept", () => {
+    const { owner, advanceId } = account("issue", { send: true });
+    const { id } = convertAdvance(webActor(owner), advanceId);
+
+    pay(owner, advanceId);
+
+    expect(row(owner, id).status).toBe("draft");
+    expect(logsOf(owner)).toEqual([]);
+    const [notice] = noticesOf(owner);
+    expect(notice).toMatchObject({ kind: "advance_final_manual", entityId: id });
+    expect(notificationText("advance_final_manual", notice!.params)).toContain(
+      row(owner, advanceId).number,
+    );
+  });
+
+  test("režim koncept s ručním konceptem neupozorní, je to očekávaný stav", () => {
+    const { owner, advanceId } = account("draft");
+    convertAdvance(webActor(owner), advanceId);
+
+    pay(owner, advanceId);
+
     expect(noticesOf(owner)).toEqual([]);
   });
 
@@ -542,6 +583,37 @@ describe("vrácení peněz", () => {
     expect(reviewOf(owner)).toHaveLength(1);
   });
 
+  test("kontrolu vyřeší i oprava konečné faktury na celý zbytek", () => {
+    const { owner, advanceId } = account("issue");
+    pay(owner, advanceId);
+    const id = finalId(owner, advanceId);
+    addRefund(webActor(owner), advanceId, paymentInput(owner, advanceId, 100_000));
+    const { id: noteId } = createCreditNote(webActor(owner), id);
+    saveDraft(webActor(owner), noteDraft(owner, noteId, -60_000));
+    issueInvoice(webActor(owner), noteId, { revision: row(owner, noteId).revision });
+    expect(reviewOf(owner)).toHaveLength(1);
+
+    const { id: restId } = createCreditNote(webActor(owner), id);
+    saveDraft(webActor(owner), noteDraft(owner, restId, -40_000));
+    issueInvoice(webActor(owner), restId, { revision: row(owner, restId).revision });
+
+    expect(amountDue(row(owner, id))).toBe(0);
+    expect(reviewOf(owner)).toEqual([]);
+    assertConsistent(db, owner);
+  });
+
+  test("kontrolu vyřeší storno konečné faktury", () => {
+    const { owner, advanceId } = account("issue");
+    pay(owner, advanceId);
+    const id = finalId(owner, advanceId);
+    addRefund(webActor(owner), advanceId, paymentInput(owner, advanceId, 100_000));
+    expect(reviewOf(owner)).toHaveLength(1);
+
+    cancelInvoice(webActor(owner), id);
+
+    expect(reviewOf(owner)).toEqual([]);
+  });
+
   test("kontrola po vrácení zmizí i po opravě platby zálohy zpět", () => {
     const { owner, advanceId } = account("issue");
     pay(owner, advanceId);
@@ -551,6 +623,156 @@ describe("vrácení peněz", () => {
     deletePayment(webActor(owner), refund.id, row(owner, advanceId).revision);
 
     expect(reviewOf(owner)).toEqual([]);
+  });
+});
+
+describe("po storně konečné faktury", () => {
+  const CANCELLED = "advance_final_cancelled";
+  const finalsCreated = (owner: string) =>
+    db
+      .select()
+      .from(invoice)
+      .where(eq(invoice.userId, owner))
+      .all()
+      .filter((item) => item.type === "invoice");
+  const openCancelled = (owner: string) => open(owner).filter((item) => item.kind === CANCELLED);
+
+  function cancelledFinal(mode: "issue" | "draft") {
+    const { owner, advanceId } = account("issue", { send: true });
+    const { id: paymentId } = pay(owner, advanceId);
+    const id = finalId(owner, advanceId);
+    cancelInvoice(webActor(owner), id);
+    savePreferences(webActor(owner), { advanceFinalMode: mode });
+    return { owner, advanceId, id, paymentId };
+  }
+
+  async function expectNothingNew(owner: string, advanceId: string) {
+    await drainJobs(WORKER);
+    expect(finalOf(db, owner, advanceId)).toBeNull();
+    expect(finalsCreated(owner)).toHaveLength(1);
+    expect(toClient()).toEqual([]);
+    expect(row(owner, advanceId).supersededAt).toBeNull();
+  }
+
+  test.each(["issue", "draft"] as const)(
+    "režim %s: další úhrada nic nezaloží a jen upozorní",
+    async (mode) => {
+      const { owner, advanceId, paymentId } = cancelledFinal(mode);
+
+      deletePayment(webActor(owner), paymentId, row(owner, advanceId).revision);
+      pay(owner, advanceId);
+
+      await expectNothingNew(owner, advanceId);
+      const [notice] = openCancelled(owner);
+      expect(notice).toMatchObject({ entityId: advanceId });
+      expect(notificationText(CANCELLED, notice!.params)).toContain(row(owner, advanceId).number);
+      assertConsistent(db, owner);
+    },
+  );
+
+  test("režim vypnuto mlčí", async () => {
+    const { owner, advanceId, paymentId } = cancelledFinal("issue");
+    savePreferences(webActor(owner), { advanceFinalMode: "off" });
+
+    deletePayment(webActor(owner), paymentId, row(owner, advanceId).revision);
+    pay(owner, advanceId);
+
+    await expectNothingNew(owner, advanceId);
+    expect(openCancelled(owner)).toEqual([]);
+  });
+
+  test("oprava platby tam a zpět nic nezaloží a nechá jedno otevřené upozornění", async () => {
+    const { owner, advanceId, paymentId } = cancelledFinal("issue");
+
+    for (const round of [1, 2]) {
+      updatePayment(webActor(owner), paymentId, paymentInput(owner, advanceId, TOTAL - round));
+      updatePayment(webActor(owner), paymentId, paymentInput(owner, advanceId, TOTAL));
+    }
+
+    await expectNothingNew(owner, advanceId);
+    expect(openCancelled(owner)).toHaveLength(1);
+    expect(noticesOf(owner).filter((item) => item.kind === CANCELLED)).toHaveLength(2);
+  });
+
+  test("vrácení avíza a nové přiřazení nic nezaloží", async () => {
+    const { owner, advanceId } = account("issue", { send: true });
+    const { id: noticeId } = matched(owner, advanceId);
+    cancelInvoice(webActor(owner), finalId(owner, advanceId));
+
+    undoNotice(webActor(owner), noticeId);
+    assignNotice(webActor(owner), noticeId, { invoiceId: advanceId });
+
+    expect(row(owner, advanceId).status).toBe("paid");
+    await expectNothingNew(owner, advanceId);
+    expect(openCancelled(owner)).toHaveLength(1);
+  });
+
+  test("ruční převod po storně jde dál a upozornění vyřeší", () => {
+    const { owner, advanceId, id, paymentId } = cancelledFinal("issue");
+    deletePayment(webActor(owner), paymentId, row(owner, advanceId).revision);
+    pay(owner, advanceId);
+
+    const created = convertAdvance(webActor(owner), advanceId);
+
+    expect(created.id).not.toBe(id);
+    expect(row(owner, created.id)).toMatchObject({ status: "draft", advanceMinor: TOTAL });
+    expect(openCancelled(owner)).toEqual([]);
+  });
+
+  test("vrácení storna upozornění vyřeší", () => {
+    const { owner, advanceId, id, paymentId } = cancelledFinal("issue");
+    deletePayment(webActor(owner), paymentId, row(owner, advanceId).revision);
+    pay(owner, advanceId);
+    expect(openCancelled(owner)).toHaveLength(1);
+
+    restoreInvoice(webActor(owner), id);
+
+    expect(openCancelled(owner)).toEqual([]);
+    expect(finalOf(db, owner, advanceId)!.id).toBe(id);
+  });
+
+  test("další úhrada po smazaném konceptu storno nepotřebuje a fakturu založí", () => {
+    const { owner, advanceId } = account("draft");
+    const { id: paymentId } = pay(owner, advanceId);
+    deleteDraft(webActor(owner), finalId(owner, advanceId));
+
+    deletePayment(webActor(owner), paymentId, row(owner, advanceId).revision);
+    pay(owner, advanceId);
+
+    expect(finalOf(db, owner, advanceId)).toMatchObject({ status: "draft" });
+    expect(noticesOf(owner)).toEqual([]);
+  });
+});
+
+describe("klíče upozornění", () => {
+  function secondFinal(owner: string, advanceId: string, paymentId: string) {
+    deleteDraft(webActor(owner), finalId(owner, advanceId));
+    deletePayment(webActor(owner), paymentId, row(owner, advanceId).revision);
+    pay(owner, advanceId);
+    return finalId(owner, advanceId);
+  }
+
+  test("druhý koncept po smazaném prvním dostane vlastní upozornění o vypínači", () => {
+    const { owner, advanceId } = account("issue", { send: true });
+    setPaused(webActor(owner), true, { confirmed: false });
+    const { id: paymentId } = pay(owner, advanceId);
+    const first = finalId(owner, advanceId);
+
+    const second = secondFinal(owner, advanceId, paymentId);
+
+    expect(noticesOf(owner).map((item) => item.entityId)).toEqual([first, second]);
+  });
+
+  test("druhé selhání vystavení dostane vlastní upozornění", () => {
+    const { owner, advanceId } = account("issue", { send: true });
+    db.update(supplier).set({ name: "" }).where(eq(supplier.userId, owner)).run();
+    const { id: paymentId } = pay(owner, advanceId);
+    const first = finalId(owner, advanceId);
+
+    const second = secondFinal(owner, advanceId, paymentId);
+
+    const failed = noticesOf(owner).filter((item) => item.kind === "advance_final_failed");
+    expect(failed.map((item) => item.entityId)).toEqual([first, second]);
   });
 });
 
@@ -582,6 +804,7 @@ test("faktura vystavená automaticky s posledním známým kurzem na to upozorn�
   const [notice] = noticesOf(owner);
   expect(notice).toMatchObject({ kind: "rate_last_known", entityId: final.id });
   expect(notificationText("rate_last_known", notice!.params)).toContain(final.number);
+  expect(notice!.dedupeKey).toBe(`advance-final:${final.id}:rate`);
   db.delete(exchangeRate).run();
 });
 

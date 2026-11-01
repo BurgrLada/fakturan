@@ -124,7 +124,6 @@ export function applyPayments(tx: Tx, audit: Audit, userId: string, invoiceId: s
   if (final) {
     refreshBalance(tx, audit, userId, final.id);
     if (paidMinor < row.paidMinor) advanceBalanceDropped(tx, userId, final.id);
-    else resolveFinalReview(tx, userId, final.id);
   }
   if (isFinalInvoice(row)) resolveFinalReview(tx, userId, invoiceId);
   return findOwned(tx, userId, invoiceId);

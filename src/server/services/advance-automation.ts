@@ -1,4 +1,5 @@
 import "server-only";
+import type { NotificationKind } from "@/lib/automation";
 import { daysBetween } from "@/lib/invoice";
 import { mailMessageSchema } from "@/lib/mail-send";
 import type { CalendarDate } from "@/lib/number-format";
@@ -9,7 +10,7 @@ import { ServiceError } from "./access";
 import { createFinalIn } from "./advances";
 import { automaticSendAllowed, getAutomation } from "./automation";
 import { composeMail, type MailDraft } from "./email-templates";
-import { finalOf } from "./invoice-balance";
+import { finalOf, hasCancelledFinal, resolveWhenCovered } from "./invoice-balance";
 import { issueIn } from "./invoice-lifecycle";
 import { queueMail } from "./invoice-mail";
 import { findOwned } from "./invoices";
@@ -52,12 +53,13 @@ function queueFinal(
   dedupeKey: string,
 ): void {
   if (!automaticSendAllowed(userId, "advanceInvoice")) return;
-  if (daysBetween(paidOn, today) > MAX_PAYMENT_AGE_DAYS) return;
 
   const invoice = findOwned(tx, userId, finalId).number;
   const entity = { type: "invoice", id: finalId };
-  const raise = (kind: "advance_final_no_address" | "advance_final_bad_mail", extra = {}) =>
+  const raise = (kind: NotificationKind, extra = {}) =>
     notify(tx, { userId, kind, dedupeKey, params: { invoice, ...extra }, entity });
+
+  if (daysBetween(paidOn, today) > MAX_PAYMENT_AGE_DAYS) return raise("advance_final_old_payment");
 
   const composed = draftMail(userId, finalId);
   if ("problems" in composed) {
@@ -88,11 +90,29 @@ function queueFinal(
 export function afterAdvancePaid(tx: Tx, audit: Audit, input: AdvancePaidInput): void {
   const { userId, advanceId } = input;
   const mode = getPreferences(userId).advanceFinalMode;
-  if (mode === "off" || finalOf(tx, userId, advanceId)) return;
+  if (mode === "off") return;
 
   const advanceRow = findOwned(tx, userId, advanceId);
   const params = { advance: advanceRow.number };
-  const dedupeKey = `advance-final:${advanceId}`;
+  const active = finalOf(tx, userId, advanceId);
+  if (active) {
+    if (mode !== "issue" || active.status !== "draft") return;
+    const entity = { type: "invoice", id: active.id };
+    const dedupeKey = `advance-final:${active.id}`;
+    return notify(tx, { userId, kind: "advance_final_manual", dedupeKey, params, entity });
+  }
+  // A cancelled final invoice was someone's decision, which a later payment must not reverse.
+  if (hasCancelledFinal(tx, userId, advanceId)) {
+    resolveEntityNotifications(tx, userId, "advance_final_cancelled", advanceId);
+    return notify(tx, {
+      userId,
+      kind: "advance_final_cancelled",
+      dedupeKey: `advance-final-cancelled:${advanceId}:${advanceRow.revision}`,
+      params,
+      entity: { type: "invoice", id: advanceId },
+    });
+  }
+
   const created = safely(tx, (savepoint) =>
     createFinalIn(savepoint, audit, userId, advanceRow, { automatic: true }),
   );
@@ -100,7 +120,7 @@ export function afterAdvancePaid(tx: Tx, audit: Audit, input: AdvancePaidInput):
     return notify(tx, {
       userId,
       kind: "advance_final_failed",
-      dedupeKey,
+      dedupeKey: `advance-final:${advanceId}:${advanceRow.revision}`,
       params: { ...params, problems: created.problems },
       entity: { type: "invoice", id: advanceId },
     });
@@ -108,6 +128,7 @@ export function afterAdvancePaid(tx: Tx, audit: Audit, input: AdvancePaidInput):
   if (mode === "draft") return;
 
   const finalId = created.value.id;
+  const dedupeKey = `advance-final:${finalId}`;
   const entity = { type: "invoice", id: finalId };
   if (getAutomation(userId).paused) {
     return notify(tx, { userId, kind: "advance_final_held", dedupeKey, params, entity });
@@ -144,6 +165,5 @@ export function advanceBalanceDropped(tx: Tx, userId: string, finalId: string): 
 }
 
 export function resolveFinalReview(tx: Tx, userId: string, finalId: string): void {
-  if (amountDue(findOwned(tx, userId, finalId)) > 0) return;
-  resolveEntityNotifications(tx, userId, "advance_final_review", finalId);
+  resolveWhenCovered(tx, findOwned(tx, userId, finalId));
 }

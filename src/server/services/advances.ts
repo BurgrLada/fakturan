@@ -26,6 +26,7 @@ import {
   type Invoice,
 } from "./invoices";
 import { mutate, type Audit } from "./mutation";
+import { resolveEntityNotifications } from "./notifications";
 import { defaultSeriesFor } from "./number-series";
 import { linkTags, tagsOf } from "./tags";
 
@@ -41,6 +42,7 @@ export function createFinalIn(
 ): { id: string } {
   const existing = finalOf(tx, userId, advance.id);
   if (existing) return { id: existing.id };
+  resolveEntityNotifications(tx, userId, "advance_final_cancelled", advance.id);
 
   const lines = linesOf(tx, userId, advance.id);
   const id = randomUUID();

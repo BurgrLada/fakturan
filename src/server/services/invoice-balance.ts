@@ -1,7 +1,8 @@
 import "server-only";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import { ACTIVE_CREDIT_STATUSES } from "@/lib/invoice";
+import { ACTIVE_CREDIT_STATUSES, isFinalInvoice } from "@/lib/invoice";
 import { deriveStatus } from "@/lib/payments";
+import { amountDue } from "@/lib/qr-payload";
 import { clock } from "../clock";
 import type { Tx } from "../db";
 import { invoice, payment } from "../db/schema";
@@ -9,6 +10,7 @@ import { scoped } from "../db/scoped";
 import type { Reader } from "./access";
 import { findOwned, type Invoice } from "./invoices";
 import type { Audit } from "./mutation";
+import { resolveEntityNotifications } from "./notifications";
 
 export function hasPayments(q: Reader, ownerId: string, invoiceId: string): boolean {
   const found = q
@@ -32,6 +34,25 @@ export function finalOf(q: Reader, ownerId: string, advanceId: string): Invoice 
       )
       .get() ?? null
   );
+}
+
+export function hasCancelledFinal(q: Reader, ownerId: string, advanceId: string): boolean {
+  const found = q
+    .select({ id: invoice.id })
+    .from(invoice)
+    .where(
+      scoped(ownerId).where(invoice, (t) =>
+        and(eq(t.relatedInvoiceId, advanceId), eq(t.type, "invoice"), eq(t.status, "cancelled")),
+      ),
+    )
+    .limit(1)
+    .get();
+  return found !== undefined;
+}
+
+export function resolveWhenCovered(tx: Tx, final: Invoice): void {
+  if (amountDue(final) > 0) return;
+  resolveEntityNotifications(tx, final.userId, "advance_final_review", final.id);
 }
 
 export function creditsOf(
@@ -99,5 +120,7 @@ export function refreshBalance(tx: Tx, audit: Audit, userId: string, invoiceId: 
     },
     after: { creditsMinor, advanceMinor, status },
   });
-  return findOwned(tx, userId, invoiceId);
+  const after = findOwned(tx, userId, invoiceId);
+  if (isFinalInvoice(after)) resolveWhenCovered(tx, after);
+  return after;
 }

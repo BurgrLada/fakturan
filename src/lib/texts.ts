@@ -1014,6 +1014,12 @@ export const TEXTS = {
         `Faktura ${p.invoice ?? ""} po úhradě zálohy je vystavená, ale e-mail nešlo odeslat. ${p.problems ?? ""}`.trim(),
       advance_final_review: (p: Record<string, unknown>) =>
         `Platba zálohy se vrátila, faktura ${p.invoice ?? ""} opět chce doplatek. Zkontrolujte ji, případná zpráva ve frontě se zadržela.`,
+      advance_final_cancelled: (p: Record<string, unknown>) =>
+        `Záloha ${p.advance ?? ""} je znovu uhrazená, ale její faktura je stornovaná. Automatika novou nevytvořila, případně převeďte zálohu ručně.`,
+      advance_final_manual: (p: Record<string, unknown>) =>
+        `Záloha ${p.advance ?? ""} je uhrazená a má ruční koncept faktury. Automatika ho nevystavila, zkontrolujte ho a vystavte sami.`,
+      advance_final_old_payment: (p: Record<string, unknown>) =>
+        `Faktura ${p.invoice ?? ""} po úhradě zálohy je vystavená, ale úhrada je starší 3 dnů, takže neodešla.`,
       recurring_bad_mail: (p: Record<string, unknown>) =>
         `Faktura ${p.invoice ?? ""} z plánu „${p.plan ?? ""}“ je vystavená, ale e-mail nešlo odeslat. ${p.problems ?? ""}`.trim(),
       recurring_conflict: (p: Record<string, unknown>) =>
