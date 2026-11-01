@@ -1,4 +1,6 @@
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
+import Database from "better-sqlite3";
 import { addDays } from "@/lib/invoice";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
@@ -363,4 +365,46 @@ test("ruční potvrzení jde přes dialog a nic neodejde bez kliknutí", async (
     "Potvrzení je zařazené k odeslání.",
   );
   await expect.poll(() => smtp.messages.length, { timeout: 20_000 }).toBe(1);
+});
+
+test("[BNK-009] opakované odeslání změněného potvrzení ukáže nový text a jde jako potvrzení", async ({
+  page,
+  freshApp,
+  smtp,
+}) => {
+  await ready(page, freshApp.baseURL, smtp);
+  const url = await issuedCash(page, freshApp.baseURL);
+  await page.goto(url);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+  await expect(page.getByTestId("payment-row")).toHaveCount(1);
+  await page.getByRole("button", { name: "Poslat potvrzení" }).click();
+  await expect(dialog(page).getByLabel("Text", { exact: true })).toHaveValue(/1\s000,00/);
+  await dialog(page).getByRole("button", { name: "Odeslat" }).click();
+  await page.goto(url);
+  await expect(page.getByTestId("email-history")).toContainText("Odesláno", { timeout: 20_000 });
+
+  const sqlite = new Database(join(freshApp.dataDir, "fakturan.db"));
+  const paymentId = sqlite.prepare("SELECT id FROM payment").pluck().get();
+  sqlite
+    .prepare(
+      `UPDATE email_log SET status = 'failed', body = 'stará částka 900,00',
+        receipt_print = json_set(receipt_print, '$.creditedMinor', 90000)`,
+    )
+    .run();
+  sqlite.close();
+
+  await page.goto(url);
+  await page.getByTestId("send-problem").getByRole("button", { name: "Odeslat znovu" }).click();
+  await expect(dialog(page).getByLabel("Text", { exact: true })).toHaveValue(/1\s000,00/);
+  await dialog(page).getByRole("button", { name: "Odeslat" }).click();
+  await expect.poll(() => smtp.messages.length, { timeout: 20_000 }).toBe(2);
+
+  const after = new Database(join(freshApp.dataDir, "fakturan.db"), { readonly: true });
+  const sent = after
+    .prepare("SELECT kind, payment_id AS paymentId FROM email_log WHERE status = 'sent'")
+    .all();
+  after.close();
+  expect(sent).toEqual([{ kind: "payment_receipt", paymentId }]);
+  expect(smtp.messages[1]!.body).not.toContain("900,00");
 });
