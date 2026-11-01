@@ -293,7 +293,7 @@ export function draftInputFromDocument(
   customerId: string | null,
   dates: { issueDate?: CalendarDate },
 ): DraftInput {
-  const base = newDraftDefaults(ownerId, usableCustomerId(ownerId, customerId));
+  const base = newDraftDefaults(ownerId, usableCustomerId(ownerId, customerId), document.type);
   const issueDate = dates.issueDate ?? base.issueDate;
   const items = existingCatalogIds(ownerId, document);
   return {

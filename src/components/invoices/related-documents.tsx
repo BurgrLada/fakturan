@@ -22,9 +22,11 @@ function Row({ row }: { row: RelatedDocument }) {
 export function RelatedDocuments({
   parent,
   childDocuments,
+  replaced,
 }: {
   parent: RelatedDocument | null;
   childDocuments: RelatedDocument[];
+  replaced: boolean;
 }) {
   if (!parent && childDocuments.length === 0) return null;
   return (
@@ -32,7 +34,9 @@ export function RelatedDocuments({
       <h2 className="text-lg">{T.title}</h2>
       {parent && (
         <>
-          <h3 className="text-muted-foreground">{T.parent}</h3>
+          <h3 className="text-muted-foreground">
+            {parent.type === "advance" ? T.advance : T.parent}
+          </h3>
           <ul>
             <Row row={parent} />
           </ul>
@@ -40,7 +44,7 @@ export function RelatedDocuments({
       )}
       {childDocuments.length > 0 && (
         <>
-          <h3 className="text-muted-foreground">{T.children}</h3>
+          <h3 className="text-muted-foreground">{replaced ? T.replacedBy : T.children}</h3>
           <ul className="flex flex-col gap-1">
             {childDocuments.map((row) => (
               <Row key={row.id} row={row} />

@@ -45,6 +45,41 @@ function creditNoteProblems(
   return problems;
 }
 
+function finalProblems(
+  row: typeof schema.invoice.$inferSelect,
+  rows: (typeof schema.invoice.$inferSelect)[],
+  label: string,
+): string[] {
+  const advance = rows.find((other) => other.id === row.relatedInvoiceId);
+  if (advance?.type !== "advance") return [`${label}: konečná faktura bez zálohy`];
+  const problems: string[] = [];
+  if (advance.currency !== row.currency) problems.push(`${label}: faktura v jiné měně než záloha`);
+  if (advance.customerId !== row.customerId) {
+    problems.push(`${label}: faktura pro jiného zákazníka než záloha`);
+  }
+  return problems;
+}
+
+function advanceProblems(rows: (typeof schema.invoice.$inferSelect)[]): string[] {
+  return rows
+    .filter((row) => row.type === "advance")
+    .flatMap((row) => {
+      const finals = rows.filter(
+        (other) =>
+          other.type === "invoice" &&
+          other.relatedInvoiceId === row.id &&
+          other.status !== "cancelled",
+      );
+      const problems: string[] = [];
+      if (finals.length > 1) problems.push(`invoice ${row.id}: více aktivních konečných faktur`);
+      const issued = finals.some((other) => other.status !== "draft");
+      if ((row.supersededAt !== null) !== issued) {
+        problems.push(`invoice ${row.id}: superseded_at neodpovídá konečné faktuře`);
+      }
+      return problems;
+    });
+}
+
 function rateProblems(row: typeof schema.invoice.$inferSelect, label: string): string[] {
   const { currency, status, exchangeRateMicros: micros } = row;
   const { exchangeRateSource: source, exchangeRateDate: listDate } = row;
@@ -103,6 +138,9 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
     }
 
     problems.push(...rateProblems(row, label));
+    if (row.type === "invoice" && row.relatedInvoiceId) {
+      problems.push(...finalProblems(row, rows, label));
+    }
     if (row.status === "draft") {
       if (row.number !== null) problems.push(`${label}: koncept má číslo`);
       continue;
@@ -118,6 +156,7 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
     if (row.type === "credit_note") problems.push(...creditNoteProblems(row, rows, label));
   }
 
+  problems.push(...advanceProblems(rows));
   const numbers = rows.flatMap((row) => row.number ?? []);
   const repeated = numbers.filter((number, i) => numbers.indexOf(number) !== i);
   if (repeated.length > 0) problems.push(`invoice: opakovaná čísla ${repeated.join(", ")}`);
@@ -157,7 +196,8 @@ function paymentProblems(db: Db, ownerId: string): string[] {
       (other) => other.id === row.relatedInvoiceId && other.type === "advance",
     );
     const advanceMinor = advance?.paidMinor ?? 0;
-    if (row.advanceMinor !== advanceMinor) {
+    // A cancelled final invoice is left out of balance updates until it is restored.
+    if (row.status !== "cancelled" && row.advanceMinor !== advanceMinor) {
       problems.push(`${label}: advance_minor neodpovídá úhradě zálohy`);
     }
     const expected = deriveStatus({ ...row, paidMinor: paid, creditsMinor, advanceMinor });

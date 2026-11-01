@@ -236,7 +236,7 @@ export function PaymentPanel({
             </Button>
           </>
         )}
-        {canTakePayment(status) && (
+        {canTakePayment(status) && !balance.supersededAt && (
           <Button
             variant="outline"
             className={TOUCH}
@@ -256,7 +256,7 @@ export function PaymentPanel({
             {T.refund}
           </Button>
         )}
-        {status === "partially_paid" && (
+        {status === "partially_paid" && !balance.supersededAt && (
           <Button
             variant="outline"
             className={TOUCH}

@@ -384,6 +384,32 @@ describe("automatika", () => {
     assertConsistent(db, owner);
   }, 30_000);
 
+  test("[ADV-006] pravidelná záloha vystaví doklad řady záloh a mail advance", () => {
+    const { owner, customerId } = sendingAccount();
+    const plan = savePlan(owner, customerId, {
+      ...SEND,
+      document: planDocument({ type: "advance" }),
+    });
+
+    const result = runOnce(owner, plan);
+
+    expect(result.status).toBe("queued");
+    expect(getInvoice(owner, result.invoiceId!)).toMatchObject({
+      type: "advance",
+      number: "Z2026-001",
+    });
+    expect(mailOf(owner)[0]).toMatchObject({ kind: "advance", automation: "recurringSend" });
+    assertConsistent(db, owner);
+  });
+
+  test("[ADV-006] plán s opravnou fakturou je odmítnutý", () => {
+    const { owner, customerId } = account();
+
+    expect(() =>
+      savePlan(owner, customerId, { document: planDocument({ type: "credit_note" }) }),
+    ).toThrow();
+  });
+
   test("zákazník bez adresy nechá fakturu vystavenou s upozorněním", () => {
     const { owner, customerId } = sendingAccount("");
     const result = runOnce(owner, savePlan(owner, customerId, SEND));

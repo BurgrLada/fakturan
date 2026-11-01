@@ -1,6 +1,11 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
-import { isActiveDocument, type InvoiceStatus, type InvoiceType } from "@/lib/invoice";
+import {
+  isActiveDocument,
+  isFinalInvoice,
+  type InvoiceStatus,
+  type InvoiceType,
+} from "@/lib/invoice";
 import { diffLines } from "@/lib/invoice-diff";
 import { discountNotes, formRateNotes } from "@/lib/invoice-form";
 import { rateDate } from "@/lib/fx";
@@ -17,7 +22,8 @@ import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
 import { creditNoteProblem } from "./credit-notes";
 import { resolveRate } from "./exchange-rates";
-import { hasPayments, refreshBalance } from "./invoice-balance";
+import { syncSuperseded } from "./advances";
+import { finalOf, hasPayments, refreshBalance } from "./invoice-balance";
 import {
   currentParties,
   relatedSnapshotOf,
@@ -466,7 +472,9 @@ export function issueIn(
           ? automaticSymbol(userId, number)
           : manualSymbol || null,
       variableSymbolManual: !isNote && manualSymbol !== undefined,
-      relatedSnapshot: isNote ? relatedSnapshotOf(tx, userId, row) : row.relatedSnapshot,
+      relatedSnapshot: row.relatedInvoiceId
+        ? relatedSnapshotOf(tx, userId, row)
+        : row.relatedSnapshot,
       seriesId: picked.series.id,
       customerName: texts.customerName,
       dateFormat: texts.dateFormat,
@@ -509,6 +517,10 @@ export function issueIn(
     },
   });
   if (isNote) refreshBalance(tx, audit, userId, row.relatedInvoiceId!);
+  if (isFinalInvoice(row)) {
+    refreshBalance(tx, audit, userId, id);
+    syncSuperseded(tx, audit, userId, id);
+  }
   return { id, number };
 }
 
@@ -553,6 +565,14 @@ function changeStatus(
     if (row.type === "credit_note" && row.relatedInvoiceId && leftOrReturned) {
       refreshBalance(tx, audit, userId, row.relatedInvoiceId);
     }
+    if (isFinalInvoice(row) && values.status === "cancelled") {
+      syncSuperseded(tx, audit, userId, id);
+    }
+    // A cancelled final invoice is left out of balance updates, so it comes back with a stale one.
+    if (isFinalInvoice(row) && row.status === "cancelled") {
+      refreshBalance(tx, audit, userId, id);
+      syncSuperseded(tx, audit, userId, id);
+    }
   });
 }
 
@@ -560,18 +580,44 @@ export function cancelInvoice(actor: Actor, id: string): void {
   changeStatus(actor, id, "invoice.cancel", (row, tx) => {
     if (hasPayments(tx, row.userId, id)) throw new ServiceError(V.hasPayments);
     if (row.creditsMinor < 0) throw new ServiceError(V.hasCredits);
+    if (row.type === "advance" && finalOf(tx, row.userId, id)) {
+      throw new ServiceError(V.hasFinalInvoice);
+    }
     if (row.status !== "issued" && row.status !== "sent") throw new ServiceError(V.notCancellable);
     return { status: "cancelled", cancelledFrom: row.status };
   });
 }
 
+function finalRestoreProblem(q: Reader, row: Invoice): string | null {
+  if (!isFinalInvoice(row)) return null;
+  const advance = findOwned(q, row.userId, row.relatedInvoiceId!);
+  if (advance.status === "cancelled") return V.advanceCancelled;
+  return finalOf(q, row.userId, advance.id) ? V.finalExists : null;
+}
+
+// finalOf answers first; the index only speaks up if the two ever disagree.
+export function isFinalConflict(error: unknown): boolean {
+  for (let cause = error; cause instanceof Error; cause = cause.cause) {
+    if (cause.message.includes("UNIQUE constraint failed: invoice.related_invoice_id")) return true;
+  }
+  return false;
+}
+
 export function restoreInvoice(actor: Actor, id: string): void {
-  changeStatus(actor, id, "invoice.restore", (row, tx) => {
-    if (row.status !== "cancelled" || !row.cancelledFrom) throw new ServiceError(V.notCancelled);
-    const problem = row.type === "credit_note" && creditNoteProblem(tx, row.userId, row);
-    if (problem) throw new ServiceError(problem);
-    return { status: row.cancelledFrom, cancelledFrom: null };
-  });
+  try {
+    changeStatus(actor, id, "invoice.restore", (row, tx) => {
+      if (row.status !== "cancelled" || !row.cancelledFrom) throw new ServiceError(V.notCancelled);
+      const problem =
+        row.type === "credit_note"
+          ? creditNoteProblem(tx, row.userId, row)
+          : finalRestoreProblem(tx, row);
+      if (problem) throw new ServiceError(problem);
+      return { status: row.cancelledFrom, cancelledFrom: null };
+    });
+  } catch (error) {
+    if (isFinalConflict(error)) throw new ServiceError(V.finalExists);
+    throw error;
+  }
 }
 
 // A document settled before it left still has to record sending, or removing the payment or the

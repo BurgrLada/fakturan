@@ -412,8 +412,20 @@ describe("seznam faktur", () => {
 
     const stats = customerInvoiceStats(o.owner, o.alfa);
     expect(stats.sums).toEqual([
-      { currency: "CZK", invoicedMinor: 150_000, paidMinor: 20_000, outstandingMinor: 130_000 },
-      { currency: "EUR", invoicedMinor: 7_000, paidMinor: 0, outstandingMinor: 7_000 },
+      {
+        currency: "CZK",
+        invoicedMinor: 150_000,
+        paidMinor: 20_000,
+        outstandingMinor: 130_000,
+        advanceOpenMinor: 0,
+      },
+      {
+        currency: "EUR",
+        invoicedMinor: 7_000,
+        paidMinor: 0,
+        outstandingMinor: 7_000,
+        advanceOpenMinor: 0,
+      },
     ]);
     expect(stats.rows.map((row) => row.id)).toEqual(expect.arrayContaining([first, second]));
     expect(stats.rows.every((row) => row.customerId === o.alfa)).toBe(true);

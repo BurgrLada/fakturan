@@ -27,6 +27,7 @@ export type DocumentLabels = {
   creditTotal: string;
   correctsDocument: string;
   correctsDate: (number: string, date: string) => string;
+  advanceOf: string;
   credits: string;
   paidByAdvance: string;
   paid: string;
@@ -86,6 +87,7 @@ export const LABELS: Record<Language, DocumentLabels> = {
     creditTotal: "Celkem opraveno",
     correctsDocument: "Opravuje doklad",
     correctsDate: (number, date) => `${number} ze dne ${date}`,
+    advanceOf: "Vyúčtování zálohy",
     credits: "Opravné faktury",
     paidByAdvance: "Uhrazeno zálohou",
     paid: "Uhrazeno",
@@ -143,6 +145,7 @@ export const LABELS: Record<Language, DocumentLabels> = {
     creditTotal: "Total credited",
     correctsDocument: "Corrects document",
     correctsDate: (number, date) => `${number} of ${date}`,
+    advanceOf: "Settles advance invoice",
     credits: "Credit notes",
     paidByAdvance: "Paid by advance",
     paid: "Paid",

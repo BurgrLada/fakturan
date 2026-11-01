@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MAX_FILE_BYTES } from "@/lib/file-limits";
-import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
+import { ADVANCE_NOTE, REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { DEFAULT_NOT_VAT_PAYER_CS, DEFAULT_NOT_VAT_PAYER_EN } from "@/lib/supplier-defaults";
 import { TEXTS } from "@/lib/texts";
 
@@ -35,6 +35,8 @@ export type SupplierValues = {
   notVatPayerEn: string;
   reverseChargeCs: string;
   reverseChargeEn: string;
+  advanceNoteCs: string;
+  advanceNoteEn: string;
 };
 
 type ImageKind = "logo" | "qr_logo" | "signature";
@@ -58,6 +60,8 @@ export const EMPTY_SUPPLIER: SupplierValues = {
   notVatPayerEn: DEFAULT_NOT_VAT_PAYER_EN,
   reverseChargeCs: REVERSE_CHARGE_CLAUSE.cs,
   reverseChargeEn: REVERSE_CHARGE_CLAUSE.en,
+  advanceNoteCs: ADVANCE_NOTE.cs,
+  advanceNoteEn: ADVANCE_NOTE.en,
 };
 
 const IMAGE_KINDS: ImageKind[] = ["logo", "qr_logo", "signature"];
@@ -257,6 +261,8 @@ export function SupplierForm({
           <Field name="reverseChargeCs" value={values.reverseChargeCs} {...fieldProps} />
           <Field name="reverseChargeEn" value={values.reverseChargeEn} {...fieldProps} />
           <p className="text-sm text-muted-foreground">{TEXTS.supplier.reverseChargeHint}</p>
+          <Field name="advanceNoteCs" value={values.advanceNoteCs} {...fieldProps} />
+          <Field name="advanceNoteEn" value={values.advanceNoteEn} {...fieldProps} />
         </section>
         <div>
           <Button type="submit" disabled={pending}>

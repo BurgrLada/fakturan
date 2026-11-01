@@ -21,6 +21,9 @@ export type SupplierSnapshot = {
   footerText: string;
   notVatPayerCs: string;
   notVatPayerEn: string;
+  // Absent on snapshots frozen before advance invoices got their own text.
+  advanceNoteCs?: string;
+  advanceNoteEn?: string;
 };
 
 export type CustomerSnapshot = {

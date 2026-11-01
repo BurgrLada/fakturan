@@ -15,7 +15,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
-import { addDays, isCreditable, isOverdue } from "@/lib/invoice";
+import { addDays, isConvertibleAdvance, isCreditable, isOverdue } from "@/lib/invoice";
 import { isSendable } from "@/lib/mail-send";
 import { invoiceDocument } from "@/lib/invoice-document";
 import { formatMoney } from "@/lib/money";
@@ -28,7 +28,9 @@ import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
 import { hasQueuedNotice } from "@/server/services/bank-notices";
+import { db } from "@/server/db";
 import { relatedDocuments } from "@/server/services/credit-notes";
+import { finalOf } from "@/server/services/invoice-balance";
 import { EDITABLE_STATUSES, listVersions } from "@/server/services/invoice-versions";
 import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
@@ -54,6 +56,9 @@ function StatusSteps({ row, closedMinor }: { row: InvoiceDetail; closedMinor: nu
     { label: T.steps.issued, value: formatDateTime(row.issuedAt) },
     { label: T.steps.sent, value: formatDateTime(row.sentAt) },
     ...(isNote ? [] : [{ label: T.steps.paid, value: formatMoney(row.paidMinor, row.currency) }]),
+    ...(row.advanceMinor > 0 && row.status !== "cancelled"
+      ? [{ label: T.steps.advance, value: formatMoney(row.advanceMinor, row.currency) }]
+      : []),
     ...(closedMinor > 0
       ? [
           {
@@ -124,7 +129,9 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
     .filter((item) => item.kind === "difference")
     .reduce((sum, item) => sum + item.creditedMinor, 0);
   const isNote = row.type === "credit_note";
-  const takesPayment = canTakePayment(row.status) && !isNote;
+  const isAdvance = row.type === "advance";
+  const final = isAdvance ? finalOf(db, user.id, id) : null;
+  const takesPayment = canTakePayment(row.status) && !isNote && !row.supersededAt;
   // A credited invoice takes no money, but its refund must stay reachable to be taken back.
   const showsPayments =
     takesPayment || (canAmendPayment(row.status) && !isNote && payments.length > 0);
@@ -136,9 +143,10 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-brand text-2xl">
-          {isNote ? T.creditTitle : T.title} {row.number}
+          {isNote ? T.creditTitle : isAdvance ? T.advanceTitle : T.title} {row.number}
         </h1>
         <InvoiceStatusBadge status={row.status} overdue={isOverdue(row, today)} />
+        {row.supersededAt && <Badge variant="outline">{T.superseded}</Badge>}
       </div>
       <p className="text-sm">
         <span className="text-muted-foreground">{T.customer}: </span>
@@ -184,6 +192,8 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         cancellable={row.status === "issued" || row.status === "sent"}
         hasPayments={takesPayment && payments.length > 0}
         hasCredits={row.creditsMinor < 0 && row.status !== "cancelled"}
+        hasFinal={final !== null}
+        convertible={isConvertibleAdvance(row) && final === null}
         creditable={isCreditable(row) && row.totalMinor + row.creditsMinor > 0}
         copyable={!isNote}
         restorable={row.status === "cancelled" && row.cancelledFrom !== null}
@@ -206,7 +216,11 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           </p>
         )}
       </section>
-      <RelatedDocuments parent={related.parent} childDocuments={related.children} />
+      <RelatedDocuments
+        parent={related.parent}
+        childDocuments={related.children}
+        replaced={row.supersededAt !== null}
+      />
       {sendable && amountDue(row) > 0 && (
         <ReminderPanel
           invoiceId={id}

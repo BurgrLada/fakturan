@@ -60,6 +60,13 @@ export function runJobWorkers<T>(
   return runGatedWorkers("./job-worker.mjs", "result", jobs, databasePath);
 }
 
+export function runAdvanceWorkers<T>(
+  jobs: Record<string, unknown>[],
+  databasePath: string,
+): Promise<T[]> {
+  return runGatedWorkers("./advance-worker.mjs", "converted", jobs, databasePath);
+}
+
 export type CrashPoint =
   | "after_sending"
   | "after_smtp"

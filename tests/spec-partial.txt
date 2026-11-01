@@ -14,3 +14,5 @@ BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se au
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 CRN-003	Chybí statistiky a dashboard	plán 7
 FOR-008	chybí statistiky	plán 7
+ADV-005	Příjmy k datu úhrady ve statistikách a daňovém přehledu	plán 7 a 8
+ADV-007	Obrat a řádek záloh v přehledech mimo seznam faktur	plán 7 a 8

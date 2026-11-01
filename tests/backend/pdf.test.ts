@@ -817,6 +817,33 @@ describe("povinné údaje", () => {
     );
   });
 
+  test("[ADV-001] záloha vytiskne text ze snapshotu v jazyce dokladu", async () => {
+    const text = await textOf(
+      await render({
+        ...F.short,
+        type: "advance",
+        snapshot: {
+          ...F.short.snapshot,
+          supplier: { ...F.short.snapshot.supplier!, advanceNoteCs: "Vlastní text zálohy." },
+        },
+      }),
+    );
+
+    expect(text).toContain("Vlastní text zálohy.");
+    expect(await textOf(await render(F.short))).not.toContain("daňový doklad");
+  });
+
+  test("[ADV-003] konečná faktura tiskne odkaz na zálohu", async () => {
+    const text = await textOf(
+      await render({
+        ...F.short,
+        relatedDocument: { type: "advance", number: "Z2026-001", issueDate: "2026-03-01" },
+      }),
+    );
+
+    expect(text).toMatch(/Vyúčtování zálohy[\s\S]*Z2026-001/);
+  });
+
   test("úhrada zálohou má řádek a zbytek je silný", async () => {
     const { totals } = await viewOf({
       ...F.english,

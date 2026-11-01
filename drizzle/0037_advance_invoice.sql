@@ -1,0 +1,3 @@
+ALTER TABLE `supplier` ADD `advance_note_cs` text DEFAULT 'Toto není daňový doklad.' NOT NULL;--> statement-breakpoint
+ALTER TABLE `supplier` ADD `advance_note_en` text DEFAULT 'This is not a tax document.' NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `invoice_final_of_advance_idx` ON `invoice` (`related_invoice_id`) WHERE type = 'invoice' AND related_invoice_id IS NOT NULL AND status <> 'cancelled';

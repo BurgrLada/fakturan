@@ -329,8 +329,11 @@ export function InvoiceTable({
                 >
                   {row.number ?? TEXTS.invoices.statuses.draft}
                 </Link>
-                {row.type === "credit_note" && (
-                  <span className="block text-xs text-muted-foreground">{T.types.credit_note}</span>
+                {row.type !== "invoice" && (
+                  <span className="block text-xs text-muted-foreground">
+                    {T.types[row.type]}
+                    {row.supersededAt && ` · ${TEXTS.invoices.detail.superseded}`}
+                  </span>
                 )}
               </TableCell>
               <TableCell className="whitespace-normal">{row.customerName || "–"}</TableCell>

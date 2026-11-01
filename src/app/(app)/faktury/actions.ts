@@ -12,6 +12,7 @@ import { paymentInputSchema } from "@/lib/payments";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
+import { convertAdvance } from "@/server/services/advances";
 import { getAutomation } from "@/server/services/automation";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
 import { createCreditNote } from "@/server/services/credit-notes";
@@ -343,6 +344,15 @@ export async function createCreditNoteAction(raw: unknown) {
     const note = createCreditNote(actor, invoiceId);
     changedInvoices();
     return note;
+  });
+}
+
+export async function convertAdvanceAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    ensureDefaultSeries(actor);
+    const final = convertAdvance(actor, invoiceId);
+    changedInvoices();
+    return final;
   });
 }
 

@@ -59,6 +59,7 @@ import {
   addRefundAction,
   bulkSendAction,
   closeDifferenceAction,
+  convertAdvanceAction,
   createCreditNoteAction,
   creditPreviewAction,
   loadRateAction,
@@ -78,7 +79,14 @@ import {
   setRemindersOffAction,
   snoozeRemindersAction,
 } from "@/app/(app)/faktury/actions";
-import { bankNotification, emailLog, payment, recurringInvoice, user } from "@/server/db/schema";
+import {
+  bankNotification,
+  emailLog,
+  invoice,
+  payment,
+  recurringInvoice,
+  user,
+} from "@/server/db/schema";
 import { ingestNotice } from "@/server/services/bank-notices";
 import { seedAccount } from "../helpers/fixtures-bank";
 import { issuedInvoice, ownSmtp, seedCustomer, seedOwner } from "../helpers/fixtures-mail";
@@ -262,6 +270,22 @@ describe("akce pošty", () => {
     await expect(createCreditNoteAction({ id: mine.invoiceId })).resolves.toMatchObject({
       ok: true,
     });
+  });
+
+  test("[TST-009] akce záloh odmítnou cizí ID", async () => {
+    const mine = mailAccount();
+    const stranger = mailAccount();
+    db.update(invoice).set({ type: "advance" }).where(eq(invoice.id, mine.invoiceId)).run();
+
+    session.userId = stranger.owner;
+    await expect(convertAdvanceAction({ id: mine.invoiceId })).resolves.toMatchObject({
+      ok: false,
+    });
+    expect(listInvoices(mine.owner, {}).rows).toHaveLength(1);
+    expect(listInvoices(stranger.owner, {}).rows).toHaveLength(1);
+
+    session.userId = mine.owner;
+    await expect(convertAdvanceAction({ id: mine.invoiceId })).resolves.toMatchObject({ ok: true });
   });
 
   test("[SEC-002] akce upomínek odmítnou cizí ID", async () => {

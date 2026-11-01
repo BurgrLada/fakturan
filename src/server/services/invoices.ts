@@ -290,7 +290,11 @@ export function isFreeDraftId(id: string): boolean {
   return !db.select({ id: invoice.id }).from(invoice).where(eq(invoice.id, id)).get();
 }
 
-export function newDraftDefaults(ownerId: string, customerId: string | null): DraftInput {
+export function newDraftDefaults(
+  ownerId: string,
+  customerId: string | null,
+  type: InvoiceType = "invoice",
+): DraftInput {
   const prefs = getPreferences(ownerId);
   const defaults = customerId
     ? customerDefaults(ownerId, customerId, prefs)
@@ -298,10 +302,10 @@ export function newDraftDefaults(ownerId: string, customerId: string | null): Dr
   const { vatIdentified, texts } = clauseDefaultsOf(ownerId);
   const issueDate = defaultIssueDate(defaults.issueDateMode, clock.now());
   return {
-    type: "invoice",
+    type,
     customerId,
     bankAccountId: defaultAccountFor(ownerId, defaults.currency)?.id ?? null,
-    seriesId: defaultSeriesFor(ownerId, "invoice")?.id ?? null,
+    seriesId: defaultSeriesFor(ownerId, type)?.id ?? null,
     issueDate,
     dueDate: addDays(issueDate, defaults.dueDays),
     taxableDate: null,
@@ -680,7 +684,7 @@ export function deleteDraft(actor: Actor, id: string): void {
   });
 }
 
-function accountForCopy(tx: Tx, ownerId: string, source: Invoice): string | null {
+export function accountForCopy(tx: Tx, ownerId: string, source: Invoice): string | null {
   if (!source.bankAccountId) return null;
   const account = tx
     .select({ hidden: bankAccount.hidden })
@@ -1079,12 +1083,14 @@ export function invoiceSummary(ownerId: string, filter: InvoiceFilter): InvoiceS
 export function customerInvoiceStats(ownerId: string, customerId: string) {
   const ofCustomer = scoped(ownerId).where(invoice, (t, { eq }) => eq(t.customerId, customerId));
   const outstanding = and(openCondition, ne(invoice.type, "advance"));
+  const advanceOpen = and(openCondition, eq(invoice.type, "advance"));
   const sums = db
     .select({
       currency: invoice.currency,
       invoicedMinor: invoicedSql,
       paidMinor: sql<number>`coalesce(sum(${invoice.paidMinor}), 0)`,
       outstandingMinor: sql<number>`coalesce(sum(CASE WHEN ${outstanding} THEN ${dueSql} ELSE 0 END), 0)`,
+      advanceOpenMinor: sql<number>`coalesce(sum(CASE WHEN ${advanceOpen} THEN ${dueSql} ELSE 0 END), 0)`,
     })
     .from(invoice)
     .where(and(ofCustomer, notInArray(invoice.status, NOT_IN_TOTALS)))

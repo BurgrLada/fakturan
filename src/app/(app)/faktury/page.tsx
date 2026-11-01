@@ -9,6 +9,7 @@ import { InvoiceSummary } from "@/components/invoices/invoice-summary";
 import { InvoiceTable } from "@/components/invoices/invoice-table";
 import { PageLoading } from "@/components/page-loading";
 import { buttonVariants } from "@/components/ui/button";
+import { ADVANCE_FORM_PARAM } from "@/lib/invoice";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { mailAvailability } from "@/server/services/mail-settings";
@@ -105,10 +106,16 @@ export default function InvoicesPage({ searchParams }: PageProps<"/faktury">) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-brand text-2xl">{T.title}</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link href="/faktury/sablony" className={buttonVariants({ variant: "outline" })}>
             {T.templates}
           </Link>
+          <a
+            href={`/faktury/nova?typ=${ADVANCE_FORM_PARAM}`}
+            className={buttonVariants({ variant: "outline" })}
+          >
+            {TEXTS.invoices.addAdvance}
+          </a>
           <NewInvoiceLink />
         </div>
       </div>

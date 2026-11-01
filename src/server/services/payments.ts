@@ -135,6 +135,7 @@ export function insertPayment(
   assertPaidOn(fields.paidOn);
   const before = findOwned(tx, userId, invoiceId);
   assertPayable(before);
+  if (before.supersededAt) throw new ServiceError(E.superseded);
   if (before.totalMinor <= 0) throw new ServiceError(E.zeroTotal);
   if (fields.amountMinor <= 0 || fields.creditedMinor <= 0) throw new ServiceError(E.amount);
 
@@ -473,6 +474,7 @@ export function closeDifference(
   return mutate(actor, "payment.close_difference", (tx, audit) => {
     const row = findOwned(tx, userId, invoiceId);
     assertRevision(row, opts.revision);
+    if (row.supersededAt) throw new ServiceError(E.supersededDifference);
     if (row.status !== "partially_paid") throw new ServiceError(E.notClosable);
     if (!opts.confirmed) throw new ServiceError(E.confirmDifference);
     const differenceMinor = amountDue(row);

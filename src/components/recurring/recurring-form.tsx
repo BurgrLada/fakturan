@@ -148,6 +148,9 @@ const optionalNumber = (text: string): number | null => (text.trim() === "" ? nu
 // Number("") is 0, which would pass a blank required field off as a value.
 const requiredNumber = (text: string): number => (text.trim() === "" ? Number.NaN : Number(text));
 
+const PLAN_TYPES = ["invoice", "advance"] as const;
+type PlanType = (typeof PLAN_TYPES)[number];
+
 export function RecurringForm(props: RecurringFormProps) {
   const { planId, initial, accounts, units, defaultUnit, recurringSend, designs } = props;
   const { status } = props;
@@ -156,6 +159,7 @@ export function RecurringForm(props: RecurringFormProps) {
   const variables = useVariableTarget();
 
   const [name, setName] = useState(initial.name);
+  const [type, setType] = useState(initial.document.type);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [customerName, setCustomerName] = useState(initial.customerName);
   const [customerDic, setCustomerDic] = useState(props.customerDic);
@@ -188,15 +192,9 @@ export function RecurringForm(props: RecurringFormProps) {
   const [submitted, setSubmitted] = useState(false);
   const [summary, setSummary] = useState<{ email: string; sendTime: string } | null>(null);
 
-  const fields = useMemo(
-    () => toDocumentFields(values, initial.document.type),
-    [values, initial.document.type],
-  );
+  const fields = useMemo(() => toDocumentFields(values, type), [values, type]);
   const invalid = useMemo(() => new Set(fields.ok ? [] : fields.invalid), [fields]);
-  const totals = useMemo(
-    () => computeFormTotals(values, initial.document.type),
-    [values, initial.document.type],
-  );
+  const totals = useMemo(() => computeFormTotals(values, type), [values, type]);
   const nets = useMemo(() => {
     const kept = nonEmptyLines(values.lines);
     return new Map(kept.map((line, i) => [line.key, totals?.lines[i]?.netMinor ?? 0]));
@@ -264,7 +262,7 @@ export function RecurringForm(props: RecurringFormProps) {
       name,
       customerId,
       document: {
-        type: initial.document.type,
+        type: type,
         bankAccountId: f.bankAccountId,
         dueDays: numbers.dueDays,
         language: f.language,
@@ -309,7 +307,7 @@ export function RecurringForm(props: RecurringFormProps) {
     planId,
     name,
     customerId,
-    initial.document.type,
+    type,
     frequency,
     endsOn,
     mode,
@@ -509,6 +507,19 @@ export function RecurringForm(props: RecurringFormProps) {
             value={name}
             onChange={(event) => setName(event.target.value)}
           />
+        </Field>
+        <Field id="field-type" label={F.type}>
+          <NativeSelect
+            id="field-type"
+            value={type}
+            onChange={(event) => setType(event.target.value as PlanType)}
+          >
+            {PLAN_TYPES.map((option) => (
+              <option key={option} value={option}>
+                {TEXTS.invoices.list.types[option]}
+              </option>
+            ))}
+          </NativeSelect>
         </Field>
         <CustomerPicker
           name={customerName}

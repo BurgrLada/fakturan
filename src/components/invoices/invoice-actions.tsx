@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
   cancelInvoiceAction,
+  convertAdvanceAction,
   createCreditNoteAction,
   duplicateInvoiceAction,
   markSentAction,
@@ -48,6 +49,8 @@ export function InvoiceActions({
   cancellable,
   hasPayments,
   hasCredits,
+  hasFinal,
+  convertible,
   creditable,
   copyable,
   restorable,
@@ -60,6 +63,8 @@ export function InvoiceActions({
   cancellable: boolean;
   hasPayments: boolean;
   hasCredits: boolean;
+  hasFinal: boolean;
+  convertible: boolean;
   creditable: boolean;
   copyable: boolean;
   restorable: boolean;
@@ -95,24 +100,11 @@ export function InvoiceActions({
     });
   }
 
-  function createCredit() {
+  function openNewDraft(action: typeof duplicateInvoiceAction) {
     setMessage(null);
     startTransition(async () => {
       try {
-        const reply = await createCreditNoteAction({ id });
-        if (reply.ok) router.push(`/faktury/${reply.id}/upravit`);
-        else setMessage({ ok: false, text: reply.error });
-      } catch {
-        setMessage({ ok: false, text: T.failed });
-      }
-    });
-  }
-
-  function duplicate() {
-    setMessage(null);
-    startTransition(async () => {
-      try {
-        const reply = await duplicateInvoiceAction({ id });
+        const reply = await action({ id });
         if (reply.ok) router.push(`/faktury/${reply.id}/upravit`);
         else setMessage({ ok: false, text: reply.error });
       } catch {
@@ -133,13 +125,30 @@ export function InvoiceActions({
           </Link>
         )}
         {creditable && (
-          <Button variant="outline" disabled={pending} onClick={createCredit}>
+          <Button
+            variant="outline"
+            disabled={pending}
+            onClick={() => openNewDraft(createCreditNoteAction)}
+          >
             {T.createCredit}
+          </Button>
+        )}
+        {convertible && (
+          <Button
+            variant="outline"
+            disabled={pending}
+            onClick={() => openNewDraft(convertAdvanceAction)}
+          >
+            {T.convertAdvance}
           </Button>
         )}
         {copyable && (
           <>
-            <Button variant="outline" disabled={pending} onClick={duplicate}>
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => openNewDraft(duplicateInvoiceAction)}
+            >
               {T.duplicate}
             </Button>
             <Button variant="outline" disabled={pending} onClick={() => setNaming(true)}>
@@ -181,7 +190,7 @@ export function InvoiceActions({
             {T.restore}
           </Button>
         )}
-        {cancellable && !hasPayments && !hasCredits && (
+        {cancellable && !hasPayments && !hasCredits && !hasFinal && (
           <AlertDialog open={confirming} onOpenChange={setConfirming}>
             <AlertDialogTrigger render={<Button variant="destructive" disabled={pending} />}>
               {T.cancel}
@@ -223,9 +232,9 @@ export function InvoiceActions({
           onSent={sent}
         />
       </div>
-      {(hasPayments || hasCredits) && (
+      {(hasPayments || hasCredits || hasFinal) && (
         <p data-testid="cancel-blocked" className="text-sm text-muted-foreground">
-          {hasPayments ? T.cancelBlocked : T.cancelCredited}
+          {hasPayments ? T.cancelBlocked : hasFinal ? T.cancelFinal : T.cancelCredited}
         </p>
       )}
       {mail.sendable && !mail.available && (

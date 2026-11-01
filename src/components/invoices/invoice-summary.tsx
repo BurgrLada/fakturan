@@ -22,6 +22,14 @@ export function InvoiceSummary({ rows }: { rows: InvoiceSummaryRow[] }) {
           <dd className={`text-right ${row.overdueMinor > 0 ? "text-destructive" : ""}`}>
             {formatMoney(row.overdueMinor, row.currency)}
           </dd>
+          {row.advanceOpenMinor > 0 && (
+            <>
+              <dt className="text-muted-foreground">{T.advanceOpen}</dt>
+              <dd data-testid="summary-advance-open" className="text-right">
+                {formatMoney(row.advanceOpenMinor, row.currency)}
+              </dd>
+            </>
+          )}
         </dl>
       ))}
     </section>

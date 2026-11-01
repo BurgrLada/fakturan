@@ -6,6 +6,11 @@ export const REVERSE_CHARGE_CLAUSE: Record<Language, string> = {
   en: "Reverse charge: VAT to be accounted for by the customer (Article 196 of Directive 2006/112/EC).",
 };
 
+export const ADVANCE_NOTE: Record<Language, string> = {
+  cs: "Toto není daňový doklad.",
+  en: "This is not a tax document.",
+};
+
 // Without CZ: a Czech customer is a domestic supply. Greece uses EL in VAT IDs.
 export const EU_COUNTRY_CODES = [
   "AT",

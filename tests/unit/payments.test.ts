@@ -79,6 +79,17 @@ describe("deriveStatus", () => {
     expect(deriveStatus({ ...sent, advanceMinor: 400 })).toBe("sent");
     expect(deriveStatus({ ...sent, advanceMinor: 1000 })).toBe("paid");
   });
+
+  test("zvýšení faktury uhrazené zálohou dá částečnou úhradu a ta při další změně drží", () => {
+    expect(deriveStatus({ ...sent, status: "paid", advanceMinor: 400 })).toBe("partially_paid");
+    expect(deriveStatus({ ...sent, status: "partially_paid", advanceMinor: 400 })).toBe(
+      "partially_paid",
+    );
+  });
+
+  test("po vrácení celé zálohy jde faktura na základní stav", () => {
+    expect(deriveStatus({ ...sent, status: "paid" })).toBe("sent");
+  });
 });
 
 describe("canAmendPayment", () => {

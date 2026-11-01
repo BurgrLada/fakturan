@@ -121,6 +121,10 @@ export const invoice = sqliteTable(
     index("invoice_user_variable_symbol_idx").on(t.userId, t.variableSymbol),
     index("invoice_recurring_idx").on(t.recurringId),
     index("invoice_user_related_idx").on(t.userId, t.relatedInvoiceId),
+    // Repeated payment or a race cannot produce a second final invoice (R-26).
+    uniqueIndex("invoice_final_of_advance_idx")
+      .on(t.relatedInvoiceId)
+      .where(sql`type = 'invoice' AND related_invoice_id IS NOT NULL AND status <> 'cancelled'`),
   ],
 );
 

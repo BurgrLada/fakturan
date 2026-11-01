@@ -22,7 +22,7 @@ import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
 import { creditLimitProblem } from "./credit-notes";
-import { hasPayments, refreshBalance } from "./invoice-balance";
+import { finalOf, hasPayments, refreshBalance } from "./invoice-balance";
 import { currentParties } from "./invoice-document";
 import {
   automaticSymbol,
@@ -146,8 +146,8 @@ function writeVersion(tx: Tx, ownerId: string, row: Invoice, lines: InvoiceLine[
   return versionNo;
 }
 
-// In applyChange, so restoring a version cannot get around it. A final invoice locks only its
-// currency: advance_minor is in that currency, while its rate is its own.
+// In applyChange, so restoring a version cannot get around it. A final invoice and its advance lock
+// only the currency: advance_minor is in that currency, while each keeps its own rate.
 function assertLinkedMoney(tx: Tx, ownerId: string, before: Invoice, values: InvoiceValues): void {
   const isNote = before.type === "credit_note";
   const credited = before.creditsMinor < 0;
@@ -155,10 +155,10 @@ function assertLinkedMoney(tx: Tx, ownerId: string, before: Invoice, values: Inv
   const newRate =
     values.exchangeRateMicros !== undefined &&
     values.exchangeRateMicros !== before.exchangeRateMicros;
-  if (
-    (newCurrency && before.relatedInvoiceId) ||
-    ((isNote || credited) && (newCurrency || newRate))
-  ) {
+  const linked =
+    before.relatedInvoiceId !== null ||
+    (before.type === "advance" && finalOf(tx, ownerId, before.id) !== null);
+  if ((newCurrency && linked) || ((isNote || credited) && (newCurrency || newRate))) {
     throw new ServiceError(V.currencyHasCredits);
   }
   const candidate = { ...before, ...values };

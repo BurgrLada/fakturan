@@ -1,7 +1,7 @@
 import "server-only";
 import { eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
+import { ADVANCE_NOTE, REVERSE_CHARGE_CLAUSE } from "@/lib/clauses";
 import { isValidIco } from "@/lib/ico";
 import type { ClauseDefaults } from "@/lib/invoice-form";
 import { TEXTS } from "@/lib/texts";
@@ -42,6 +42,8 @@ export const supplierInputSchema = z
     notVatPayerEn: text(300),
     reverseChargeCs: text(300).default(REVERSE_CHARGE_CLAUSE.cs),
     reverseChargeEn: text(300).default(REVERSE_CHARGE_CLAUSE.en),
+    advanceNoteCs: text(300).default(ADVANCE_NOTE.cs),
+    advanceNoteEn: text(300).default(ADVANCE_NOTE.en),
   })
   .superRefine((value, ctx) => {
     for (const path of ["name", "street", "city", "zip", "country"] as const) {

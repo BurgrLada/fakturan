@@ -57,6 +57,7 @@ export function IssueDialog({
     onCancel();
   };
   const isNote = summary?.type === "credit_note";
+  const isAdvance = summary?.type === "advance";
   const wrongMonth = summary?.issueDate?.slice(0, 7) !== summary?.today.slice(0, 7);
 
   return (
@@ -75,8 +76,12 @@ export function IssueDialog({
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>{isNote ? T.creditTitle : T.title}</AlertDialogTitle>
-            <AlertDialogDescription>{isNote ? T.creditBody : T.body}</AlertDialogDescription>
+            <AlertDialogTitle>
+              {isNote ? T.creditTitle : isAdvance ? T.advanceTitle : T.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isNote ? T.creditBody : isAdvance ? T.advanceBody : T.body}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           {summary?.number && <p className="text-sm font-medium">{T.number(summary.number)}</p>}
           {summary && (

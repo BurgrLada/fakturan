@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { InvoiceForm } from "@/components/invoices/invoice-form";
 import { PageLoading } from "@/components/page-loading";
 import { buttonVariants } from "@/components/ui/button";
+import { ADVANCE_FORM_PARAM, type InvoiceType } from "@/lib/invoice";
 import { formFromDocument } from "@/lib/invoice-form";
 import { TEXTS } from "@/lib/texts";
 import { formatMoney } from "@/lib/money";
@@ -12,6 +13,7 @@ import { requireSession } from "@/server/auth/session";
 import { db } from "@/server/db";
 import { creditableMinor } from "@/server/services/credit-notes";
 import { getCustomer } from "@/server/services/customers";
+import { finalOf } from "@/server/services/invoice-balance";
 import { checkIssuable } from "@/server/services/invoice-lifecycle";
 import { EDITABLE_STATUSES } from "@/server/services/invoice-versions";
 import { designChoices } from "@/server/pdf/designs";
@@ -24,8 +26,8 @@ const T = TEXTS.invoices.form;
 
 export const metadata: Metadata = { title: `${T.draftTitle} | ${TEXTS.appName}` };
 
-function newDocument(ownerId: string) {
-  const defaults = newDraftDefaults(ownerId, null);
+function newDocument(ownerId: string, type: InvoiceType) {
+  const defaults = newDraftDefaults(ownerId, null, type);
   return {
     ...defaults,
     customerId: null,
@@ -38,30 +40,35 @@ function newDocument(ownerId: string) {
   } as Parameters<typeof formFromDocument>[0];
 }
 
-async function EditContent({ params }: { params: Promise<{ id: string }> }) {
+function titleOf(type: InvoiceType, row: { number: string | null } | null, isDraft: boolean) {
+  const number = row?.number ?? "";
+  if (type === "advance") {
+    if (!row) return T.advanceNewTitle;
+    return isDraft ? T.advanceDraftTitle : T.advanceIssuedTitle(number);
+  }
+  if (!row) return T.newTitle;
+  if (type === "credit_note") return isDraft ? T.creditDraftTitle : T.creditIssuedTitle(number);
+  return isDraft ? T.draftTitle : T.issuedTitle(number);
+}
+
+async function EditContent({ params, searchParams }: PageProps<"/faktury/[id]/upravit">) {
   const { id } = await params;
+  const { typ } = await searchParams;
   const { user } = await requireSession();
   const row = getInvoice(user.id, id);
   if (!row && !isFreeDraftId(id)) notFound();
   const isDraft = !row || row.status === "draft";
   if (row && !isDraft && !EDITABLE_STATUSES.has(row.status)) redirect(`/faktury/${id}`);
 
-  const type = row?.type ?? "invoice";
+  const type = row?.type ?? (typ === ADVANCE_FORM_PARAM ? "advance" : "invoice");
   const choices = formChoices(user.id, row?.bankAccountId ?? null, type);
   const isNote = type === "credit_note";
   const customerDic =
     row?.customerSnapshot?.dic ??
     (row?.customerId ? getCustomer(user.id, row.customerId)?.dic : undefined) ??
     "";
-  const title = !row
-    ? T.newTitle
-    : isDraft
-      ? isNote
-        ? T.creditDraftTitle
-        : T.draftTitle
-      : isNote
-        ? T.creditIssuedTitle(row.number ?? "")
-        : T.issuedTitle(row.number ?? "");
+  const title = titleOf(type, row, isDraft);
+  const hasFinal = type === "advance" && finalOf(db, user.id, id) !== null;
   const creditLeft =
     isNote && row?.relatedInvoiceId
       ? T.creditLeft(
@@ -87,7 +94,7 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
         saved={row !== null}
         mailAvailable={mailAvailability(user.id).available}
         hasPayments={row !== null && !isDraft && listPayments(user.id, id).length > 0}
-        linkedParty={row?.relatedInvoiceId != null}
+        linkedParty={row?.relatedInvoiceId != null || hasFinal}
         linkedMoney={row !== null && (isNote || row.creditsMinor < 0)}
         type={type}
         mode={isDraft ? "draft" : "issued"}
@@ -98,7 +105,7 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
         customerName={row?.customerName ?? ""}
         customerDic={customerDic}
         rateListDate={row?.exchangeRateDate ?? null}
-        initial={formFromDocument(row ?? newDocument(user.id), choices.defaultUnit)}
+        initial={formFromDocument(row ?? newDocument(user.id, type), choices.defaultUnit)}
         initialTags={row?.tags.map((tag) => tag.name) ?? []}
         initialProblems={row && isDraft ? checkIssuable(user.id, id) : []}
         designs={designChoices()}
@@ -108,10 +115,13 @@ async function EditContent({ params }: { params: Promise<{ id: string }> }) {
   );
 }
 
-export default function EditInvoicePage({ params }: PageProps<"/faktury/[id]/upravit">) {
+export default function EditInvoicePage({
+  params,
+  searchParams,
+}: PageProps<"/faktury/[id]/upravit">) {
   return (
     <Suspense fallback={<PageLoading />}>
-      <EditContent params={params} />
+      <EditContent params={params} searchParams={searchParams} />
     </Suspense>
   );
 }

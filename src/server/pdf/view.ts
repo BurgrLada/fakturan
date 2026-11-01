@@ -1,4 +1,5 @@
 import "server-only";
+import { ADVANCE_NOTE } from "@/lib/clauses";
 import type { Currency } from "@/lib/currency";
 import { toDiscount } from "@/lib/invoice";
 import type { DocumentLine, InvoiceDocument } from "@/lib/invoice-document";
@@ -57,6 +58,7 @@ export type InvoiceView = {
   textAfter: string;
   note: string;
   clause: string;
+  advanceNote: string;
   vatStatement: string;
   registryNote: string;
   footer: string;
@@ -169,6 +171,13 @@ function detailRows(doc: InvoiceDocument, opts: ViewOptions, labels: DocumentLab
           ? printable(labels.correctsDate(related.number, date(related.issueDate)))
           : "",
     },
+    {
+      label: labels.advanceOf,
+      value:
+        related?.type === "advance"
+          ? printable(labels.correctsDate(related.number, date(related.issueDate)))
+          : "",
+    },
     { label: labels.issueDate, value: date(doc.issueDate ?? (opts.draft ? opts.today : null)) },
     { label: labels.dueDate, value: date(doc.dueDate) },
     { label: labels.taxableDate, value: doc.appearance.showDuzp ? date(doc.taxableDate) : "" },
@@ -203,6 +212,13 @@ function totalRows(doc: InvoiceDocument, labels: DocumentLabels): TotalRow[] {
     ...(totals.paidMinor ? [row(labels.paid, amount(totals.paidMinor))] : []),
     ...(settled ? [row(due < 0 ? labels.overpaid : labels.due, amount(Math.abs(due)), true)] : []),
   ];
+}
+
+function advanceNote(doc: InvoiceDocument): string {
+  if (doc.type !== "advance") return "";
+  const supplier = doc.snapshot.supplier;
+  const own = doc.language === "en" ? supplier?.advanceNoteEn : supplier?.advanceNoteCs;
+  return printable(own ?? ADVANCE_NOTE[doc.language]);
 }
 
 function groupIban(iban: string): string {
@@ -291,6 +307,7 @@ export async function buildInvoiceView(
     textAfter: printable(doc.textAfter),
     note: printable(doc.note),
     clause: printable(doc.clause),
+    advanceNote: advanceNote(doc),
     vatStatement: printable(
       (doc.language === "en" ? supplier?.notVatPayerEn : supplier?.notVatPayerCs) ?? "",
     ),

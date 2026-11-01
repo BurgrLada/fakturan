@@ -591,6 +591,7 @@ export function InvoiceBody({ view, tokens }: PartProps) {
       <PaymentBox view={view} tokens={tokens} />
       <TextBlock text={view.note} label={view.labels.note} tokens={tokens} />
       <TextBlock text={view.clause} tokens={tokens} />
+      <TextBlock text={view.advanceNote} tokens={tokens} />
       <TextBlock text={view.vatStatement} tokens={tokens} />
       <TextBlock text={view.registryNote} tokens={tokens} />
       <Signature view={view} tokens={tokens} />

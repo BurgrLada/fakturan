@@ -75,6 +75,19 @@ export function isCreditable(row: { type: InvoiceType; status: InvoiceStatus }):
   return row.type === "invoice" && CREDITABLE_STATUSES.includes(row.status);
 }
 
+export const ADVANCE_FORM_PARAM = "zalohova";
+
+export function isConvertibleAdvance(row: { type: InvoiceType; status: InvoiceStatus }): boolean {
+  return row.type === "advance" && CREDITABLE_STATUSES.includes(row.status);
+}
+
+export function isFinalInvoice(row: {
+  type: InvoiceType;
+  relatedInvoiceId: string | null;
+}): boolean {
+  return row.type === "invoice" && row.relatedInvoiceId !== null;
+}
+
 export function isActiveDocument(status: InvoiceStatus): boolean {
   return (ACTIVE_CREDIT_STATUSES as readonly InvoiceStatus[]).includes(status);
 }

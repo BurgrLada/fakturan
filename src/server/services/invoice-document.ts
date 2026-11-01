@@ -41,6 +41,8 @@ function supplierSnapshotOf(row: typeof supplier.$inferSelect): SupplierSnapshot
     footerText: row.footerText,
     notVatPayerCs: row.notVatPayerCs,
     notVatPayerEn: row.notVatPayerEn,
+    advanceNoteCs: row.advanceNoteCs,
+    advanceNoteEn: row.advanceNoteEn,
   };
 }
 

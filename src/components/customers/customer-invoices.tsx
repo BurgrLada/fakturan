@@ -28,6 +28,12 @@ export function CustomerInvoices({ ownerId, customerId }: { ownerId: string; cus
           <dd className="text-right">{formatMoney(sum.paidMinor, sum.currency)}</dd>
           <dt className="text-muted-foreground">{T.outstanding}</dt>
           <dd className="text-right">{formatMoney(sum.outstandingMinor, sum.currency)}</dd>
+          {sum.advanceOpenMinor > 0 && (
+            <>
+              <dt className="text-muted-foreground">{T.advanceOpen}</dt>
+              <dd className="text-right">{formatMoney(sum.advanceOpenMinor, sum.currency)}</dd>
+            </>
+          )}
         </dl>
       ))}
       {rows.length === 0 ? (
