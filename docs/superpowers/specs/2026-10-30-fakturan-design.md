@@ -70,7 +70,6 @@ Není součástí první verze, ale architektura s ním počítá:
 - **2FA (TOTP) a passkeys** přes pluginy Better Auth.
 - **Widget s vlastním kódem** v izolovaném sandboxu: iframe bez přístupu k session, síti a stejnému originu, data dostane jen přes `postMessage`.
 - **Editor rozložení faktur** v aplikaci.
-- **Více HTML šablon e-mailů** na výběr, podobně jako designy faktur.
 - **Další banky** přes nové parsery avíz. **Fio API.** Univerzální open banking.
 - **Souhrnné hlášení** pro identifikované osoby.
 - **Další jazyky faktur**, rozhraní s i18n.
@@ -366,7 +365,8 @@ Proměnné jde použít v položkách, poznámkách i předmětu e-mailu.
 - **MAIL-006** Historie odeslání na faktuře: kdy, komu, předmět, výsledek, archivovaný PDF.
 - **MAIL-007** Odkaz „potvrzení přijetí“ a sledovací pixely se nepoužívají.
 - **MAIL-008** Hromadné odeslání ukáže souhrn příjemců a vyžaduje potvrzení.
-- **MAIL-009** Zprávy klientovi mají kromě prostého textu i HTML verzi z jedné neutrální šablony bez barev Fakturanu a bez značky aplikace. Zadavatel preferuje typ Karta, konkrétní vzhled čeká na výběr. HTML zpráva k faktuře může obsahovat QR platbu, pokud ji faktura má.
+- **MAIL-009** Zprávy klientovi mají kromě prostého textu i HTML verzi. Uživatel v Nastavení vybírá ze sedmi vzhledů podle `docs/superpowers/mockups/email-sablony.html`: B1 až B5, A a C. Výchozí je B4 Tmavá hlavička, vše bez barev a značky Fakturanu.
+- **MAIL-010** V Nastavení jde k HTML zprávě zadat vlastní úvodní text, podpis a logo. Logo je ve výchozím stavu to z profilu dodavatele, jde nahradit vlastním. Hodnoty platí pro všechny typy zpráv, text konkrétní zprávy jde dál upravit v dialogu odeslání. Vzhledy s místem pro QR ho ukážou, pokud ho faktura má.
 
 ## 12. Upomínky (REM)
 

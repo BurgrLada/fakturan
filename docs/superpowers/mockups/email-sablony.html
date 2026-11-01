@@ -1,0 +1,197 @@
+<title>Šablony e-mailu k faktuře</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: katalog variant, každý návrh je samostatný náhled zprávy v poštovním klientovi. */
+:root {
+  --bg: #eef0f2; --fg: #1c2127; --muted: #5d6671; --panel: #ffffff; --line: #d3d8de; --accent: #2f5d62;
+  --ui: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #15191d; --fg: #e8ebee; --muted: #a1abb5; --panel: #1f252b; --line: #38414a; --accent: #8cc0c5; color-scheme: dark }
+}
+:root[data-theme="dark"] { --bg: #15191d; --fg: #e8ebee; --muted: #a1abb5; --panel: #1f252b; --line: #38414a; --accent: #8cc0c5; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--ui); font-size: 15px; line-height: 1.5 }
+.wrap { max-width: 1320px; margin: 0 auto; padding-block: 32px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+h1 { font-size: 30px; line-height: 1.15; margin: 0 0 8px; text-wrap: balance }
+h2 { font-size: 19px; margin: 40px 0 4px }
+.lead { color: var(--muted); max-width: 68ch; margin: 0 }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 24px; margin-top: 16px; align-items: start }
+figure { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px }
+figcaption { display: flex; flex-direction: column; gap: 2px }
+figcaption b { font-size: 16px }
+figcaption span { color: var(--muted); font-size: 14px }
+.client { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel) }
+.head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); overflow-wrap: anywhere }
+.head strong { color: var(--fg); font-weight: 600 }
+
+/* Vzhled zprávy je záměrně pevný: poštovní klient nedědí téma této stránky. */
+.m { --ink: #20252b; --soft: #626b75; --rule: #dfe3e7; --tint: #f4f5f6; --mark: #2b3440; color: var(--ink); background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.55; padding: 24px; overflow-wrap: anywhere }
+.m.gray { background: #eceef0 }
+.m p { margin: 0 0 12px }
+.m small, .m .s { color: var(--soft); font-size: 13px }
+.m .card { background: #fff; border: 1px solid var(--rule); border-radius: 8px; padding: 22px }
+.m .logo { font-weight: 700; font-size: 17px; letter-spacing: -.01em; margin-bottom: 16px }
+.m .amt { font-size: 30px; font-weight: 700; line-height: 1.15; color: var(--ink); font-variant-numeric: tabular-nums }
+.m .rows { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px }
+.m .rows td { padding: 7px 0; border-top: 1px solid var(--rule); vertical-align: top }
+.m .rows td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums }
+.m .side { display: flex; gap: 16px; align-items: center; flex-wrap: wrap }
+.m .side > div:first-child { flex: 1; min-width: 150px }
+.m .qr { background: #fff; display: block; flex: none }
+.m .tint { background: var(--tint); border-radius: 6px; padding: 16px }
+.m .foot { margin-top: 14px; color: var(--soft); font-size: 12px; text-align: center }
+.m .band { background: var(--mark); color: #fff; padding: 18px 22px; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline }
+.m .band b { font-size: 16px }
+.m .body { background: #fff; border: 1px solid var(--rule); border-top: 0; border-radius: 0 0 8px 8px; padding: 22px }
+.m .tag { display: inline-block; font-size: 12px; font-weight: 700; background: var(--tint); border-radius: 4px; padding: 2px 8px; color: var(--ink) }
+.m .pdf { display: inline-block; font-size: 13px; color: var(--soft); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; margin-top: 4px }
+.m .rule { height: 3px; background: #0f6c74; border-radius: 2px; margin-bottom: 16px; width: 56px }
+.m .center { text-align: center }
+.m .center .qr { margin: 12px auto 4px }
+ul.notes { margin: 8px 0 0; padding-left: 20px; color: var(--muted); max-width: 70ch }
+.pick { margin-top: 12px; display: inline-flex; gap: 8px; align-items: center; font-size: 14px }
+</style>
+
+<main class="wrap">
+  <h1>Šablony e-mailu k faktuře</h1>
+  <p class="lead">Pět variant karty a dvě dřívější alternativy pro srovnání. Všechna data jsou smyšlená a QR kódy jsou jen zástupné obrázky, nejdou naskenovat. Vzhled je neutrální, logo a jméno patří uživateli, značka Fakturanu nikde není.</p>
+
+  <h2>Karta</h2>
+  <p class="lead">Šedé pozadí a bílá karta. Liší se tím, co je první a kde je QR.</p>
+  <div class="grid">
+
+    <figure>
+      <figcaption><b>B1 Základní karta</b><span>Bez QR. Nejkratší zpráva, platební údaje jsou v PDF.</span></figcaption>
+      <div class="client"><div class="head"><strong>Faktura 2026-040</strong> · Studio Příklad &lt;fakturace@studio-priklad.example&gt;</div>
+        <div class="m gray"><div class="card">
+          <div class="logo">Studio Příklad</div>
+          <p>Dobrý den, posíláme fakturu za říjen.</p>
+          <div class="s">K úhradě</div><div class="amt">12 100,00 Kč</div>
+          <table class="rows"><tr><td>Číslo faktury</td><td>2026-040</td></tr><tr><td>Splatnost</td><td>14. 11. 2026</td></tr></table>
+          <span class="pdf">Příloha: 2026-040.pdf</span>
+        </div><div class="foot">Studio Příklad · IČO 12345678</div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption><b>B2 Karta s QR vedle částky</b><span>Doporučuju. Částka a QR jsou vidět hned, na telefonu se QR přesune pod ni.</span></figcaption>
+      <div class="client"><div class="head"><strong>Faktura 2026-040</strong> · Studio Příklad &lt;fakturace@studio-priklad.example&gt;</div>
+        <div class="m gray"><div class="card">
+          <div class="logo">Studio Příklad</div>
+          <p>Dobrý den, posíláme fakturu za říjen.</p>
+          <div class="side"><div><div class="s">K úhradě</div><div class="amt">12 100,00 Kč</div><div class="s">Splatnost 14. 11. 2026</div></div><svg class="qr" data-size="112"></svg></div>
+          <table class="rows"><tr><td>Účet</td><td>123456789/0800</td></tr><tr><td>Variabilní symbol</td><td>2026040</td></tr></table>
+          <span class="pdf">Příloha: 2026-040.pdf</span>
+        </div><div class="foot">Studio Příklad · IČO 12345678</div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption><b>B3 Platební blok</b><span>QR a údaje jsou v jednom šedém bloku, text zprávy je nad ním. Působí nejvíc jako doklad.</span></figcaption>
+      <div class="client"><div class="head"><strong>Faktura 2026-040</strong> · Studio Příklad &lt;fakturace@studio-priklad.example&gt;</div>
+        <div class="m gray"><div class="card">
+          <div class="logo">Studio Příklad</div>
+          <p>Dobrý den, posíláme fakturu 2026-040 za říjen. Fakturu najdete v příloze.</p>
+          <div class="tint"><div class="side"><div><div class="s">K úhradě do 14. 11. 2026</div><div class="amt">12 100,00 Kč</div><div class="s">Účet 123456789/0800<br>VS 2026040</div></div><svg class="qr" data-size="104"></svg></div></div>
+          <p class="s" style="margin:12px 0 0">Stačí naskenovat QR kód v aplikaci banky.</p>
+        </div><div class="foot">Studio Příklad · IČO 12345678</div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption><b>B4 Tmavá hlavička</b><span>Výraznější, stále bez značky. Barva pásu by šla převzít z akcentu faktury.</span></figcaption>
+      <div class="client"><div class="head"><strong>Faktura 2026-040</strong> · Studio Příklad &lt;fakturace@studio-priklad.example&gt;</div>
+        <div class="m gray">
+          <div class="band"><b>Studio Příklad</b><span>Faktura 2026-040</span></div>
+          <div class="body">
+            <p>Dobrý den, posíláme fakturu za říjen.</p>
+            <div class="side"><div><div class="s">K úhradě</div><div class="amt">12 100,00 Kč</div><div class="s">Splatnost 14. 11. 2026 · VS 2026040</div></div><svg class="qr" data-size="104"></svg></div>
+          </div>
+          <div class="foot">Studio Příklad · IČO 12345678</div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption><b>B5 Na střed</b><span>Velká částka a pod ní QR. Dobře se čte na telefonu, zpráva je ale delší.</span></figcaption>
+      <div class="client"><div class="head"><strong>Faktura 2026-040</strong> · Studio Příklad &lt;fakturace@studio-priklad.example&gt;</div>
+        <div class="m gray"><div class="card center">
+          <div class="logo">Studio Příklad</div>
+          <span class="tag">Faktura 2026-040</span>
+          <div class="amt" style="margin-top:12px">12 100,00 Kč</div>
+          <div class="s">Splatnost 14. 11. 2026</div>
+          <svg class="qr" data-size="132"></svg>
+          <div class="s">Účet 123456789/0800 · VS 2026040</div>
+          <p style="margin:14px 0 0">Dobrý den, posíláme fakturu za říjen.</p>
+        </div><div class="foot">Studio Příklad · IČO 12345678</div></div>
+      </div>
+    </figure>
+
+  </div>
+
+  <h2>Dřívější alternativy</h2>
+  <div class="grid">
+    <figure>
+      <figcaption><b>A Dopis</b><span>Bílé pozadí bez karty, působí jako osobní e-mail.</span></figcaption>
+      <div class="client"><div class="head"><strong>Faktura 2026-040</strong> · Studio Příklad &lt;fakturace@studio-priklad.example&gt;</div>
+        <div class="m">
+          <div class="logo">Studio Příklad</div>
+          <p>Dobrý den,</p><p>posíláme fakturu za říjen. Fakturu najdete v příloze.</p>
+          <table class="rows"><tr><td>Číslo faktury</td><td>2026-040</td></tr><tr><td>K úhradě</td><td>12 100,00 Kč</td></tr><tr><td>Splatnost</td><td>14. 11. 2026</td></tr></table>
+          <p class="s">S pozdravem<br>Jana Příkladová</p>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption><b>C Akcent</b><span>Dopis s tenkou linkou v barvě z designu faktury.</span></figcaption>
+      <div class="client"><div class="head"><strong>Faktura 2026-040</strong> · Studio Příklad &lt;fakturace@studio-priklad.example&gt;</div>
+        <div class="m">
+          <div class="rule"></div>
+          <div class="logo">Studio Příklad</div>
+          <p>Dobrý den,</p><p>posíláme fakturu za říjen. Fakturu najdete v příloze.</p>
+          <table class="rows"><tr><td>Číslo faktury</td><td>2026-040</td></tr><tr><td>K úhradě</td><td>12 100,00 Kč</td></tr><tr><td>Splatnost</td><td>14. 11. 2026</td></tr></table>
+          <p class="s">S pozdravem<br>Jana Příkladová</p>
+        </div>
+      </div>
+    </figure>
+  </div>
+
+  <h2>Co platí pro všechny varianty</h2>
+  <ul class="notes">
+    <li>Text zprávy si uživatel dál upravuje v šabloně, grafika ho jen obalí.</li>
+    <li>Každá zpráva má i verzi v prostém textu pro klienty bez HTML.</li>
+    <li>QR je vložený přímo do zprávy jako obrázek, žádný externí odkaz ani sledování.</li>
+    <li>Upomínka a potvrzení platby používají stejný rám, QR má jen zpráva s dluhem a odpovídá zbývající částce.</li>
+    <li>Finální HTML půjde postavit na tabulkách kvůli Outlooku, takže drobné detaily se mohou lišit.</li>
+  </ul>
+</main>
+
+<script>
+document.querySelectorAll("svg.qr").forEach((svg, index) => {
+  const cells = 29;
+  const size = Number(svg.dataset.size);
+  svg.setAttribute("viewBox", `0 0 ${cells} ${cells}`);
+  svg.setAttribute("width", size);
+  svg.setAttribute("height", size);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Zástupný obrázek QR kódu");
+  let seed = 7919 * (index + 1);
+  const next = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const finder = (x, y) => (a, b) => {
+    const dx = a - x, dy = b - y;
+    if (dx < -1 || dy < -1 || dx > 7 || dy > 7) return null;
+    if (dx < 0 || dy < 0 || dx > 6 || dy > 6) return false;
+    return dx === 0 || dy === 0 || dx === 6 || dy === 6 || (dx > 1 && dx < 5 && dy > 1 && dy < 5);
+  };
+  const finders = [finder(0, 0), finder(22, 0), finder(0, 22)];
+  let rects = "";
+  for (let y = 0; y < cells; y++) for (let x = 0; x < cells; x++) {
+    const fixed = finders.map((f) => f(x, y)).find((v) => v !== null);
+    const on = fixed === undefined ? next() > 0.5 : fixed;
+    if (on) rects += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="#111"/>`;
+  }
+  svg.innerHTML = rects;
+});
+</script>
