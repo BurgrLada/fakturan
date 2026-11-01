@@ -1,11 +1,12 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq, ne } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { AUTOMATIONS, type AutomationKey } from "@/lib/automation";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
-import { invoice, job, schedulerState, user } from "@/server/db/schema";
+import { auditLog, emailLog, invoice, job, schedulerState, user } from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
 import {
   deadMailTask,
@@ -251,6 +252,71 @@ describe("[TST-016] matice ticha", () => {
     },
     60_000,
   );
+});
+
+describe("[SET-043] vypnutí během čekání na další pokus", () => {
+  type Stop = (owner: string) => void;
+  const STOPS: [string, Stop, Stop][] = [
+    [
+      "hlavní vypínač",
+      (owner) => setPaused(webActor(owner), true, { confirmed: false }),
+      (owner) => setPaused(webActor(owner), false, ENABLED),
+    ],
+    [
+      "vypnutá automatika",
+      (owner) => setAutomation(webActor(owner), "paymentReceipt", false, ENABLED),
+      (owner) => setAutomation(webActor(owner), "paymentReceipt", true, ENABLED),
+    ],
+  ];
+
+  const logOf = (owner: string) =>
+    db.select().from(emailLog).where(eq(emailLog.userId, owner)).get()!;
+
+  function waitingForRetry(): string {
+    const owner = armed("paymentReceipt");
+    db.update(emailLog).set({ attempts: 1 }).where(eq(emailLog.userId, owner)).run();
+    db.update(job)
+      .set({ runAt: new Date(T0.getTime() + 300_000), attempts: 1 })
+      .where(and(eq(job.userId, owner), eq(job.kind, "mail.send")))
+      .run();
+    return owner;
+  }
+
+  test.each(STOPS)(
+    "%s zadrží čekající zprávu a opětovné zapnutí ji nepustí",
+    async (_name, stop, resume) => {
+      const owner = waitingForRetry();
+
+      stop(owner);
+      expect(logOf(owner)).toMatchObject({
+        status: "held",
+        reason: TEXTS.invoiceMail.reasons.automation,
+      });
+      resume(owner);
+      await everyDay();
+
+      expect(toClient()).toEqual([]);
+      expect(logOf(owner).status).toBe("held");
+      const held = db.select().from(auditLog).where(eq(auditLog.action, "mail.held")).all();
+      expect(held.filter((row) => row.ownerId === owner)).toHaveLength(1);
+      assertConsistent(db, owner);
+    },
+    60_000,
+  );
+
+  test("vypnutí jiné automatiky zprávu nezadrží", () => {
+    const owner = waitingForRetry();
+    setAutomation(webActor(owner), "reminders", true, ENABLED);
+    setAutomation(webActor(owner), "reminders", false, ENABLED);
+    expect(logOf(owner).status).toBe("queued");
+  });
+
+  test("ruční zpráva ve frontě hlavním vypínačem nezmizí", () => {
+    const owner = waitingForRetry();
+    db.update(emailLog).set({ trigger: "manual" }).where(eq(emailLog.userId, owner)).run();
+    setPaused(webActor(owner), true, { confirmed: false });
+    expect(logOf(owner).status).toBe("queued");
+  });
 });
 
 describe("bez kliknutí", () => {

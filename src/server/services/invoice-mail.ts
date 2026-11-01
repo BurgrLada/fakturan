@@ -25,6 +25,7 @@ import { composeMail, type MailDraft } from "./email-templates";
 import { FileNotFoundError, readOwnedFile } from "./files";
 import { InvoicePdfNotFoundError } from "./invoice-pdf";
 import { findOwned, getInvoice, type Invoice } from "./invoices";
+import { mailNoticeKey } from "./mail-hold";
 import { mailAvailability } from "./mail-settings";
 import { mutate } from "./mutation";
 import { notify, resolveNotification } from "./notifications";
@@ -53,7 +54,7 @@ export type QueueInput = {
   paymentId?: string;
 };
 
-export const mailNoticeKey = (logId: string) => `mail:${logId}`;
+export { mailNoticeKey };
 
 // Receipts of two payments are separate messages: one never answers for or replaces the other.
 export const samePayment = (t: typeof emailLog, paymentId: string | null) =>

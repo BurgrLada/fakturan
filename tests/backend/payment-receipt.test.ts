@@ -8,7 +8,15 @@ import { formatMoney } from "@/lib/money";
 import { notificationText } from "@/lib/notification-text";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
-import { customer, emailLog, job, mailSettings, notification, payment } from "@/server/db/schema";
+import {
+  auditLog,
+  customer,
+  emailLog,
+  job,
+  mailSettings,
+  notification,
+  payment,
+} from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { ServiceError } from "@/server/services/access";
@@ -447,6 +455,8 @@ describe("souběh a vrácení", () => {
       expect(smtp.connections()).toBe(0);
       expect(logsOf(owner)[0]).toMatchObject({ status: "held", reason: R.paymentChanged });
       expect(noticesOf(owner)).toEqual([]);
+      const audited = db.select().from(auditLog).where(eq(auditLog.action, "mail.held")).all();
+      expect(audited.filter((row) => row.ownerId === owner)).toHaveLength(1);
       assertConsistent(db, owner);
     });
 

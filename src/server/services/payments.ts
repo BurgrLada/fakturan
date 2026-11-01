@@ -18,10 +18,11 @@ import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { bankNotification, emailLog, invoice, payment } from "../db/schema";
+import { bankNotification, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { findOwned, ownerOf, type Invoice } from "./invoices";
+import { holdQueuedMail } from "./mail-hold";
 import { mutate, type Audit } from "./mutation";
 
 const E = TEXTS.payments.errors;
@@ -257,23 +258,6 @@ function assertAmountsEditable(
   if (!same) throw new ServiceError(E.noticeLocked);
 }
 
-// {{prijato}} is already rendered into the queued message, so it would state the old values. Only
-// `queued`: what is sending or sent can no longer be recalled.
-function holdQueuedReceipts(tx: Tx, userId: string, paymentId: string): void {
-  tx.update(emailLog)
-    .set({
-      status: "held",
-      reason: TEXTS.invoiceMail.reasons.paymentChanged,
-      updatedAt: clock.now(),
-    })
-    .where(
-      scoped(userId).where(emailLog, (t, { and, eq }) =>
-        and(eq(t.paymentId, paymentId), eq(t.status, "queued")),
-      ),
-    )
-    .run();
-}
-
 export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id: string } {
   const userId = ownerOf(actor);
   const input = parseInput(raw);
@@ -293,8 +277,15 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
     const told =
       paidOn === before.paidOn &&
       amountMinor === before.amountMinor &&
+      creditedMinor === before.creditedMinor &&
       currency === before.currency;
-    if (!told) holdQueuedReceipts(tx, userId, id);
+    // {{prijato}} is already rendered into a queued message, which would state the old values.
+    if (!told) {
+      holdQueuedMail(tx, audit, userId, (t) => eq(t.paymentId, id), {
+        reason: TEXTS.invoiceMail.reasons.paymentChanged,
+        quiet: true,
+      });
+    }
     const after = applyPayments(tx, userId, before.invoiceId);
     audit({
       entity: "payment",

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, count, eq, exists, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, count, eq, exists, inArray, isNull, ne, or, type SQL } from "drizzle-orm";
 import {
   AUTOMATIONS,
   DEFAULT_AUTOMATION,
@@ -13,9 +13,17 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { automationSettings, customer, invoice, recurringInvoice, user } from "../db/schema";
+import {
+  automationSettings,
+  customer,
+  emailLog,
+  invoice,
+  recurringInvoice,
+  user,
+} from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError } from "./access";
+import { holdQueuedMail } from "./mail-hold";
 import { mutate } from "./mutation";
 
 const T = TEXTS.automation.errors;
@@ -104,6 +112,8 @@ type Change = {
   action: string;
   patch: Partial<typeof automationSettings.$inferInsert>;
   after: Record<string, unknown>;
+  // A message waiting for its next attempt must not slip out after a later resume.
+  holds?: (t: typeof emailLog) => SQL | undefined;
 };
 
 function apply(actor: Actor, change: (before: AutomationSettings) => Change | null): void {
@@ -135,6 +145,13 @@ function apply(actor: Actor, change: (before: AutomationSettings) => Change | nu
       before,
       after: next.after,
     });
+    if (next.holds) {
+      const { holds } = next;
+      holdQueuedMail(tx, audit, userId, (t) => and(eq(t.trigger, "automatic"), holds(t)), {
+        reason: TEXTS.invoiceMail.reasons.automation,
+        quiet: false,
+      });
+    }
   });
 }
 
@@ -161,6 +178,7 @@ export function setAutomation(
         ...(key === "reminders" && enabled ? { remindersOpenSince: today() } : {}),
       },
       after: { key, enabled },
+      ...(!enabled && { holds: (t: typeof emailLog) => eq(t.automation, key) }),
     };
   });
 }
@@ -176,6 +194,7 @@ export function setPaused(actor: Actor, paused: boolean, opts: { confirmed: bool
         ...(!paused && before.reminders ? { remindersOpenSince: today() } : {}),
       },
       after: { paused },
+      ...(paused && { holds: () => undefined }),
     };
   });
 }
