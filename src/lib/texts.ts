@@ -690,6 +690,8 @@ export const TEXTS = {
       notClosable: "Rozdíl jde uzavřít jen u částečně uhrazeného dokladu",
       confirmDifference: "Potvrďte uzavření rozdílu",
       differenceLocked: "Uzavřený rozdíl upravit nejde, jde jen smazat",
+      differenceClosed:
+        "Na dokladu je uzavřený rozdíl počítaný z této platby. Nejdřív rozdíl smažte, potom jde platbu změnit.",
       noticeLocked: "U platby z avíza jde změnit jen datum, způsob a poznámku",
       noticeDelete: "Platbu z avíza jde odebrat jen vrácením celého avíza",
     },
@@ -1484,7 +1486,7 @@ export const TEXTS = {
       conflict:
         "Ověřené avízo se liší od dřívější neověřené zprávy se stejným ID pokynu. Ukázané jsou údaje z ověřeného avíza, zkontrolujte je.",
       manual_duplicate:
-        "U dokladu už je ruční platba se stejnou částkou a datem, může jít o tytéž peníze.",
+        "U dokladu už je ruční platba se stejnou částkou a podobným datem, může jít o tytéž peníze.",
       future_date: "Avízo má datum v budoucnosti.",
     },
     statuses: {

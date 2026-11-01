@@ -2,7 +2,7 @@ import type { AuthResult } from "./bank-notices/auth";
 import { isProvisional } from "./bank-notices";
 import type { NoticeVariant } from "./bank-notices/types";
 import type { Currency } from "./currency";
-import { AWAITING_PAYMENT, type InvoiceStatus } from "./invoice";
+import { AWAITING_PAYMENT, daysBetween, type InvoiceStatus } from "./invoice";
 import type { CalendarDate } from "./number-format";
 import { amountDue } from "./qr-payload";
 
@@ -23,6 +23,8 @@ export const QUEUE_REASONS = [
   "future_date",
 ] as const;
 export type QueueReason = (typeof QUEUE_REASONS)[number];
+
+const MANUAL_DUPLICATE_DAYS = 7;
 
 export type MatchableNotice = {
   variant: NoticeVariant;
@@ -102,9 +104,12 @@ export function matchNotice(
   if (onAccount.length === 0) return queue("other_account", sameAmount);
   if (onAccount.length > 1) return queue("multiple", onAccount);
   const [only] = onAccount as [MatchCandidate];
-  // The user may have written this very money down by hand before the notice arrived.
+  // The user may have written this very money down by hand before the notice arrived, and the
+  // date they typed need not be the bank's.
   const recorded = only.manualPayments.some(
-    (row) => row.amountMinor === notice.amountMinor && row.paidOn === notice.paidOn,
+    (row) =>
+      row.amountMinor === notice.amountMinor &&
+      Math.abs(daysBetween(row.paidOn, notice.paidOn)) <= MANUAL_DUPLICATE_DAYS,
   );
   if (recorded) return queue("manual_duplicate", onAccount);
   return { result: "match", invoiceId: only.id };

@@ -193,12 +193,24 @@ describe("matchNotice", () => {
 
   test("ruční platba jiné částky nebo data párování nezastaví", () => {
     const other = [
-      { amountMinor: 100_000, paidOn: "2026-10-29" },
+      { amountMinor: 100_000, paidOn: "2026-10-22" },
       { amountMinor: 99_999, paidOn: "2026-10-30" },
     ];
     expect(match(notice(), [candidate({ manualPayments: other })])).toMatchObject({
       result: "match",
     });
+  });
+
+  test.each([
+    ["2026-10-23", "manual_duplicate"],
+    ["2026-11-06", "manual_duplicate"],
+    ["2026-10-22", null],
+    ["2026-11-07", null],
+  ])("[BNK-008] ruční platba z %s proti avízu z 30. 10.", (paidOn, reason) => {
+    const manualPayments = [{ amountMinor: 100_000, paidOn }];
+    expect(match(notice({ paidOn: "2026-10-30" }), [candidate({ manualPayments })])).toMatchObject(
+      reason ? { result: "queue", reason } : { result: "match" },
+    );
   });
 
   test("ruční platba se stejnou částkou a datem nabídne ten doklad", () => {

@@ -277,6 +277,32 @@ describe("zápis plateb", () => {
     expect(row(owner, id)).toMatchObject({ status: "partially_paid", paidMinor: TOTAL - 37 });
   });
 
+  test("[PAY-007] platbu pod uzavřeným rozdílem nejde smazat ani změnit její částku", () => {
+    const { owner, id } = account();
+    const { id: paymentId } = pay(owner, id, { amountMinor: TOTAL - 37 });
+    const closed = closeDifference(webActor(owner), id, {
+      revision: revisionOf(owner, id),
+      confirmed: true,
+    });
+
+    expect(() => deletePayment(webActor(owner), paymentId, revisionOf(owner, id))).toThrow(
+      E.differenceClosed,
+    );
+    expect(() =>
+      updatePayment(webActor(owner), paymentId, input(owner, id, { amountMinor: TOTAL - 40 })),
+    ).toThrow(E.differenceClosed);
+    updatePayment(
+      webActor(owner),
+      paymentId,
+      input(owner, id, { amountMinor: TOTAL - 37, note: "jen poznámka" }),
+    );
+
+    deletePayment(webActor(owner), closed.id, revisionOf(owner, id));
+    deletePayment(webActor(owner), paymentId, revisionOf(owner, id));
+    expect(listPayments(owner, id)).toEqual([]);
+    assertConsistent(db, owner);
+  });
+
   test("[PAY-007] uzavřít jde jen částečně uhrazený doklad", () => {
     const { owner, id } = account();
 

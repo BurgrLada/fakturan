@@ -149,6 +149,22 @@ export function insertPayment(
   return { id };
 }
 
+// A closed difference was computed from the money received: changing that money would leave a
+// paid document whose difference no longer matches.
+function hasDifference(q: Reader, userId: string, invoiceIds: string[]): boolean {
+  const closed = q
+    .select({ id: payment.id })
+    .from(payment)
+    .where(
+      scoped(userId).where(payment, (t, { and, eq }) =>
+        and(eq(t.kind, "difference"), inArray(t.invoiceId, invoiceIds)),
+      ),
+    )
+    .limit(1)
+    .get();
+  return closed !== undefined;
+}
+
 // R-22: the one way back from a matched notice. Every payment of the notice goes, each invoice's
 // state is recomputed, and the notice returns to the queue, from where nothing matches it again.
 export function undoNoticeIn(tx: Tx, audit: Audit, userId: string, noticeId: string): void {
@@ -166,19 +182,9 @@ export function undoNoticeIn(tx: Tx, audit: Audit, userId: string, noticeId: str
     .where(scoped(userId).where(payment, (t, { eq }) => eq(t.notificationId, noticeId)))
     .all();
   const touched = [...new Set(removed.map((row) => row.invoiceId))];
-  // A closed difference was computed from the money this notice brought: removing the payment
-  // would leave a paid document whose difference no longer matches.
-  const closed = tx
-    .select({ id: payment.id })
-    .from(payment)
-    .where(
-      scoped(userId).where(payment, (t, { and, eq }) =>
-        and(eq(t.kind, "difference"), inArray(t.invoiceId, touched)),
-      ),
-    )
-    .limit(1)
-    .get();
-  if (closed) throw new ServiceError(TEXTS.bankQueue.errors.differenceClosed);
+  if (hasDifference(tx, userId, touched)) {
+    throw new ServiceError(TEXTS.bankQueue.errors.differenceClosed);
+  }
 
   tx.delete(payment)
     .where(scoped(userId).where(payment, (t, { eq }) => eq(t.notificationId, noticeId)))
@@ -271,6 +277,9 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
     const { paidOn, amountMinor, currency, method, note } = input;
     const creditedMinor = creditedFor(row, input);
     assertAmountsEditable(before, { amountMinor, currency, creditedMinor });
+    if (creditedMinor !== before.creditedMinor && hasDifference(tx, userId, [before.invoiceId])) {
+      throw new ServiceError(E.differenceClosed);
+    }
 
     tx.update(payment)
       .set({ paidOn, amountMinor, currency, creditedMinor, method, note, updatedAt: clock.now() })
@@ -310,6 +319,9 @@ export function deletePayment(actor: Actor, id: string, revision: number): void 
     assertRevision(row, revision);
     if (before.notificationId) return undoNoticeIn(tx, audit, userId, before.notificationId);
     if (before.source === "notice") throw new ServiceError(E.noticeDelete);
+    if (before.kind === "payment" && hasDifference(tx, userId, [before.invoiceId])) {
+      throw new ServiceError(E.differenceClosed);
+    }
 
     tx.delete(payment)
       .where(scoped(userId).where(payment, (t, { eq }) => eq(t.id, id)))
