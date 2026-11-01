@@ -3,6 +3,7 @@ import {
   canAmendPayment,
   canTakePayment,
   deriveStatus,
+  isRefund,
   PAYMENT_CHANNELS,
   PAYMENT_KINDS,
   PAYMENT_SOURCES,
@@ -92,6 +93,18 @@ describe("deriveStatus", () => {
 
   test("po vrácení celé zálohy jde faktura na základní stav", () => {
     expect(deriveStatus({ ...sent, status: "paid" })).toBe("sent");
+  });
+
+  test("zůstatek uzavřený opravou a zálohou zůstává uhrazený, ne dobropisovaný", () => {
+    expect(deriveStatus({ ...sent, creditsMinor: -400, advanceMinor: 600 })).toBe("paid");
+  });
+});
+
+describe("isRefund", () => {
+  test("vrácení je jen záporně připsaná částka", () => {
+    expect(isRefund({ creditedMinor: -1 })).toBe(true);
+    expect(isRefund({ creditedMinor: 0 })).toBe(false);
+    expect(isRefund({ creditedMinor: 1 })).toBe(false);
   });
 });
 

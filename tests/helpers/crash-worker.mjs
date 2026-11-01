@@ -65,6 +65,8 @@ const { createDb, setDbForTests } = await import("@/server/db");
 const { registerJob } = await import("@/server/jobs/registry");
 const { drainJobs } = await import("@/server/jobs/worker");
 const { pollMailbox } = await import("@/server/services/bank-poll");
+const { runRateFetch } = await import("@/server/services/exchange-rates");
+const { issueInvoice } = await import("@/server/services/invoice-lifecycle");
 const { deliverMail, recoverMail } = await import("@/server/services/mail-delivery");
 const { runRecurringJob } = await import("@/server/services/recurring-run");
 
@@ -74,14 +76,22 @@ setClockForTests({ now: () => new Date(now) });
 registerJob("mail.send", { run: deliverMail, recover: recoverMail });
 registerJob("recurring.run", { run: runRecurringJob });
 registerJob("bank.poll", { run: pollMailbox });
+registerJob("fx.fetch", { run: runRateFetch });
 
 db.$client.function("crash_now", () => die());
-// Each fires in the transaction of its own write: the number taken, the payment of a notice, and
-// the cursor moving past a notice that is already committed.
+// Each fires in the transaction of its own write: the number taken, the payment of a notice, the
+// final invoice behind a paid advance, the balance of a credited invoice, the first row of a list,
+// and the cursor moving past a notice that is already committed.
+const CURSOR = `BEFORE UPDATE OF last_uid ON main.bank_mailbox WHEN new.last_uid IS NOT NULL`;
 const TRIGGERS = {
   in_run_tx: `AFTER UPDATE OF number ON main.invoice WHEN new.number IS NOT NULL`,
   in_notice_tx: `AFTER INSERT ON main.payment`,
-  after_notice_tx: `BEFORE UPDATE OF last_uid ON main.bank_mailbox WHEN new.last_uid IS NOT NULL`,
+  after_notice_tx: CURSOR,
+  in_advance_tx: `AFTER INSERT ON main.invoice WHEN new.type = 'invoice'
+    AND new.related_invoice_id IS NOT NULL`,
+  after_advance_tx: CURSOR,
+  in_credit_tx: `AFTER UPDATE OF credits_minor ON main.invoice WHEN new.credits_minor < 0`,
+  in_fx_tx: `AFTER INSERT ON main.exchange_rate`,
 };
 if (TRIGGERS[killAt]) {
   db.$client.exec(
@@ -89,6 +99,11 @@ if (TRIGGERS[killAt]) {
   );
 }
 
-await drainJobs("mrtvy-proces");
+if (process.env.CRASH_ISSUE) {
+  const { actor, invoiceId, revision } = JSON.parse(process.env.CRASH_ISSUE);
+  issueInvoice(actor, invoiceId, { revision });
+} else {
+  await drainJobs("mrtvy-proces");
+}
 process.exitCode = 1;
 console.error("Fronta doběhla bez pádu");

@@ -1,11 +1,18 @@
 import type { Page } from "@playwright/test";
+import { startImap } from "../helpers/imap";
+import { startSmtp } from "../helpers/smtp";
+import { VS } from "../helpers/fio-mail";
+import { checkNow, notice, saveMailbox } from "./bank-flow";
 import { expect, test } from "./fixtures";
 import {
+  addAccount,
   addCustomer,
   addSupplier,
   chooseCustomer,
+  CUSTOMER,
   fillLine,
   issue,
+  ownServer,
   register,
   settled,
 } from "./invoice-helpers";
@@ -121,6 +128,93 @@ test("faktura uhrazená zálohou: přeplatek odkazuje na zálohu a storno ji vr�
   await page.goto(advanceUrl);
   await expect(page.getByText("Nahrazená")).toHaveCount(0);
   await expect(page.getByTestId("related-documents")).not.toContainText("Nahrazeno fakturou");
+});
+
+test.describe("kritický tok", () => {
+  test.use({ allowPrivateMail: true });
+  test.setTimeout(150_000);
+
+  test("záloha z avíza po fakturu, odeslání a vrácení", async ({ page, freshApp }) => {
+    const { baseURL } = freshApp;
+    const client = "klient@example.cz";
+    const imap = await startImap();
+    const smtp = await startSmtp();
+    try {
+      await register(page, baseURL);
+      await addSupplier(page, baseURL);
+      await addCustomer(page, baseURL, CUSTOMER, client);
+      await addAccount(page, baseURL);
+      await ownServer(page, baseURL, smtp.port);
+      await saveMailbox(page, baseURL, { host: "127.0.0.1", port: imap.port, tls: "starttls" });
+
+      await page.goto(`${baseURL}/nastaveni/automatizace`);
+      await page.waitForLoadState("networkidle");
+      const automation = page
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("heading", { name: "Odeslání po záloze" }) });
+      await automation.getByLabel("Po úhradě zálohy").selectOption("issue");
+      await expect(page.getByRole("status").filter({ hasText: "Uloženo." })).toBeVisible();
+      await automation.getByRole("button", { name: "Zapnout" }).click();
+      await page
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "Zapnout a potvrdit" })
+        .click();
+      await expect(automation).toContainText("Zapnuto");
+
+      await page.goto(`${baseURL}/faktury`);
+      await page.getByRole("link", { name: "Nová záloha" }).click();
+      await page.waitForLoadState("networkidle");
+      await chooseCustomer(page);
+      await fillLine(page, 0, "Záloha na web", "1000");
+      await settled(page);
+      await page.getByRole("button", { name: "Vystavit" }).click();
+      const issueDialog = page.getByRole("alertdialog");
+      await issueDialog.getByLabel("Variabilní symbol").fill(VS);
+      await issueDialog.getByRole("button", { name: "Vystavit" }).click();
+      await page.waitForURL(/\/faktury\/[^/?]+\?vystaveno=1$/);
+      const advanceUrl = page.url().split("?")[0]!;
+
+      imap.addMessage(notice());
+      await checkNow(page, baseURL);
+      await expect
+        .poll(
+          async () => {
+            await page.goto(advanceUrl);
+            return page.getByTestId("payment-row").count();
+          },
+          { timeout: 20_000 },
+        )
+        .toBe(1);
+      await expect(page.getByTestId("payment-row")).toContainText("Z avíza");
+
+      await page.getByTestId("related-documents").getByRole("link").click();
+      await expect(page.getByRole("heading", { name: /Faktura \d{4}-001/ })).toBeVisible();
+      const finalUrl = page.url();
+      await page.goto(finalUrl);
+      await expect(page.getByTestId("email-history")).toContainText("Odesláno", {
+        timeout: 20_000,
+      });
+      expect(smtp.messages).toHaveLength(1);
+      expect(smtp.messages[0]!.to).toContain(client);
+      await expect(page.getByTestId("invoice-steps")).toContainText("Uhrazeno zálohou");
+
+      await page.goto(advanceUrl);
+      await page.getByRole("button", { name: "Vrátit avízo" }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Vrátit avízo" }).click();
+      await expect(page.getByTestId("payment-row")).toHaveCount(0);
+
+      await page.goto(finalUrl);
+      await expect(page.getByTestId("invoice-steps")).toContainText(
+        money("Zbývá uhradit1 000,00 Kč"),
+      );
+      await page.goto(`${baseURL}/upozorneni`);
+      await expect(page.getByText("opět chce doplatek")).toBeVisible();
+      expect(smtp.messages).toHaveLength(1);
+    } finally {
+      await imap.close();
+      await smtp.stop();
+    }
+  });
 });
 
 test("plán pravidelné faktury nabízí zálohu a text zálohy jde upravit", async ({

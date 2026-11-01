@@ -1,8 +1,8 @@
 # ID<tab>co chybí<tab>plán. Požadavek má test, ale není splněný celý.
 TST-014	Referenční PNG designů zatím neschválil člověk	schválení uživatelem
 PDF-007	Vizuální reference pokrývají jen první stranu	po schválení TST-014
-TST-009	Matice nemá roli administrátora ani entity plánů 6 až 8	plány 6 až 8
-TST-013	Změřeno jen s unit testy: payments 97,06, payment-matching 99,16, fio 97,81, auth 98,02, mask 100, bank-notices/index 94,74, czech-holidays 100, money 91,53 %; invoice-totals 96,55 (zbylých 5 mutantů je ekvivalentních); number-format 84,92 % bez backendových testů, recurrence a qr-payload neměřené, celý běh se nevejde do limitu; fronta úloh, lease a tick nejsou ve stryker.config.json	plán 9
+TST-009	Matice nemá roli administrátora ani entity plánů 7 a 8	plán 7 a 8
+TST-013	Změřeno jen s unit testy po souborech: payments 91,43 (6 přeživších ekvivalentních, 1 chyba), fx 99,17, cnb-rates 97,06, invoice-totals 96,55, qr-payload 95,15, payment-matching 99,16, fio 97,81, auth 98,02, mask 100, bank-notices/index 94,74, czech-holidays 100, money 91,53 %; number-format 84,92 % bez backendových testů, recurrence neměřená, celý běh se nevejde do limitu; fronta úloh, lease a tick nejsou ve stryker.config.json	plán 9
 TST-015	Chybí zpětné čtení ISDOC proti schématu	plán 8
 TST-018	Kontrola nepokrývá přehledy	plán 7
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
@@ -12,6 +12,6 @@ INV-024	Chybí export (plán 8)	plán 8
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 CRN-003	Chybí statistiky a dashboard	plán 7
-FOR-008	chybí statistiky	plán 7
-ADV-005	Příjmy k datu úhrady ve statistikách a daňovém přehledu	plán 7 a 8
-ADV-007	Obrat a řádek záloh v přehledech mimo seznam faktur	plán 7 a 8
+FOR-008	Chybí statistiky, hotový je přepočet	plán 7
+ADV-005	Chybí příjmy ve statistikách a daňovém přehledu	plán 7 a 8
+ADV-007	Chybí řádek záloh ve statistikách	plán 7

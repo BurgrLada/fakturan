@@ -157,6 +157,11 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
   }
 
   problems.push(...advanceProblems(rows));
+  for (const row of rows) {
+    if (row.supersededAt !== null && row.type !== "advance") {
+      problems.push(`invoice ${row.id}: nahrazený doklad není záloha`);
+    }
+  }
   const numbers = rows.flatMap((row) => row.number ?? []);
   const repeated = numbers.filter((number, i) => numbers.indexOf(number) !== i);
   if (repeated.length > 0) problems.push(`invoice: opakovaná čísla ${repeated.join(", ")}`);
@@ -221,6 +226,13 @@ function paymentProblems(db: Db, ownerId: string): string[] {
         AND p.credited_minor <> p.amount_minor`,
   );
   if (miscredited > 0) problems.push(`payment: ${miscredited} plateb s jinou připsanou částkou`);
+
+  const noteRefunds = count(
+    db,
+    sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
+      WHERE p.user_id = ${ownerId} AND i.type = 'credit_note'`,
+  );
+  if (noteRefunds > 0) problems.push(`payment: ${noteRefunds} plateb na opravné faktuře`);
 
   const unpayable = count(
     db,
@@ -321,6 +333,17 @@ function noticeProblems(db: Db, ownerId: string): string[] {
   return problems;
 }
 
+// The parser refuses a list without EUR, so such a date can only be a list written in part.
+function rateListProblems(db: Db): string[] {
+  const partial = count(
+    db,
+    sql`SELECT count(*) AS n FROM (
+      SELECT 1 FROM exchange_rate GROUP BY list_date HAVING sum(currency = 'EUR') = 0
+    )`,
+  );
+  return partial > 0 ? [`exchange_rate: ${partial} lístků bez EUR`] : [];
+}
+
 // Throws on the first broken invariant. Plans extend it as new entities arrive.
 export function assertConsistent(db: Db, ownerId: string): void {
   const problems: string[] = [];
@@ -356,6 +379,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
   problems.push(...mailProblems(db, ownerId));
   problems.push(...recurringProblems(db, ownerId));
   problems.push(...noticeProblems(db, ownerId));
+  problems.push(...rateListProblems(db));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

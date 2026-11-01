@@ -92,6 +92,27 @@ Adresa vlastního serveru je cizí vstup, proto aplikace odmítne privátní, lo
 a kontroluje je znovu při každém spojení, i po překladu DNS (ochrana SSRF). Na vlastní síti to vypne
 `ALLOW_PRIVATE_MAIL_HOSTS=1` (platí i pro IMAP schránku s avízy z banky), což je vhodné jen tam, kde všem uživatelům instance důvěřujete.
 
+## Zahraniční faktury a zálohy
+
+Kurzy stahuje plánovač z denního lístku ČNB (`CNB_BASE_URL`, mění se jen kvůli testům) jednou za hodinu
+od 14:45, dokud lístek nemá. Síť nikdy neběží při vystavení ani při platbě, ty čtou jen uložené kurzy.
+Když ČNB nejde stáhnout, aplikace funguje dál: použije poslední známý kurz a upozorní na to. Kdyby
+žádný neměla, kurz zadá člověk ručně, pravidelná faktura v cizí měně zůstane jako koncept. Výpadek se
+do Sentry nehlásí, teprve lístek starý 5 a více dní.
+
+Kurz se zamrazí vystavením, pozdější lístek ho nezmění. Na PDF se netiskne: neplátce ho na dokladu
+nepotřebuje a přepočet do CZK slouží jen přehledům.
+
+Doložka o přenesení daňové povinnosti je předvyplněný návrh pro identifikovanou osobu a zákazníka
+s DIČ z EU, aplikace nepozná službu od zboží. **Znění doložek, text „Toto není daňový doklad.“
+a název „Opravná faktura“ pro neplátce musí před ostrým použitím ověřit daňový poradce.** Výchozí
+texty jdou upravit v nastavení dodavatele.
+
+Po úhradě zálohy se řídí Nastavení > Automatizace, volbou „Po úhradě zálohy“: `off` nic nezaloží,
+`draft` (výchozí) připraví koncept konečné faktury a `issue` ji vystaví. Odeslat ji může jen zapnutá
+automatika „Odeslání po záloze“ a jen v režimu `issue`. Hlavní vypínač změní `issue` na `draft`.
+Vrácení platby zálohy fakturu nezruší, jen upozorní, že opět chce doplatek.
+
 ## Avíza z banky
 
 Fakturan páruje platby z e-mailových avíz Fio banky. Ve Fio internetbankingu zapněte v Nastavení >

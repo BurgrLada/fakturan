@@ -10,6 +10,7 @@ import {
   issue,
   issueWithOffer,
   openForm,
+  ownServer,
   register,
   settled,
 } from "./invoice-helpers";
@@ -32,20 +33,6 @@ async function prepare(page: Page, baseURL: string) {
   await register(page, baseURL);
   await addSupplier(page, baseURL);
   await addCustomer(page, baseURL, CUSTOMER, CLIENT);
-}
-
-async function ownServer(page: Page, baseURL: string, port: number, cc = "", bcc = "") {
-  await page.goto(`${baseURL}/nastaveni/posta`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Server", { exact: true }).fill("127.0.0.1");
-  await page.getByLabel("Port").fill(String(port));
-  await page.getByLabel("Adresa odesílatele").fill("jan@firma.cz");
-  await page.getByLabel("Uživatel").fill("jan");
-  await page.getByLabel("Heslo").fill("heslo-smtp");
-  await page.getByLabel("Stálá kopie (Cc)").fill(cc);
-  await page.getByLabel("Stálá skrytá kopie (Bcc)").fill(bcc);
-  await page.getByRole("button", { name: "Uložit" }).first().click();
-  await expect(page.getByRole("status")).toContainText("Nastavení pošty je uložené");
 }
 
 async function connected(page: Page, baseURL: string, smtp: TestSmtp, cc = "", bcc = "") {

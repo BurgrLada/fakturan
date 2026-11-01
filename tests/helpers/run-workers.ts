@@ -72,7 +72,11 @@ export type CrashPoint =
   | "after_smtp"
   | "in_run_tx"
   | "in_notice_tx"
-  | "after_notice_tx";
+  | "after_notice_tx"
+  | "in_advance_tx"
+  | "after_advance_tx"
+  | "in_credit_tx"
+  | "in_fx_tx";
 
 // A real process, because a worker thread cannot receive SIGKILL. `now` drives the child's clock.
 export function runCrashWorker(input: {
@@ -80,6 +84,8 @@ export function runCrashWorker(input: {
   dataDir: string;
   now: Date;
   killAt: CrashPoint;
+  // Issues this document in the child instead of draining the queue.
+  issue?: { actor: { userId: string; source: "web" }; invoiceId: string; revision: number };
 }): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = fork(new URL("./crash-worker.mjs", import.meta.url), {
@@ -91,6 +97,7 @@ export function runCrashWorker(input: {
         CRASH_DATABASE_PATH: input.databasePath,
         CRASH_NOW: input.now.toISOString(),
         CRASH_AT: input.killAt,
+        CRASH_ISSUE: input.issue ? JSON.stringify(input.issue) : "",
       },
     });
     let output = "";

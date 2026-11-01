@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { CURRENCIES } from "@/lib/currency";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import {
   bankMailbox,
   bankNotification,
   emailLog,
+  exchangeRate,
   invoice,
   job,
   mailSettings,
@@ -22,19 +24,31 @@ import {
 } from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
 import { backupTask, listBackups } from "@/server/scheduler/backup";
-import { bankPollTask, deadMailTask, recurringPlanTask } from "@/server/scheduler/start";
+import {
+  bankPollTask,
+  deadMailTask,
+  fxPlanTask,
+  recurringPlanTask,
+} from "@/server/scheduler/start";
 import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
 import { pollMailbox } from "@/server/services/bank-poll";
+import { createCreditNote } from "@/server/services/credit-notes";
+import { planRateFetch, runRateFetch } from "@/server/services/exchange-rates";
 import { archiveSentPdf } from "@/server/services/files";
+import { issueInvoice } from "@/server/services/invoice-lifecycle";
 import { queueMail } from "@/server/services/invoice-mail";
 import { getInvoice } from "@/server/services/invoices";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import { mutate } from "@/server/services/mutation";
+import { addPayment } from "@/server/services/payments";
 import { runRecurringJob } from "@/server/services/recurring-run";
 import { deactivateUser, reactivateUser } from "@/server/services/users";
+import { cnbMode, startCnbStub } from "../helpers/cnb";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import {
+  draftFor,
+  issuedAdvance,
   issuedInvoice,
   ownSmtp,
   seedCustomer,
@@ -45,10 +59,12 @@ import {
   INVOICE_TOTAL,
   noticeText,
   rawMail,
+  seedBankAccount,
   seedMailbox,
   seedPayable,
+  VS,
 } from "../helpers/fixtures-bank";
-import { savePlan } from "../helpers/fixtures-recurring";
+import { planDocument, savePlan } from "../helpers/fixtures-recurring";
 import { startImap, type TestImap } from "../helpers/imap";
 import { runCrashWorker, type CrashPoint } from "../helpers/run-workers";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
@@ -83,12 +99,16 @@ vi.stubEnv("SMTP_HOST", "");
 vi.stubEnv("SMTP_PORT", "");
 vi.stubEnv("SMTP_FROM", "");
 
+const cnb = await startCnbStub();
+vi.stubEnv("CNB_BASE_URL", cnb.url);
+
 const db = createTestDb();
 const databasePath = db.$client.name;
 const T0 = new Date("2026-03-10T10:00:00Z");
 const MINUTE = 60_000;
 // Past the 120 s lease a dead holder leaves behind.
 const LEASE_GONE = 3 * MINUTE;
+const HOUR = 60 * MINUTE;
 const CLOSED_PORT = 1;
 
 let smtp: TestSmtp;
@@ -109,6 +129,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await smtp.stop();
   await imap.close();
+  await cnb.close();
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -120,6 +141,8 @@ beforeEach(() => {
   current = T0;
   disk.full = false;
   disk.free = null;
+  db.delete(exchangeRate).run();
+  cnb.setMode(cnbMode.date(LIST_DATE));
   setClockForTests({ now: () => current });
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   resetTickTasksForTests();
@@ -176,6 +199,8 @@ function archivedInvoice() {
 }
 
 const YESTERDAY = "03/09/2026 14:05";
+// T0 is before 14:30 in Prague, so the list expected at that moment is the one of the day before.
+const LIST_DATE = "2026-03-09";
 const imapPort = (port: number) =>
   db.update(bankMailbox).set({ port }).where(eq(bankMailbox.userId, owner)).run();
 const mailboxRow = () => db.select().from(bankMailbox).where(eq(bankMailbox.userId, owner)).get()!;
@@ -193,6 +218,23 @@ function incomingNotice(id = "10000000001") {
   );
   return { invoiceId, uid };
 }
+
+function incomingAdvance() {
+  const accountId = seedBankAccount(db, owner, T0);
+  const advanceId = issuedAdvance(owner, seedCustomer(owner), INVOICE_TOTAL, {
+    bankAccountId: accountId,
+  });
+  db.update(invoice).set({ variableSymbol: VS }).where(eq(invoice.id, advanceId)).run();
+  seedMailbox(db, owner, imap.port, T0);
+  const uid = imap.addMessage(
+    rawMail({ body: noticeText({ date: YESTERDAY, id: "10000000003" }) }),
+    new Date(T0.getTime() - MINUTE),
+  );
+  return { advanceId, uid };
+}
+
+const finals = (advanceId: string) =>
+  invoices().filter((row) => row.type === "invoice" && row.relatedInvoiceId === advanceId);
 
 async function pollTick() {
   later(5 * MINUTE);
@@ -392,6 +434,172 @@ describe("čtení avíz", () => {
   }, 30_000);
 });
 
+describe("zálohy a opravy", () => {
+  test("[TST-017] SIGKILL v transakci zálohy: po restartu jedna platba a jedna faktura", async () => {
+    scenarios += 1;
+    const { advanceId, uid } = incomingAdvance();
+    await bankPollTask.run(current);
+
+    await crash("in_advance_tx");
+    expect(noticesOf()).toEqual([]);
+    expect(paymentsOf()).toEqual([]);
+    expect(finals(advanceId)).toEqual([]);
+    expect(mailboxRow().lastUid).toBeNull();
+
+    await tickAfterLease();
+    await tickAfterLease();
+
+    expect(paymentsOf()).toHaveLength(1);
+    expect(noticesOf()).toMatchObject([{ status: "matched" }]);
+    expect(finals(advanceId)).toMatchObject([{ status: "draft", advanceMinor: INVOICE_TOTAL }]);
+    expect(mailboxRow().lastUid).toBe(uid);
+    expect(getInvoice(owner, advanceId)?.status).toBe("paid");
+  }, 30_000);
+
+  test("[TST-017] SIGKILL po transakci před kurzorem: žádná druhá faktura", async () => {
+    scenarios += 1;
+    const { advanceId, uid } = incomingAdvance();
+    await bankPollTask.run(current);
+
+    await crash("after_advance_tx");
+    expect(paymentsOf()).toHaveLength(1);
+    expect(finals(advanceId)).toHaveLength(1);
+    expect(mailboxRow().lastUid).toBeNull();
+
+    imap.commands.length = 0;
+    await tickAfterLease();
+    await tickAfterLease();
+
+    expect(imap.commands.some((command) => command.includes("BODY"))).toBe(true);
+    expect(paymentsOf()).toHaveLength(1);
+    expect(noticesOf()).toHaveLength(1);
+    expect(finals(advanceId)).toHaveLength(1);
+    expect(mailboxRow().lastUid).toBe(uid);
+  }, 30_000);
+
+  test("[TST-017] SIGKILL při vystavení opravy: zůstatek odpovídá dokladům", async () => {
+    scenarios += 1;
+    const invoiceId = issuedInvoice(owner, seedCustomer(owner));
+    const { id: noteId } = createCreditNote(webActor(owner), invoiceId);
+    const { revision } = getInvoice(owner, noteId)!;
+
+    await runCrashWorker({
+      databasePath,
+      dataDir,
+      now: current,
+      killAt: "in_credit_tx",
+      issue: { actor: webActor(owner), invoiceId: noteId, revision },
+    });
+    expect(getInvoice(owner, noteId)).toMatchObject({ status: "draft", number: null });
+    expect(getInvoice(owner, invoiceId)).toMatchObject({ creditsMinor: 0, status: "issued" });
+
+    assertConsistent(db, owner);
+    issueInvoice(webActor(owner), noteId, { revision });
+
+    const original = getInvoice(owner, invoiceId)!;
+    expect(getInvoice(owner, noteId)?.status).toBe("issued");
+    expect(original).toMatchObject({ creditsMinor: -original.totalMinor, status: "credited" });
+  }, 30_000);
+});
+
+describe("kurzy ČNB", () => {
+  const rates = () => db.select().from(exchangeRate).all();
+  // Only the currencies the application works with are kept, CZK has no rate.
+  const LIST_SIZE = CURRENCIES.length - 1;
+
+  async function nextHour() {
+    later(HOUR);
+    await tick("h");
+    await tick("h");
+  }
+
+  beforeEach(() => {
+    registerJob("fx.fetch", { run: runRateFetch });
+    registerTickTask(fxPlanTask);
+  });
+
+  test("[TST-017] SIGKILL během fx.fetch: žádný částečný lístek, další běh ho doplní", async () => {
+    scenarios += 1;
+    planRateFetch(current);
+
+    await crash("in_fx_tx");
+    expect(rates()).toEqual([]);
+
+    await nextHour();
+
+    expect(rates()).toHaveLength(LIST_SIZE);
+    expect(new Set(rates().map((row) => row.listDate))).toEqual(new Set([LIST_DATE]));
+  }, 30_000);
+
+  test("[TST-017] výpadek ČNB během běhu: vystavení, platby a plán dál fungují", async () => {
+    scenarios += 1;
+    db.insert(exchangeRate)
+      .values({ currency: "EUR", listDate: "2026-03-02", rateMicros: 24_500_000, fetchedAt: T0 })
+      .run();
+    cnb.setMode(cnbMode.down);
+    const customerId = seedCustomer(owner);
+
+    await nextHour();
+    expect(rates()).toHaveLength(1);
+
+    const draft = draftFor(owner, customerId, {
+      currency: "EUR",
+      paymentMethod: "cash",
+      bankAccountId: null,
+    });
+    issueInvoice(webActor(owner), draft.id, { revision: draft.revision });
+    const issued = getInvoice(owner, draft.id)!;
+    expect(issued).toMatchObject({
+      exchangeRateMicros: 24_500_000,
+      exchangeRateSource: "last_known",
+      exchangeRateDate: "2026-03-02",
+    });
+
+    addPayment(webActor(owner), draft.id, {
+      revision: issued.revision,
+      paidOn: LIST_DATE,
+      amountMinor: issued.totalMinor,
+      currency: "EUR",
+      method: "transfer",
+      note: "",
+    });
+    expect(getInvoice(owner, draft.id)?.status).toBe("paid");
+
+    savePlan(owner, customerId, {
+      mode: "issue",
+      document: planDocument({ currency: "EUR", paymentMethod: "cash" }),
+    });
+    await tick("h");
+    await tick("h");
+
+    const planned = invoices().find((row) => row.recurringId !== null);
+    expect(planned).toMatchObject({ status: "issued", exchangeRateSource: "last_known" });
+
+    cnb.setMode(cnbMode.date(LIST_DATE));
+    await nextHour();
+    expect(rates().some((row) => row.listDate === LIST_DATE)).toBe(true);
+  }, 30_000);
+
+  test("[TST-017] plný disk při zápisu lístku: nic se neuloží a další běh doplní", async () => {
+    scenarios += 1;
+    db.$client.function("disk_full", () => {
+      throw Object.assign(new Error("database or disk is full"), { code: "SQLITE_FULL" });
+    });
+    db.$client.exec(`CREATE TEMP TRIGGER no_space BEFORE INSERT ON main.exchange_rate
+      WHEN new.currency = 'USD' BEGIN SELECT disk_full(); END`);
+    try {
+      await nextHour();
+    } finally {
+      db.$client.exec("DROP TRIGGER no_space");
+    }
+    expect(rates()).toEqual([]);
+
+    await nextHour();
+
+    expect(rates()).toHaveLength(LIST_SIZE);
+  }, 30_000);
+});
+
 describe("nedostupné služby", () => {
   test("[TST-017] nedostupné SMTP: doklad zůstane, po obnovení se doručí jednou", async () => {
     scenarios += 1;
@@ -446,8 +654,8 @@ describe("nedostupné služby", () => {
     expect(listBackups()).toEqual(before);
   });
 
-  test("[TST-018] po každém scénáři proběhla kontrola souladu", () => {
-    expect(scenarios).toBeGreaterThanOrEqual(11);
+  test("[TST-018] po každém scénáři projde kontrola souladu", () => {
+    expect(scenarios).toBeGreaterThanOrEqual(17);
     expect(checked).toBe(scenarios);
   });
 });

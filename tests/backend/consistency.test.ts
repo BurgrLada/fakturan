@@ -6,6 +6,7 @@ import type { CustomerSnapshot, SupplierSnapshot } from "@/lib/invoice-document"
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
 import {
   auditLog,
+  exchangeRate,
   invoice,
   invoiceLine,
   payment,
@@ -420,6 +421,38 @@ describe("assertConsistent", () => {
 
       expect(() => assertConsistent(db, owner)).toThrow(/koncept|stornu/);
     });
+
+    test("[TST-018] odhalí platbu na opravné faktuře", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      db.update(invoice).set({ type: "credit_note" }).where(eq(invoice.id, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/plateb na opravné faktuře/);
+    });
+  });
+
+  test("[TST-018] odhalí nahrazený doklad, který není záloha", () => {
+    const owner = createUser();
+    createInvoice(owner, { supersededAt: new Date() });
+
+    expect(() => assertConsistent(db, owner)).toThrow(/nahrazený doklad není záloha/);
+  });
+
+  test("[TST-018] odhalí lístek zapsaný jen zčásti", () => {
+    const owner = createUser();
+    const row = { listDate: "2026-03-09", rateMicros: 22_000_000, fetchedAt: new Date() };
+    db.insert(exchangeRate)
+      .values({ ...row, currency: "USD" })
+      .run();
+    try {
+      expect(() => assertConsistent(db, owner)).toThrow(/lístků bez EUR/);
+      db.insert(exchangeRate)
+        .values({ ...row, currency: "EUR" })
+        .run();
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+    } finally {
+      db.delete(exchangeRate).run();
+    }
   });
 
   // Last on purpose: audit_log is append-only, so the orphan row stays in this file's database.

@@ -8,7 +8,10 @@ import {
   addSupplier,
   chooseCurrency,
   chooseCustomer,
+  eurAccount,
   fillLine,
+  foreignCustomer,
+  identified,
   issue,
   issuedPdf,
   openForm,
@@ -29,37 +32,6 @@ function invoiceCount(dataDir: string): number {
 const rate = (page: Page) => page.getByLabel("Kurz k CZK");
 const source = (page: Page) => page.getByTestId("rate-source");
 const notes = (page: Page) => page.getByTestId("rate-notes");
-
-async function foreignCustomer(page: Page, baseURL: string, name: string, dic: string) {
-  await page.goto(`${baseURL}/zakaznici/novy`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Název nebo jméno").fill(name);
-  await page.getByLabel("Stát").fill("Německo");
-  await page.getByLabel("DIČ").fill(dic);
-  await page.getByRole("button", { name: "Uložit" }).click();
-  await expect(page.getByRole("heading", { name: "Karta zákazníka" })).toBeVisible();
-}
-
-async function identified(page: Page, baseURL: string) {
-  await page.goto(`${baseURL}/nastaveni/dodavatel`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Jsem identifikovaná osoba k DPH").check();
-  await page.getByLabel("DIČ").fill("CZ27082440");
-  await page.getByRole("button", { name: "Uložit" }).first().click();
-  await expect(page.getByText("Uloženo.").first()).toBeVisible();
-}
-
-async function eurAccount(page: Page, baseURL: string, currency = "EUR", swift = "") {
-  await page.goto(`${baseURL}/nastaveni/ucty`);
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Název účtu").fill(`Účet ${currency}`);
-  await page.getByLabel("Měna").selectOption(currency);
-  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("2000145399");
-  await page.getByLabel("Kód banky").fill("0800");
-  if (swift) await page.getByLabel("BIC").fill(swift);
-  await page.getByRole("button", { name: "Uložit účet" }).click();
-  await expect(page.getByText("Účet je uložený.")).toBeVisible();
-}
 
 async function eurCashDraft(page: Page, baseURL: string) {
   await openForm(page, baseURL);

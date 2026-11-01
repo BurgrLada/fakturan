@@ -56,6 +56,51 @@ export async function addAccount(page: Page, baseURL: string) {
   await expect(page.getByText("Účet je uložený.")).toBeVisible();
 }
 
+export async function foreignCustomer(page: Page, baseURL: string, name: string, dic: string) {
+  await page.goto(`${baseURL}/zakaznici/novy`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název nebo jméno").fill(name);
+  await page.getByLabel("Stát").fill("Německo");
+  await page.getByLabel("DIČ").fill(dic);
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByRole("heading", { name: "Karta zákazníka" })).toBeVisible();
+}
+
+export async function identified(page: Page, baseURL: string) {
+  await page.goto(`${baseURL}/nastaveni/dodavatel`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Jsem identifikovaná osoba k DPH").check();
+  await page.getByLabel("DIČ").fill("CZ27082440");
+  await page.getByRole("button", { name: "Uložit" }).first().click();
+  await expect(page.getByText("Uloženo.").first()).toBeVisible();
+}
+
+export async function eurAccount(page: Page, baseURL: string, currency = "EUR", swift = "") {
+  await page.goto(`${baseURL}/nastaveni/ucty`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Název účtu").fill(`Účet ${currency}`);
+  await page.getByLabel("Měna").selectOption(currency);
+  await page.getByLabel("Číslo účtu (i s předčíslím)").fill("2000145399");
+  await page.getByLabel("Kód banky").fill("0800");
+  if (swift) await page.getByLabel("BIC").fill(swift);
+  await page.getByRole("button", { name: "Uložit účet" }).click();
+  await expect(page.getByText("Účet je uložený.")).toBeVisible();
+}
+
+export async function ownServer(page: Page, baseURL: string, port: number, cc = "", bcc = "") {
+  await page.goto(`${baseURL}/nastaveni/posta`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Server", { exact: true }).fill("127.0.0.1");
+  await page.getByLabel("Port").fill(String(port));
+  await page.getByLabel("Adresa odesílatele").fill("jan@firma.cz");
+  await page.getByLabel("Uživatel").fill("jan");
+  await page.getByLabel("Heslo").fill("heslo-smtp");
+  await page.getByLabel("Stálá kopie (Cc)").fill(cc);
+  await page.getByLabel("Stálá skrytá kopie (Bcc)").fill(bcc);
+  await page.getByRole("button", { name: "Uložit" }).first().click();
+  await expect(page.getByRole("status")).toContainText("Nastavení pošty je uložené");
+}
+
 export async function openForm(page: Page, baseURL: string) {
   await page.goto(`${baseURL}/faktury/nova`);
   await page.waitForLoadState("networkidle");
