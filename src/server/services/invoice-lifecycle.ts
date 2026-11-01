@@ -24,7 +24,7 @@ import { recordCatalogUse } from "./catalog";
 import { creditNoteProblem } from "./credit-notes";
 import { resolveRate } from "./exchange-rates";
 import { syncSuperseded } from "./advances";
-import { finalOf, hasPayments, refreshBalance } from "./invoice-balance";
+import { finalOf, refreshBalance } from "./invoice-balance";
 import {
   currentParties,
   relatedSnapshotOf,
@@ -48,6 +48,7 @@ import {
 } from "./invoices";
 import { mutate, type Audit } from "./mutation";
 import { resolveEntityNotifications } from "./notifications";
+import { hasDifference } from "./payments";
 import { allocateNumber, defaultSeriesFor, peekNumber, type NumberSeries } from "./number-series";
 import { getPreferences } from "./preferences";
 import { missingSupplierKeys } from "./supplier";
@@ -582,8 +583,16 @@ function changeStatus(
 
 export function cancelInvoice(actor: Actor, id: string): void {
   changeStatus(actor, id, "invoice.cancel", (row, tx) => {
-    if (hasPayments(tx, row.userId, id)) throw new ServiceError(V.hasPayments);
+    // The net sum on purpose: a fully refunded document has no money left to account for.
+    if (row.paidMinor > 0) throw new ServiceError(V.hasPayments);
     if (row.creditsMinor < 0) throw new ServiceError(V.hasCredits);
+    if (
+      row.type === "credit_note" &&
+      row.relatedInvoiceId &&
+      hasDifference(tx, row.userId, [row.relatedInvoiceId])
+    ) {
+      throw new ServiceError(V.creditDifference);
+    }
     if (row.type === "advance" && finalOf(tx, row.userId, id)) {
       throw new ServiceError(V.hasFinalInvoice);
     }
@@ -596,6 +605,9 @@ function finalRestoreProblem(q: Reader, row: Invoice): string | null {
   if (!isFinalInvoice(row)) return null;
   const advance = findOwned(q, row.userId, row.relatedInvoiceId!);
   if (advance.status === "cancelled") return V.advanceCancelled;
+  if (advance.currency !== row.currency || advance.customerId !== row.customerId) {
+    return V.finalMismatch;
+  }
   return finalOf(q, row.userId, advance.id) ? V.finalExists : null;
 }
 

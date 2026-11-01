@@ -467,6 +467,51 @@ describe("vrácení peněz", () => {
   });
 });
 
+describe("aktivní oprava a uzavřený rozdíl", () => {
+  function closedWithNote() {
+    const { owner, id, actor } = setup(100_000);
+    const noteId = issuedNote(owner, id, -10_000);
+    pay(owner, id, 80_000);
+    const difference = closeDifference(actor, id, {
+      revision: row(owner, id).revision,
+      confirmed: true,
+    });
+    return { owner, id, actor, noteId, difference };
+  }
+
+  test("storno aktivní opravy je odmítnuté, po smazání rozdílu projde", () => {
+    const { owner, id, actor, noteId, difference } = closedWithNote();
+
+    expect(() => cancelInvoice(actor, noteId)).toThrow(V.creditDifference);
+
+    deletePayment(actor, difference.id, row(owner, id).revision);
+    cancelInvoice(actor, noteId);
+    expect(row(owner, id).creditsMinor).toBe(0);
+  });
+
+  test("změna částky aktivní opravy je odmítnutá, text projde", () => {
+    const { owner, actor, noteId } = closedWithNote();
+
+    expect(() =>
+      updateIssuedInvoice(actor, noteId, issuedInput(owner, noteId, { lines: [line(-5000)] })),
+    ).toThrow(V.creditDifference);
+
+    updateIssuedInvoice(actor, noteId, issuedInput(owner, noteId, { note: "Doplněno" }));
+    expect(row(owner, noteId).note).toBe("Doplněno");
+  });
+
+  test("obnovení verze s jinou částkou je odmítnuté", () => {
+    const { owner, id, actor } = setup(100_000);
+    const noteId = issuedNote(owner, id, -10_000);
+    updateIssuedInvoice(actor, noteId, issuedInput(owner, noteId, { lines: [line(-5000)] }));
+    pay(owner, id, 85_000);
+    closeDifference(actor, id, { revision: row(owner, id).revision, confirmed: true });
+    const [version] = listVersions(owner, noteId);
+
+    expect(() => restoreVersion(actor, version!.id)).toThrow(V.creditDifference);
+  });
+});
+
 describe("stav původní faktury", () => {
   test("[CRN-006] úplná oprava bez plateb dá credited, storno opravy vrátí sent", () => {
     const { owner, id, actor } = setup();

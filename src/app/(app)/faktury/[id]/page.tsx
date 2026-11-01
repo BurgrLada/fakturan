@@ -41,7 +41,7 @@ import { EDITABLE_STATUSES, listVersions } from "@/server/services/invoice-versi
 import { listEmailLog, mailStateOf } from "@/server/services/invoice-mail";
 import { getInvoice, type InvoiceDetail } from "@/server/services/invoices";
 import { mailAvailability } from "@/server/services/mail-settings";
-import { listPayments } from "@/server/services/payments";
+import { hasDifference, listPayments } from "@/server/services/payments";
 import { getRecurring } from "@/server/services/recurring";
 import { getPreferences } from "@/server/services/preferences";
 import {
@@ -197,9 +197,12 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         editable={editable}
         cancellable={isCancellable(row)}
         covered={
-          isCancellable(row) && row.status !== "issued" && row.status !== "sent" && !payments.length
+          isCancellable(row) &&
+          row.status !== "issued" &&
+          row.status !== "sent" &&
+          row.paidMinor === 0
         }
-        hasPayments={takesPayment && payments.length > 0}
+        hasPayments={takesPayment && row.paidMinor > 0}
         hasCredits={row.creditsMinor < 0 && row.status !== "cancelled"}
         hasFinal={final !== null}
         convertible={isConvertibleAdvance(row) && final === null}
@@ -264,7 +267,19 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
             supersededAt: row.supersededAt,
           }}
           today={today}
-          advance={related.parent?.type === "advance" ? related.parent : null}
+          advance={
+            related.parent?.type === "advance"
+              ? {
+                  ...related.parent,
+                  closed: hasDifference(db, user.id, [related.parent.id]),
+                }
+              : null
+          }
+          closedFinal={
+            final && hasDifference(db, user.id, [final.id])
+              ? { id: final.id, number: final.number }
+              : null
+          }
           payments={payments.map((item) => ({
             id: item.id,
             kind: item.kind,

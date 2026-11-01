@@ -236,10 +236,14 @@ function paymentProblems(db: Db, ownerId: string): string[] {
 
   const unpayable = count(
     db,
-    sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
-      WHERE p.user_id = ${ownerId} AND i.status IN ('draft', 'cancelled')`,
+    sql`SELECT count(*) AS n FROM invoice i
+      WHERE i.user_id = ${ownerId} AND i.status IN ('draft', 'cancelled')
+        AND EXISTS (SELECT 1 FROM payment p WHERE p.invoice_id = i.id)
+        AND (i.status = 'draft' OR i.paid_minor <> 0)`,
   );
-  if (unpayable > 0) problems.push(`payment: ${unpayable} plateb na konceptu nebo stornu`);
+  // A cancelled document keeps the history of a fully refunded payment, never money.
+  if (unpayable > 0)
+    problems.push(`payment: ${unpayable} dokladů s platbou na konceptu nebo stornu`);
   return problems;
 }
 

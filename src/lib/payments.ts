@@ -3,7 +3,7 @@ import { CURRENCIES } from "./currency";
 import { AWAITING_PAYMENT, type InvoiceStatus } from "./invoice";
 import { MAX_DOCUMENT_MINOR } from "./invoice-totals";
 import { isCalendarDate } from "./number-format";
-import { amountDue } from "./qr-payload";
+import { amountDue, type Balance } from "./qr-payload";
 import { TEXTS } from "./texts";
 
 const E = TEXTS.payments.errors;
@@ -29,6 +29,12 @@ export function isRefund(row: { creditedMinor: number }): boolean {
 
 export function canAmendPayment(status: InvoiceStatus): boolean {
   return canTakePayment(status) || status === "credited";
+}
+
+// A rest after an advance keeps the base status (R-4), yet it is as closable as a part payment.
+export function canCloseDifference(row: Balance & { status: InvoiceStatus }): boolean {
+  if (row.supersededAt || amountDue(row) <= 0) return false;
+  return row.status === "partially_paid" || (row.advanceMinor > 0 && canTakePayment(row.status));
 }
 
 // A zero total is never paid: nothing was owed, so any money on it stays a plain overpayment.

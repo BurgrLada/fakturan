@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import type { Currency } from "@/lib/currency";
 import type { InvoiceStatus } from "@/lib/invoice";
 import { formatMoney } from "@/lib/money";
-import { canTakePayment, isRefund } from "@/lib/payments";
+import { canCloseDifference, canTakePayment, isRefund } from "@/lib/payments";
 import { amountDue, type Balance } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
@@ -49,6 +49,7 @@ export function PaymentPanel({
   today,
   payments,
   advance,
+  closedFinal,
 }: {
   invoiceId: string;
   revision: number;
@@ -57,7 +58,8 @@ export function PaymentPanel({
   balance: Balance;
   today: string;
   payments: PaymentView[];
-  advance: { id: string; number: string | null } | null;
+  advance: { id: string; number: string | null; closed: boolean } | null;
+  closedFinal: { id: string; number: string | null } | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -121,12 +123,20 @@ export function PaymentPanel({
           {T.overpaid(formatMoney(-due, currency))}
           {advance && (
             <span className="block font-normal" data-testid="payment-overpaid-advance">
-              {T.overpaidAdvance}{" "}
+              {advance.closed ? T.overpaidAdvanceClosed : T.overpaidAdvance}{" "}
               <Link href={`/faktury/${advance.id}`} className="underline underline-offset-4">
                 {advance.number}
               </Link>
             </span>
           )}
+        </p>
+      )}
+      {closedFinal && (
+        <p className="text-sm" data-testid="payment-closed-final">
+          {T.finalClosed}{" "}
+          <Link href={`/faktury/${closedFinal.id}`} className="underline underline-offset-4">
+            {closedFinal.number}
+          </Link>
         </p>
       )}
       {payments.length === 0 ? (
@@ -256,7 +266,7 @@ export function PaymentPanel({
             {T.add}
           </Button>
         )}
-        {balance.paidMinor > 0 && (
+        {balance.paidMinor > 0 && !closedFinal && (
           <Button
             variant="outline"
             className={TOUCH}
@@ -266,7 +276,7 @@ export function PaymentPanel({
             {T.refund}
           </Button>
         )}
-        {status === "partially_paid" && !balance.supersededAt && (
+        {canCloseDifference({ ...balance, status }) && (
           <Button
             variant="outline"
             className={TOUCH}

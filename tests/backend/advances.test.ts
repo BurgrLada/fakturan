@@ -13,6 +13,7 @@ import { auditLog, invoice, invoiceTag, type bankNotification } from "@/server/d
 import { convertAdvance } from "@/server/services/advances";
 import { ingestNotice, noticeCandidates, type IngestInput } from "@/server/services/bank-notices";
 import { createCreditNote } from "@/server/services/credit-notes";
+import { composeMail } from "@/server/services/email-templates";
 import { saveSupplier, getSupplier } from "@/server/services/supplier";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import {
@@ -387,6 +388,99 @@ describe("konečná faktura", () => {
     assertConsistent(db, owner);
   });
 
+  test("doplatek po záloze jde uzavřít rozdílem a faktura je uhrazená", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = convert(owner, advanceId);
+    setFinalDraft(owner, finalId, 1_000_100);
+    issue(owner, finalId);
+    expect(row(owner, finalId).status).toBe("issued");
+
+    const { differenceMinor } = closeDifference(webActor(owner), finalId, {
+      revision: row(owner, finalId).revision,
+      confirmed: true,
+    });
+
+    expect(differenceMinor).toBe(100);
+    expect(row(owner, finalId).status).toBe("paid");
+    expect(amountDue(row(owner, finalId))).toBe(0);
+    assertConsistent(db, owner);
+  });
+
+  test("faktura bez zálohy a bez platby rozdíl uzavřít nejde", () => {
+    const { owner, customerId } = account();
+    const id = issuedPlain(owner, customerId, 100_000);
+
+    expect(() =>
+      closeDifference(webActor(owner), id, { revision: row(owner, id).revision, confirmed: true }),
+    ).toThrow(E.notClosable);
+  });
+
+  test("uzavřený rozdíl na faktuře zastaví vrácení i změnu platby zálohy", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = convert(owner, advanceId);
+    setFinalDraft(owner, finalId, 1_000_100);
+    issue(owner, finalId);
+    const difference = closeDifference(webActor(owner), finalId, {
+      revision: row(owner, finalId).revision,
+      confirmed: true,
+    });
+    const [paid] = listPayments(owner, advanceId);
+
+    expect(() => refund(owner, advanceId, 1000)).toThrow(E.finalDifference);
+    expect(() => deletePayment(webActor(owner), paid!.id, row(owner, advanceId).revision)).toThrow(
+      E.finalDifference,
+    );
+
+    deletePayment(webActor(owner), difference.id, row(owner, finalId).revision);
+    refund(owner, advanceId, 1000);
+    expect(amountDue(row(owner, finalId))).toBe(1100);
+    assertConsistent(db, owner);
+  });
+
+  test("[MAIL-003] přeplacená faktura po záloze zápor nepíše a nabídne vrácení", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = convert(owner, advanceId);
+    setFinalDraft(owner, finalId, 900_000);
+    issue(owner, finalId);
+
+    const { body } = composeMail(owner, finalId, "invoice");
+
+    expect(body).toMatch(/Přeplatek k vrácení činí 1\s000,00\sKč/);
+    expect(body).not.toContain("Zbývá uhradit");
+    expect(body).not.toMatch(/-\s*1\s000/);
+  });
+
+  test("[MAIL-003] vlastní text s {{zbyva}} nemá zápor ani u přeplatku", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = convert(owner, advanceId);
+    setFinalDraft(owner, finalId, 900_000);
+    issue(owner, finalId);
+    const texts = { cs: { subject: "Faktura", body: "Zbývá {{zbyva}}" } };
+
+    const { body } = composeMail(owner, finalId, "invoice", undefined, texts);
+
+    expect(body).toMatch(/^Zbývá 0,00\sKč/);
+  });
+
+  test("[MAIL-003] doplatek po záloze uvede zbývající částku", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = convert(owner, advanceId);
+    setFinalDraft(owner, finalId, 1_210_000);
+    issue(owner, finalId);
+
+    expect(composeMail(owner, finalId, "invoice").body).toMatch(/Zbývá uhradit 2\s100,00\sKč/);
+  });
+
+  test("[MAIL-003] anglická faktura má stejné tři věty v angličtině", () => {
+    const { owner, advanceId } = paidAdvance();
+    const finalId = convert(owner, advanceId);
+    setFinalDraft(owner, finalId, 900_000);
+    db.update(invoice).set({ language: "en" }).where(eq(invoice.id, finalId)).run();
+    issue(owner, finalId);
+
+    expect(composeMail(owner, finalId, "invoice").body).toContain("overpayment to be refunded");
+  });
+
   test("faktura s vlastní platbou stornovat nejde ani po záloze", () => {
     const { owner, advanceId } = paidAdvance();
     const finalId = convert(owner, advanceId);
@@ -522,6 +616,66 @@ describe("nahrazení zálohy", () => {
         confirmed: true,
       }),
     ).toThrow(E.supersededDifference);
+  });
+
+  test("vrácení storna po změně měny zálohy je odmítnuté", () => {
+    const { owner, advanceId, finalId } = replaced();
+    cancelInvoice(webActor(owner), finalId);
+    db.update(invoice).set({ currency: "EUR" }).where(eq(invoice.id, advanceId)).run();
+
+    expect(() => restoreInvoice(webActor(owner), finalId)).toThrow(V.finalMismatch);
+    expect(row(owner, finalId).status).toBe("cancelled");
+  });
+
+  test("vrácení storna po změně zákazníka zálohy je odmítnuté", () => {
+    const { owner, advanceId, finalId } = replaced();
+    cancelInvoice(webActor(owner), finalId);
+    const other = seedCustomer(owner, "jiny@example.cz");
+    db.update(invoice).set({ customerId: other }).where(eq(invoice.id, advanceId)).run();
+
+    expect(() => restoreInvoice(webActor(owner), finalId)).toThrow(V.finalMismatch);
+  });
+
+  test("plně vrácenou zálohu jde stornovat a upomínka na ni nejde", () => {
+    const { owner, customerId } = account();
+    savePreferences(webActor(owner), { advanceFinalMode: "off" });
+    const advanceId = issuedAdvance(owner, customerId);
+    pay(owner, advanceId, 1_000_000);
+    refund(owner, advanceId, 1_000_000);
+    db.update(invoice).set({ sentAt: NOW, status: "sent" }).where(eq(invoice.id, advanceId)).run();
+    expect(isEligibleForReminder(row(owner, advanceId), null)).toBe(true);
+
+    cancelInvoice(webActor(owner), advanceId);
+
+    expect(row(owner, advanceId)).toMatchObject({ status: "cancelled", paidMinor: 0 });
+    expect(isEligibleForReminder(row(owner, advanceId), null)).toBe(false);
+    expect(listPayments(owner, advanceId)).toHaveLength(2);
+    assertConsistent(db, owner);
+  });
+
+  test("částečně vrácenou zálohu stornovat nejde", () => {
+    const { owner, customerId } = account();
+    savePreferences(webActor(owner), { advanceFinalMode: "off" });
+    const advanceId = issuedAdvance(owner, customerId);
+    pay(owner, advanceId, 1_000_000);
+    refund(owner, advanceId, 999_999);
+
+    expect(() => cancelInvoice(webActor(owner), advanceId)).toThrow(V.hasPayments);
+  });
+
+  test("[REM-006] konečná faktura s doplatkem se řídí přepínačem částečné úhrady", () => {
+    const { owner, customerId } = account();
+    const advanceId = issuedAdvance(owner, customerId);
+    pay(owner, advanceId, 1_000_000);
+    const finalId = convert(owner, advanceId);
+    const doc = row(owner, finalId);
+    saveDraft(webActor(owner), { ...doc, id: finalId, lines: [line(1_210_000)] });
+    issue(owner, finalId);
+    db.update(invoice).set({ sentAt: NOW, status: "sent" }).where(eq(invoice.id, finalId)).run();
+
+    expect(isEligibleForReminder(row(owner, finalId), null)).toBe(false);
+    db.update(invoice).set({ remindersPartial: true }).where(eq(invoice.id, finalId)).run();
+    expect(isEligibleForReminder(row(owner, finalId), null)).toBe(true);
   });
 
   test("smazání platby zálohy zvedne doplatek na faktuře a stav se přepočítá", () => {

@@ -671,7 +671,9 @@ export const TEXTS = {
       creditNoteCopy: "Opravnou fakturu nejde duplikovat ani uložit jako šablonu",
       creditNotNegative: "Celková částka opravné faktury musí být záporná",
       creditDifference:
-        "Na faktuře je uzavřený rozdíl počítaný z původní částky. Nejdřív rozdíl smažte, potom jde fakturu opravit.",
+        "Na faktuře je uzavřený rozdíl počítaný z původní částky. Nejdřív rozdíl smažte, potom jde opravu vystavit, změnit nebo stornovat.",
+      finalMismatch:
+        "Záloha má mezitím jinou měnu nebo zákazníka než tato faktura, storno vrátit nejde. Vytvořte fakturu znovu ze zálohy.",
       creditExceeds: "Oprava je vyšší než částka, která na faktuře zbývá opravit",
       linkedLocked: "Typ, zákazníka, měnu ani kurz navázaného dokladu změnit nejde",
       typeLocked: "Typ konceptu změnit nejde",
@@ -787,6 +789,8 @@ export const TEXTS = {
       refundExceeds: "Vrácená částka nesmí být vyšší než přijaté platby",
       refundDifference:
         "Na dokladu je uzavřený rozdíl počítaný z přijatých plateb. Nejdřív rozdíl smažte, potom jde peníze vrátit.",
+      finalDifference:
+        "Na konečné faktuře je uzavřený rozdíl počítaný z této zálohy. Nejdřív ho na faktuře smažte, potom jde platbu zálohy změnit.",
     },
     methods: { transfer: "Převodem", cash: "Hotově", other: "Jinak" },
     sources: { manual: "Ručně", notice: "Z avíza", import: "Import" },
@@ -796,6 +800,10 @@ export const TEXTS = {
       left: "Zbývá uhradit",
       overpaid: (amount: string) => `Přeplatek k vrácení ${amount}`,
       overpaidAdvance: "Peníze jsou na záloze, vrácení zapište tam:",
+      overpaidAdvanceClosed:
+        "Peníze jsou na záloze a je na ní uzavřený rozdíl. Nejdřív ho tam smažte, potom zapište vrácení:",
+      finalClosed:
+        "Na faktuře je uzavřený rozdíl počítaný z této zálohy. Než půjde vrátit peníze, smažte ho tam:",
       empty: "Zatím nepřišla žádná platba.",
       refund: "Vrátit peníze",
       refundBadge: "Vrácení",

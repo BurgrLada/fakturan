@@ -130,6 +130,70 @@ test("faktura uhrazená zálohou: přeplatek odkazuje na zálohu a storno ji vr�
   await expect(page.getByTestId("related-documents")).not.toContainText("Nahrazeno fakturou");
 });
 
+async function issuedCashAdvance(page: Page, baseURL: string) {
+  await register(page, baseURL);
+  await addSupplier(page, baseURL);
+  await addCustomer(page, baseURL);
+  await page.goto(`${baseURL}/faktury`);
+  await page.getByRole("link", { name: "Nová záloha" }).click();
+  await page.waitForLoadState("networkidle");
+  await chooseCustomer(page);
+  await fillLine(page, 0, "Záloha na web", "1000");
+  await page.getByLabel("Způsob platby").selectOption("cash");
+  await settled(page);
+  await issue(page);
+  return page.url();
+}
+
+test("doplatek po záloze jde uzavřít a záloha odkáže na rozdíl na faktuře", async ({
+  page,
+  freshApp,
+}) => {
+  const advanceUrl = await issuedCashAdvance(page, freshApp.baseURL);
+  await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+  await expect(page.getByTestId("payment-paid")).toHaveText(money("1 000,00 Kč"));
+  await openAutomaticDraft(page);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Cena za jednotku").fill("1000,50");
+  await settled(page);
+  await issue(page);
+  const finalUrl = page.url();
+
+  await page.getByRole("button", { name: "Uzavřít jako uhrazené" }).click();
+  await page.getByRole("button", { name: "Uzavřít rozdíl" }).click();
+  await expect(page.getByTestId("invoice-steps")).toContainText("Uzavřený rozdíl");
+
+  await page.goto(advanceUrl);
+  await expect(page.getByTestId("payment-closed-final").getByRole("link")).toHaveAttribute(
+    "href",
+    new URL(finalUrl).pathname,
+  );
+  await expect(page.getByRole("button", { name: "Vrátit peníze" })).toHaveCount(0);
+});
+
+test("přeplatek po záloze s uzavřeným rozdílem řekne, co udělat na záloze", async ({
+  page,
+  freshApp,
+}) => {
+  const advanceUrl = await issuedCashAdvance(page, freshApp.baseURL);
+  await page.getByRole("button", { name: "Přidat platbu" }).click();
+  await page.getByRole("alertdialog").getByLabel("Částka", { exact: true }).fill("900");
+  await page.getByRole("alertdialog").getByRole("button", { name: "Uložit platbu" }).click();
+  await expect(page.getByTestId("payment-paid")).toHaveText(money("900,00 Kč"));
+  await page.getByRole("button", { name: "Uzavřít jako uhrazené" }).click();
+  await page.getByRole("button", { name: "Uzavřít rozdíl" }).click();
+  await expect(page.getByTestId("payment-paid")).toHaveText(money("1 000,00 Kč"));
+  await openAutomaticDraft(page);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Cena za jednotku").fill("900");
+  await settled(page);
+  await issue(page);
+
+  const hint = page.getByTestId("payment-overpaid-advance");
+  await expect(hint).toContainText("uzavřený rozdíl");
+  await expect(hint.getByRole("link")).toHaveAttribute("href", new URL(advanceUrl).pathname);
+});
+
 test.describe("kritický tok", () => {
   test.use({ allowPrivateMail: true });
   test.setTimeout(150_000);

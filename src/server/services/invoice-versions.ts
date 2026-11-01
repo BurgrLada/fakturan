@@ -51,6 +51,7 @@ import {
   type IssuedInput,
 } from "./invoices";
 import { mutate } from "./mutation";
+import { hasDifference } from "./payments";
 import { isNumberTaken } from "./number-series";
 
 const V = TEXTS.invoices.validation;
@@ -162,6 +163,10 @@ function assertLinkedMoney(tx: Tx, ownerId: string, before: Invoice, values: Inv
     throw new ServiceError(V.currencyHasCredits);
   }
   const candidate = { ...before, ...values };
+  const noteMoved = isNote && candidate.totalMinor !== before.totalMinor;
+  if (noteMoved && hasDifference(tx, ownerId, [before.relatedInvoiceId!])) {
+    throw new ServiceError(V.creditDifference);
+  }
   if (credited && candidate.totalMinor < -before.creditsMinor) {
     throw new ServiceError(V.creditsExceedTotal);
   }

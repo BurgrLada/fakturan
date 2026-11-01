@@ -5,6 +5,7 @@ import { daysBetween, isFinalInvoice, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
   canAmendPayment,
+  canCloseDifference,
   canTakePayment,
   deriveStatus,
   isRefund,
@@ -122,6 +123,7 @@ export function applyPayments(tx: Tx, audit: Audit, userId: string, invoiceId: s
   const final =
     row.type === "advance" && paidMinor !== row.paidMinor ? finalOf(tx, userId, invoiceId) : null;
   if (final) {
+    if (hasDifference(tx, userId, [final.id])) throw new ServiceError(E.finalDifference);
     refreshBalance(tx, audit, userId, final.id);
     if (paidMinor < row.paidMinor) advanceBalanceDropped(tx, userId, final.id);
   }
@@ -500,7 +502,7 @@ export function closeDifference(
     const row = findOwned(tx, userId, invoiceId);
     assertRevision(row, opts.revision);
     if (row.supersededAt) throw new ServiceError(E.supersededDifference);
-    if (row.status !== "partially_paid") throw new ServiceError(E.notClosable);
+    if (!canCloseDifference(row)) throw new ServiceError(E.notClosable);
     if (!opts.confirmed) throw new ServiceError(E.confirmDifference);
     const differenceMinor = amountDue(row);
     const { id } = insertPayment(tx, audit, userId, invoiceId, {
