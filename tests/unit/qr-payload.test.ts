@@ -320,15 +320,45 @@ describe("planQr důvody", () => {
   });
 });
 
+const balance = {
+  totalMinor: 100000,
+  paidMinor: 0,
+  creditsMinor: 0,
+  advanceMinor: 0,
+  supersededAt: null,
+};
+
 describe("amountDue", () => {
   test("[QR-006] částka je zbývající, ne celková", () => {
-    expect(amountDue({ totalMinor: 100000, paidMinor: 0 })).toBe(100000);
-    expect(amountDue({ totalMinor: 100000, paidMinor: 40050 })).toBe(59950);
-    expect(amountDue({ totalMinor: 100000, paidMinor: 100000 })).toBe(0);
+    expect(amountDue(balance)).toBe(100000);
+    expect(amountDue({ ...balance, paidMinor: 40050 })).toBe(59950);
+    expect(amountDue({ ...balance, paidMinor: 100000 })).toBe(0);
+  });
+
+  test("[CRN-005] 12 100,00 - oprava 2 100,00 - platba 4 000,00 dá 6 000,00", () => {
+    expect(
+      amountDue({ ...balance, totalMinor: 1_210_000, creditsMinor: -210_000, paidMinor: 400_000 }),
+    ).toBe(600_000);
+  });
+
+  test("[CRN-006] záporný zůstatek je přeplatek", () => {
+    expect(
+      amountDue({ ...balance, totalMinor: 500_000, creditsMinor: -150_000, paidMinor: 500_000 }),
+    ).toBe(-150_000);
+  });
+
+  test("uhrazená záloha snižuje zůstatek", () => {
+    expect(amountDue({ ...balance, advanceMinor: 30000 })).toBe(70000);
+  });
+
+  test("nahrazená záloha nemá co vybírat, přeplatek zůstává", () => {
+    const supersededAt = new Date("2026-03-01T10:00:00Z");
+    expect(amountDue({ ...balance, supersededAt })).toBe(0);
+    expect(amountDue({ ...balance, paidMinor: 100001, supersededAt })).toBe(-1);
   });
 
   test("[QR-006] QR nese zbývající částku po částečné úhradě", () => {
-    const dueMinor = amountDue({ totalMinor: 123450, paidMinor: 23450 });
+    const dueMinor = amountDue({ ...balance, totalMinor: 123450, paidMinor: 23450 });
     const plan = planQr({ ...czk, dueMinor }) as { payload: string };
     expect(plan.payload).toContain("*AM:1000.00*");
     const epc = planQr({ ...eur, dueMinor }) as { payload: string };
@@ -344,7 +374,7 @@ describe("qrStateOf", () => {
       currency: "CZK",
       paymentMethod: "transfer",
       variableSymbol: "2026001",
-      totals: { totalMinor: 100_000, paidMinor: 0 },
+      totals: { ...balance, totalMinor: 100_000 },
       appearance: { showQr: true },
       snapshot: { account, supplier: { name: "Jan Novák" } },
       ...over,
@@ -359,7 +389,7 @@ describe("qrStateOf", () => {
     expect(qrStateOf(doc({ paymentMethod: "cash" }))).toBe("other_payment");
     expect(qrStateOf(doc({ appearance: { showQr: false } }))).toBe("turned_off");
     expect(qrStateOf(doc({ currency: "USD" }))).toBe("currency");
-    expect(qrStateOf(doc({ totals: { totalMinor: 0, paidMinor: 0 } }))).toBe("zero");
+    expect(qrStateOf(doc({ totals: { ...balance, totalMinor: 0 } }))).toBe("zero");
     expect(
       qrStateOf(
         doc({

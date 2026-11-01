@@ -321,6 +321,30 @@ describe("assertConsistent", () => {
       expect(() => assertConsistent(db, owner)).toThrow(/paid_minor/);
     });
 
+    test("[TST-018] nesoulad credits_minor kontrola odhalí", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      db.update(invoice).set({ creditsMinor: -500 }).where(eq(invoice.id, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/credits_minor/);
+    });
+
+    test("[TST-018] nesoulad advance_minor kontrola odhalí", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      db.update(invoice).set({ advanceMinor: 500 }).where(eq(invoice.id, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/advance_minor/);
+    });
+
+    test("[TST-018] záporné paid_minor kontrola odhalí", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      db.update(invoice).set({ paidMinor: -1 }).where(eq(invoice.id, id)).run();
+
+      expect(() => assertConsistent(db, owner)).toThrow(/paid_minor je záporné/);
+    });
+
     test("[TST-018] odhalí stav, který neodpovídá platbám", () => {
       const owner = createUser();
       const id = paidInvoice(owner);

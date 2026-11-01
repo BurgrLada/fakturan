@@ -111,7 +111,11 @@ const short: InvoiceDocument = {
     roundingMinor: 0,
     totalMinor: 300_000,
     paidMinor: 0,
+    creditsMinor: 0,
+    advanceMinor: 0,
+    supersededAt: null,
   },
+  relatedDocument: null,
 };
 
 const long: InvoiceDocument = {
@@ -197,8 +201,13 @@ export function seedPayment(db: Db, invoiceId: string, creditedMinor: number): v
         sent_at: number | null;
         currency: string;
         total_minor: number;
+        credits_minor: number;
+        advance_minor: number;
       }
-    >("SELECT user_id, status, sent_at, currency, total_minor FROM invoice WHERE id = ?")
+    >(
+      `SELECT user_id, status, sent_at, currency, total_minor, credits_minor, advance_minor
+       FROM invoice WHERE id = ?`,
+    )
     .get(invoiceId)!;
   client
     .prepare(
@@ -217,10 +226,43 @@ export function seedPayment(db: Db, invoiceId: string, creditedMinor: number): v
     sentAt: row.sent_at === null ? null : new Date(row.sent_at),
     totalMinor: row.total_minor,
     paidMinor,
+    creditsMinor: row.credits_minor,
+    advanceMinor: row.advance_minor,
   });
   client
     .prepare("UPDATE invoice SET paid_minor = ?, status = ? WHERE id = ?")
     .run(paidMinor, status, invoiceId);
+}
+
+// A direct row, because no service creates credit notes yet. The caller runs refreshBalance.
+export function seedCreditNote(
+  db: Db,
+  invoiceId: string,
+  totalMinor: number,
+  status: "issued" | "cancelled" = "issued",
+): string {
+  const id = randomUUID();
+  const client = db.$client;
+  client
+    .prepare(
+      `INSERT INTO invoice (id, user_id, type, status, number, customer_id, customer_name,
+        bank_account_id, issue_date, due_date, language, currency, payment_method, subtotal_minor,
+        total_minor, appearance, supplier_snapshot, customer_snapshot, account_snapshot,
+        date_format, related_invoice_id, created_at, updated_at)
+       SELECT ?, user_id, 'credit_note', ?, ?, customer_id, customer_name, bank_account_id,
+        issue_date, issue_date, language, currency, payment_method, ?, ?, appearance,
+        supplier_snapshot, customer_snapshot, account_snapshot, date_format, id, 0, 0
+       FROM invoice WHERE id = ?`,
+    )
+    .run(id, status, `D-${id}`, totalMinor, totalMinor, invoiceId);
+  client
+    .prepare(
+      `INSERT INTO invoice_line (id, invoice_id, user_id, position, name, quantity_milli,
+        unit_price_minor, net_minor)
+       SELECT ?, ?, user_id, 0, 'Oprava', 1000, ?, ? FROM invoice WHERE id = ?`,
+    )
+    .run(randomUUID(), id, totalMinor, totalMinor, id);
+  return id;
 }
 
 export const INVOICE_FIXTURES = { short, long, eur, english, noLogo, longNames };

@@ -52,6 +52,12 @@ export type InvoiceSnapshot = {
   account: AccountSnapshot | null;
 };
 
+export type RelatedSnapshot = {
+  type: InvoiceType;
+  number: string;
+  issueDate: CalendarDate;
+};
+
 export type DocumentImages = {
   logoFileId: string | null;
   qrLogoFileId: string | null;
@@ -64,6 +70,9 @@ export type DocumentTotals = {
   roundingMinor: number;
   totalMinor: number;
   paidMinor: number;
+  creditsMinor: number;
+  advanceMinor: number;
+  supersededAt: Date | null;
 };
 
 export type DocumentLine = {
@@ -116,6 +125,7 @@ export type InvoiceDocument = DocumentHeader & {
   snapshot: InvoiceSnapshot;
   images: DocumentImages;
   totals: DocumentTotals;
+  relatedDocument: RelatedSnapshot | null;
 };
 
 type DocumentRow = DocumentHeader &
@@ -125,6 +135,7 @@ type DocumentRow = DocumentHeader &
     supplierSnapshot: SupplierSnapshot | null;
     customerSnapshot: CustomerSnapshot | null;
     accountSnapshot: AccountSnapshot | null;
+    relatedSnapshot: RelatedSnapshot | null;
     lines: DocumentLine[];
   };
 
@@ -188,6 +199,10 @@ export function invoiceDocument(row: DocumentRow): InvoiceDocument {
       roundingMinor: row.roundingMinor,
       totalMinor: row.totalMinor,
       paidMinor: row.paidMinor,
+      creditsMinor: row.creditsMinor,
+      advanceMinor: row.advanceMinor,
+      supersededAt: row.supersededAt,
     },
+    relatedDocument: row.relatedSnapshot,
   };
 }

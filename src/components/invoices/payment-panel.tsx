@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Currency } from "@/lib/currency";
 import { formatMoney } from "@/lib/money";
-import { amountDue } from "@/lib/qr-payload";
+import { amountDue, type Balance } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { PaymentDialog, type PaymentView } from "./payment-dialog";
@@ -42,8 +42,7 @@ export function PaymentPanel({
   revision,
   status,
   currency,
-  totalMinor,
-  paidMinor,
+  balance,
   today,
   payments,
 }: {
@@ -51,8 +50,7 @@ export function PaymentPanel({
   revision: number;
   status: string;
   currency: Currency;
-  totalMinor: number;
-  paidMinor: number;
+  balance: Balance;
   today: string;
   payments: PaymentView[];
 }) {
@@ -68,7 +66,7 @@ export function PaymentPanel({
   const [receiptFor, setReceiptFor] = useState<string | null>(null);
   const receipt = useMemo(() => (receiptFor ? { paymentId: receiptFor } : undefined), [receiptFor]);
 
-  const due = amountDue({ totalMinor, paidMinor });
+  const due = amountDue(balance);
 
   function perform(work: () => Promise<Reply>, done?: string) {
     setMessage(null);
@@ -96,7 +94,7 @@ export function PaymentPanel({
       <h2 className="text-lg">{T.title}</h2>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">{T.paid}</dt>
-        <dd data-testid="payment-paid">{formatMoney(paidMinor, currency)}</dd>
+        <dd data-testid="payment-paid">{formatMoney(balance.paidMinor, currency)}</dd>
         {due > 0 && (
           <>
             <dt className="text-muted-foreground">{T.left}</dt>

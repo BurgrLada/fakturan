@@ -44,13 +44,15 @@ import {
   type DraftInput,
   type IssuedInput,
 } from "@/server/services/invoices";
+import { refreshBalance } from "@/server/services/invoice-balance";
+import { mutate } from "@/server/services/mutation";
 import { ensureDefaultSeries } from "@/server/services/number-series";
 import { markPaid } from "@/server/services/payments";
 import { saveSupplier, setSupplierImage, type SupplierInput } from "@/server/services/supplier";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
-import { seedPayment } from "../fixtures/invoices";
+import { seedCreditNote, seedPayment } from "../fixtures/invoices";
 import { assertIsolated } from "../helpers/isolation";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
@@ -175,6 +177,8 @@ function issued(owner: string, customerId: string, over: Partial<DraftInput> = {
 }
 
 const detail = (owner: string, id: string) => getInvoice(owner, id)!;
+const balance = (owner: string, id: string) =>
+  mutate(actor(owner), "invoice.balance", (tx, audit) => refreshBalance(tx, audit, owner, id));
 
 const edit = (owner: string, id: string, over: Partial<IssuedInput> = {}): IssuedInput => {
   const row = detail(owner, id);
@@ -526,6 +530,20 @@ describe("úprava vystaveného dokladu", () => {
     assertConsistent(db, owner);
   });
 
+  test("[INV-023] úprava faktury s opravou počítá přeplatek z nového amountDue", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    seedPayment(db, id, 250_000);
+    seedCreditNote(db, id, -100_000);
+    balance(owner, id);
+    expect(detail(owner, id).status).toBe("paid");
+
+    const result = update(owner, id, { note: "Po opravě" });
+
+    expect(result.balanceWarning).toBe("overpaid");
+    assertConsistent(db, owner);
+  });
+
   test("[INV-023] úprava na nižší částku nechá paid s přeplatkem", () => {
     const { owner, customerId } = newOwner();
     const { id } = issued(owner, customerId);
@@ -536,6 +554,86 @@ describe("úprava vystaveného dokladu", () => {
     expect(result.balanceWarning).toBe("overpaid");
     expect(detail(owner, id).status).toBe("paid");
     assertConsistent(db, owner);
+  });
+
+  test("obnovení starší verze nepřepíše credits_minor", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    update(owner, id, { note: "Před opravou" });
+    const older = listVersions(owner, id)[0]!.id;
+    update(owner, id, { note: "Druhá" });
+    seedCreditNote(db, id, -100_000);
+    balance(owner, id);
+
+    restoreVersion(actor(owner), older);
+
+    expect(detail(owner, id)).toMatchObject({ note: "", creditsMinor: -100_000 });
+    assertConsistent(db, owner);
+  });
+
+  test("změna zůstatku se v porovnání verzí neukáže", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    update(owner, id, { note: "Před opravou" });
+    const before = getVersion(owner, listVersions(owner, id)[0]!.id)!.document;
+    seedCreditNote(db, id, -100_000);
+    const credited = balance(owner, id);
+    const document = {
+      ...before,
+      totals: {
+        ...before.totals,
+        creditsMinor: credited.creditsMinor,
+        advanceMinor: 100,
+        supersededAt: new Date(0),
+      },
+    };
+
+    expect(diffInvoices(before, document)).toEqual([]);
+  });
+
+  test("uložená verze bez nových polí jde otevřít a porovnat", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    update(owner, id, { note: "Nová" });
+    const versionId = listVersions(owner, id)[0]!.id;
+    const { document } = getVersion(owner, versionId)!;
+    const { relatedDocument: _r, ...rest } = document;
+    const { creditsMinor: _c, advanceMinor: _a, supersededAt: _s, ...totals } = document.totals;
+    db.update(invoiceVersion)
+      .set({ document: { ...rest, totals } as typeof document })
+      .where(eq(invoiceVersion.id, versionId))
+      .run();
+
+    const old = getVersion(owner, versionId)!.document;
+
+    expect(old.relatedDocument).toBeNull();
+    expect(old.totals).toMatchObject({ creditsMinor: 0, advanceMinor: 0, supersededAt: null });
+    expect(diffInvoices(old, document)).toEqual([]);
+  });
+
+  test("uložená verze vrátí supersededAt jako datum", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    db.update(invoice).set({ supersededAt: NOW }).where(eq(invoice.id, id)).run();
+    update(owner, id, { note: "Nová" });
+
+    const { document } = getVersion(owner, listVersions(owner, id)[0]!.id)!;
+
+    expect(document.totals.supersededAt).toEqual(NOW);
+  });
+
+  test("restoreVersion zapíše zamrzlý odkaz z verze", () => {
+    const { owner, customerId } = newOwner();
+    const { id } = issued(owner, customerId);
+    const relatedSnapshot = { type: "advance" as const, number: "Z1", issueDate: "2026-03-01" };
+    db.update(invoice).set({ relatedSnapshot }).where(eq(invoice.id, id)).run();
+    update(owner, id, { note: "První" });
+    const older = listVersions(owner, id)[0]!.id;
+    db.update(invoice).set({ relatedSnapshot: null }).where(eq(invoice.id, id)).run();
+
+    restoreVersion(actor(owner), older);
+
+    expect(detail(owner, id).relatedSnapshot).toEqual(relatedSnapshot);
   });
 
   test("[INV-023] obnovení verze přepočítá stav", () => {

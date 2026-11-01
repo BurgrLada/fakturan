@@ -1,6 +1,7 @@
 import { DOCUMENT_TYPES, type CalendarDate, type DocumentType } from "./number-format";
 import type { Discount, DiscountKind } from "./invoice-totals";
 import type { LogoPosition, Preferences } from "./preferences";
+import { amountDue, type Balance } from "./qr-payload";
 
 export const INVOICE_STATUSES = [
   "draft",
@@ -66,18 +67,19 @@ export const MAX_BULK_DOCUMENTS = 200;
 
 export const AWAITING_PAYMENT = ["issued", "sent", "partially_paid"] as const;
 
+export const ACTIVE_CREDIT_STATUSES = ["issued", "sent"] as const;
+
+export function isActiveDocument(status: InvoiceStatus): boolean {
+  return (ACTIVE_CREDIT_STATUSES as readonly InvoiceStatus[]).includes(status);
+}
+
 export function isOverdue(
-  row: {
-    status: InvoiceStatus;
-    dueDate: CalendarDate | null;
-    totalMinor: number;
-    paidMinor: number;
-  },
+  row: Balance & { status: InvoiceStatus; dueDate: CalendarDate | null },
   today: CalendarDate,
 ): boolean {
   return (
     (AWAITING_PAYMENT as readonly InvoiceStatus[]).includes(row.status) &&
-    row.totalMinor > row.paidMinor &&
+    amountDue(row) > 0 &&
     row.dueDate !== null &&
     row.dueDate < today
   );

@@ -45,7 +45,7 @@ const T = TEXTS.invoices.detail;
 export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
 
 function StatusSteps({ row, closedMinor }: { row: InvoiceDetail; closedMinor: number }) {
-  const left = row.totalMinor - row.paidMinor;
+  const left = amountDue(row);
   const settled = row.status === "cancelled" || row.status === "credited";
   const steps = [
     { label: T.steps.issued, value: formatDateTime(row.issuedAt) },
@@ -216,8 +216,13 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           revision={row.revision}
           status={row.status}
           currency={row.currency}
-          totalMinor={row.totalMinor}
-          paidMinor={row.paidMinor}
+          balance={{
+            totalMinor: row.totalMinor,
+            paidMinor: row.paidMinor,
+            creditsMinor: row.creditsMinor,
+            advanceMinor: row.advanceMinor,
+            supersededAt: row.supersededAt,
+          }}
           today={today}
           payments={payments.map((item) => ({
             id: item.id,

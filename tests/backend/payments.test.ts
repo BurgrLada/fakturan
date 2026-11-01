@@ -334,7 +334,7 @@ describe("zápis plateb", () => {
     pay(owner, id);
     db.update(invoice).set({ paidMinor: 999 }).where(eq(invoice.id, id)).run();
 
-    const repaired = db.transaction((tx) => applyPayments(tx, owner, id));
+    const repaired = db.transaction((tx) => applyPayments(tx, () => {}, owner, id));
 
     expect(repaired.paidMinor).toBe(100_000);
   });

@@ -20,6 +20,7 @@ import {
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { setAutomation, setPaused } from "@/server/services/automation";
+import { refreshBalance } from "@/server/services/invoice-balance";
 import { markSent } from "@/server/services/invoice-lifecycle";
 import { queueMail, sendPrefill } from "@/server/services/invoice-mail";
 import { getInvoice } from "@/server/services/invoices";
@@ -41,6 +42,7 @@ import {
 } from "@/server/services/reminders";
 import { MANUAL_STAGE } from "@/lib/reminders";
 import { TEXTS } from "@/lib/texts";
+import { seedCreditNote } from "../fixtures/invoices";
 import { createTestDb } from "../helpers/db";
 import {
   issuedInvoice,
@@ -853,6 +855,24 @@ describe("zpráva, která přestala platit", () => {
     expect(smtp.messages).toEqual([]);
     expect(logsOf(owner)[0]).toMatchObject({ status: "held", reason: TEXTS.reminders.held });
     expect(noticesOf(owner)).toEqual([]);
+  });
+
+  test("refreshBalance zvýší revision a upomínka ve frontě se zadrží", async () => {
+    const { owner, customerId } = account();
+    const id = sentInvoice(owner, customerId);
+    manual(owner, id, null);
+    const { revision } = getInvoice(owner, id)!;
+    seedCreditNote(db, id, -100_000);
+    mutate(webActor(owner), "invoice.balance", (tx, audit) => refreshBalance(tx, audit, owner, id));
+
+    expect(getInvoice(owner, id)!.revision).toBe(revision + 1);
+    await drainJobs("w");
+
+    expect(smtp.messages).toEqual([]);
+    expect(logsOf(owner)[0]).toMatchObject({
+      status: "held",
+      reason: TEXTS.invoiceMail.reasons.revision,
+    });
   });
 
   test("upomínka ve frontě se po platbě zadrží a SMTP nic nedostane", async () => {

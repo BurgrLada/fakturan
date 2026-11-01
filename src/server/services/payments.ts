@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { daysBetween, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
+  canAmendPayment,
   canTakePayment,
   deriveStatus,
   paymentInputSchema,
@@ -21,10 +22,13 @@ import { db, type Tx } from "../db";
 import { bankNotification, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
+import { finalOf, refreshBalance } from "./invoice-balance";
 import { findOwned, ownerOf, type Invoice } from "./invoices";
 import { holdQueuedMail, receiptNoticeKey } from "./mail-hold";
 import { mutate, type Audit } from "./mutation";
 import { resolveNotification } from "./notifications";
+
+export { hasPayments } from "./invoice-balance";
 
 const E = TEXTS.payments.errors;
 
@@ -62,6 +66,12 @@ function assertPayable(row: Invoice): void {
   }
 }
 
+function assertAmendable(row: Invoice): void {
+  if (!canAmendPayment(row.status) || row.type === "credit_note") {
+    throw new ServiceError(E.notPayable);
+  }
+}
+
 function assertRevision(row: Invoice, revision: number): void {
   if (row.revision !== revision) throw new ServiceError(TEXTS.invoices.stale);
 }
@@ -87,18 +97,8 @@ function auditFields(row: Payment) {
   return { invoiceId, kind, source, paidOn, amountMinor, creditedMinor, currency, method };
 }
 
-export function hasPayments(q: Reader, ownerId: string, invoiceId: string): boolean {
-  const found = q
-    .select({ id: payment.id })
-    .from(payment)
-    .where(scoped(ownerId).where(payment, (t, { eq }) => eq(t.invoiceId, invoiceId)))
-    .limit(1)
-    .get();
-  return found !== undefined;
-}
-
 // The only writer of paid_minor: always a fresh SUM, so a repeated or partial run cannot drift.
-export function applyPayments(tx: Tx, userId: string, invoiceId: string): Invoice {
+export function applyPayments(tx: Tx, audit: Audit, userId: string, invoiceId: string): Invoice {
   const row = findOwned(tx, userId, invoiceId);
   const paidMinor = tx
     .select({ sum: sql<number>`coalesce(sum(${payment.creditedMinor}), 0)` })
@@ -114,6 +114,10 @@ export function applyPayments(tx: Tx, userId: string, invoiceId: string): Invoic
     })
     .where(and(eq(invoice.id, invoiceId), eq(invoice.userId, userId)))
     .run();
+  if (row.type === "advance") {
+    const final = finalOf(tx, userId, invoiceId);
+    if (final) refreshBalance(tx, audit, userId, final.id);
+  }
   return findOwned(tx, userId, invoiceId);
 }
 
@@ -136,7 +140,7 @@ export function insertPayment(
   tx.insert(payment)
     .values({ ...fields, id, userId, invoiceId, kind, createdAt: now, updatedAt: now })
     .run();
-  const after = applyPayments(tx, userId, invoiceId);
+  const after = applyPayments(tx, audit, userId, invoiceId);
   audit({
     action,
     entity: "payment",
@@ -191,7 +195,7 @@ export function undoNoticeIn(tx: Tx, audit: Audit, userId: string, noticeId: str
     .run();
   for (const invoiceId of new Set(removed.map((row) => row.invoiceId))) {
     const before = findOwned(tx, userId, invoiceId);
-    const after = applyPayments(tx, userId, invoiceId);
+    const after = applyPayments(tx, audit, userId, invoiceId);
     for (const row of removed.filter((item) => item.invoiceId === invoiceId)) {
       audit({
         action: "payment.delete",
@@ -272,7 +276,7 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
   return mutate(actor, "payment.update", (tx, audit) => {
     const before = readPayment(tx, userId, id);
     const row = findOwned(tx, userId, before.invoiceId);
-    assertPayable(row);
+    assertAmendable(row);
     assertRevision(row, input.revision);
     const { paidOn, amountMinor, currency, method, note } = input;
     const creditedMinor = creditedFor(row, input);
@@ -297,7 +301,7 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
         quiet: true,
       });
     }
-    const after = applyPayments(tx, userId, before.invoiceId);
+    const after = applyPayments(tx, audit, userId, before.invoiceId);
     audit({
       entity: "payment",
       entityId: id,
@@ -315,7 +319,7 @@ export function deletePayment(actor: Actor, id: string, revision: number): void 
   mutate(actor, "payment.delete", (tx, audit) => {
     const before = readPayment(tx, userId, id);
     const row = findOwned(tx, userId, before.invoiceId);
-    assertPayable(row);
+    assertAmendable(row);
     assertRevision(row, revision);
     if (before.notificationId) return undoNoticeIn(tx, audit, userId, before.notificationId);
     if (before.source === "notice") throw new ServiceError(E.noticeDelete);
@@ -326,7 +330,7 @@ export function deletePayment(actor: Actor, id: string, revision: number): void 
     tx.delete(payment)
       .where(scoped(userId).where(payment, (t, { eq }) => eq(t.id, id)))
       .run();
-    const after = applyPayments(tx, userId, before.invoiceId);
+    const after = applyPayments(tx, audit, userId, before.invoiceId);
     audit({
       entity: "payment",
       entityId: id,

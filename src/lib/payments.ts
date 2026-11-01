@@ -23,15 +23,24 @@ export function canTakePayment(status: InvoiceStatus): boolean {
   return TAKES_PAYMENT.includes(status);
 }
 
+export function canAmendPayment(status: InvoiceStatus): boolean {
+  return canTakePayment(status) || status === "credited";
+}
+
 // A zero total is never paid: nothing was owed, so any money on it stays a plain overpayment.
+// The status reads the full balance, so a replaced advance that was partly paid stays that way.
 export function deriveStatus(input: {
   status: InvoiceStatus;
   sentAt: Date | null;
   totalMinor: number;
   paidMinor: number;
+  creditsMinor: number;
+  advanceMinor: number;
 }): InvoiceStatus {
-  if (!canTakePayment(input.status)) return input.status;
-  const due = amountDue(input);
+  if (!canAmendPayment(input.status)) return input.status;
+  const due = amountDue({ ...input, supersededAt: null });
+  const untouched = input.paidMinor === 0 && input.advanceMinor === 0;
+  if (input.totalMinor > 0 && input.creditsMinor < 0 && due === 0 && untouched) return "credited";
   if (input.totalMinor > 0 && due <= 0) return "paid";
   if (input.paidMinor > 0 && due > 0) return "partially_paid";
   return input.sentAt ? "sent" : "issued";

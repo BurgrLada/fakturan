@@ -344,8 +344,20 @@ describe("seznam faktur", () => {
 
     const summary = invoiceSummary(o.owner, { pageSize: 1 });
     expect(summary).toEqual([
-      { currency: "CZK", invoicedMinor: 160_000, paidMinor: 30_000, overdueMinor: 130_000 },
-      { currency: "EUR", invoicedMinor: 7_000, paidMinor: 0, overdueMinor: 0 },
+      {
+        currency: "CZK",
+        invoicedMinor: 160_000,
+        paidMinor: 30_000,
+        overdueMinor: 130_000,
+        advanceOpenMinor: 0,
+      },
+      {
+        currency: "EUR",
+        invoicedMinor: 7_000,
+        paidMinor: 0,
+        overdueMinor: 0,
+        advanceOpenMinor: 0,
+      },
     ]);
     expect(invoiceSummary(o.owner, { currency: "EUR", page: 9 })).toHaveLength(1);
   });
@@ -358,7 +370,13 @@ describe("seznam faktur", () => {
     draft(o, { price: 4_000 });
 
     expect(invoiceSummary(o.owner, {})).toEqual([
-      { currency: "CZK", invoicedMinor: 1_000, paidMinor: 0, overdueMinor: 0 },
+      {
+        currency: "CZK",
+        invoicedMinor: 1_000,
+        paidMinor: 0,
+        overdueMinor: 0,
+        advanceOpenMinor: 0,
+      },
     ]);
   });
 

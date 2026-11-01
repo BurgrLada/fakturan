@@ -120,6 +120,9 @@ function candidatesFor(tx: Tx, userId: string, variableSymbol: string | null): M
       variableSymbol: invoice.variableSymbol,
       totalMinor: invoice.totalMinor,
       paidMinor: invoice.paidMinor,
+      creditsMinor: invoice.creditsMinor,
+      advanceMinor: invoice.advanceMinor,
+      supersededAt: invoice.supersededAt,
     })
     .from(invoice)
     .where(
@@ -651,6 +654,9 @@ export function noticeCandidates(
       variableSymbol: invoice.variableSymbol,
       totalMinor: invoice.totalMinor,
       paidMinor: invoice.paidMinor,
+      creditsMinor: invoice.creditsMinor,
+      advanceMinor: invoice.advanceMinor,
+      supersededAt: invoice.supersededAt,
       status: invoice.status,
     })
     .from(invoice)

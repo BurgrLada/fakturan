@@ -10,7 +10,12 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { CURRENCIES } from "@/lib/currency";
 import { INVOICE_STATUSES, INVOICE_TYPES, type Appearance } from "@/lib/invoice";
-import type { AccountSnapshot, CustomerSnapshot, SupplierSnapshot } from "@/lib/invoice-document";
+import type {
+  AccountSnapshot,
+  CustomerSnapshot,
+  RelatedSnapshot,
+  SupplierSnapshot,
+} from "@/lib/invoice-document";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { DATE_FORMATS, LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
 import { user } from "./auth";
@@ -66,6 +71,10 @@ export const invoice = sqliteTable(
     roundingMinor: integer("rounding_minor").notNull().default(0),
     totalMinor: integer("total_minor").notNull().default(0),
     paidMinor: integer("paid_minor").notNull().default(0),
+    // Written only by refreshBalance, never by arithmetic at the call site.
+    creditsMinor: integer("credits_minor").notNull().default(0),
+    advanceMinor: integer("advance_minor").notNull().default(0),
+    supersededAt: integer("superseded_at", { mode: "timestamp_ms" }),
     appearance: text({ mode: "json" }).$type<Appearance>().notNull(),
     supplierSnapshot: text("supplier_snapshot", { mode: "json" }).$type<SupplierSnapshot>(),
     customerSnapshot: text("customer_snapshot", { mode: "json" }).$type<CustomerSnapshot>(),
@@ -76,6 +85,8 @@ export const invoice = sqliteTable(
     qrLogoFileId: imageRef("qr_logo_file_id"),
     signatureFileId: imageRef("signature_file_id"),
     relatedInvoiceId: text("related_invoice_id").references((): AnySQLiteColumn => invoice.id),
+    // Frozen when issuing: renumbering the original must not rewrite an issued document.
+    relatedSnapshot: text("related_snapshot", { mode: "json" }).$type<RelatedSnapshot>(),
     external: integer({ mode: "boolean" }).notNull().default(false),
     recurringId: text("recurring_id").references((): AnySQLiteColumn => recurringInvoice.id, {
       onDelete: "set null",
@@ -103,6 +114,7 @@ export const invoice = sqliteTable(
     index("invoice_user_customer_idx").on(t.userId, t.customerId),
     index("invoice_user_variable_symbol_idx").on(t.userId, t.variableSymbol),
     index("invoice_recurring_idx").on(t.recurringId),
+    index("invoice_user_related_idx").on(t.userId, t.relatedInvoiceId),
   ],
 );
 

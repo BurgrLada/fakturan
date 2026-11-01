@@ -1,6 +1,6 @@
 import { asc, eq, getTableColumns, getTableName, is, sql } from "drizzle-orm";
 import { SQLiteTable } from "drizzle-orm/sqlite-core";
-import { toDiscount } from "@/lib/invoice";
+import { isActiveDocument, toDiscount } from "@/lib/invoice";
 import { computeTotals } from "@/lib/invoice-totals";
 import { deriveStatus } from "@/lib/payments";
 import type { Db } from "@/server/db";
@@ -92,11 +92,31 @@ function paymentProblems(db: Db, ownerId: string): string[] {
       )
       .map((row) => [row.id, row.paid]),
   );
-  for (const row of db.select().from(invoice).where(eq(invoice.userId, ownerId)).all()) {
+  const rows = db.select().from(invoice).where(eq(invoice.userId, ownerId)).all();
+  for (const row of rows) {
     const label = `invoice ${row.id}`;
     const paid = paidByInvoice.get(row.id) ?? 0;
     if (row.paidMinor !== paid) problems.push(`${label}: paid_minor neodpovídá součtu plateb`);
-    const expected = deriveStatus({ ...row, paidMinor: paid });
+    if (row.paidMinor < 0) problems.push(`${label}: paid_minor je záporné`);
+    const creditsMinor = rows
+      .filter(
+        (other) =>
+          other.type === "credit_note" &&
+          other.relatedInvoiceId === row.id &&
+          isActiveDocument(other.status),
+      )
+      .reduce((sum, other) => sum + other.totalMinor, 0);
+    if (row.creditsMinor !== creditsMinor) {
+      problems.push(`${label}: credits_minor neodpovídá aktivním opravám`);
+    }
+    const advance = rows.find(
+      (other) => other.id === row.relatedInvoiceId && other.type === "advance",
+    );
+    const advanceMinor = advance?.paidMinor ?? 0;
+    if (row.advanceMinor !== advanceMinor) {
+      problems.push(`${label}: advance_minor neodpovídá úhradě zálohy`);
+    }
+    const expected = deriveStatus({ ...row, paidMinor: paid, creditsMinor, advanceMinor });
     if (row.status !== expected) {
       problems.push(`${label}: stav ${row.status} neodpovídá platbám (${expected})`);
     }

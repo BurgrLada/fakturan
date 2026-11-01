@@ -750,6 +750,9 @@ describe("povinné údaje", () => {
           roundingMinor: 33,
           totalMinor: 290_033,
           paidMinor: 90_033,
+          creditsMinor: 0,
+          advanceMinor: 0,
+          supersededAt: null,
         },
       }),
     );
@@ -759,6 +762,50 @@ describe("povinné údaje", () => {
     expect(text).toMatch(/Zaokrouhlení[\s\S]*0,33\sKč/);
     expect(text).toMatch(/Uhrazeno[\s\S]*900,33\sKč/);
     expect(text).toMatch(/Zbývá uhradit[\s\S]*2\s000,00\sKč/);
+  });
+
+  test("PDF ukáže Přeplatek k vrácení 1 500,00", async () => {
+    const view = await viewOf({
+      ...F.short,
+      totals: {
+        ...F.short.totals,
+        totalMinor: 500_000,
+        subtotalMinor: 500_000,
+        creditsMinor: -150_000,
+        paidMinor: 500_000,
+      },
+    });
+
+    expect(view.totals.map(({ label, strong }) => [label, strong])).toEqual([
+      ["Celkem k úhradě", false],
+      ["Opravné faktury", false],
+      ["Uhrazeno", false],
+      ["Přeplatek k vrácení", true],
+    ]);
+    expect(view.totals.at(-1)!.value).toMatch(/1\s500,00\sKč/);
+    expect(view.totals.at(1)!.value).toMatch(/-\s?1\s500,00\sKč/);
+    expect(await textOf(await renderInvoicePdf(view))).toMatch(
+      /Přeplatek k vrácení[\s\S]*1\s500,00\sKč/,
+    );
+  });
+
+  test("úhrada zálohou má řádek a zbytek je silný", async () => {
+    const { totals } = await viewOf({
+      ...F.english,
+      totals: { ...F.english.totals, advanceMinor: 100_000 },
+    });
+
+    expect(totals.map(({ label, strong }) => [label, strong])).toEqual([
+      ["Total due", false],
+      ["Paid by advance", false],
+      ["Amount due", true],
+    ]);
+  });
+
+  test("doklad bez oprav, záloh a plateb má jediný silný řádek", async () => {
+    const { totals } = await viewOf(F.short);
+
+    expect(totals.map(({ label, strong }) => [label, strong])).toEqual([["Celkem k úhradě", true]]);
   });
 
   test.each([

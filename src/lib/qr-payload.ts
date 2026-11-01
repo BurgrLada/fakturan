@@ -53,8 +53,18 @@ const TRANSLITERATIONS: Record<string, string> = {
   ı: "i",
 };
 
-export function amountDue(row: { totalMinor: number; paidMinor: number }): number {
-  return row.totalMinor - row.paidMinor;
+export type Balance = {
+  totalMinor: number;
+  paidMinor: number;
+  creditsMinor: number;
+  advanceMinor: number;
+  supersededAt: Date | null;
+};
+
+// The SQL form is dueSql in services/invoices. A replaced advance has nothing left to collect.
+export function amountDue(row: Balance): number {
+  const due = row.totalMinor + row.creditsMinor - row.advanceMinor - row.paidMinor;
+  return row.supersededAt ? Math.min(0, due) : due;
 }
 
 function formatAmount(minor: number): string {

@@ -161,6 +161,9 @@ describe("koncept", () => {
       dueDate: "2026-03-10",
       totalMinor: 1000,
       paidMinor: 0,
+      creditsMinor: 0,
+      advanceMinor: 0,
+      supersededAt: null,
     };
 
     expect(isOverdue(row, "2026-03-10")).toBe(false);

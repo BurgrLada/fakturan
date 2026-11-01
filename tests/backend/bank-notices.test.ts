@@ -12,6 +12,7 @@ import {
   auditLog,
   bankNotification,
   invoice,
+  invoiceLine,
   notification,
   payment,
   user,
@@ -31,6 +32,7 @@ import {
   undoNotice,
   type IngestInput,
 } from "@/server/services/bank-notices";
+import { refreshBalance } from "@/server/services/invoice-balance";
 import { getInvoice } from "@/server/services/invoices";
 import {
   addPayment,
@@ -41,6 +43,7 @@ import {
 } from "@/server/services/payments";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
 import { mutate } from "@/server/services/mutation";
+import { seedCreditNote, seedPayment } from "../fixtures/invoices";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import {
@@ -52,7 +55,7 @@ import {
   VS,
 } from "../helpers/fixtures-bank";
 import { assertIsolated } from "../helpers/isolation";
-import { issuedInvoice } from "../helpers/fixtures-mail";
+import { issuedInvoice, webActor } from "../helpers/fixtures-mail";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -147,6 +150,33 @@ describe("ingestNotice", () => {
     });
     expect(getInvoice(owner, invoiceId)!.paidMinor).toBe(0);
     assertConsistent(db, owner);
+  });
+
+  test("[BNK-008] avízo na 6 000,00 uhradí fakturu po opravě, 12 100,00 jde do fronty", () => {
+    const { owner, invoiceId } = seedAccount(db, NOW);
+    const noteId = seedCreditNote(db, invoiceId, -210_000);
+    db.update(invoice)
+      .set({ subtotalMinor: 1_210_000, totalMinor: 1_210_000 })
+      .where(eq(invoice.id, invoiceId))
+      .run();
+    db.update(invoiceLine)
+      .set({ quantityMilli: 1000, unitPriceMinor: 1_210_000, netMinor: 1_210_000 })
+      .where(eq(invoiceLine.invoiceId, invoiceId))
+      .run();
+    seedPayment(db, invoiceId, 400_000);
+    mutate(webActor(owner), "invoice.balance", (tx, audit) =>
+      refreshBalance(tx, audit, owner, invoiceId),
+    );
+
+    expect(ingestNotice(owner, income(parsed({ amountMinor: 1_210_000 })))).toMatchObject({
+      status: "pending",
+      reason: "amount",
+    });
+    expect(ingestNotice(owner, income(parsed({ amountMinor: 600_000 })))).toMatchObject({
+      status: "matched",
+    });
+    expect(getInvoice(owner, invoiceId)).toMatchObject({ status: "paid", paidMinor: 1_000_000 });
+    expect(getInvoice(owner, noteId)!.paidMinor).toBe(0);
   });
 
   test("[BNK-010] neznámý VS, jiná částka a jiná měna jdou do fronty bez platby", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  canAmendPayment,
   canTakePayment,
   deriveStatus,
   PAYMENT_CHANNELS,
@@ -13,7 +14,14 @@ import { INVOICE_STATUSES } from "@/lib/invoice";
 const SENT_AT = new Date("2026-03-01T10:00:00Z");
 
 describe("deriveStatus", () => {
-  const sent = { status: "sent" as const, sentAt: SENT_AT, totalMinor: 1000, paidMinor: 0 };
+  const sent = {
+    status: "sent" as const,
+    sentAt: SENT_AT,
+    totalMinor: 1000,
+    paidMinor: 0,
+    creditsMinor: 0,
+    advanceMinor: 0,
+  };
 
   test("[PAY-002] součet plateb určí částečnou a plnou úhradu", () => {
     expect(deriveStatus({ ...sent, paidMinor: 1 })).toBe("partially_paid");
@@ -37,8 +45,51 @@ describe("deriveStatus", () => {
     expect(deriveStatus({ ...sent, totalMinor: 0, paidMinor: 500, sentAt: null })).toBe("issued");
   });
 
-  test.each(["draft", "cancelled", "credited"] as const)("stav %s zůstává beze změny", (status) => {
+  test.each(["draft", "cancelled"] as const)("stav %s zůstává beze změny", (status) => {
     expect(deriveStatus({ ...sent, status, paidMinor: 1000 })).toBe(status);
+  });
+
+  test("[CRN-006] úplná oprava bez plateb je dobropisovaná", () => {
+    expect(deriveStatus({ ...sent, creditsMinor: -1000 })).toBe("credited");
+  });
+
+  test("[CRN-006] s platbou nebo zálohou zůstává uhrazená s přeplatkem", () => {
+    expect(deriveStatus({ ...sent, creditsMinor: -1000, paidMinor: 1 })).toBe("paid");
+    expect(deriveStatus({ ...sent, creditsMinor: -1000, advanceMinor: 1 })).toBe("paid");
+    expect(deriveStatus({ ...sent, creditsMinor: -400, paidMinor: 1000 })).toBe("paid");
+  });
+
+  test("[CRN-006] částečná oprava dobropis nezaloží", () => {
+    expect(deriveStatus({ ...sent, creditsMinor: -400 })).toBe("sent");
+    expect(deriveStatus({ ...sent, creditsMinor: -400, paidMinor: 100 })).toBe("partially_paid");
+    expect(deriveStatus({ ...sent, creditsMinor: -400, paidMinor: 600 })).toBe("paid");
+  });
+
+  test("[CRN-006] nulový doklad bez oprav dobropisovaný není", () => {
+    expect(deriveStatus({ ...sent, totalMinor: 0, creditsMinor: 0 })).toBe("sent");
+  });
+
+  test("z dobropisované po stornu opravy vede cesta zpět na základ", () => {
+    expect(deriveStatus({ ...sent, status: "credited" })).toBe("sent");
+    expect(deriveStatus({ ...sent, status: "credited", sentAt: null })).toBe("issued");
+    expect(deriveStatus({ ...sent, status: "credited", paidMinor: 400 })).toBe("partially_paid");
+  });
+
+  test("doplatek po záloze má základní stav, ne částečnou úhradu", () => {
+    expect(deriveStatus({ ...sent, advanceMinor: 400 })).toBe("sent");
+    expect(deriveStatus({ ...sent, advanceMinor: 1000 })).toBe("paid");
+  });
+});
+
+describe("canAmendPayment", () => {
+  test("oproti přijetí platby přibývá dobropisovaná", () => {
+    expect(INVOICE_STATUSES.filter(canAmendPayment)).toEqual([
+      "issued",
+      "sent",
+      "partially_paid",
+      "paid",
+      "credited",
+    ]);
   });
 });
 

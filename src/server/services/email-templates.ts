@@ -196,8 +196,8 @@ export function composeMail(
     content = parsed.data;
   } else {
     const chosen = texts?.[doc.language] ?? getEmailTemplate(ownerId, kind, doc.language);
-    // REM-006: a partly paid document must state what is left, whatever text was written.
-    const mustStateRest = kind === "reminder" && doc.status === "partially_paid";
+    // REM-006: a document no longer owed in full must state what is left, whatever text was written.
+    const mustStateRest = kind === "reminder" && amountDue(doc.totals) !== doc.totals.totalMinor;
     const template =
       mustStateRest && !statesRest(chosen) ? DEFAULT_MAIL_CONTENT[doc.language].reminder : chosen;
     const base = variablesFor(ownerId, doc, doc.number ?? "", doc.customerName);

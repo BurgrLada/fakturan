@@ -21,6 +21,7 @@ import {
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
+import { hasPayments } from "./invoice-balance";
 import { currentParties } from "./invoice-document";
 import {
   automaticSymbol,
@@ -49,7 +50,6 @@ import {
 } from "./invoices";
 import { mutate } from "./mutation";
 import { isNumberTaken } from "./number-series";
-import { hasPayments } from "./payments";
 
 const V = TEXTS.invoices.validation;
 
@@ -325,14 +325,28 @@ function withLiveReferences(
   };
 }
 
+// Stored versions predate some fields, and JSON keeps a date as text.
+function completeDocument(document: InvoiceDocument): InvoiceDocument {
+  const { creditsMinor, advanceMinor, supersededAt } = document.totals;
+  return {
+    ...document,
+    relatedDocument: document.relatedDocument ?? null,
+    totals: {
+      ...document.totals,
+      creditsMinor: creditsMinor ?? 0,
+      advanceMinor: advanceMinor ?? 0,
+      supersededAt: supersededAt ? new Date(supersededAt) : null,
+    },
+  };
+}
+
 function readVersion(q: Reader, ownerId: string, id: string): InvoiceVersion | null {
-  return (
-    q
-      .select()
-      .from(invoiceVersion)
-      .where(scoped(ownerId).where(invoiceVersion, (t, { eq }) => eq(t.id, id)))
-      .get() ?? null
-  );
+  const row = q
+    .select()
+    .from(invoiceVersion)
+    .where(scoped(ownerId).where(invoiceVersion, (t, { eq }) => eq(t.id, id)))
+    .get();
+  return row ? { ...row, document: completeDocument(row.document) } : null;
 }
 
 export function listVersions(ownerId: string, invoiceId: string): InvoiceVersionSummary[] {
@@ -353,7 +367,8 @@ export function getVersion(ownerId: string, versionId: string): InvoiceVersion |
   return readVersion(db, ownerId, versionId);
 }
 
-// Payments are not part of a version, they record what has happened since, and status follows them.
+// Payments and the balance are not part of a version, they record what has happened since, and
+// status follows them.
 export function restoreVersion(actor: Actor, versionId: string): EditResult {
   const userId = ownerOf(actor);
   return unlessUnchanged(() =>
@@ -379,6 +394,7 @@ export function restoreVersion(actor: Actor, versionId: string): EditResult {
         snapshot,
         images,
         totals: _o,
+        relatedDocument,
         ...header
       } = document;
       const totals = totalsOf(lines, document);
@@ -389,6 +405,7 @@ export function restoreVersion(actor: Actor, versionId: string): EditResult {
         supplierSnapshot: snapshot.supplier,
         customerSnapshot: snapshot.customer,
         accountSnapshot: snapshot.account,
+        relatedSnapshot: relatedDocument,
       };
       // Only this check: the rest of documentProblems would refuse a version whose account is gone.
       const problems = vatStatementProblems(tx, userId, { ...before, ...values });

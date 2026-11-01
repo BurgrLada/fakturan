@@ -124,10 +124,10 @@ function flatten(value: object, prefix = ""): [string, FieldValue][] {
   );
 }
 
-// Status and payments move on their own, a version compares what the document says.
+// Status and balance move on their own, a version compares what the document says.
 function documentFields(document: InvoiceDocument): Map<string, FieldValue> {
   const { id: _i, status: _s, lines: _l, totals, ...rest } = document;
-  const { paidMinor: _p, ...sums } = totals;
+  const { paidMinor: _p, creditsMinor: _c, advanceMinor: _a, supersededAt: _u, ...sums } = totals;
   return new Map(flatten({ ...rest, totals: sums }));
 }
 

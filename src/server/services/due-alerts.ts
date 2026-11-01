@@ -48,6 +48,9 @@ export function dueAlerts(
       currency: invoice.currency,
       totalMinor: invoice.totalMinor,
       paidMinor: invoice.paidMinor,
+      creditsMinor: invoice.creditsMinor,
+      advanceMinor: invoice.advanceMinor,
+      supersededAt: invoice.supersededAt,
     })
     .from(invoice)
     .where(

@@ -4,7 +4,7 @@ import type { NoticeVariant } from "./bank-notices/types";
 import type { Currency } from "./currency";
 import { AWAITING_PAYMENT, daysBetween, type InvoiceStatus } from "./invoice";
 import type { CalendarDate } from "./number-format";
-import { amountDue } from "./qr-payload";
+import { amountDue, type Balance } from "./qr-payload";
 
 export const QUEUE_REASONS = [
   "unknown_vs",
@@ -35,14 +35,12 @@ export type MatchableNotice = {
   paidOn: CalendarDate;
 };
 
-export type MatchCandidate = {
+export type MatchCandidate = Balance & {
   id: string;
   status: InvoiceStatus;
   currency: Currency;
   bankAccountId: string | null;
   variableSymbol: string | null;
-  totalMinor: number;
-  paidMinor: number;
   manualPayments: readonly { amountMinor: number; paidOn: CalendarDate }[];
 };
 

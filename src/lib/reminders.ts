@@ -3,7 +3,7 @@ import { mailContentSchema } from "./email-template";
 import { addDays, daysBetween, type InvoiceStatus, type InvoiceType } from "./invoice";
 import { calendarDateInPrague, type CalendarDate } from "./number-format";
 import type { Language } from "./preferences";
-import { amountDue } from "./qr-payload";
+import { amountDue, type Balance } from "./qr-payload";
 import { MAIL_VARIABLE_NAMES, validateVariables } from "./template-vars";
 import { TEXTS } from "./texts";
 
@@ -136,11 +136,9 @@ export function stageForReview<R extends ReminderRule>(input: StageInput<R>): R 
 
 export const REMINDABLE_TYPES: readonly InvoiceType[] = ["invoice", "advance"];
 
-type EligibleInvoice = {
+type EligibleInvoice = Balance & {
   type: InvoiceType;
   status: InvoiceStatus;
-  totalMinor: number;
-  paidMinor: number;
   sentAt: Date | null;
   remindersOff: boolean;
   remindersPartial: boolean;

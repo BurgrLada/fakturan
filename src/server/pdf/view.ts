@@ -178,17 +178,17 @@ function totalRows(doc: InvoiceDocument, labels: DocumentLabels): TotalRow[] {
     strong,
   });
   const adjusted = totals.discountMinor !== 0 || totals.roundingMinor !== 0;
+  const settled = totals.creditsMinor || totals.advanceMinor || totals.paidMinor;
+  const due = amountDue(totals);
   return [
     ...(adjusted ? [row(labels.subtotal, amount(totals.subtotalMinor))] : []),
     ...(totals.discountMinor ? [row(labels.discount, amount(-totals.discountMinor))] : []),
     ...(totals.roundingMinor ? [row(labels.rounding, amount(totals.roundingMinor))] : []),
-    row(labels.total, amount(totals.totalMinor), !totals.paidMinor),
-    ...(totals.paidMinor
-      ? [
-          row(labels.paid, amount(totals.paidMinor)),
-          row(labels.due, amount(amountDue(totals)), true),
-        ]
-      : []),
+    row(labels.total, amount(totals.totalMinor), !settled),
+    ...(totals.creditsMinor ? [row(labels.credits, amount(totals.creditsMinor))] : []),
+    ...(totals.advanceMinor ? [row(labels.paidByAdvance, amount(totals.advanceMinor))] : []),
+    ...(totals.paidMinor ? [row(labels.paid, amount(totals.paidMinor))] : []),
+    ...(settled ? [row(due < 0 ? labels.overpaid : labels.due, amount(Math.abs(due)), true)] : []),
   ];
 }
 

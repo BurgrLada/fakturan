@@ -12,6 +12,7 @@ import {
   inArray,
   lt,
   lte,
+  ne,
   notInArray,
   sql,
   type SQL,
@@ -725,8 +726,12 @@ export type InvoiceRow = {
   issueDate: string | null;
   dueDate: string | null;
   currency: Currency;
+  type: InvoiceType;
   totalMinor: number;
   paidMinor: number;
+  creditsMinor: number;
+  advanceMinor: number;
+  supersededAt: Date | null;
   overdue: boolean;
 };
 
@@ -735,6 +740,7 @@ export type InvoiceSummaryRow = {
   invoicedMinor: number;
   paidMinor: number;
   overdueMinor: number;
+  advanceOpenMinor: number;
 };
 
 export type SortLink = { href: string; active: SortDirection | null };
@@ -766,6 +772,7 @@ const MAX_LIST_PAGE_SIZE = 100;
 const MAX_QUERY_CHARS = 100;
 const MAX_ID_CHARS = 100;
 const CUSTOMER_CARD_ROWS = 10;
+// Credited stays in: without it +1000 and its -1000 credit note would not net out.
 const NOT_IN_TOTALS = ["draft", "cancelled"] as const satisfies InvoiceStatus[];
 
 function keyOf<K extends string>(map: Record<K, string>, value: string | undefined): K | undefined {
@@ -856,11 +863,21 @@ export function isFiltered(filter: InvoiceFilter): boolean {
   return Object.keys(rest).length > 0;
 }
 
+const fullDue = sql`${invoice.totalMinor} + ${invoice.creditsMinor} - ${invoice.advanceMinor} - ${invoice.paidMinor}`;
+
+// The SQL form of amountDue in lib/qr-payload.
+export const dueSql: SQL<number> = sql<number>`CASE WHEN ${invoice.supersededAt} IS NULL THEN ${fullDue} ELSE min(0, ${fullDue}) END`;
+
+// A zero document keeps a stranded payment as awaiting, and that must not lower what is owed.
+const openCondition = and(inArray(invoice.status, AWAITING_PAYMENT), gt(dueSql, 0));
+
+const invoicedSql = sql<number>`coalesce(sum(CASE WHEN ${invoice.type} <> 'advance' THEN ${invoice.totalMinor} ELSE 0 END), 0)`;
+
 // The SQL form of isOverdue in lib/invoice; tests compare the two.
 function overdueCondition(today: string): SQL {
   return and(
     inArray(invoice.status, AWAITING_PAYMENT),
-    gt(invoice.totalMinor, invoice.paidMinor),
+    gt(dueSql, 0),
     lt(invoice.dueDate, today),
   ) as SQL;
 }
@@ -934,8 +951,12 @@ function invoiceRows(where: SQL, filter: InvoiceFilter): Page<InvoiceRow> {
       issueDate: invoice.issueDate,
       dueDate: invoice.dueDate,
       currency: invoice.currency,
+      type: invoice.type,
       totalMinor: invoice.totalMinor,
       paidMinor: invoice.paidMinor,
+      creditsMinor: invoice.creditsMinor,
+      advanceMinor: invoice.advanceMinor,
+      supersededAt: invoice.supersededAt,
     })
     .from(invoice)
     .where(where)
@@ -957,13 +978,18 @@ export function listInvoices(ownerId: string, filter: InvoiceFilter): Page<Invoi
 }
 
 export function invoiceSummary(ownerId: string, filter: InvoiceFilter): InvoiceSummaryRow[] {
-  const overdue = overdueCondition(calendarDateInPrague(clock.now()));
+  const overdue = and(
+    overdueCondition(calendarDateInPrague(clock.now())),
+    ne(invoice.type, "advance"),
+  );
+  const advanceOpen = and(openCondition, eq(invoice.type, "advance"));
   return db
     .select({
       currency: invoice.currency,
-      invoicedMinor: sql<number>`coalesce(sum(${invoice.totalMinor}), 0)`,
+      invoicedMinor: invoicedSql,
       paidMinor: sql<number>`coalesce(sum(${invoice.paidMinor}), 0)`,
-      overdueMinor: sql<number>`coalesce(sum(CASE WHEN ${overdue} THEN ${invoice.totalMinor} - ${invoice.paidMinor} ELSE 0 END), 0)`,
+      overdueMinor: sql<number>`coalesce(sum(CASE WHEN ${overdue} THEN ${dueSql} ELSE 0 END), 0)`,
+      advanceOpenMinor: sql<number>`coalesce(sum(CASE WHEN ${advanceOpen} THEN ${dueSql} ELSE 0 END), 0)`,
     })
     .from(invoice)
     .where(and(invoiceConditions(ownerId, filter), notInArray(invoice.status, NOT_IN_TOTALS)))
@@ -974,17 +1000,13 @@ export function invoiceSummary(ownerId: string, filter: InvoiceFilter): InvoiceS
 
 export function customerInvoiceStats(ownerId: string, customerId: string) {
   const ofCustomer = scoped(ownerId).where(invoice, (t, { eq }) => eq(t.customerId, customerId));
-  // A zero document keeps a stranded payment as awaiting, and that must not lower what is owed.
-  const outstanding = and(
-    inArray(invoice.status, AWAITING_PAYMENT),
-    gt(invoice.totalMinor, invoice.paidMinor),
-  );
+  const outstanding = and(openCondition, ne(invoice.type, "advance"));
   const sums = db
     .select({
       currency: invoice.currency,
-      invoicedMinor: sql<number>`coalesce(sum(${invoice.totalMinor}), 0)`,
+      invoicedMinor: invoicedSql,
       paidMinor: sql<number>`coalesce(sum(${invoice.paidMinor}), 0)`,
-      outstandingMinor: sql<number>`coalesce(sum(CASE WHEN ${outstanding} THEN ${invoice.totalMinor} - ${invoice.paidMinor} ELSE 0 END), 0)`,
+      outstandingMinor: sql<number>`coalesce(sum(CASE WHEN ${outstanding} THEN ${dueSql} ELSE 0 END), 0)`,
     })
     .from(invoice)
     .where(and(ofCustomer, notInArray(invoice.status, NOT_IN_TOTALS)))

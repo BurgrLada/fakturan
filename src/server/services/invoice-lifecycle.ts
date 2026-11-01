@@ -14,6 +14,7 @@ import { bankAccount, catalogItem, invoice, invoiceLine, numberSeries } from "..
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
+import { hasPayments } from "./invoice-balance";
 import { currentParties, renderDocumentTexts, variablesFor } from "./invoice-document";
 import {
   auditSnapshot,
@@ -32,7 +33,6 @@ import {
 } from "./invoices";
 import { mutate, type Audit } from "./mutation";
 import { allocateNumber, defaultSeriesFor, peekNumber, type NumberSeries } from "./number-series";
-import { hasPayments } from "./payments";
 import { getPreferences } from "./preferences";
 import { missingSupplierKeys } from "./supplier";
 

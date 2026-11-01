@@ -239,6 +239,13 @@
       "when": 1793495058646,
       "tag": "0033_email_log_receipt_print",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1793500577800,
+      "tag": "0034_invoice_balance",
+      "breakpoints": true
     }
   ]
 }

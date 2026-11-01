@@ -110,7 +110,11 @@ export function samplePreviewDocument(ownerId: string): InvoiceDocument {
       roundingMinor: 0,
       totalMinor,
       paidMinor: 0,
+      creditsMinor: 0,
+      advanceMinor: 0,
+      supersededAt: null,
     },
+    relatedDocument: null,
   };
 }
 

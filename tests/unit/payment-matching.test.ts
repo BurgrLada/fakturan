@@ -27,6 +27,9 @@ const candidate = (over: Partial<MatchCandidate> = {}): MatchCandidate => ({
   variableSymbol: "20260042",
   totalMinor: 100_000,
   paidMinor: 0,
+  creditsMinor: 0,
+  advanceMinor: 0,
+  supersededAt: null,
   manualPayments: [],
   ...over,
 });
@@ -74,6 +77,27 @@ describe("matchNotice", () => {
     const partly = candidate({ status: "partially_paid", totalMinor: 300_000, paidMinor: 200_000 });
     expect(match(notice(), [partly])).toEqual({ result: "match", invoiceId: "inv-1" });
     expect(match(notice({ amountMinor: 300_000 }), [partly])).toMatchObject({ reason: "amount" });
+  });
+
+  test("[BNK-008] po opravě a platbě se páruje proti zbytku, ne proti celé částce", () => {
+    const credited = candidate({
+      status: "partially_paid",
+      totalMinor: 1_210_000,
+      creditsMinor: -210_000,
+      paidMinor: 400_000,
+    });
+    expect(match(notice({ amountMinor: 600_000 }), [credited])).toMatchObject({ result: "match" });
+    expect(match(notice({ amountMinor: 1_210_000 }), [credited])).toMatchObject({
+      reason: "amount",
+    });
+  });
+
+  test("[BNK-008] nahrazená záloha se stejným VS sama vypadne", () => {
+    const replaced = candidate({ id: "adv-1", supersededAt: new Date(0) });
+    expect(match(notice(), [replaced, candidate()])).toEqual({
+      result: "match",
+      invoiceId: "inv-1",
+    });
   });
 
   test("[BNK-008] vystavená faktura a úvodní nuly na obou stranách se spárují", () => {

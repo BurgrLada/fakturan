@@ -24,8 +24,11 @@ export type DocumentLabels = {
   subtotal: string;
   rounding: string;
   total: string;
+  credits: string;
+  paidByAdvance: string;
   paid: string;
   due: string;
+  overpaid: string;
   payment: string;
   paymentMethod: string;
   account: string;
@@ -77,8 +80,11 @@ export const LABELS: Record<Language, DocumentLabels> = {
     subtotal: "Mezisoučet",
     rounding: "Zaokrouhlení",
     total: "Celkem k úhradě",
+    credits: "Opravné faktury",
+    paidByAdvance: "Uhrazeno zálohou",
     paid: "Uhrazeno",
     due: "Zbývá uhradit",
+    overpaid: "Přeplatek k vrácení",
     payment: "Platební údaje",
     paymentMethod: "Způsob platby",
     account: "Číslo účtu",
@@ -128,8 +134,11 @@ export const LABELS: Record<Language, DocumentLabels> = {
     subtotal: "Subtotal",
     rounding: "Rounding",
     total: "Total due",
+    credits: "Credit notes",
+    paidByAdvance: "Paid by advance",
     paid: "Paid",
     due: "Amount due",
+    overpaid: "Overpayment to refund",
     payment: "Payment details",
     paymentMethod: "Payment method",
     account: "Account number",

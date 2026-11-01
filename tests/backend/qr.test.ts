@@ -133,7 +133,13 @@ describe("qrPng", () => {
   });
 
   test("[TST-015] dekódovaný QR souhlasí s fakturou", async () => {
-    const dueMinor = amountDue({ totalMinor: 123450, paidMinor: 23450 });
+    const dueMinor = amountDue({
+      totalMinor: 123450,
+      paidMinor: 23450,
+      creditsMinor: 0,
+      advanceMinor: 0,
+      supersededAt: null,
+    });
     const plan = planQr({ ...base, dueMinor });
     if (plan.kind === "none") throw new Error("plan");
     const decoded = decodeQr(await qrPng(plan.payload, await logo(300, 300)));

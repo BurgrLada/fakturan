@@ -54,6 +54,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "invoice_template.delete": "Smazání šablony faktury",
   "invoice_template.from_invoice": "Uložení faktury jako šablony",
   "invoice_template.save": "Uložení šablony faktury",
+  "invoice.balance": "Přepočet zůstatku faktury",
   "invoice.cancel": "Storno faktury",
   "invoice.delete": "Smazání konceptu",
   "invoice.duplicate": "Duplikace faktury",
