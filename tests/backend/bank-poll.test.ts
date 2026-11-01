@@ -412,6 +412,28 @@ describe("kurzor a duplicity", () => {
   });
 });
 
+describe("[BNK-012] klíč zprávy bez těla", () => {
+  test("zpráva bez Message-ID s neznámým předmětem nevznikne po resetu UIDVALIDITY znovu", async () => {
+    const { owner } = account();
+    imap.addMessage(rawMail({ subject: "Fio banka - změna podmínek", messageId: null }));
+    await poll(owner);
+    imap.setUidValidity(2000);
+    await poll(owner);
+    expect(notices(owner)).toHaveLength(1);
+  });
+
+  test("příliš velké zprávy bez Message-ID se liší velikostí", async () => {
+    const { owner } = account();
+    const big = (bytes: number) => rawMail({ body: "x".repeat(bytes), messageId: null });
+    imap.addMessage(big(257 * 1024));
+    imap.addMessage(big(258 * 1024));
+    await poll(owner);
+    imap.setUidValidity(2000);
+    await poll(owner);
+    expect(notices(owner)).toHaveLength(2);
+  });
+});
+
 describe("selhání", () => {
   const leakyParser: BankNoticeParser = {
     ...fioParser,

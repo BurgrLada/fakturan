@@ -56,6 +56,7 @@ export const NOTIFICATION_KINDS = [
   "bank_connection_failed",
   "payments_unmatched",
   "notices_unrecognized",
+  "notices_over_limit",
   "receipt_no_address",
   "receipt_bad_mail",
 ] as const;

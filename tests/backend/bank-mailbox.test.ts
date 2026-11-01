@@ -630,6 +630,7 @@ describe("sezení", () => {
       from: ["automat@fio.cz"],
       subject: "a",
       messageId: "<a@fio.cz>",
+      size: expect.any(Number),
       date: new Date("2026-11-02T10:00:00Z"),
     });
     expect((await session.download(2, 10_000))?.toString()).toContain("telo b");

@@ -902,6 +902,8 @@ export const TEXTS = {
         `Platby z avíz čekající na spárování: ${p.count ?? 0}. Najdete je v sekci Platby.`,
       notices_unrecognized: (p: Record<string, unknown>) =>
         `Nerozpoznaná avíza z banky: ${p.count ?? 0}. Platbu z nich zapište ručně a zprávu zahoďte v sekci Platby.`,
+      notices_over_limit: (p: Record<string, unknown>) =>
+        `Dorazilo přes ${p.limit ?? 0} neověřených nebo nerozpoznaných zpráv za den, může jít o podvržené avízo. Další jsou v sekci Platby uložené bez textu, zkontrolujte je.`,
     },
   },
   recurring: {

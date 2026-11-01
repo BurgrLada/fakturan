@@ -21,6 +21,7 @@ export type MessageEnvelope = {
   subject: string;
   messageId: string | null;
   date: Date | null;
+  size: number;
 };
 
 export type MailboxSession = {
@@ -154,7 +155,11 @@ export async function openMailbox(
         .map((uid) => ({ uid }));
     },
     async envelope(uid) {
-      const message = await client.fetchOne(String(uid), { envelope: true }, { uid: true });
+      const message = await client.fetchOne(
+        String(uid),
+        { envelope: true, size: true },
+        { uid: true },
+      );
       if (!message || !message.envelope) return null;
       const { envelope } = message;
       const date = envelope.date ? new Date(envelope.date) : null;
@@ -163,6 +168,7 @@ export async function openMailbox(
         subject: envelope.subject ?? "",
         messageId: envelope.messageId ?? null,
         date: date && !Number.isNaN(date.getTime()) ? date : null,
+        size: message.size ?? 0,
       };
     },
     async download(uid, maxBytes) {

@@ -117,16 +117,24 @@ type Reader = {
   stored: Date | null;
 };
 
+// Stable across a UIDVALIDITY reset, or the same message would come back as a new one.
+function fingerprintOf(envelope: MessageEnvelope, raw: Buffer | null): string {
+  if (envelope.messageId) return envelope.messageId;
+  const { from, subject, date, size } = envelope;
+  const content = raw ?? JSON.stringify([from, subject, date, size]);
+  return createHash("sha256").update(content).digest("hex");
+}
+
 function bodyless(
   reader: Reader,
   parser: BankNoticeParser,
-  uid: number,
   envelope: MessageEnvelope,
+  raw: Buffer | null,
 ): IngestInput {
   return {
     bank: parser.bank,
     notice: null,
-    fingerprint: envelope.messageId ?? `${reader.session.uidValidity}:${uid}`,
+    fingerprint: fingerprintOf(envelope, raw),
     text: null,
     authResult: "none",
     requireConfirmation: reader.mailbox.requireConfirmation,
@@ -141,7 +149,7 @@ async function readNotice(
   envelope: MessageEnvelope,
   raw: Buffer,
 ): Promise<IngestInput> {
-  const fingerprint = envelope.messageId ?? createHash("sha256").update(raw).digest("hex");
+  const fingerprint = fingerprintOf(envelope, raw);
   const { authServId, requireConfirmation } = reader.mailbox;
   const header = firstRawHeader(raw.toString("latin1"), "authentication-results");
   const trusted = authServId !== null && authservIdOf(header) === authServId;
@@ -181,7 +189,7 @@ function store(reader: Reader, input: IngestInput, fallback: () => IngestInput):
     report("zápis avíza", error, job);
     throw new WriteFailed();
   }
-  if (result.status !== "duplicate" && result.status !== "dropped") reader.stored = clock.now();
+  if (result.status !== "duplicate") reader.stored = clock.now();
 }
 
 async function processMessage(reader: Reader, uid: number): Promise<void> {
@@ -194,14 +202,14 @@ async function processMessage(reader: Reader, uid: number): Promise<void> {
   if (!hit || hit.kind === "expense") return;
 
   const { parser, kind } = hit;
-  const unreadable = () => bodyless(reader, parser, uid, envelope);
-  if (kind === "unknown") return store(reader, unreadable(), unreadable);
+  const unreadable = (raw: Buffer | null) => () => bodyless(reader, parser, envelope, raw);
+  if (kind === "unknown") return store(reader, unreadable(null)(), unreadable(null));
 
   const raw = await deadline.within(session.download(uid, MAX_MESSAGE_BYTES));
-  if (!raw) return store(reader, unreadable(), unreadable);
+  if (!raw) return store(reader, unreadable(null)(), unreadable(null));
 
   const input = await readNotice(reader, parser, meta, envelope, raw);
-  store(reader, input, unreadable);
+  store(reader, input, unreadable(raw));
 }
 
 function fromPosition(mailbox: Mailbox, session: MailboxSession) {

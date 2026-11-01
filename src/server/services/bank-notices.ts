@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import type { ZodType } from "zod";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { AuthResult } from "@/lib/bank-notices/auth";
 import { maskAccount, maskDigits } from "@/lib/bank-notices/mask";
 import type { ParsedNotice } from "@/lib/bank-notices/types";
@@ -27,7 +27,6 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { logger } from "../logger";
 import {
   bankAccount,
   bankMailbox,
@@ -41,14 +40,15 @@ import { kickWorker } from "../jobs/worker";
 import { ServiceError, type Reader } from "./access";
 import { findOwned, ownerOf } from "./invoices";
 import { mutate, type Audit } from "./mutation";
+import { notify } from "./notifications";
 import { queueAutomaticReceipt } from "./payment-receipt";
 import { insertPayment, undoNoticeIn } from "./payments";
 
 const FIO_DEFAULT_BANK_CODE = "2010";
 const RETENTION_MS = 90 * 86_400_000;
 const MAX_STORED_TEXT = 64 * 1024;
-const MAX_FAILED_AUTH_TEXT = 2 * 1024;
-const MAX_UNRECOGNIZED_PER_DAY = 50;
+const MAX_UNVERIFIED_TEXT = 2 * 1024;
+const MAX_UNVERIFIED_PER_DAY = 50;
 const DAY_MS = 86_400_000;
 
 type IngestContext = {
@@ -69,14 +69,11 @@ export type IngestResult =
   | { status: "matched"; id: string; invoiceId: string }
   | { status: "pending"; id: string; reason: QueueReason }
   | { status: "ignored"; id: string; reason: "foreign_account" }
-  | { status: "unrecognized"; id: string }
-  | { status: "dropped" };
+  | { status: "unrecognized"; id: string };
 
 // Thrown to roll back an empty transaction: mutate refuses to commit one without an audit entry,
 // and a repeated message must leave no trace at all.
 class AlreadyStored extends Error {}
-
-class OverLimit extends Error {}
 
 const pragueToday = () => calendarDateInPrague(clock.now());
 
@@ -163,8 +160,7 @@ function candidatesFor(tx: Tx, userId: string, variableSymbol: string | null): M
   }));
 }
 
-function maskedText(text: string | null, authResult: AuthResult): string | null {
-  const limit = authResult === "fail" ? MAX_FAILED_AUTH_TEXT : MAX_STORED_TEXT;
+function maskedText(text: string | null, limit: number): string | null {
   // Masked before the cut, which could otherwise shorten a number below the masking threshold.
   return text ? maskDigits(text).slice(0, limit) : null;
 }
@@ -202,6 +198,32 @@ function decide(
   return match.result === "match"
     ? { status: "matched", invoiceId: match.invoiceId }
     : { status: "pending", reason: match.reason };
+}
+
+// Anyone can send a message from a forged Fio address, so one day's mail must not fill the
+// database. Dismissed rows count too, or dismissing would reopen the limit. Over the limit a row
+// keeps no content, never disappears: this may just as well be the bank's new format.
+function overLimit(tx: Tx, userId: string): boolean {
+  const since = new Date(clock.now().getTime() - DAY_MS);
+  const row = tx
+    .select({ n: sql<number>`count(*)` })
+    .from(bankNotification)
+    .where(
+      scoped(userId).where(bankNotification, (t) =>
+        and(or(isNull(t.variant), ne(t.authResult, "pass")), gte(t.createdAt, since)),
+      ),
+    )
+    .get();
+  return (row?.n ?? 0) >= MAX_UNVERIFIED_PER_DAY;
+}
+
+function raiseOverLimit(tx: Tx, userId: string): void {
+  notify(tx, {
+    userId,
+    kind: "notices_over_limit",
+    dedupeKey: `notices:over_limit:${pragueToday()}`,
+    params: { limit: MAX_UNVERIFIED_PER_DAY },
+  });
 }
 
 function insertRow(
@@ -262,8 +284,10 @@ function noticeValues(
   input: ParsedInput,
   dedupeKey: string,
   accountId: string | null,
+  bare: boolean,
 ): NoticeValues {
   const { notice } = input;
+  const verified = input.authResult === "pass";
   return {
     dedupeKey,
     bank: input.bank,
@@ -279,10 +303,12 @@ function noticeValues(
     variableSymbol: notice.variableSymbol,
     constantSymbol: notice.constantSymbol,
     counterpartyMasked: notice.counterpartyAccount && maskAccount(notice.counterpartyAccount),
-    counterpartyName: notice.counterpartyName,
-    message: notice.message,
+    counterpartyName: bare ? null : notice.counterpartyName,
+    message: bare ? null : notice.message,
     instructionId: notice.instructionId,
-    textMasked: maskedText(input.text, input.authResult),
+    textMasked: bare
+      ? null
+      : maskedText(input.text, verified ? MAX_STORED_TEXT : MAX_UNVERIFIED_TEXT),
     receivedAt: receivedAt(input),
   };
 }
@@ -292,10 +318,27 @@ function ingestParsed(tx: Tx, audit: Audit, userId: string, input: ParsedInput):
   const { amountMinor, currency } = notice;
   const dedupeKey = noticeKey(input.bank, notice);
   const accountId = ownAccountId(tx, userId, notice.targetAccount);
-  const values = noticeValues(input, dedupeKey, accountId);
-
   const existing = findByKey(tx, userId, dedupeKey);
-  if (existing && !isOverridable(tx, userId, existing, input)) throw new AlreadyStored();
+  const bare = !existing && input.authResult !== "pass" && overLimit(tx, userId);
+  const values = noticeValues(input, dedupeKey, accountId, bare);
+
+  const entry = {
+    entity: "bank_notification",
+    ownerId: userId,
+    scope: "user",
+  } as const;
+  if (existing && !isOverridable(tx, userId, existing, input)) {
+    if (existing.purgedAt || !contradicts(existing, values)) throw new AlreadyStored();
+    // The stored row stands, but a second story under one instruction ID must leave a trace (R-18).
+    audit({
+      ...entry,
+      entityId: existing.id,
+      action: "notice.conflict",
+      before: { amountMinor: existing.amountMinor, currency: existing.currency },
+      after: { amountMinor, currency, reason: "conflict" },
+    });
+    return { status: "duplicate" };
+  }
   const conflict = existing !== undefined && contradicts(existing, values);
   const decision: Decision = conflict
     ? { status: "pending", reason: "conflict" }
@@ -314,15 +357,11 @@ function ingestParsed(tx: Tx, audit: Audit, userId: string, input: ParsedInput):
     id = insertRow(tx, userId, stored);
   }
 
-  const entry = {
-    entity: "bank_notification",
-    entityId: id,
-    ownerId: userId,
-    scope: "user",
-  } as const;
+  if (bare) raiseOverLimit(tx, userId);
   if (conflict) {
     audit({
       ...entry,
+      entityId: id,
       action: "notice.conflict",
       before: { amountMinor: existing.amountMinor, currency: existing.currency },
       after: { amountMinor, currency, reason },
@@ -351,30 +390,15 @@ function ingestParsed(tx: Tx, audit: Audit, userId: string, input: ParsedInput):
     });
     audit({
       ...entry,
+      entityId: id,
       action: "notice.matched",
       after: { invoiceId, amountMinor, currency, reason },
     });
     return { status: "matched", id, invoiceId };
   }
   const action = decision.status === "pending" ? "notice.queued" : "notice.ignored";
-  audit({ ...entry, action, after: { amountMinor, currency, reason } });
+  audit({ ...entry, entityId: id, action, after: { amountMinor, currency, reason } });
   return { ...decision, id };
-}
-
-// Anyone can send a message from a forged Fio address, so one day's mail must not fill the
-// database. Dismissed rows count too, or dismissing would reopen the limit.
-function overDailyLimit(tx: Tx, userId: string): boolean {
-  const since = new Date(clock.now().getTime() - DAY_MS);
-  const row = tx
-    .select({ n: sql<number>`count(*)` })
-    .from(bankNotification)
-    .where(
-      scoped(userId).where(bankNotification, (t) =>
-        and(isNull(t.variant), gte(t.createdAt, since)),
-      ),
-    )
-    .get();
-  return (row?.n ?? 0) >= MAX_UNRECOGNIZED_PER_DAY;
 }
 
 function ingestUnrecognized(
@@ -383,15 +407,17 @@ function ingestUnrecognized(
   userId: string,
   input: IngestContext & { fingerprint: string; text: string | null },
 ): IngestResult {
-  if (overDailyLimit(tx, userId)) throw new OverLimit();
+  const bare = overLimit(tx, userId);
+  const limit = input.authResult === "fail" ? MAX_UNVERIFIED_TEXT : MAX_STORED_TEXT;
   const id = insertRow(tx, userId, {
     dedupeKey: `msg:${sha256(input.fingerprint)}`,
     bank: input.bank,
     status: "unrecognized",
     authResult: input.authResult,
-    textMasked: maskedText(input.text, input.authResult),
+    textMasked: bare ? null : maskedText(input.text, limit),
     receivedAt: receivedAt(input),
   });
+  if (bare) raiseOverLimit(tx, userId);
   audit({
     action: "notice.unrecognized",
     entity: "bank_notification",
@@ -414,10 +440,6 @@ export function ingestNotice(actorUserId: string, input: IngestInput): IngestRes
     );
   } catch (error) {
     if (error instanceof AlreadyStored) return { status: "duplicate" };
-    if (error instanceof OverLimit) {
-      logger.warn("Denní strop nerozpoznaných avíz", { userId: actorUserId });
-      return { status: "dropped" };
-    }
     throw error;
   }
 }
@@ -425,11 +447,12 @@ export function ingestNotice(actorUserId: string, input: IngestInput): IngestRes
 const PURGEABLE = ["matched", "ignored", "dismissed"] as const;
 
 // Pending and unrecognized rows stay until the user settles them (BNK-012). dedupe_key, the
-// amount and the date stay for good, so that a re-read message cannot pay twice (R-18).
+// amount and the date stay for good, so that a re-read message cannot pay twice (R-18). The age
+// is ours, not the Date header: the sender writes that one.
 export function purgeNotices(now: Date): void {
   const cutoff = new Date(now.getTime() - RETENTION_MS);
   const expired = (t: typeof bankNotification) =>
-    and(inArray(t.status, PURGEABLE), isNull(t.purgedAt), lt(t.receivedAt, cutoff));
+    and(inArray(t.status, PURGEABLE), isNull(t.purgedAt), lt(t.createdAt, cutoff));
 
   const owners = db
     .selectDistinct({ userId: bankNotification.userId })

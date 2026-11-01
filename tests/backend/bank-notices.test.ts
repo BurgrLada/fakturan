@@ -5,9 +5,17 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ParsedNotice } from "@/lib/bank-notices/types";
 import { czechAccountToIban } from "@/lib/iban";
+import { notificationText } from "@/lib/notification-text";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, bankNotification, invoice, payment, user } from "@/server/db/schema";
+import {
+  auditLog,
+  bankNotification,
+  invoice,
+  notification,
+  payment,
+  user,
+} from "@/server/db/schema";
 import { scoped } from "@/server/db/scoped";
 import { ServiceError } from "@/server/services/access";
 import {
@@ -269,6 +277,70 @@ describe("ingestNotice", () => {
     expect(rows(owner)[0]!.dedupeKey).not.toContain("m1");
   });
 
+  test("[BNK-012] strop platí i pro čitelná neověřená avíza a nic se neztratí", () => {
+    const { owner } = seedAccount(db, NOW);
+    const forged = (over = {}) =>
+      income(parsed({ variableSymbol: "1", ...over }), {
+        authResult: "none",
+        text: "x".repeat(9000),
+      });
+    for (let i = 0; i < 50; i += 1) ingestNotice(owner, forged());
+
+    expect(rows(owner).every((row) => row.textMasked!.length === 2048)).toBe(true);
+
+    const over = ingestNotice(owner, forged({ amountMinor: 77 }));
+
+    expect(over).toMatchObject({ status: "pending" });
+    expect(rows(owner).find((row) => row.amountMinor === 77)).toMatchObject({
+      textMasked: null,
+      message: null,
+      counterpartyName: null,
+      paidOn: "2026-10-30",
+    });
+    expect(
+      db.select().from(notification).where(eq(notification.userId, owner)).all(),
+    ).toMatchObject([{ kind: "notices_over_limit" }]);
+
+    expect(
+      ingestNotice(owner, income(parsed({ amountMinor: 78, variableSymbol: "1" }))),
+    ).toMatchObject({ status: "pending" });
+    expect(rows(owner).find((row) => row.amountMinor === 78)!.textMasked).not.toBeNull();
+  });
+
+  test("[BNK-006] rozpor bez ověření se zapíše do auditu a řádek nezmění", () => {
+    const { owner } = seedAccount(db, NOW);
+    const notice = parsed({ variableSymbol: "1" });
+    ingestNotice(owner, income(notice));
+    const before = rows(owner)[0]!;
+
+    const result = ingestNotice(
+      owner,
+      income({ ...notice, amountMinor: 999 }, { authResult: "fail" }),
+    );
+
+    expect(result).toEqual({ status: "duplicate" });
+    expect(rows(owner)).toEqual([before]);
+    const entries = db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.ownerId, owner), eq(auditLog.action, "notice.conflict")))
+      .all();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.after).toMatchObject({ amountMinor: 999, reason: "conflict" });
+  });
+
+  test("[BNK-006] stejná zpráva znovu do auditu nejde ani po čištění", () => {
+    const { owner } = seedAccount(db, NOW);
+    const notice = parsed();
+    ingestNotice(owner, income(notice));
+    purgeNotices(new Date(NOW.getTime() + 91 * DAY));
+    const audits = db.select().from(auditLog).all().length;
+
+    expect(ingestNotice(owner, income(notice))).toEqual({ status: "duplicate" });
+
+    expect(db.select().from(auditLog).all()).toHaveLength(audits);
+  });
+
   test("avízo z budoucnosti dostane čas příjmu", () => {
     const { owner } = seedAccount(db, NOW);
     ingestNotice(owner, income(parsed(), { receivedAt: new Date(NOW.getTime() + DAY) }));
@@ -441,7 +513,16 @@ describe("rozhodnutí po kontrole", () => {
     ).toThrow(TEXTS.payments.errors.future);
   });
 
-  test("[BNK-012] nerozpoznaných je nejvýš 50 za den, zahozené se počítají", () => {
+  test("[BNK-017] retence běží od uložení, ne od data ve zprávě", () => {
+    const { owner } = seedAccount(db, NOW);
+    ingestNotice(owner, income(parsed(), { receivedAt: new Date(NOW.getTime() - 200 * DAY) }));
+
+    purgeNotices(new Date(NOW.getTime() + DAY));
+
+    expect(rows(owner)[0]!.purgedAt).toBeNull();
+  });
+
+  test("[BNK-012] nad strop 50 za den zůstane záznam bez obsahu a trvalé upozornění", () => {
     const { owner } = seedAccount(db, NOW);
     for (let i = 0; i < 50; i += 1) {
       expect(ingestNotice(owner, unrecognized(`m${i}`))).toMatchObject({ status: "unrecognized" });
@@ -450,12 +531,22 @@ describe("rozhodnutí po kontrole", () => {
       .set({ status: "dismissed" })
       .where(eq(bankNotification.userId, owner))
       .run();
-    const audits = db.select().from(auditLog).all().length;
 
-    expect(ingestNotice(owner, unrecognized("navic"))).toEqual({ status: "dropped" });
+    const over = ingestNotice(owner, { ...unrecognized("navic"), text: "text navic" });
+    ingestNotice(owner, { ...unrecognized("navic-2"), text: "dalsi" });
 
-    expect(rows(owner)).toHaveLength(50);
-    expect(db.select().from(auditLog).all()).toHaveLength(audits);
+    expect(over).toMatchObject({ status: "unrecognized" });
+    const extra = rows(owner).filter((row) => row.status === "unrecognized");
+    expect(extra).toHaveLength(2);
+    expect(extra.every((row) => row.textMasked === null)).toBe(true);
+    const alerts = db
+      .select()
+      .from(notification)
+      .where(and(eq(notification.userId, owner), eq(notification.kind, "notices_over_limit")))
+      .all();
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.resolvedAt).toBeNull();
+    expect(notificationText("notices_over_limit", alerts[0]!.params)).toContain("50");
     expect(ingestNotice(owner, income(parsed({ amountMinor: 5 })))).toMatchObject({
       status: "pending",
     });
