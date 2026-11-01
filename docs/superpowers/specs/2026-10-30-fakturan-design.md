@@ -406,7 +406,7 @@ Princip: uživatel si ve Fio nastaví e-mailová oznámení do své schránky a 
 - **BNK-010** Fronta „Nespárované platby“: neznámý VS, jiná částka, jiná měna, shoda s více fakturami. Uživatel platbu přiřadí, rozdělí nebo zahodí.
 - **BNK-011** Přijetí částečné platby z fronty funguje jako dílčí platba.
 - **BNK-012** Nerozpoznané avízo od Fio se neztratí. Zobrazí se jako „Nerozpoznaný formát“ s upozorněním, protože jde pravděpodobně o změnu formátu.
-- **BNK-013** Hlavičky SPF/DKIM se kontrolují, pokud jsou k dispozici. Selhání přesune platbu do fronty místo automatického spárování. Přeposlaná zpráva, která kontrolu projít nemůže, se řídí nastavením „vyžadovat potvrzení“ **[návrh]**. Přeposlaná zpráva bez platného podpisu se nedá odlišit od podvržené, proto jde vždy do fronty k ručnímu potvrzení.
+- **BNK-013** Hlavičky SPF/DKIM se kontrolují, pokud jsou k dispozici. Selhání přesune platbu do fronty místo automatického spárování. Přeposlaná zpráva bez platného podpisu se nedá odlišit od podvržené, proto jde vždy do fronty k ručnímu potvrzení.
 - **BNK-014** Spárování z avíza jde vrátit jedním kliknutím.
 - **BNK-015** Stav napojení: poslední kontrola, poslední zpracované avízo, chyba připojení. Selhání opakovaně po sobě vytvoří upozornění.
 - **BNK-016** Parsery jsou samostatné moduly s jednotným rozhraním, přidání banky neovlivní zbytek.
