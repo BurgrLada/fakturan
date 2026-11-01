@@ -61,6 +61,16 @@ describe("env", () => {
     expect(() => parseEnv({ ...base, ARES_BASE_URL: "ares" })).toThrow(/ARES_BASE_URL/);
   });
 
+  test("[OPS-003] CNB_BASE_URL má veřejný výchozí a lomítko se ořízne", () => {
+    expect(parseEnv(base).CNB_BASE_URL).toBe(
+      "https://www.cnb.cz/cs/financni_trhy/devizovy_trh/kurzy_devizoveho_trhu",
+    );
+    expect(parseEnv({ ...base, CNB_BASE_URL: "http://127.0.0.1:9/cnb//" }).CNB_BASE_URL).toBe(
+      "http://127.0.0.1:9/cnb",
+    );
+    expect(() => parseEnv({ ...base, CNB_BASE_URL: "cnb" })).toThrow(/CNB_BASE_URL/);
+  });
+
   test("[OPS-003] VIES_BASE_URL má veřejné API jako výchozí a lomítko na konci se ořízne", () => {
     expect(parseEnv(base).VIES_BASE_URL).toBe(
       "https://ec.europa.eu/taxation_customs/vies/rest-api",

@@ -9,7 +9,7 @@ import type { PaymentInput } from "@/lib/payments";
 import { documentQrInput, qrStateOf } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, invoice, payment, user } from "@/server/db/schema";
+import { auditLog, exchangeRate, invoice, payment, user } from "@/server/db/schema";
 import {
   applySent,
   cancelInvoice,
@@ -771,5 +771,161 @@ describe("izolace a audit", () => {
       action: "payment.mark_paid",
       after: { amountMinor: 50_000, currency: "CZK", status: "paid" },
     });
+  });
+});
+
+describe("kurz platby", () => {
+  const seedRates = () => {
+    db.delete(exchangeRate).run();
+    for (const [currency, rateMicros] of [
+      ["USD", 22_311_000],
+      ["EUR", 24_380_000],
+    ] as const) {
+      db.insert(exchangeRate)
+        .values({ currency, listDate: "2026-03-19", rateMicros, fetchedAt: NOW })
+        .run();
+    }
+  };
+  const rateOf = (paymentId: string) =>
+    db.select({ rate: payment.rateMicros }).from(payment).where(eq(payment.id, paymentId)).get()!
+      .rate;
+
+  test("[PAY-006] platba uloží kurz měny platby ke dni úhrady a koruny mají 1 000 000", () => {
+    seedRates();
+    const { owner, id } = account();
+
+    const usd = pay(owner, id, {
+      currency: "USD",
+      amountMinor: 1_000,
+      creditedMinor: 22_000,
+      paidOn: "2026-03-19",
+    });
+    const czk = pay(owner, id, { paidOn: "2026-03-19" });
+
+    expect(rateOf(usd.id)).toBe(22_311_000);
+    expect(rateOf(czk.id)).toBe(1_000_000);
+  });
+
+  test("[PAY-006] předvyplnění jde přepsat: uloží se zadaná částka a kurz dne úhrady", () => {
+    seedRates();
+    const { owner, id } = account();
+
+    const typed = pay(owner, id, {
+      currency: "USD",
+      amountMinor: 10_000,
+      creditedMinor: 123_456,
+      paidOn: "2026-03-19",
+    });
+
+    expect(listPayments(owner, id)[0]).toMatchObject({
+      id: typed.id,
+      creditedMinor: 123_456,
+      rateMicros: 22_311_000,
+    });
+  });
+
+  test("[PAY-006] bez kurzu platba projde s prázdným kurzem a ruční částkou", () => {
+    db.delete(exchangeRate).run();
+    const { owner, id } = account();
+
+    const usd = pay(owner, id, {
+      currency: "USD",
+      amountMinor: 1_000,
+      creditedMinor: 22_000,
+      paidOn: "2026-03-19",
+    });
+
+    expect(rateOf(usd.id)).toBeNull();
+    expect(row(owner, id).paidMinor).toBe(22_000);
+  });
+
+  test("[PAY-006] úprava platby přepočítá kurz podle nového data a měny", () => {
+    seedRates();
+    db.insert(exchangeRate)
+      .values({ currency: "EUR", listDate: "2026-03-18", rateMicros: 24_000_000, fetchedAt: NOW })
+      .run();
+    const { owner, id } = account();
+    const added = pay(owner, id, {
+      currency: "EUR",
+      amountMinor: 1_000,
+      creditedMinor: 24_000,
+      paidOn: "2026-03-19",
+    });
+    expect(rateOf(added.id)).toBe(24_380_000);
+
+    updatePayment(
+      webActor(owner),
+      added.id,
+      input(owner, id, {
+        currency: "EUR",
+        amountMinor: 1_000,
+        creditedMinor: 24_000,
+        paidOn: "2026-03-18",
+      }),
+    );
+    expect(rateOf(added.id)).toBe(24_000_000);
+
+    updatePayment(
+      webActor(owner),
+      added.id,
+      input(owner, id, {
+        currency: "USD",
+        amountMinor: 1_000,
+        creditedMinor: 24_000,
+        paidOn: "2026-03-19",
+      }),
+    );
+    expect(rateOf(added.id)).toBe(22_311_000);
+
+    updatePayment(
+      webActor(owner),
+      added.id,
+      input(owner, id, {
+        currency: "GBP",
+        amountMinor: 1_000,
+        creditedMinor: 24_000,
+        paidOn: "2026-03-19",
+      }),
+    );
+    expect(rateOf(added.id)).toBeNull();
+  });
+
+  test("[PAY-006] vrácení peněz a označení za uhrazené nesou kurz svého dne", () => {
+    seedRates();
+    const { owner, id } = account();
+    markPaid(webActor(owner), id, { revision: revisionOf(owner, id), paidOn: "2026-03-19" });
+    const refund = addRefund(
+      webActor(owner),
+      id,
+      input(owner, id, {
+        currency: "EUR",
+        amountMinor: 100,
+        creditedMinor: 2_000,
+        paidOn: "2026-03-19",
+      }),
+    );
+
+    expect(
+      listPayments(owner, id)
+        .map((item) => item.rateMicros)
+        .sort(),
+    ).toEqual([1_000_000, 24_380_000]);
+    expect(rateOf(refund.id)).toBe(24_380_000);
+  });
+
+  test("[PAY-006] víkendová platba bere kurz z pátku", () => {
+    seedRates();
+    db.update(exchangeRate).set({ listDate: "2026-03-20" }).run();
+    current = new Date("2026-03-23T12:00:00Z");
+    const { owner, id } = account();
+
+    const sunday = pay(owner, id, {
+      currency: "USD",
+      amountMinor: 1_000,
+      creditedMinor: 22_000,
+      paidOn: "2026-03-22",
+    });
+
+    expect(rateOf(sunday.id)).toBe(22_311_000);
   });
 });

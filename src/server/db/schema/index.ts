@@ -12,6 +12,7 @@ export * from "./catalog";
 export * from "./invoice";
 export * from "./invoice-version";
 export * from "./invoice-template";
+export * from "./exchange-rate";
 export * from "./payment";
 export * from "./bank";
 export * from "./recurring";

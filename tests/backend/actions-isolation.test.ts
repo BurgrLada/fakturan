@@ -60,6 +60,8 @@ import {
   bulkSendAction,
   closeDifferenceAction,
   createCreditNoteAction,
+  creditPreviewAction,
+  loadRateAction,
   deletePaymentAction,
   markPaidAction,
   markPaidManyAction,
@@ -186,6 +188,34 @@ describe("akce pošty", () => {
       paidMinor: 1000,
     });
     expect(listPayments(stranger.owner, stranger.invoiceId)).toEqual([]);
+  });
+
+  test("[TST-009] předvyplnění platby kurzem odmítne cizí doklad a načtení kurzu vyžaduje platná data", async () => {
+    const mine = mailAccount();
+    const stranger = mailAccount();
+    session.userId = stranger.owner;
+
+    const foreign = await creditPreviewAction({
+      id: mine.invoiceId,
+      currency: "EUR",
+      amountMinor: 1000,
+      paidOn: "2026-01-10",
+    });
+    const same = await creditPreviewAction({
+      id: mine.invoiceId,
+      currency: "CZK",
+      amountMinor: 1000,
+      paidOn: "2026-01-10",
+    });
+
+    expect(foreign).toMatchObject({ ok: false });
+    expect(same).toMatchObject({ ok: false });
+    expect(await loadRateAction({ currency: "XXX", date: "2026-01-10" })).toMatchObject({
+      ok: false,
+    });
+    expect(await loadRateAction({ currency: "EUR", date: "2026-02-31" })).toMatchObject({
+      ok: false,
+    });
   });
 
   test("[TST-009] akce oprav a vrácení odmítnou cizí ID", async () => {

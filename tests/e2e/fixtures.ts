@@ -70,6 +70,24 @@ const ARES_REPLY = {
   },
 };
 
+const CNB_LIST = [
+  "30.10.2026 #211",
+  "země|měna|množství|kód|kurz",
+  "EMU|euro|1|EUR|24,380",
+  "USA|dolar|1|USD|22,311",
+  "",
+].join("\n");
+
+async function startCnbStub() {
+  const server = createHttpServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end(CNB_LIST);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as { port: number };
+  return { url: `http://127.0.0.1:${port}`, close: () => server.close() };
+}
+
 async function startAresStub() {
   const server = createHttpServer((request, response) => {
     const known = request.url === `/${ARES_REPLY.ico}`;
@@ -128,6 +146,8 @@ export const test = base.extend<{
         `ENCRYPTION_KEY=${Buffer.alloc(32, 7).toString("base64")}`,
         "--env",
         "SCHEDULER_TICK_SECONDS=1",
+        "--env",
+        "CNB_BASE_URL=http://127.0.0.1:9",
         ...(allowPrivateMail
           ? [
               "--env",
@@ -158,6 +178,7 @@ export const test = base.extend<{
 
   freshApp: async ({ withSmtp, allowPrivateMail }, use) => {
     const ares = await startAresStub();
+    const cnb = await startCnbStub();
     const smtp = withSmtp ? await startSmtp() : null;
     const dataDir = mkdtempSync(join(tmpdir(), "fakturan-e2e-"));
     const port = await freePort();
@@ -172,6 +193,7 @@ export const test = base.extend<{
         BETTER_AUTH_SECRET: "e2e-secret-e2e-secret-e2e-secret-00",
         ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         ARES_BASE_URL: ares.url,
+        CNB_BASE_URL: cnb.url,
         SCHEDULER_TICK_SECONDS: "1",
         ...(allowPrivateMail && { ALLOW_PRIVATE_MAIL_HOSTS: "1" }),
         ...(smtp && {
@@ -188,6 +210,7 @@ export const test = base.extend<{
     } finally {
       process.kill(-child.pid!, "SIGTERM");
       ares.close();
+      cnb.close();
       await smtp?.stop();
       rmSync(dataDir, { recursive: true, force: true });
     }

@@ -15,6 +15,7 @@ import { ServiceError } from "@/server/services/access";
 import { getAutomation } from "@/server/services/automation";
 import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
 import { createCreditNote } from "@/server/services/credit-notes";
+import { creditPreview, loadRate } from "@/server/services/exchange-rates";
 import { customerInputSchema, saveCustomer, searchCustomers } from "@/server/services/customers";
 import {
   cancelInvoice,
@@ -127,6 +128,16 @@ const markPaidInput = z.object({
 });
 const deletePaymentInput = z.object({ id, revision });
 const closeDifferenceInput = z.object({ id, revision, confirmed: z.boolean(V.invalid) });
+const rateInput = z.object({
+  currency: z.enum(CURRENCIES, V.currency),
+  date: z.string(V.date).refine(isCalendarDate, V.date),
+});
+const creditPreviewInput = z.object({
+  id,
+  currency: z.enum(CURRENCIES, V.currency),
+  amountMinor: z.number(V.invalid).int(V.invalid).positive(V.invalid),
+  paidOn: z.string(V.date).refine(isCalendarDate, V.date),
+});
 const lineInput = z.object({
   name: z.string(V.invalid),
   description: z.string(V.invalid).optional(),
@@ -228,6 +239,16 @@ export async function customerDefaultsAction(raw: unknown) {
     };
     return { defaults };
   });
+}
+
+export async function loadRateAction(raw: unknown) {
+  return run(rateInput, raw, async (input, actor) => ({ rate: await loadRate(actor, input) }));
+}
+
+export async function creditPreviewAction(raw: unknown) {
+  return run(creditPreviewInput, raw, async ({ id: invoiceId, ...input }, actor) => ({
+    preview: await creditPreview(actor, { invoiceId, ...input }),
+  }));
 }
 
 export async function searchCustomersAction(raw: unknown) {

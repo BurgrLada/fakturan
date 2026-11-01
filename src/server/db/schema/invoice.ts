@@ -9,6 +9,7 @@ import {
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { CURRENCIES } from "@/lib/currency";
+import { EXCHANGE_RATE_SOURCES } from "@/lib/fx";
 import { INVOICE_STATUSES, INVOICE_TYPES, type Appearance } from "@/lib/invoice";
 import type {
   AccountSnapshot,
@@ -57,6 +58,9 @@ export const invoice = sqliteTable(
     language: text({ enum: LANGUAGES }).notNull(),
     currency: text({ enum: CURRENCIES }).notNull(),
     exchangeRateMicros: integer("exchange_rate_micros"),
+    exchangeRateSource: text("exchange_rate_source", { enum: EXCHANGE_RATE_SOURCES }),
+    // The date of the CNB list the rate comes from, not of the document.
+    exchangeRateDate: text("exchange_rate_date"),
     paymentMethod: text("payment_method", { enum: PAYMENT_METHODS }).notNull(),
     orderRef: text("order_ref").notNull().default(""),
     reference: text().notNull().default(""),

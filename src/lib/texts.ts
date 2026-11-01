@@ -770,6 +770,7 @@ export const TEXTS = {
       credited: "Připsáno na fakturu",
       creditedHint: (currency: string) =>
         `Platba je v jiné měně, zadejte částku v měně faktury (${currency}).`,
+      creditedPrefilled: "Předvyplněno kurzy ČNB ke dni úhrady, částku můžete přepsat.",
       method: "Způsob úhrady",
       note: "Poznámka",
       noticeLocked: "Platba z avíza: změnit jde jen datum, způsob a poznámku.",
@@ -905,6 +906,8 @@ export const TEXTS = {
         `Pravidelnou fakturu „${p.plan ?? ""}“ se nepodařilo vystavit, vznikl koncept. ${p.problems ?? ""}`.trim(),
       recurring_missed: (p: Record<string, unknown>) =>
         `Pravidelná faktura „${p.plan ?? ""}“ nevznikla v termínu ${p.date ?? ""}. Zmeškaných termínů ke kontrole: ${p.count ?? 1}.`,
+      rate_last_known: (p: Record<string, unknown>) =>
+        `Faktura z plánu „${p.plan ?? ""}“ je v ${p.currency ?? ""} a kurz ČNB k ${p.date ?? ""} nebyl k dispozici. Použil se poslední známý kurz z ${p.listDate ?? ""}, zkontrolujte ho.`,
       recurring_held: (p: Record<string, unknown>) =>
         `Automatika je vypnutá, pravidelná faktura „${p.plan ?? ""}“ zůstala jako koncept.`,
       recurring_no_address: (p: Record<string, unknown>) =>
@@ -1564,6 +1567,7 @@ export const TEXTS = {
       credited: "Připsáno na doklad",
       creditedHint: (currency: string, notice: string) =>
         `Platba přišla v jiné měně (${notice}), zadejte částku v měně dokladu (${currency}).`,
+      creditedPrefilled: "Předvyplněno kurzy ČNB ke dni úhrady, částku můžete přepsat.",
       badCredited: "Zadejte připsanou částku větší než nula",
       overpaid: (amount: string) => `Přeplatek ${amount}`,
       confirm: "Přiřadit platbu",
@@ -1606,6 +1610,16 @@ export const TEXTS = {
       undoBody:
         "Platba pochází z avíza z banky. Smažou se všechny platby tohoto avíza (i na jiných dokladech), stav faktur se přepočte a avízo se vrátí do fronty.",
       undoConfirm: "Vrátit avízo",
+    },
+  },
+  exchangeRates: {
+    errors: { invalid: "Neplatný dotaz na kurz" },
+    notes: {
+      lastKnown: (currency: string, date: string) =>
+        `Kurz ${currency} ČNB k rozhodnému dni není k dispozici, použit je poslední známý z ${date}.`,
+      deviation: (currency: string) =>
+        `Kurz ${currency} se od kurzu ČNB liší o více než 5 %. Zkontrolujte ho.`,
+      noReference: "Kurz ČNB teď není k dispozici, odchylku od něj nešlo ověřit.",
     },
   },
   bankMailbox: {
@@ -1913,6 +1927,7 @@ export const TEXTS = {
       rounding: "Neplatné zaokrouhlení",
       pdfFileName: "Neplatný název souboru PDF",
       fxBasis: "Neplatný základ pro kurz",
+      fixedRates: "Pevný kurz musí být kladné číslo a měna nesmí být koruna",
     },
   },
   onboarding: {

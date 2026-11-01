@@ -3,8 +3,10 @@ import { and, eq, inArray } from "drizzle-orm";
 import { isActiveDocument, type InvoiceStatus, type InvoiceType } from "@/lib/invoice";
 import { diffLines } from "@/lib/invoice-diff";
 import { discountNotes } from "@/lib/invoice-form";
+import { deviationExceeds, rateDate } from "@/lib/fx";
 import { allowsNegativePrice } from "@/lib/invoice-totals";
 import { calendarDateInPrague, variableSymbolFrom } from "@/lib/number-format";
+import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
@@ -15,6 +17,7 @@ import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
 import { creditNoteProblem } from "./credit-notes";
+import { resolveRate } from "./exchange-rates";
 import { hasPayments, refreshBalance } from "./invoice-balance";
 import {
   currentParties,
@@ -221,8 +224,9 @@ function draftProblems(q: Reader, ownerId: string, row: Invoice, lines: InvoiceL
 }
 
 export function checkIssuable(ownerId: string, id: string): IssueProblem[] {
-  const row = findOwned(db, ownerId, id);
-  if (row.status !== "draft") return [{ field: "status", message: T.alreadyIssued }];
+  const stored = findOwned(db, ownerId, id);
+  if (stored.status !== "draft") return [{ field: "status", message: T.alreadyIssued }];
+  const row = ratedFor(db, ownerId, stored);
   const lines = linesOf(db, ownerId, id);
   const found = draftProblems(db, ownerId, row, lines);
   const picked = pickSeries(db, ownerId, row, row.seriesId);
@@ -232,6 +236,42 @@ export function checkIssuable(ownerId: string, id: string): IssueProblem[] {
       ? peekNumber(db, ownerId, picked.series, row.issueDate)
       : "";
   return [...found, ...textProblems(issuedTexts(db, ownerId, row, lines, number))];
+}
+
+type RateFields = Pick<Invoice, "exchangeRateMicros" | "exchangeRateSource" | "exchangeRateDate">;
+
+// A rate typed by a person is never replaced. Older documents carry a rate without a source and
+// count as typed. Otherwise the rate follows the decisive day, which the issue dialog may have changed.
+function ratedFor(q: Reader, ownerId: string, row: Invoice): Invoice {
+  const typed = row.exchangeRateSource === "manual" || row.exchangeRateSource === null;
+  if (row.currency === "CZK" || row.type === "credit_note") return row;
+  if (typed && row.exchangeRateMicros !== null) return row;
+  const day = rateDate(row, getPreferences(ownerId).fxBasis, calendarDateInPrague(clock.now()));
+  const found = resolveRate(q, ownerId, row.currency, day, clock.now());
+  if (!found) return row;
+  const fields: RateFields = {
+    exchangeRateMicros: found.rateMicros,
+    exchangeRateSource: found.source,
+    exchangeRateDate: found.listDate,
+  };
+  return { ...row, ...fields };
+}
+
+function rateNotes(q: Reader, ownerId: string, row: Invoice): string[] {
+  if (row.currency === "CZK" || !row.exchangeRateMicros) return [];
+  const R = TEXTS.exchangeRates.notes;
+  const format = getPreferences(ownerId).dateFormat;
+  const day = rateDate(row, getPreferences(ownerId).fxBasis, calendarDateInPrague(clock.now()));
+  const listed = resolveRate(q, ownerId, row.currency, day, clock.now());
+  const notes: string[] = [];
+  if (row.exchangeRateSource === "last_known" && row.exchangeRateDate) {
+    notes.push(R.lastKnown(row.currency, formatCalendarDate(row.exchangeRateDate, format)));
+  }
+  if (listed?.reference == null) notes.push(R.noReference);
+  else if (deviationExceeds(row.exchangeRateMicros, listed.reference)) {
+    notes.push(R.deviation(row.currency));
+  }
+  return notes;
 }
 
 export type IssuePreview = {
@@ -244,6 +284,7 @@ export type IssuePreview = {
   totalMinor: number;
   currency: Invoice["currency"];
   discountNotes: string[];
+  rateNotes: string[];
   type: InvoiceType;
 };
 
@@ -257,7 +298,7 @@ function capNotes(row: Invoice, lines: InvoiceLine[]): string[] {
 }
 
 export function previewIssue(ownerId: string, id: string): IssuePreview {
-  const row = findOwned(db, ownerId, id);
+  const row = ratedFor(db, ownerId, findOwned(db, ownerId, id));
   const picked = pickSeries(db, ownerId, row, row.seriesId);
   const number =
     "series" in picked && row.issueDate
@@ -273,6 +314,7 @@ export function previewIssue(ownerId: string, id: string): IssuePreview {
     totalMinor: row.totalMinor,
     currency: row.currency,
     discountNotes: capNotes(row, linesOf(db, ownerId, id)),
+    rateNotes: rateNotes(db, ownerId, row),
     type: row.type,
   };
 }
@@ -367,10 +409,11 @@ export function issueIn(
   if (manualSymbol !== undefined && !MANUAL_VARIABLE_SYMBOL.test(manualSymbol)) {
     throw new ServiceError(V.variableSymbol);
   }
-  const row = findOwned(tx, userId, id);
-  if (row.status !== "draft" || row.revision !== opts.revision) {
+  const stored = findOwned(tx, userId, id);
+  if (stored.status !== "draft" || stored.revision !== opts.revision) {
     throw new ServiceError(TEXTS.invoices.stale);
   }
+  const row = ratedFor(tx, userId, stored);
   const lines = linesOf(tx, userId, id);
   const picked = pickSeries(tx, userId, row, opts.seriesId ?? row.seriesId);
   const problems = draftProblems(tx, userId, row, lines);
@@ -398,6 +441,9 @@ export function issueIn(
     .set({
       ...sumsOf(totals),
       ...texts.images,
+      exchangeRateMicros: row.exchangeRateMicros,
+      exchangeRateSource: row.exchangeRateSource,
+      exchangeRateDate: row.exchangeRateDate,
       status: "issued",
       number,
       variableSymbol: isNote
@@ -438,7 +484,7 @@ export function issueIn(
     ownerId: userId,
     scope: "user",
     before: {
-      ...auditSnapshot(row, lines.length),
+      ...auditSnapshot(stored, lines.length),
       ...(changes && { lines: changes.before }),
     },
     after: {

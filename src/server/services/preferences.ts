@@ -2,6 +2,7 @@ import "server-only";
 import { isNull } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
+import { MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
 import { ROUNDING_MODES } from "@/lib/invoice-totals";
 import {
   DATE_FORMATS,
@@ -25,6 +26,7 @@ import { ServiceError } from "./access";
 import { mutate } from "./mutation";
 
 const V = TEXTS.preferences.validation;
+const FOREIGN: ReadonlySet<string> = new Set(CURRENCIES.filter((code) => code !== "CZK"));
 const text = (max: number) => z.string().trim().max(max, V.tooLong);
 
 export const colorSchema = z.string(V.accentColor).regex(/^(#[0-9a-fA-F]{6})?$/, V.accentColor);
@@ -65,6 +67,15 @@ export const preferencesSchema = z.object({
     .max(100, V.tooLong)
     .regex(/^[^/\\\p{Cc}\p{Zl}\p{Zp}]+$/u, V.pdfFileName),
   fxBasis: z.enum(FX_BASES, V.fxBasis),
+  fixedRates: z.record(
+    z.string(V.fixedRates).refine((code) => FOREIGN.has(code), V.fixedRates),
+    z
+      .number(V.fixedRates)
+      .int(V.fixedRates)
+      .positive(V.fixedRates)
+      .max(MAX_EXCHANGE_RATE_MICROS, V.fixedRates),
+    V.fixedRates,
+  ),
 });
 
 export const preferencesPatchSchema = preferencesSchema.partial();

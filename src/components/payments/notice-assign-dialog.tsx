@@ -18,6 +18,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import type { Currency } from "@/lib/currency";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { TEXTS } from "@/lib/texts";
+import { useCreditPrefill } from "@/components/invoices/use-credit-prefill";
 import { NoticeSummary, type NoticeItem } from "./notice-list";
 
 const T = TEXTS.bankQueue.assign;
@@ -138,6 +139,14 @@ function Form({
   const noticeCurrency = notice.currency!;
   const amountMinor = notice.amountMinor!;
   const foreign = chosen !== null && chosen.currency !== noticeCurrency;
+  const { prefilled, typed } = useCreditPrefill({
+    enabled: foreign,
+    invoiceId: chosenId,
+    currency: noticeCurrency,
+    amountMinor,
+    paidOn: notice.paidOn,
+    onValue: setCredited,
+  });
   const overpaid =
     chosen && !foreign && amountMinor > chosen.dueMinor ? amountMinor - chosen.dueMinor : 0;
 
@@ -218,10 +227,15 @@ function Form({
             id={`${key}-credited`}
             inputMode="decimal"
             value={credited}
-            onChange={(event) => setCredited(event.target.value)}
+            onChange={(event) => {
+              typed();
+              setCredited(event.target.value);
+            }}
           />
           <p className="text-xs text-muted-foreground">
-            {T.creditedHint(chosen.currency, formatMoney(amountMinor, noticeCurrency))}
+            {prefilled
+              ? T.creditedPrefilled
+              : T.creditedHint(chosen.currency, formatMoney(amountMinor, noticeCurrency))}
           </p>
         </div>
       )}

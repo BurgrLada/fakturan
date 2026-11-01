@@ -7,6 +7,7 @@ export const JOB_KINDS = [
   "user.notice",
   "user.digest",
   "bank.poll",
+  "fx.fetch",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 

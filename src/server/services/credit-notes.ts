@@ -110,6 +110,8 @@ export function createCreditNote(actor: Actor, invoiceId: string): { id: string 
         language: source.language,
         currency: source.currency,
         exchangeRateMicros: source.exchangeRateMicros,
+        exchangeRateSource: source.exchangeRateSource,
+        exchangeRateDate: source.exchangeRateDate,
         paymentMethod: source.paymentMethod,
         discountKind: source.discountKind,
         discountValue: source.discountValue,

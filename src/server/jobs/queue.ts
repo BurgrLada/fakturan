@@ -10,7 +10,7 @@ export { JOB_KINDS, type Job, type JobKind, type JobPayload } from "../db/schema
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const RETENTION_MS = 90 * 86_400_000;
-const BANK_POLL_RETENTION_MS = 7 * 86_400_000;
+const SHORT_LIVED_RETENTION_MS = 7 * 86_400_000;
 
 type EnqueueInput = {
   kind: JobKind;
@@ -42,6 +42,11 @@ export function enqueue(tx: Tx, input: EnqueueInput): { id: string; created: boo
   if (inserted) return { id: inserted.id, created: true };
   const existing = tx.select({ id: job.id }).from(job).where(eq(job.key, input.key)).get();
   return { id: existing!.id, created: false };
+}
+
+// For work that belongs to no account and needs no audit entry, such as hourly planning.
+export function enqueueStandalone(input: EnqueueInput): { created: boolean } {
+  return db.transaction((tx) => enqueue(tx, input), { behavior: "immediate" });
 }
 
 export function claimNext(worker: string): Job | null {
@@ -155,13 +160,14 @@ export function purgeFinishedJobs(now: Date): void {
       ),
     )
     .run();
-  // A poll every 5 minutes would pile up, and bank_notification holds its idempotency (R-29).
+  // A poll every 5 minutes would pile up, and bank_notification holds its idempotency (R-29). A rate
+  // fetch repeats every hour and the exchange_rate row is its only record.
   db.delete(job)
     .where(
       and(
-        eq(job.kind, "bank.poll"),
+        inArray(job.kind, ["bank.poll", "fx.fetch"]),
         inArray(job.status, ["done", "dead", "cancelled"]),
-        lt(job.updatedAt, new Date(now.getTime() - BANK_POLL_RETENTION_MS)),
+        lt(job.updatedAt, new Date(now.getTime() - SHORT_LIVED_RETENTION_MS)),
       ),
     )
     .run();

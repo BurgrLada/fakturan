@@ -20,6 +20,7 @@ import {
 import { z } from "zod";
 import { CURRENCIES, type Currency } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
+import { MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
 import {
   addDays,
   appearanceFrom,
@@ -74,7 +75,6 @@ import { linkTags, listTags, tagsOf, type Tag } from "./tags";
 
 const V = TEXTS.invoices.validation;
 const MAX_LINES = 500;
-const MAX_EXCHANGE_RATE_MICROS = 1_000_000_000_000;
 const MAX_NUMBER = 100;
 export const MAX_LINE_NAME = 200;
 export const MAX_REFERENCE = 200;

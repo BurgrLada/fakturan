@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, count, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { kindForInvoice } from "@/lib/email-template";
 import { mailMessageSchema } from "@/lib/mail-send";
+import { rateDate } from "@/lib/fx";
 import { addDays, daysBetween } from "@/lib/invoice";
 import { calendarDateInPrague, isDailyDue, type CalendarDate } from "@/lib/number-format";
 import {
@@ -34,6 +35,7 @@ import { reportFailure } from "../scheduler/report";
 import { ServiceError, type Reader } from "./access";
 import { automaticSendAllowed, getAutomation } from "./automation";
 import { composeMail } from "./email-templates";
+import { ensureRate } from "./exchange-rates";
 import { issueIn } from "./invoice-lifecycle";
 import { queueMail } from "./invoice-mail";
 import { draftInputFromDocument } from "./invoice-templates";
@@ -480,6 +482,23 @@ function queueRecurringMail(
   return { queued: queued !== null };
 }
 
+function noticeLastKnownRate(tx: Tx, plan: RecurringInvoice, invoiceId: string, key: string) {
+  const issued = findOwned(tx, plan.userId, invoiceId);
+  if (issued.exchangeRateSource !== "last_known") return;
+  notify(tx, {
+    userId: plan.userId,
+    kind: "rate_last_known",
+    dedupeKey: `${key}:rate`,
+    params: {
+      plan: plan.name,
+      currency: issued.currency,
+      date: displayDate(plan.userId, issued.issueDate!),
+      listDate: displayDate(plan.userId, issued.exchangeRateDate!),
+    },
+    entity: { type: "invoice", id: invoiceId },
+  });
+}
+
 function createInvoice(
   tx: Tx,
   audit: Audit,
@@ -514,6 +533,7 @@ function createInvoice(
     notify(tx, { userId, kind: "recurring_failed", dedupeKey, params: notice, entity });
     return { status: "fallback", invoiceId, reason: problems.slice(0, MAX_REASON_CHARS) };
   }
+  noticeLastKnownRate(tx, plan, invoiceId, dedupeKey);
   if (mode === "issue") return { status: "issued", invoiceId };
 
   const invoice = result.number;
@@ -590,9 +610,24 @@ export function processOccurrence(
   );
 }
 
+// The network runs here, before the transaction: an outage leaves the last known rate, and the
+// occurrence is issued or falls back to a draft as it would without a rate (R-11).
+async function warmRate(ownerId: string, recurringId: string, occurrence: RunOccurrence) {
+  const currency = readPlan(db, ownerId, recurringId)?.document.currency;
+  if (!currency || currency === "CZK") return;
+  const { issueDate } = occurrence;
+  await ensureRate(
+    currency,
+    rateDate({ issueDate, taxableDate: null }, getPreferences(ownerId).fxBasis, issueDate),
+  );
+}
+
 export async function runRecurringJob(row: Job): Promise<void> {
   if (!row.userId) throw new Error("Úloha pravidelné faktury nemá vlastníka");
-  processOccurrence(row.userId, String(row.payload.recurringId), occurrenceOf(row));
+  const recurringId = String(row.payload.recurringId);
+  const occurrence = occurrenceOf(row);
+  await warmRate(row.userId, recurringId, occurrence);
+  processOccurrence(row.userId, recurringId, occurrence);
 }
 
 function resolveMissedNotices(tx: Tx, userId: string, planId: string): void {

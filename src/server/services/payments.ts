@@ -23,6 +23,7 @@ import { db, type Tx } from "../db";
 import { bankNotification, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
+import { cnbRate } from "./exchange-rates";
 import { finalOf, refreshBalance } from "./invoice-balance";
 import { findOwned, ownerOf, type Invoice } from "./invoices";
 import { holdQueuedMail, receiptNoticeKey } from "./mail-hold";
@@ -140,7 +141,16 @@ export function insertPayment(
   const id = randomUUID();
   const now = clock.now();
   tx.insert(payment)
-    .values({ ...fields, id, userId, invoiceId, kind, createdAt: now, updatedAt: now })
+    .values({
+      ...fields,
+      id,
+      userId,
+      invoiceId,
+      kind,
+      rateMicros: cnbRate(tx, fields.currency, fields.paidOn),
+      createdAt: now,
+      updatedAt: now,
+    })
     .run();
   const after = applyPayments(tx, audit, userId, invoiceId);
   audit({
@@ -296,6 +306,7 @@ export function addRefund(actor: Actor, invoiceId: string, raw: PaymentInput): {
         amountMinor: -amountMinor,
         currency,
         creditedMinor: -creditedMinor,
+        rateMicros: cnbRate(tx, currency, paidOn),
         method,
         note,
         createdAt: now,
@@ -347,7 +358,16 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
     }
 
     tx.update(payment)
-      .set({ paidOn, amountMinor, currency, creditedMinor, method, note, updatedAt: clock.now() })
+      .set({
+        paidOn,
+        amountMinor,
+        currency,
+        creditedMinor,
+        method,
+        note,
+        rateMicros: cnbRate(tx, currency, paidOn),
+        updatedAt: clock.now(),
+      })
       .where(scoped(userId).where(payment, (t, { eq }) => eq(t.id, id)))
       .run();
     const told =

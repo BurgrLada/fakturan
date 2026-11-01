@@ -47,6 +47,7 @@ export const NOTIFICATION_KINDS = [
   "recurring_held",
   "recurring_no_address",
   "recurring_bad_mail",
+  "rate_last_known",
   "recurring_upcoming",
   "recurring_conflict",
   "reminder_failed",

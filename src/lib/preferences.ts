@@ -44,6 +44,7 @@ export type Preferences = {
   rounding: RoundingMode;
   pdfFileName: string;
   fxBasis: FxBasis;
+  fixedRates: Record<string, number>;
 };
 
 export type DesignChoice = { id: string; name: string };
@@ -74,6 +75,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   rounding: "none",
   pdfFileName: "{cislo}.pdf",
   fxBasis: "issue_date",
+  fixedRates: {},
 };
 
 export function defaultIssueDate(mode: IssueDateMode, now: Date): CalendarDate {

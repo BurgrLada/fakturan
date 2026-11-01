@@ -12,6 +12,7 @@ import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
 import { purgeNotices } from "../services/bank-notices";
 import { planBankPolls, pollMailbox } from "../services/bank-poll";
 import { deliverDigest, planDigests } from "../services/due-alerts";
+import { planRateFetch, runRateFetch } from "../services/exchange-rates";
 import { deliverMail, recoverMail, settleDeadMail } from "../services/mail-delivery";
 import {
   deliverUserNotice,
@@ -64,6 +65,8 @@ export const reminderPlanTask: TickTask = { name: "reminder-plan", run: planRemi
 
 export const digestPlanTask: TickTask = { name: "digest-plan", run: planDigests };
 
+export const fxPlanTask: TickTask = { name: "fx-plan", run: planRateFetch };
+
 export const bankPollTask: TickTask = { name: "bank-poll", run: planBankPolls };
 
 export function cronPattern(seconds: number): string {
@@ -99,6 +102,7 @@ export function startScheduler(): void {
   registerJob("user.notice", { run: deliverUserNotice });
   registerJob("user.digest", { run: deliverDigest });
   registerJob("bank.poll", { run: pollMailbox });
+  registerJob("fx.fetch", { run: runRateFetch });
   registerTickTask(deadMailTask);
   registerTickTask(deadRecurringTask);
   registerTickTask(recurringPlanTask);
@@ -106,6 +110,7 @@ export function startScheduler(): void {
   registerTickTask(reminderPlanTask);
   registerTickTask(digestPlanTask);
   registerTickTask(bankPollTask);
+  registerTickTask(fxPlanTask);
   registerTickTask(jobCleanupTask);
   registerTickTask(backupTask);
   bindWorker(holder);

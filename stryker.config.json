@@ -14,7 +14,9 @@
     "src/lib/payments.ts",
     "src/lib/payment-matching.ts",
     "src/lib/recurrence.ts",
-    "src/lib/czech-holidays.ts"
+    "src/lib/czech-holidays.ts",
+    "src/lib/fx.ts",
+    "src/lib/cnb-rates.ts"
   ],
   "vitest": { "configFile": "vitest.config.ts" },
   "coverageAnalysis": "perTest",

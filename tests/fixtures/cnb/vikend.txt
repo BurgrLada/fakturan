@@ -1,0 +1,5 @@
+30.10.2026 #211
+země|měna|množství|kód|kurz
+EMU|euro|1|EUR|24,380
+Polsko|zlotý|1|PLN|5,731
+USA|dolar|1|USD|22,311

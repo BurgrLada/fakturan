@@ -39,6 +39,7 @@ export const RATE_RULES = {
   exportUser: rule("exportUser", 60, 60),
   aresLookup: rule("aresLookup", 30, 60),
   viesLookup: rule("viesLookup", 30, 60),
+  fxLookupUser: rule("fxLookupUser", 60, 60),
   monitoringIp: rule("monitoringIp", 120, 60),
   pdfUser: rule("pdfUser", 120, 60),
   pdfPreviewUser: rule("pdfPreviewUser", 600, 60),

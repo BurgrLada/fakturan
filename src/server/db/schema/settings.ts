@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import {
   DATE_FORMATS,
@@ -52,6 +53,10 @@ export const preferences = sqliteTable("preferences", {
   rounding: text({ enum: ROUNDING_MODES }).notNull().default(D.rounding),
   pdfFileName: text("pdf_file_name").notNull().default(D.pdfFileName),
   fxBasis: text("fx_basis", { enum: FX_BASES }).notNull().default(D.fxBasis),
+  fixedRates: text("fixed_rates", { mode: "json" })
+    .$type<Record<string, number>>()
+    .notNull()
+    .default(sql`'{}'`),
   onboardingCompletedAt: integer("onboarding_completed_at", { mode: "timestamp_ms" }),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });

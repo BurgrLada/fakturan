@@ -49,6 +49,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "customer.vat_verify": "Ověření DIČ ve VIES",
   "email_template.reset": "Vrácení šablony e-mailu na výchozí",
   "email_template.save": "Uložení šablony e-mailu",
+  "exchange_rate.fetch": "Stažení kurzů ČNB",
   "file.create": "Nahrání souboru",
   "file.delete": "Smazání souboru",
   "invoice_template.delete": "Smazání šablony faktury",

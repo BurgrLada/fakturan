@@ -7,7 +7,7 @@ import type { InvoiceDocument } from "@/lib/invoice-document";
 import { documentQrInput, planQr } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, invoice, numberSeries, payment } from "@/server/db/schema";
+import { auditLog, exchangeRate, invoice, numberSeries, payment } from "@/server/db/schema";
 import { renderInvoicePdf } from "@/server/pdf/render";
 import { buildInvoiceView } from "@/server/pdf/view";
 import { hideBankAccount, listBankAccounts } from "@/server/services/bank-accounts";
@@ -646,6 +646,42 @@ describe("stav původní faktury", () => {
     ).toThrow(V.currencyHasCredits);
     const [version] = listVersions(owner, id);
     expect(() => restoreVersion(actor, version!.id)).toThrow(V.currencyHasCredits);
+  });
+
+  test("[FOR-003] oprava zdědí kurz, jeho zdroj i datum a vystavení je nepřepočítá", () => {
+    const { owner, id } = setup(100_000, {
+      currency: "EUR",
+      exchangeRateMicros: 25_000_000,
+      paymentMethod: "cash",
+      bankAccountId: null,
+    });
+    db.update(invoice)
+      .set({ exchangeRateSource: "last_known", exchangeRateDate: "2026-03-02" })
+      .where(eq(invoice.id, id))
+      .run();
+    db.insert(exchangeRate)
+      .values({
+        currency: "EUR",
+        listDate: row(owner, id).issueDate!,
+        rateMicros: 30_000_000,
+        fetchedAt: NOW,
+      })
+      .run();
+
+    const noteId = noteOf(owner, id);
+    expect(row(owner, noteId)).toMatchObject({
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "last_known",
+      exchangeRateDate: "2026-03-02",
+    });
+    issue(owner, noteId);
+
+    expect(row(owner, noteId)).toMatchObject({
+      status: "issued",
+      exchangeRateMicros: 25_000_000,
+      exchangeRateSource: "last_known",
+      exchangeRateDate: "2026-03-02",
+    });
   });
 
   test("kurz a měnu vystavené opravy změnit nejde", () => {

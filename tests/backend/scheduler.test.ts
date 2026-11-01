@@ -8,6 +8,7 @@ import { job, schedulerState } from "@/server/db/schema";
 import { checkHealth } from "@/server/health";
 import { claimNext, completeJob, enqueue } from "@/server/jobs/queue";
 import { jobDefinition, registerJob } from "@/server/jobs/registry";
+import { runRateFetch } from "@/server/services/exchange-rates";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import { drainJobs, kickWorker } from "@/server/jobs/worker";
 import { acquireLease, releaseLease } from "@/server/scheduler/lease";
@@ -412,6 +413,13 @@ describe("start", () => {
     expect(jobDefinition("mail.send")).toEqual({ run: deliverMail, recover: recoverMail });
     expect(tickTasksForTests()).toContain("dead-mail");
     expect(tickTasksForTests()).toContain("bank-poll");
+  });
+
+  test("start zaregistruje stahování kurzů i jeho plánovač", () => {
+    stubEnv();
+    startScheduler();
+    expect(jobDefinition("fx.fetch")).toEqual({ run: runRateFetch });
+    expect(tickTasksForTests()).toContain("fx-plan");
   });
 
   test("[R-5] SIGTERM s běžící úlohou lease neuvolní a nechá ho vypršet", async () => {

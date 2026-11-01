@@ -22,6 +22,8 @@ export const payment = sqliteTable(
     amountMinor: integer("amount_minor").notNull(),
     currency: text({ enum: CURRENCIES }).notNull(),
     creditedMinor: integer("credited_minor").notNull(),
+    // CZK per one unit of the payment currency on the payment day; null until a list is known.
+    rateMicros: integer("rate_micros"),
     method: text({ enum: PAYMENT_CHANNELS }).notNull(),
     note: text().notNull().default(""),
     source: text({ enum: PAYMENT_SOURCES }).notNull(),

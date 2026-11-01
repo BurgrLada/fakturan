@@ -11,6 +11,7 @@ import { createDb, runMigrations } from "@/server/db";
 import {
   auditLog,
   customer,
+  exchangeRate,
   emailLog,
   invoice,
   job,
@@ -38,6 +39,7 @@ import {
   runRecurringJob,
 } from "@/server/services/recurring-run";
 import { assertConsistent } from "../helpers/consistency";
+import { cnbMode, startCnbStub } from "../helpers/cnb";
 import { createTestDb } from "../helpers/db";
 import { ownSmtp, seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
 import { planDocument, savePlan } from "../helpers/fixtures-recurring";
@@ -53,6 +55,9 @@ vi.stubEnv("SENTRY_DSN", "http://public@localhost/1");
 vi.stubEnv("SMTP_HOST", "");
 vi.stubEnv("SMTP_PORT", "");
 vi.stubEnv("SMTP_FROM", "");
+
+const cnb = await startCnbStub(cnbMode.down);
+vi.stubEnv("CNB_BASE_URL", cnb.url);
 
 const db = createTestDb();
 const T0 = new Date("2026-03-10T10:00:00Z");
@@ -70,10 +75,16 @@ const at = (iso: string) => {
 beforeAll(async () => {
   smtp = await startSmtp();
 });
-afterAll(() => smtp.stop());
+afterAll(async () => {
+  await smtp.stop();
+  await cnb.close();
+});
 
 beforeEach(() => {
   smtp.reset();
+  db.delete(exchangeRate).run();
+  cnb.setMode(cnbMode.down);
+  cnb.requests.length = 0;
   db.delete(job).run();
   db.delete(schedulerState).run();
   current = T0;
@@ -512,4 +523,123 @@ describe("souběh", () => {
     assertConsistent(shared, owner);
     shared.$client.close();
   }, 60_000);
+});
+
+describe("kurzy ČNB u pravidelných faktur", () => {
+  const seedEur = (listDate: string, rateMicros = 24_380_000) =>
+    db.insert(exchangeRate).values({ currency: "EUR", listDate, rateMicros, fetchedAt: T0 }).run();
+
+  const eurPlan = (owner: string, customerId: string) =>
+    savePlan(owner, customerId, {
+      mode: "issue",
+      document: planDocument({ currency: "EUR", paymentMethod: "cash" }),
+    });
+
+  async function runJob(owner: string, id: string) {
+    const { periodKey, issueDate, billedPeriod } = occurrenceOf(owner, id);
+    await runRecurringJob({
+      userId: owner,
+      payload: {
+        recurringId: id,
+        periodKey,
+        issueDate,
+        periodFrom: billedPeriod.from,
+        periodTo: billedPeriod.to,
+      },
+    } as never);
+    return listRuns(owner, id)[0]!;
+  }
+
+  test("pravidelná faktura v EUR se vystaví bez sítě z uloženého lístku a nekončí ve fallback", async () => {
+    const { owner, customerId } = account();
+    seedEur("2026-03-09");
+
+    const run = await runJob(owner, eurPlan(owner, customerId));
+
+    expect(run.status).toBe("issued");
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({
+      status: "issued",
+      exchangeRateMicros: 24_380_000,
+      exchangeRateSource: "cnb",
+      exchangeRateDate: "2026-03-09",
+    });
+    expect(cnb.requests).toEqual([]);
+    expect(noticesOf(owner)).toEqual([]);
+    assertConsistent(db, owner);
+  });
+
+  test("[FOR-003] chybějící lístek se před vystavením stáhne", async () => {
+    const { owner, customerId } = account();
+    cnb.setMode(cnbMode.date("2026-03-09"));
+
+    const run = await runJob(owner, eurPlan(owner, customerId));
+
+    expect(run.status).toBe("issued");
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({
+      exchangeRateSource: "cnb",
+      exchangeRateDate: "2026-03-09",
+    });
+    expect(cnb.requests).toEqual(["/denni_kurz.txt?date=09.03.2026"]);
+  });
+
+  test("[FOR-004] při výpadku se vystaví s posledním známým kurzem a upozorní", async () => {
+    const { owner, customerId } = account();
+    seedEur("2026-03-02", 24_000_000);
+
+    const run = await runJob(owner, eurPlan(owner, customerId));
+
+    expect(run.status).toBe("issued");
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({
+      exchangeRateMicros: 24_000_000,
+      exchangeRateSource: "last_known",
+      exchangeRateDate: "2026-03-02",
+    });
+    expect(noticesOf(owner).map((row) => row.kind)).toEqual(["rate_last_known"]);
+    expect(noticesOf(owner)[0]!.params).toMatchObject({
+      currency: "EUR",
+      date: "10. 3. 2026",
+      listDate: "2. 3. 2026",
+    });
+  });
+
+  test("[FOR-004] pravidelná faktura při výpadku s prázdnou tabulkou skončí konceptem bez chyby úlohy", async () => {
+    const { owner, customerId } = account();
+
+    const run = await runJob(owner, eurPlan(owner, customerId));
+
+    expect(run.status).toBe("fallback");
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({ status: "draft", number: null });
+    expect(noticesOf(owner).map((row) => row.kind)).toEqual(["recurring_failed"]);
+    expect(cnb.requests).toHaveLength(1);
+  });
+
+  test("faktura v korunách síť ani kurz nepoužije", async () => {
+    const { owner, customerId } = account();
+
+    const run = await runJob(owner, savePlan(owner, customerId, { mode: "issue" }));
+
+    expect(run.status).toBe("issued");
+    expect(getInvoice(owner, run.invoiceId!)).toMatchObject({
+      exchangeRateMicros: null,
+      exchangeRateSource: null,
+    });
+    expect(cnb.requests).toEqual([]);
+  });
+
+  test("zrušený nebo smazaný plán úloha přeskočí bez sítě", async () => {
+    const { owner } = account();
+
+    await runRecurringJob({
+      userId: owner,
+      payload: {
+        recurringId: "neexistuje",
+        periodKey: "x",
+        issueDate: "2026-03-10",
+        periodFrom: "2026-03-01",
+        periodTo: "2026-03-31",
+      },
+    } as never);
+
+    expect(cnb.requests).toEqual([]);
+  });
 });

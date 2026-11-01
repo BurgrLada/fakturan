@@ -22,6 +22,7 @@ import { CURRENCIES, type Currency } from "@/lib/currency";
 import { formatMoneyInput, parseMoney } from "@/lib/money";
 import { isRefund, PAYMENT_CHANNELS, type PaymentChannel } from "@/lib/payments";
 import { TEXTS } from "@/lib/texts";
+import { useCreditPrefill } from "./use-credit-prefill";
 
 const T = TEXTS.payments.dialog;
 const P = TEXTS.payments.panel;
@@ -96,6 +97,14 @@ function Form({
 
   const foreign = currency !== target.currency;
   const locked = payment?.source === "notice";
+  const { prefilled, typed } = useCreditPrefill({
+    enabled: foreign && !payment,
+    invoiceId: target.invoiceId,
+    currency,
+    amountMinor: positive(amount),
+    paidOn,
+    onValue: setCredited,
+  });
 
   function reject(field: "amount" | "credited", text: string) {
     setError(text);
@@ -204,10 +213,13 @@ function Form({
             aria-invalid={invalid === "credited" || undefined}
             aria-describedby={`${key}-credited-hint`}
             value={credited}
-            onChange={(event) => setCredited(event.target.value)}
+            onChange={(event) => {
+              typed();
+              setCredited(event.target.value);
+            }}
           />
           <p id={`${key}-credited-hint`} className="text-xs text-muted-foreground">
-            {T.creditedHint(target.currency)}
+            {prefilled ? T.creditedPrefilled : T.creditedHint(target.currency)}
           </p>
         </div>
       )}
