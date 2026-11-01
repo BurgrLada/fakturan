@@ -18,6 +18,7 @@ import { defaultAccountFor, listBankAccounts } from "./bank-accounts";
 import {
   assertReferencesOwned,
   checkDiscount,
+  checkPriceSign,
   documentFields,
   findOwned,
   linesOf,
@@ -75,6 +76,7 @@ export const templateDocumentSchema = z
     lines,
   })
   .superRefine(checkDiscount)
+  .superRefine(checkPriceSign)
   .transform(withoutStrayDiscount);
 
 export const templateInputSchema = z.object({

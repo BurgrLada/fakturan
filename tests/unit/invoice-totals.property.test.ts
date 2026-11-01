@@ -6,6 +6,7 @@ import {
   parseQuantity,
   type Discount,
   type RoundingMode,
+  type Totals,
 } from "@/lib/invoice-totals";
 
 const discount: fc.Arbitrary<Discount> = fc.oneof(
@@ -30,6 +31,25 @@ const cap = (base: number, d: Discount) =>
     base,
     d.kind === "percent" ? half(base * d.basisPoints, 10_000) : d.kind === "amount" ? d.minor : 0,
   );
+
+const signedLine = fc.record({
+  quantityMilli: fc.integer({ min: 0, max: 100_000 }),
+  unitPriceMinor: fc.integer({ min: -1_000_000, max: 1_000_000 }),
+  discount,
+});
+const signedLines = fc.array(signedLine, { maxLength: 8 });
+
+const flip = (value: number) => 0 - value;
+
+function amountsOf(totals: Totals): number[] {
+  return [
+    totals.subtotalMinor,
+    totals.discountMinor,
+    totals.roundingMinor,
+    totals.totalMinor,
+    ...totals.lines.flatMap((l) => [l.grossMinor, l.discountMinor, l.netMinor]),
+  ];
+}
 
 describe("výpočet částek, vlastnosti", () => {
   test("[TST-012] total = Σ net − sleva dokladu + zaokrouhlení pro libovolné vstupy", () => {
@@ -106,6 +126,56 @@ describe("výpočet částek, vlastnosti", () => {
         expect(b.totalMinor).toBe(a.totalMinor);
         expect(b.subtotalMinor).toBe(a.subtotalMinor);
       }),
+    );
+  });
+
+  test("[TST-012] pro libovolné řádky platí computeTotals(zápor) = -computeTotals", () => {
+    fc.assert(
+      fc.property(signedLines, discount, rounding, (input, docDiscount, mode) => {
+        const totals = computeTotals(input, docDiscount, mode);
+        const mirrored = computeTotals(
+          input.map((l) => ({ ...l, unitPriceMinor: -l.unitPriceMinor })),
+          docDiscount,
+          mode,
+        );
+        expect(mirrored).toEqual({
+          lines: totals.lines.map((l) => ({
+            grossMinor: flip(l.grossMinor),
+            discountMinor: flip(l.discountMinor),
+            netMinor: flip(l.netMinor),
+          })),
+          subtotalMinor: flip(totals.subtotalMinor),
+          discountMinor: flip(totals.discountMinor),
+          roundingMinor: flip(totals.roundingMinor),
+          totalMinor: flip(totals.totalMinor),
+        });
+        for (const value of [...amountsOf(totals), ...amountsOf(mirrored)]) {
+          expect(Object.is(value, -0)).toBe(false);
+        }
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  test("[TST-012] součet položek a slev odpovídá celku i se smíšenými znaménky", () => {
+    fc.assert(
+      fc.property(signedLines, discount, rounding, (input, docDiscount, mode) => {
+        const totals = computeTotals(input, docDiscount, mode);
+        totals.lines.forEach((l, i) => {
+          expect(l.grossMinor - l.discountMinor).toBe(l.netMinor);
+          expect(l.grossMinor * input[i]!.unitPriceMinor).toBeGreaterThanOrEqual(0);
+          expect(Math.abs(l.discountMinor)).toBeLessThanOrEqual(Math.abs(l.grossMinor));
+          expect(l.discountMinor * l.grossMinor).toBeGreaterThanOrEqual(0);
+        });
+        expect(totals.subtotalMinor).toBe(totals.lines.reduce((a, l) => a + l.netMinor, 0));
+        expect(totals.totalMinor).toBe(
+          totals.subtotalMinor - totals.discountMinor + totals.roundingMinor,
+        );
+        expect(Math.abs(totals.discountMinor)).toBeLessThanOrEqual(Math.abs(totals.subtotalMinor));
+        expect(totals.discountMinor * totals.subtotalMinor).toBeGreaterThanOrEqual(0);
+        expect(totals.totalMinor * totals.subtotalMinor).toBeGreaterThanOrEqual(0);
+      }),
+      { numRuns: 500 },
     );
   });
 

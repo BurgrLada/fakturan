@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
+  allowsNegativePrice,
+  appliedLineDiscount,
+  cappedDiscounts,
   computeTotals,
   formatQuantity,
   MAX_DOCUMENT_MINOR,
@@ -156,9 +159,6 @@ describe("výpočet částek", () => {
       expect(() => computeTotals([line(bad, 100)], none, "none"), `qty ${bad}`).toThrow(
         AmountOutOfRangeError,
       );
-      expect(() => computeTotals([line(1000, bad)], none, "none"), `price ${bad}`).toThrow(
-        AmountOutOfRangeError,
-      );
       expect(() =>
         computeTotals([line(1000, 100, { kind: "percent", basisPoints: bad })], none, "none"),
       ).toThrow(AmountOutOfRangeError);
@@ -169,12 +169,18 @@ describe("výpočet částek", () => {
         computeTotals([line(1000, 100)], { kind: "amount", minor: bad }, "none"),
       ).toThrow(AmountOutOfRangeError);
     }
+    for (const bad of [1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => computeTotals([line(1000, bad)], none, "none"), `price ${bad}`).toThrow(
+        AmountOutOfRangeError,
+      );
+    }
     expect(() =>
       computeTotals([line(1000, 100)], { kind: "percent", basisPoints: -1 }, "none"),
     ).toThrow(AmountOutOfRangeError);
   });
 
   test("[INV-012] množství se čte a zapisuje po tisícinách", () => {
+    expect(parseQuantity("12 345")).toBe(12_345_000);
     expect(parseQuantity("1,5")).toBe(1500);
     expect(parseQuantity("1.5")).toBe(1500);
     expect(parseQuantity("0,333")).toBe(333);
@@ -203,5 +209,142 @@ describe("výpočet částek", () => {
     expect(formatQuantity(1230)).toBe("1,23");
     expect(formatQuantity(0)).toBe("0");
     expect(formatQuantity(MAX_QUANTITY_MILLI)).toBe("9999999,999");
+  });
+});
+
+describe("záporné částky", () => {
+  const percent = (basisPoints: number): Discount => ({ kind: "percent", basisPoints });
+  const amount = (minor: number): Discount => ({ kind: "amount", minor });
+
+  test("[INV-012] řádek 3 × -1 250,50 Kč se slevou 10 % dá -3 376,35 Kč", () => {
+    const totals = computeTotals([line(3000, -125050, percent(1000))], none, "none");
+    expect(totals.lines[0]).toEqual({
+      grossMinor: -375150,
+      discountMinor: -37515,
+      netMinor: -337635,
+    });
+    expect(totals).toMatchObject({
+      subtotalMinor: -337635,
+      discountMinor: 0,
+      roundingMinor: 0,
+      totalMinor: -337635,
+    });
+  });
+
+  test("[TST-014] oprava 3 × 1 250,50, sleva 10 %, sleva dokladu 100, na koruny: subtotal -3 376,35, discount -100,00, rounding +0,35, total -3 276,00", () => {
+    const totals = computeTotals([line(3000, -125050, percent(1000))], amount(10000), "whole");
+    expect(totals).toMatchObject({
+      subtotalMinor: -337635,
+      discountMinor: -10000,
+      roundingMinor: 35,
+      totalMinor: -327600,
+    });
+  });
+
+  test("[TST-014] zaokrouhlení -12,50 Kč na koruny je -13,00 a rozdíl -0,50", () => {
+    const totals = computeTotals([line(1000, -1250)], none, "whole");
+    expect(totals).toMatchObject({ roundingMinor: -50, totalMinor: -1300 });
+  });
+
+  test("[TST-014] množství 0,333 × -100,01 Kč je -33,30 Kč", () => {
+    expect(computeTotals([line(333, -10001)], none, "none").totalMinor).toBe(-3330);
+  });
+
+  test("[TST-014] odebrat a přidat: -1 000,00 a 2 × 150,25, sleva dokladu 10 %, na koruny je -630,00", () => {
+    const totals = computeTotals([line(1000, -100000), line(2000, 15025)], percent(1000), "whole");
+    expect(totals.lines.map((l) => l.netMinor)).toEqual([-100000, 30050]);
+    expect(totals).toMatchObject({
+      subtotalMinor: -69950,
+      discountMinor: -6995,
+      roundingMinor: -45,
+      totalMinor: -63000,
+    });
+  });
+
+  test("[TST-014] kladný součet smíšených řádků se počítá jako běžný doklad", () => {
+    const totals = computeTotals([line(1000, -10000), line(1000, 25000)], amount(1000), "none");
+    expect(totals).toMatchObject({ subtotalMinor: 15000, discountMinor: 1000, totalMinor: 14000 });
+  });
+
+  test("[TST-014] půlka haléře ve slevě -0,05 Kč zaokrouhlí velikost slevy nahoru", () => {
+    const totals = computeTotals([line(1000, -5, percent(5000))], none, "none");
+    expect(totals.lines[0]).toEqual({ grossMinor: -5, discountMinor: -3, netMinor: -2 });
+  });
+
+  test("sleva nad základem je omezená velikostí základu i v záporu", () => {
+    const totals = computeTotals([line(1000, -5000, amount(8000))], amount(100), "none");
+    expect(totals.lines[0]).toEqual({ grossMinor: -5000, discountMinor: -5000, netMinor: 0 });
+    expect(totals).toMatchObject({ subtotalMinor: 0, discountMinor: 0, totalMinor: 0 });
+
+    const document = computeTotals([line(1000, -5000)], amount(9000), "none");
+    expect(document).toMatchObject({ discountMinor: -5000, totalMinor: 0 });
+  });
+
+  test("uplatněná sleva řádku je pro PDF kladná i v záporu", () => {
+    const ask = (minor: number) =>
+      appliedLineDiscount({ quantityMilli: 1000, unitPriceMinor: -10000, discount: amount(minor) });
+    expect(ask(3000)).toBe(3000);
+    expect(ask(30000)).toBe(10000);
+  });
+
+  test("omezenou slevu hlásí podle velikosti základu", () => {
+    const check = (minor: number) => {
+      const lines = [line(1000, -2000, amount(minor))];
+      return cappedDiscounts(lines, amount(minor), computeTotals(lines, amount(minor), "none"));
+    };
+    expect(check(2000)).toEqual({ document: true, lines: [] });
+    expect(check(2001)).toEqual({ document: true, lines: [1] });
+    expect(check(1000)).toEqual({ document: false, lines: [] });
+
+    const document = [line(1000, -2000)];
+    const ask = (minor: number) =>
+      cappedDiscounts(document, amount(minor), computeTotals(document, amount(minor), "none"));
+    expect(ask(2000).document).toBe(false);
+    expect(ask(2001).document).toBe(true);
+  });
+
+  test("částka mimo limit je odmítnutá v obou znaménkách", () => {
+    const refused = (lines: ReturnType<typeof line>[], mode: "none" | "whole" = "none") =>
+      expect(() => computeTotals(lines, none, mode)).toThrow(AmountOutOfRangeError);
+
+    expect(computeTotals([line(1000, -MAX_DOCUMENT_MINOR)], none, "none").totalMinor).toBe(
+      -MAX_DOCUMENT_MINOR,
+    );
+    refused([line(1000, -MAX_DOCUMENT_MINOR - 1)]);
+    refused([line(1000, MAX_DOCUMENT_MINOR + 1)]);
+    refused([line(1000, -MAX_DOCUMENT_MINOR), line(1000, -1)]);
+    refused([line(1000, MAX_DOCUMENT_MINOR), line(1000, 1)]);
+    refused([line(1000, -MAX_DOCUMENT_MINOR)], "whole");
+    refused([line(1000, -(2 ** 53))]);
+    refused([line(1000, -1.5)]);
+  });
+
+  test("součet nad limitem neprojde ani se slevou, která by ho vrátila pod limit", () => {
+    const lines = [line(1000, -MAX_DOCUMENT_MINOR), line(1000, -1)];
+    expect(() => computeTotals(lines, amount(1000), "none")).toThrow(AmountOutOfRangeError);
+  });
+
+  test("limit platí pro výsledný součet, takže pořadí řádků o přijetí nerozhoduje", () => {
+    const lines = [line(1000, MAX_DOCUMENT_MINOR), line(1000, 1), line(1000, -2)];
+    const expected = MAX_DOCUMENT_MINOR - 1;
+    expect(computeTotals(lines, none, "none").totalMinor).toBe(expected);
+    expect(computeTotals([...lines].reverse(), none, "none").totalMinor).toBe(expected);
+  });
+
+  test("cena nula se znaménkem mínus nedá zápornou nulu", () => {
+    const totals = computeTotals([line(1000, -0)], none, "whole");
+    expect(totals).toEqual({
+      lines: [{ grossMinor: 0, discountMinor: 0, netMinor: 0 }],
+      subtotalMinor: 0,
+      discountMinor: 0,
+      roundingMinor: 0,
+      totalMinor: 0,
+    });
+  });
+
+  test("zápornou cenu dovoluje jen opravná faktura", () => {
+    expect(allowsNegativePrice("credit_note")).toBe(true);
+    expect(allowsNegativePrice("invoice")).toBe(false);
+    expect(allowsNegativePrice("advance")).toBe(false);
   });
 });

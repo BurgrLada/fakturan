@@ -31,6 +31,7 @@ import {
   restoreInvoice,
   storeLines,
 } from "@/server/services/invoice-lifecycle";
+import { updateIssuedInvoice } from "@/server/services/invoice-versions";
 import {
   deleteDraft,
   getInvoice,
@@ -353,6 +354,33 @@ describe("kontrola před vystavením", () => {
     expect(fields(owner, id)).toEqual(["lines"]);
     expect(() => issueInvoice(actor(owner), id, { revision })).toThrow(/příliš vysoká/);
     expect(counters(owner)).toEqual([]);
+  });
+});
+
+describe("záporná cena", () => {
+  test("úprava vystavené faktury zápornou cenu odmítne a doklad zůstane", () => {
+    const { owner, customerId, accountId } = newOwner();
+    const { id } = issueNew(owner, customerId, { bankAccountId: accountId });
+    const row = getInvoice(owner, id)!;
+
+    expect(() =>
+      updateIssuedInvoice(actor(owner), id, {
+        ...row,
+        number: row.number!,
+        lines: [line({ unitPriceMinor: -100 })],
+      }),
+    ).toThrow(NotIssuableError);
+    expect(getInvoice(owner, id)).toMatchObject({ revision: row.revision, totalMinor: 300_000 });
+  });
+
+  test("kontrola před vystavením zápornou cenu pustí jen u opravné faktury", () => {
+    const { owner, customerId, accountId } = newOwner();
+    const negative = { lines: [line({ unitPriceMinor: -100 })], bankAccountId: accountId };
+    const { id } = save(owner, customerId, { ...negative, type: "credit_note" });
+    expect(fields(owner, id)).not.toContain("lines.0.unitPriceMinor");
+
+    db.run(sql`UPDATE invoice SET type = 'invoice' WHERE id = ${id}`);
+    expect(fields(owner, id)).toContain("lines.0.unitPriceMinor");
   });
 });
 

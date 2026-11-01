@@ -175,9 +175,15 @@ export function RecurringForm(props: RecurringFormProps) {
   const [submitted, setSubmitted] = useState(false);
   const [summary, setSummary] = useState<{ email: string; sendTime: string } | null>(null);
 
-  const fields = useMemo(() => toDocumentFields(values), [values]);
+  const fields = useMemo(
+    () => toDocumentFields(values, initial.document.type),
+    [values, initial.document.type],
+  );
   const invalid = useMemo(() => new Set(fields.ok ? [] : fields.invalid), [fields]);
-  const totals = useMemo(() => computeFormTotals(values), [values]);
+  const totals = useMemo(
+    () => computeFormTotals(values, initial.document.type),
+    [values, initial.document.type],
+  );
   const nets = useMemo(() => {
     const kept = nonEmptyLines(values.lines);
     return new Map(kept.map((line, i) => [line.key, totals?.lines[i]?.netMinor ?? 0]));

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { TemplateDocument } from "@/lib/invoice-template";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, invoice, invoiceTemplate, user } from "@/server/db/schema";
 import { hideBankAccount, saveBankAccount } from "@/server/services/bank-accounts";
@@ -190,6 +191,18 @@ describe("šablony faktur", () => {
         document: document(owner, { lines: [{ ...line, catalogItemId: foreignItem }] }),
       }),
     ).toThrow("Položka ceníku neexistuje");
+    expect(listTemplates(owner)).toEqual([]);
+  });
+
+  test("záporná cena na faktuře a záloze je odmítnutá u šablony", () => {
+    const owner = newOwner();
+    const base = document(owner);
+    const lines = [{ ...base.lines[0]!, unitPriceMinor: -100 }];
+    for (const type of ["invoice", "advance"] as const) {
+      expect(() =>
+        saveTemplate(actor(owner), { ...input(owner), document: { ...base, type, lines } }),
+      ).toThrow(TEXTS.invoices.validation.negativePrice);
+    }
     expect(listTemplates(owner)).toEqual([]);
   });
 

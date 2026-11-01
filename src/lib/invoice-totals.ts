@@ -1,3 +1,4 @@
+import type { InvoiceType } from "./invoice";
 import { AmountOutOfRangeError } from "./money";
 
 export const DISCOUNT_KINDS = ["none", "percent", "amount"] as const;
@@ -27,6 +28,7 @@ export const MAX_QUANTITY_MILLI = 9_999_999_999;
 const MAX_DOCUMENT = BigInt(MAX_DOCUMENT_MINOR);
 const MAX_QUANTITY = BigInt(MAX_QUANTITY_MILLI);
 const ZERO = BigInt(0);
+const ONE = BigInt(1);
 const TWO = BigInt(2);
 const BASIS_POINTS = BigInt(10_000);
 const MILLI = BigInt(1000);
@@ -37,8 +39,16 @@ function nonNegativeInteger(value: number): bigint {
   return BigInt(value);
 }
 
+function safeInteger(value: number): bigint {
+  if (!Number.isSafeInteger(value)) throw new AmountOutOfRangeError();
+  return BigInt(value);
+}
+
+const signOf = (value: bigint) => (value < ZERO ? -ONE : ONE);
+const magnitude = (value: bigint) => value * signOf(value);
+
 function withinDocument(value: bigint): bigint {
-  if (value > MAX_DOCUMENT) throw new AmountOutOfRangeError();
+  if (magnitude(value) > MAX_DOCUMENT) throw new AmountOutOfRangeError();
   return value;
 }
 
@@ -60,15 +70,19 @@ function discountOf(base: bigint, discount: Discount): bigint {
 function lineAmounts(line: TotalsLine): { gross: bigint; discount: bigint; net: bigint } {
   const quantity = nonNegativeInteger(line.quantityMilli);
   if (quantity > MAX_QUANTITY) throw new AmountOutOfRangeError();
-  const gross = withinDocument(
-    divideRounded(quantity * nonNegativeInteger(line.unitPriceMinor), MILLI),
-  );
+  const price = safeInteger(line.unitPriceMinor);
+  const sign = signOf(price);
+  const gross = withinDocument(divideRounded(quantity * magnitude(price), MILLI));
   const discount = discountOf(gross, line.discount);
-  return { gross, discount, net: gross - discount };
+  return { gross: sign * gross, discount: sign * discount, net: sign * (gross - discount) };
+}
+
+export function allowsNegativePrice(type: InvoiceType): boolean {
+  return type === "credit_note";
 }
 
 export function appliedLineDiscount(line: TotalsLine): number {
-  return Number(lineAmounts(line).discount);
+  return Number(magnitude(lineAmounts(line).discount));
 }
 
 export function computeTotals(
@@ -79,7 +93,7 @@ export function computeTotals(
   let subtotal = ZERO;
   const computed = lines.map((line) => {
     const { gross, discount: lineDiscount, net } = lineAmounts(line);
-    subtotal = withinDocument(subtotal + net);
+    subtotal += net;
     return {
       grossMinor: Number(gross),
       discountMinor: Number(lineDiscount),
@@ -87,17 +101,23 @@ export function computeTotals(
     };
   });
 
-  const documentDiscount = discountOf(subtotal, discount);
-  const discounted = subtotal - documentDiscount;
+  // Checked on the final sum: with mixed signs a running check would depend on the line order.
+  withinDocument(subtotal);
+
+  // Computed on the magnitude, so a credit note mirrors the invoice it reverses to the haléř.
+  const sign = signOf(subtotal);
+  const base = magnitude(subtotal);
+  const documentDiscount = discountOf(base, discount);
+  const discounted = base - documentDiscount;
   const total = rounding === "whole" ? divideRounded(discounted, HUNDRED) * HUNDRED : discounted;
   withinDocument(total);
 
   return {
     lines: computed,
     subtotalMinor: Number(subtotal),
-    discountMinor: Number(documentDiscount),
-    roundingMinor: Number(total - discounted),
-    totalMinor: Number(total),
+    discountMinor: Number(sign * documentDiscount),
+    roundingMinor: Number(sign * (total - discounted)),
+    totalMinor: Number(sign * total),
   };
 }
 
@@ -110,9 +130,9 @@ export function cappedDiscounts(
   totals: Totals,
 ): CappedDiscounts {
   return {
-    document: discount.kind === "amount" && discount.minor > totals.subtotalMinor,
+    document: discount.kind === "amount" && discount.minor > Math.abs(totals.subtotalMinor),
     lines: lines.flatMap((line, i) =>
-      line.discount.kind === "amount" && line.discount.minor > totals.lines[i]!.grossMinor
+      line.discount.kind === "amount" && line.discount.minor > Math.abs(totals.lines[i]!.grossMinor)
         ? [i + 1]
         : [],
     ),

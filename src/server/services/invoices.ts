@@ -33,6 +33,7 @@ import {
 } from "@/lib/invoice";
 import { diffLines, lineBody } from "@/lib/invoice-diff";
 import {
+  allowsNegativePrice,
   computeTotals,
   DISCOUNT_KINDS,
   MAX_DOCUMENT_MINOR,
@@ -129,11 +130,31 @@ const lineSchema = z
       .max(MAX_QUANTITY_MILLI, V.quantity),
     unit: text(20),
     // A catalog price may exceed the document limit; computeTotals decides from the line amount.
-    unitPriceMinor: z.number(V.price).int(V.price).min(0, V.price).max(MAX_PRICE_MINOR, V.price),
+    unitPriceMinor: z
+      .number(V.price)
+      .int(V.price)
+      .min(-MAX_PRICE_MINOR, V.price)
+      .max(MAX_PRICE_MINOR, V.price),
     ...discountFields,
   })
   .superRefine(checkDiscount)
   .transform(withoutStrayDiscount);
+
+export function checkPriceSign(
+  value: { type: InvoiceType; lines: { unitPriceMinor: number }[] },
+  ctx: z.RefinementCtx,
+): void {
+  if (allowsNegativePrice(value.type)) return;
+  value.lines.forEach((line, i) => {
+    if (line.unitPriceMinor < 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines", i, "unitPriceMinor"],
+        message: V.negativePrice,
+      });
+    }
+  });
+}
 
 const appearanceSchema = z.object({
   designId: designIdSchema,
@@ -189,6 +210,7 @@ export const draftInputSchema = z
     ...documentFields,
   })
   .superRefine(checkDiscount)
+  .superRefine(checkPriceSign)
   .transform(withoutStrayDiscount);
 
 // Type, customer and series are absent on purpose: the customer changes only through

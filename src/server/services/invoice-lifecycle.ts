@@ -1,8 +1,9 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
-import type { InvoiceStatus } from "@/lib/invoice";
+import type { InvoiceStatus, InvoiceType } from "@/lib/invoice";
 import { diffLines } from "@/lib/invoice-diff";
 import { discountNotes } from "@/lib/invoice-form";
+import { allowsNegativePrice } from "@/lib/invoice-totals";
 import { calendarDateInPrague, variableSymbolFrom } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -100,7 +101,7 @@ type CheckedLine = Pick<
   "name" | "quantityMilli" | "unitPriceMinor" | "discountKind" | "discountValue"
 >;
 
-function lineProblems(lines: CheckedLine[]): IssueProblem[] {
+function lineProblems(lines: CheckedLine[], type: InvoiceType): IssueProblem[] {
   if (lines.length === 0) return [{ field: "lines", message: T.noLines }];
   return lines.flatMap((line, i) => {
     const position = i + 1;
@@ -114,7 +115,7 @@ function lineProblems(lines: CheckedLine[]): IssueProblem[] {
         message: T.lineQuantity(position),
       });
     }
-    if (line.unitPriceMinor < 0) {
+    if (line.unitPriceMinor < 0 && !allowsNegativePrice(type)) {
       found.push({
         field: `lines.${i}.unitPriceMinor`,
         message: T.linePrice(position),
@@ -175,7 +176,7 @@ export function documentProblems(
   lines: CheckedLine[],
   keptAccountId: string | null = null,
 ): IssueProblem[] {
-  const ofLines = lineProblems(lines);
+  const ofLines = lineProblems(lines, row.type);
   const found = [
     ...(row.customerId ? [] : [{ field: "customerId", message: T.customer }]),
     ...ofLines,

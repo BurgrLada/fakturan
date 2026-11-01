@@ -53,6 +53,7 @@ import {
   type FormValues,
   type TouchedField,
 } from "@/lib/invoice-form";
+import type { InvoiceType } from "@/lib/invoice";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { formatMoney } from "@/lib/money";
 import { setLeaveGuard } from "@/lib/leave-guard";
@@ -82,7 +83,7 @@ export type InvoiceFormProps = {
   saved: boolean;
   mailAvailable: boolean;
   hasPayments: boolean;
-  type: string;
+  type: InvoiceType;
   mode: "draft" | "issued";
   status: string;
   number: string;
@@ -100,8 +101,8 @@ export type InvoiceFormProps = {
   designs: DesignChoice[];
 };
 
-function payloadOf(type: string, values: FormValues, tags: string[]): Payload | null {
-  const result = toDocumentFields(values);
+function payloadOf(type: InvoiceType, values: FormValues, tags: string[]): Payload | null {
+  const result = toDocumentFields(values, type);
   return result.ok ? { draft: draftFields(type, values, result.fields), tags } : null;
 }
 
@@ -199,9 +200,9 @@ function Form(props: InvoiceFormProps) {
       }),
   );
 
-  const result = useMemo(() => toDocumentFields(values), [values]);
+  const result = useMemo(() => toDocumentFields(values, type), [values, type]);
   const invalid = useMemo(() => new Set(result.ok ? [] : result.invalid), [result]);
-  const totals = useMemo(() => computeFormTotals(values), [values]);
+  const totals = useMemo(() => computeFormTotals(values, type), [values, type]);
   const notes = useMemo(
     () => (result.ok && totals ? discountNotes(result.fields, totals) : []),
     [result, totals],
@@ -864,7 +865,7 @@ function Form(props: InvoiceFormProps) {
               >
                 <dt className="text-muted-foreground">{T.subtotal}</dt>
                 <dd className="text-right">{formatMoney(totals.subtotalMinor, values.currency)}</dd>
-                {totals.discountMinor > 0 && (
+                {totals.discountMinor !== 0 && (
                   <>
                     <dt className="text-muted-foreground">{T.discount}</dt>
                     <dd className="text-right">

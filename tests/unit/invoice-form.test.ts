@@ -70,7 +70,7 @@ describe("formulář faktury", () => {
   test("[INV-012] prázdný řádek se do dokladu neposílá", () => {
     const lines = [blankLine("ks"), { ...blankLine("ks"), name: "Práce", price: "1 234,50" }];
 
-    const result = toDocumentFields(form({ lines }));
+    const result = toDocumentFields(form({ lines }), "invoice");
 
     expect(result).toMatchObject({
       ok: true,
@@ -80,12 +80,12 @@ describe("formulář faktury", () => {
 
   test("[INV-012] neplatná částka vrátí pole k opravě", () => {
     const line = { ...blankLine("ks"), name: "Práce", price: "abc" };
-    expect(toDocumentFields(form({ lines: [line] }))).toEqual({
+    expect(toDocumentFields(form({ lines: [line] }), "invoice")).toEqual({
       ok: false,
       invalid: [`line-${line.key}-price`],
     });
     const quantity = { ...blankLine("ks"), name: "Práce", quantity: "1,2345" };
-    expect(toDocumentFields(form({ lines: [quantity] }))).toEqual({
+    expect(toDocumentFields(form({ lines: [quantity] }), "invoice")).toEqual({
       ok: false,
       invalid: [`line-${quantity.key}-quantity`],
     });
@@ -93,7 +93,65 @@ describe("formulář faktury", () => {
 
   test("[INV-012] záporná cena neprojde", () => {
     const line = { ...blankLine("ks"), name: "Práce", price: "-5" };
-    expect(toDocumentFields(form({ lines: [line] }))).toMatchObject({ ok: false });
+    expect(toDocumentFields(form({ lines: [line] }), "invoice")).toMatchObject({ ok: false });
+  });
+
+  // CRN-002 stays pending: prefilled negative lines only arrive with createCreditNote.
+  test("formulář přijme -100 jen u opravné faktury", () => {
+    const line = { ...blankLine("ks"), name: "Vratka", price: "-100" };
+    const values = form({ lines: [line] });
+    expect(toDocumentFields(values, "credit_note")).toMatchObject({
+      ok: true,
+      fields: { lines: [{ unitPriceMinor: -10000 }] },
+    });
+    expect(computeFormTotals(values, "credit_note")?.totalMinor).toBe(-10000);
+
+    for (const type of ["invoice", "advance"] as const) {
+      expect(toDocumentFields(values, type)).toEqual({
+        ok: false,
+        invalid: [`line-${line.key}-price`],
+      });
+      expect(computeFormTotals(values, type)).toBeNull();
+    }
+  });
+
+  test("záporná sleva neprojde ani u opravné faktury", () => {
+    const line = {
+      ...blankLine("ks"),
+      name: "Vratka",
+      price: "-100",
+      discountKind: "amount" as const,
+      discount: "-5",
+    };
+    expect(toDocumentFields(form({ lines: [line] }), "credit_note")).toEqual({
+      ok: false,
+      invalid: [`line-${line.key}-discount`],
+    });
+    expect(
+      toDocumentFields(form({ discountKind: "amount", discount: "-5" }), "credit_note"),
+    ).toEqual({ ok: false, invalid: ["field-discount"] });
+  });
+
+  test("záporná cena se do formuláře načte a uloží beze změny", () => {
+    const saved = {
+      catalogItemId: null,
+      name: "Vratka",
+      description: "",
+      quantityMilli: 1000,
+      unit: "ks",
+      unitPriceMinor: -125050,
+      discountKind: "none" as const,
+      discountValue: 0,
+    };
+    const values = formFromDocument(
+      { ...document, customerId: null, seriesId: null, lines: [saved] },
+      "ks",
+    );
+    expect(values.lines[0]?.price).toBe("-1250,50");
+    expect(toDocumentFields(values, "credit_note")).toMatchObject({
+      ok: true,
+      fields: { lines: [{ unitPriceMinor: -125050 }] },
+    });
   });
 
   test("[INV-014] sleva v procentech jsou setiny procenta, částkou haléře", () => {
@@ -105,6 +163,7 @@ describe("formulář faktury", () => {
     } as const;
     const result = toDocumentFields(
       form({ lines: [line], discountKind: "amount", discount: "100" }),
+      "invoice",
     );
     expect(result).toMatchObject({
       ok: true,
@@ -119,8 +178,10 @@ describe("formulář faktury", () => {
   test("[INV-012] součty ve formuláři dává stejná funkce jako na serveru", () => {
     const line = { ...blankLine("ks"), name: "A", quantity: "1,5", price: "1234,56" };
 
-    expect(computeFormTotals(form({ lines: [line] }))).toMatchObject({ totalMinor: 185_184 });
-    expect(computeFormTotals(form({ lines: [{ ...line, price: "x" }] }))).toBeNull();
+    expect(computeFormTotals(form({ lines: [line] }), "invoice")).toMatchObject({
+      totalMinor: 185_184,
+    });
+    expect(computeFormTotals(form({ lines: [{ ...line, price: "x" }] }), "invoice")).toBeNull();
   });
 
   test("[INV-012] formulář z uloženého dokladu vrátí stejné pole", () => {
@@ -146,7 +207,7 @@ describe("formulář faktury", () => {
       ],
     } as const;
 
-    const result = toDocumentFields(formFromDocument(saved, "ks"));
+    const result = toDocumentFields(formFromDocument(saved, "ks"), "invoice");
 
     expect(result).toMatchObject({
       ok: true,
@@ -167,20 +228,24 @@ describe("formulář faktury", () => {
     expect(formatRate(24_500_000)).toBe("24,5");
     expect(formatRate(null)).toBe("");
 
-    expect(toDocumentFields(form({ currency: "CZK", exchangeRate: "24" }))).toMatchObject({
+    expect(
+      toDocumentFields(form({ currency: "CZK", exchangeRate: "24" }), "invoice"),
+    ).toMatchObject({
       fields: { exchangeRateMicros: null },
     });
-    expect(toDocumentFields(form({ currency: "EUR", exchangeRate: "24" }))).toMatchObject({
+    expect(
+      toDocumentFields(form({ currency: "EUR", exchangeRate: "24" }), "invoice"),
+    ).toMatchObject({
       fields: { exchangeRateMicros: 24_000_000 },
     });
-    expect(toDocumentFields(form({ currency: "EUR", exchangeRate: "" }))).toMatchObject({
+    expect(toDocumentFields(form({ currency: "EUR", exchangeRate: "" }), "invoice")).toMatchObject({
       fields: { exchangeRateMicros: null },
     });
   });
 
   test("[INV-019] vyplněné DUZP zapne jeho zobrazení v PDF", () => {
     const filled = changeTaxableDate(form(), "2026-03-01");
-    expect(toDocumentFields(filled)).toMatchObject({
+    expect(toDocumentFields(filled, "invoice")).toMatchObject({
       fields: { taxableDate: "2026-03-01", appearance: { showDuzp: true } },
     });
 
@@ -347,7 +412,7 @@ describe("formulář faktury", () => {
     expect(values).not.toHaveProperty("status");
     expect(values).not.toHaveProperty("number");
 
-    const result = toDocumentFields(values);
+    const result = toDocumentFields(values, "invoice");
     if (!result.ok) throw new Error("neplatné");
     expect(draftFields("advance", values, result.fields)).toMatchObject({ type: "advance" });
     expect(result.fields).not.toHaveProperty("status");
@@ -355,10 +420,10 @@ describe("formulář faktury", () => {
 
   test("[SET-031] neplatná barva je pole k opravě, prázdná platí", () => {
     const colors = { ...document.appearance.colors };
-    expect(toDocumentFields(form())).toMatchObject({ ok: true });
+    expect(toDocumentFields(form(), "invoice")).toMatchObject({ ok: true });
 
     const appearance = { ...document.appearance, colors: { ...colors, accent: "modrá" } };
-    expect(toDocumentFields(form({ appearance }))).toEqual({
+    expect(toDocumentFields(form({ appearance }), "invoice")).toEqual({
       ok: false,
       invalid: ["field-color-accent"],
     });

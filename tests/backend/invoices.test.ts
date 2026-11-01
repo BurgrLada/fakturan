@@ -10,6 +10,7 @@ import { INVOICE_STATUSES, INVOICE_TYPES, isOverdue } from "@/lib/invoice";
 import type { SupplierSnapshot } from "@/lib/invoice-document";
 import { DOCUMENT_TYPES } from "@/lib/number-format";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import {
   auditLog,
@@ -385,6 +386,28 @@ describe("položky a součty", () => {
     expect(discount({ lines: [line({ unitPriceMinor: 1e15 })] })).toThrow("Cena");
     expect(discount({ lines: [line({ quantityMilli: -1 })] })).toThrow("Množství");
     expect(discount({ lines: [line({ quantityMilli: 0.5 })] })).toThrow("Množství");
+    expect(db.select({ n: count() }).from(invoice).get()?.n).toBe(0);
+  });
+
+  test("záporná cena na faktuře a záloze je odmítnutá u konceptu, opravná faktura ji uloží", () => {
+    const negative = [line({ quantityMilli: 3000, unitPriceMinor: -125_050 })];
+    for (const type of ["invoice", "advance"] as const) {
+      expect(() => save("i1", { type, lines: negative })).toThrow(
+        TEXTS.invoices.validation.negativePrice,
+      );
+    }
+    expect(db.select({ n: count() }).from(invoice).get()?.n).toBe(0);
+
+    const { totals } = save("i1", { type: "credit_note", rounding: "none", lines: negative });
+    expect(totals.totalMinor).toBe(-375_150);
+    expect(totals.lines[0]?.netMinor).toBe(-375_150);
+  });
+
+  test("částka mimo limit je odmítnutá v obou znaménkách i na opravné faktuře", () => {
+    const priced = (unitPriceMinor: number) => () =>
+      save("i1", { type: "credit_note", lines: [line({ unitPriceMinor })] });
+    expect(priced(-1e15)).toThrow("Cena");
+    expect(priced(-(MAX_DOCUMENT_MINOR + 1))).toThrow(TEXTS.invoices.validation.amountRange);
     expect(db.select({ n: count() }).from(invoice).get()?.n).toBe(0);
   });
 

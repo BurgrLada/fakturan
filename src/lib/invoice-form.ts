@@ -1,7 +1,8 @@
 import type { Currency } from "./currency";
 import { isHexColor } from "./contrast";
-import { addDays, daysBetween, toDiscount, type Appearance } from "./invoice";
+import { addDays, daysBetween, toDiscount, type Appearance, type InvoiceType } from "./invoice";
 import {
+  allowsNegativePrice,
   cappedDiscounts,
   computeTotals,
   formatQuantity,
@@ -160,10 +161,10 @@ function formatAmount(value: number): string {
 const formatDiscount = (kind: DiscountKind, value: number) =>
   kind === "none" ? "" : formatAmount(value);
 
-const parseAmount = (input: string): number | null => {
+const parseAmount = (input: string, signed = false): number | null => {
   if (!input.trim()) return 0;
   const value = parseMoney(input);
-  return value !== null && value >= 0 ? value : null;
+  return value !== null && (signed || value >= 0) ? value : null;
 };
 
 export function formFromDocument(document: FormDocument, defaultUnit: string): FormValues {
@@ -207,7 +208,8 @@ export function formFromDocument(document: FormDocument, defaultUnit: string): F
 
 export type FieldsResult = { ok: true; fields: DocumentFields } | { ok: false; invalid: string[] };
 
-export function toDocumentFields(values: FormValues): FieldsResult {
+export function toDocumentFields(values: FormValues, type: InvoiceType): FieldsResult {
+  const signedPrice = allowsNegativePrice(type);
   const invalid: string[] = [];
   const checked = <T>(id: string, value: T | null, fallback: T): T => {
     if (value !== null) return value;
@@ -227,7 +229,7 @@ export function toDocumentFields(values: FormValues): FieldsResult {
         0,
       ),
       unit: line.unit,
-      unitPriceMinor: checked(id("price"), parseAmount(line.price), 0),
+      unitPriceMinor: checked(id("price"), parseAmount(line.price, signedPrice), 0),
       discountKind: line.discountKind,
       discountValue:
         line.discountKind === "none" ? 0 : checked(id("discount"), parseAmount(line.discount), 0),
@@ -263,7 +265,7 @@ export function toDocumentFields(values: FormValues): FieldsResult {
   return invalid.length > 0 ? { ok: false, invalid } : { ok: true, fields };
 }
 
-export function draftFields(type: string, values: FormValues, fields: DocumentFields) {
+export function draftFields(type: InvoiceType, values: FormValues, fields: DocumentFields) {
   return { ...fields, type, customerId: values.customerId, seriesId: values.seriesId };
 }
 
@@ -295,8 +297,8 @@ export function discountNotes(
   ];
 }
 
-export function computeFormTotals(values: FormValues): Totals | null {
-  const result = toDocumentFields(values);
+export function computeFormTotals(values: FormValues, type: InvoiceType): Totals | null {
+  const result = toDocumentFields(values, type);
   if (!result.ok) return null;
   const { fields } = result;
   try {

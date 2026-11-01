@@ -579,6 +579,7 @@ export const TEXTS = {
       rounding: "Neplatné zaokrouhlení",
       discount: "Sleva je mimo povolený rozsah",
       price: "Cena je mimo povolený rozsah",
+      negativePrice: "Cena může být záporná jen na opravné faktuře",
       quantity: "Množství je mimo povolený rozsah",
       exchangeRate: "Kurz musí být kladné číslo",
       amountRange: "Částka dokladu je příliš vysoká",
