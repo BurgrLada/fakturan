@@ -30,6 +30,43 @@ function unconvertedRows(unconverted: Unconverted, width: number): Cell[][] {
   ]);
 }
 
+// The previous period can have one bucket more or less than the current one (a custom range of
+// equal days crosses another number of month ends). Buckets pair from the end, and any surplus
+// previous buckets fold into the first row, so the column still adds up to the previous summary.
+export function alignPrevious(current: Series, previous: Series): number[] {
+  const values = previous.points.map((point) => point.amountMinor);
+  const surplus = values.length - current.points.length;
+  if (surplus > 0 && current.points.length > 0) {
+    const head = values.slice(0, surplus + 1).reduce((sum, value) => sum + value, 0);
+    return [head, ...values.slice(surplus + 1)];
+  }
+  return current.points.map((_, index) => values[index + surplus] ?? 0);
+}
+
+function merged(list: Unconverted[]): Unconverted {
+  const byCurrency = new Map<Currency, number>();
+  let total = 0;
+  for (const item of list) {
+    total += item.count;
+    for (const { currency, amountMinor } of item.byCurrency) {
+      byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + amountMinor);
+    }
+  }
+  return {
+    count: total,
+    byCurrency: [...byCurrency]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([currency, amountMinor]) => ({ currency, amountMinor })),
+  };
+}
+
+// Everything the forecast could not convert, over all months and series (R-9, R-17).
+export function forecastUnconverted(months: ReportBundle["forecast"]): Unconverted {
+  return merged(
+    months.flatMap((month) => FORECAST_SERIES.map((series) => month.unconverted[series])),
+  );
+}
+
 function previousLabel(bundle: ReportBundle): string {
   return bundle.compare === "year" ? T.series.year : T.series.previous;
 }
@@ -43,6 +80,7 @@ function seriesSheet(
   totals: [number, number],
 ): Sheet {
   const currency = bundle.currency;
+  const aligned = alignPrevious(current, previous);
   return {
     name,
     columns: [C.period, heading, previousLabel(bundle)],
@@ -50,7 +88,7 @@ function seriesSheet(
       ...current.points.map((point, index) => [
         text(bucketLabel(point.key, bundle.unit)),
         money(point.amountMinor, currency),
-        money(previous.points[index]?.amountMinor ?? 0, currency),
+        money(aligned[index]!, currency),
       ]),
       [text(C.total), money(totals[0], currency), money(totals[1], currency)],
       ...unconvertedRows(current.unconverted, 3),
@@ -114,7 +152,7 @@ export function buildSheet(report: ReportTab, bundle: ReportBundle): Sheet {
         name,
         columns: [C.item, C.invoiced],
         rows: [
-          ...rankingRows(bundle.items.rows, currency, T.others),
+          ...rankingRows(bundle.items.rows, currency, T.noName),
           ...unconvertedRows(bundle.items.unconverted, 2),
         ],
       };
@@ -163,19 +201,24 @@ export function buildSheet(report: ReportTab, bundle: ReportBundle): Sheet {
         ],
       };
     }
-    case "predpoved":
+    case "predpoved": {
+      const columns = [C.month, ...FORECAST_SERIES.map((series) => T.forecast[series]), C.total];
       return {
         name,
-        columns: [C.month, ...FORECAST_SERIES.map((series) => T.forecast[series]), C.total],
-        rows: bundle.forecast.map((month) => [
-          text(bucketLabel(month.month, "month")),
-          ...FORECAST_SERIES.map((series) => money(month[series], "CZK")),
-          money(
-            FORECAST_SERIES.reduce((sum, series) => sum + month[series], 0),
-            "CZK",
-          ),
-        ]),
+        columns,
+        rows: [
+          ...bundle.forecast.map((month) => [
+            text(bucketLabel(month.month, "month")),
+            ...FORECAST_SERIES.map((series) => money(month[series], "CZK")),
+            money(
+              FORECAST_SERIES.reduce((sum, series) => sum + month[series], 0),
+              "CZK",
+            ),
+          ]),
+          ...unconvertedRows(forecastUnconverted(bundle.forecast), columns.length),
+        ],
       };
+    }
   }
 }
 
@@ -189,7 +232,7 @@ export function exportReport(
   today: CalendarDate,
 ): ReportFile {
   const ownerId = actor.userId;
-  if (!ownerId) throw new ServiceError("Pro export statistik se přihlaste");
+  if (!ownerId) throw new ServiceError(T.errors.signedOut);
   enforceRateLimit(actor, RATE_RULES.exportUser);
   const sheet = buildSheet(tab, reportBundle(ownerId, filter, today));
   mutate(actor, "report.export", (_tx, audit) =>

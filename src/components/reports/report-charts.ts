@@ -5,7 +5,7 @@ import { TEXTS } from "@/lib/texts";
 import { FORECAST_SERIES } from "@/server/reports/forecast";
 import { AGING_BANDS, type RankedRow, type Series } from "@/server/reports/types";
 import type { ReportBundle } from "@/server/services/reports";
-import { rankedName } from "@/server/services/report-export";
+import { alignPrevious, rankedName } from "@/server/services/report-export";
 
 const T = TEXTS.reports;
 const token = (index: number) => CHART_TOKENS[index % CHART_TOKENS.length]!;
@@ -21,7 +21,7 @@ function comparedSeries(bundle: ReportBundle): ChartSeries[] {
   ];
 }
 
-// The previous period is aligned by position: it has the same number of buckets.
+// alignPrevious pairs the buckets from the end, as the export does.
 function compared(
   bundle: ReportBundle,
   kind: ChartSpec["kind"],
@@ -30,6 +30,7 @@ function compared(
   previous: Series,
   cumulative = false,
 ): ChartSpec {
+  const aligned = alignPrevious(current, previous);
   let sums = { current: 0, previous: 0 };
   return {
     kind,
@@ -39,7 +40,7 @@ function compared(
     rows: current.points.map((point, index) => {
       const values = {
         current: point.amountMinor,
-        previous: previous.points[index]?.amountMinor ?? 0,
+        previous: aligned[index]!,
       };
       if (cumulative) {
         sums = {

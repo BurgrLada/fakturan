@@ -136,11 +136,22 @@ export const TEXTS = {
     others: "Ostatní",
     adjustment: "Sleva a zaokrouhlení dokladu",
     noCustomer: "Bez zákazníka",
+    noName: "Bez názvu",
+    fixedScope:
+      "Tento přehled je vždy v Kč za celý účet. Filtr období, měny ani importovaných faktur na něj nepůsobí.",
+    week: (week: number, year: string) => `${week}. týden ${year}`,
+    quarter: (quarter: string, year: string) => `${quarter}. čtvrtletí ${year}`,
+    errors: {
+      signedOut: "Pro export statistik se přihlaste",
+      invalidPeriod: "Neplatné období",
+    },
     emptyTable: "Za vybrané období tu nic není.",
     limits: {
       vat: "Registrace k DPH",
       flat: "Paušální daň",
       year: (year: number) => `Obrat za rok ${year}`,
+      usage: (turnover: string, limit: string, percent: number) =>
+        `${turnover} z ${limit} (${percent} %)`,
       basis: "Základ obratu",
       levels: {
         ok: "V pořádku",

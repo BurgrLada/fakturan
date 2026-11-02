@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ReportFilter } from "@/server/reports/types";
 import { CURRENCIES, type Currency } from "./currency";
 import { isCalendarDate, type CalendarDate } from "./number-format";
+import { TEXTS } from "./texts";
 import {
   PERIOD_TOKENS,
   resolvePeriod,
@@ -132,7 +133,8 @@ export function reportQuery(filter: ReportQueryFilter): string {
 export function filterFromQuery(query: string): ReportQueryFilter {
   const parsed = querySchema.parse(JSON.parse(query));
   const range = { from: parsed.from, to: parsed.to };
-  if (range.from > range.to || !withinLimit(range)) throw new RangeError("Neplatné období");
+  if (range.from > range.to || !withinLimit(range))
+    throw new RangeError(TEXTS.reports.errors.invalidPeriod);
   const currency: Currency | undefined = parsed.currency ?? undefined;
   return {
     range,
@@ -160,7 +162,7 @@ export function bucketLabel(key: string, unit: BucketUnit): string {
     }
     case "week": {
       const [year, week] = key.split("-W");
-      return `${Number(week)}. týden ${year}`;
+      return TEXTS.reports.week(Number(week), year!);
     }
     case "month": {
       const [year, month] = key.split("-").map(Number) as [number, number];
@@ -168,7 +170,7 @@ export function bucketLabel(key: string, unit: BucketUnit): string {
     }
     case "quarter": {
       const [year, quarter] = key.split("-Q");
-      return `${quarter}. čtvrtletí ${year}`;
+      return TEXTS.reports.quarter(quarter!, year!);
     }
     case "year":
       return key;

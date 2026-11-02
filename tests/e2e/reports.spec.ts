@@ -7,10 +7,13 @@ import { expect, test } from "./fixtures";
 import {
   addCustomer,
   addSupplier,
+  chooseCurrency,
   chooseCustomer,
   fillLine,
   issue,
+  openForm,
   PASSWORD,
+  ready,
   register,
   settled,
 } from "./invoice-helpers";
@@ -257,4 +260,56 @@ test("statistiky po přepnutí na EUR neukazují CZK a nesčítají měny", asyn
   await expect(page.getByTestId("summary-invoiced")).toContainText(money("0,00 €"));
   await expect(summary).not.toContainText("Kč");
   await expect(page.getByTestId("report-table")).not.toContainText("Kč");
+});
+
+test.describe("ČNB nedostupná", () => {
+  test.use({ cnbAvailable: false });
+
+  test("[REP-001] platba bez kurzu ukáže počet dokladů jen u své karty i u předchozího období", async ({
+    page,
+    freshApp,
+  }) => {
+    const { baseURL } = freshApp;
+    await ready(page, baseURL);
+    await openForm(page, baseURL);
+    await chooseCustomer(page);
+    await page.getByLabel("Způsob platby").selectOption("cash");
+    await chooseCurrency(page, "EUR");
+    await fillLine(page, 0, "Konzultace", "100");
+    await page.waitForTimeout(600);
+    await page.getByLabel("Kurz k CZK").fill("24,5");
+    await settled(page);
+    await issue(page);
+    await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+    await expect(page.getByTestId("payment-row")).toHaveCount(1);
+
+    await openReports(page, baseURL);
+    await expect(page.getByTestId("summary-invoiced")).toContainText(money("2 450,00 Kč"));
+    await expect(page.getByTestId("summary-income").getByTestId("unconverted")).toHaveText(
+      money("1 doklad bez kurzu: 100,00 €"),
+    );
+    for (const metric of ["invoiced", "outstanding", "overdue", "advanceOpen"]) {
+      await expect(page.getByTestId(`summary-${metric}`).getByTestId("unconverted")).toHaveCount(0);
+    }
+
+    const year = Number(calendarDateInPrague(new Date()).slice(0, 4)) + 1;
+    await openReports(page, baseURL, `?obdobi=vlastni&od=${year}-01-01&do=${year}-12-31`);
+    await expect(page.getByTestId("summary-income").getByTestId("previous-unconverted")).toHaveText(
+      money("Předtím: 1 doklad bez kurzu: 100,00 €"),
+    );
+    await expect(page.getByTestId("summary-income").getByTestId("unconverted")).toHaveCount(0);
+  });
+});
+
+test("Předpověď a Limity řeknou, že jsou vždy v Kč bez filtru", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await accountWithInvoice(page, baseURL);
+  for (const tab of ["predpoved", "limity"]) {
+    await openReports(page, baseURL, `?zalozka=${tab}&mena=EUR`);
+    await expect(page.getByTestId("fixed-scope")).toHaveText(
+      "Tento přehled je vždy v Kč za celý účet. Filtr období, měny ani importovaných faktur na něj nepůsobí.",
+    );
+  }
+  await openReports(page, baseURL, "?zalozka=fakturace");
+  await expect(page.getByTestId("fixed-scope")).toHaveCount(0);
 });

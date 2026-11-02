@@ -30,8 +30,11 @@ export function LimitsCard({ limits }: { limits: ReportBundle["limits"] }) {
               </span>
             </div>
             <p className="tabular-nums">
-              {formatMoney(state.turnoverMinor, "CZK")} z {formatMoney(state.limitMinor, "CZK")} (
-              {state.percent} %)
+              {T.usage(
+                formatMoney(state.turnoverMinor, "CZK"),
+                formatMoney(state.limitMinor, "CZK"),
+                state.percent,
+              )}
             </p>
             <div aria-hidden className="h-2 overflow-hidden rounded-full bg-muted">
               <div

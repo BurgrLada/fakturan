@@ -9,9 +9,23 @@ import type { Money } from "@/lib/tabular";
 import { setClockForTests } from "@/server/clock";
 import { auditLog } from "@/server/db/schema";
 import { RATE_RULES } from "@/server/rate-limit";
-import { buildSheet, exportReport } from "@/server/services/report-export";
+import {
+  alignPrevious,
+  buildSheet,
+  exportReport,
+  forecastUnconverted,
+} from "@/server/services/report-export";
 import { reportBundle } from "@/server/services/reports";
-import { REPORT_TODAY, seedReportScenario, type ReportScenario } from "../fixtures/report-scenario";
+import {
+  at,
+  issuedDocument,
+  namedCustomer,
+  REPORT_TODAY,
+  reportOwner,
+  seedReportScenario,
+  type ReportScenario,
+} from "../fixtures/report-scenario";
+import { planDocument, savePlan } from "../helpers/fixtures-recurring";
 import { createTestDb } from "../helpers/db";
 
 const session = vi.hoisted(() => ({ userId: "" }));
@@ -110,6 +124,75 @@ describe("listy přehledů", () => {
       sheet.rows.flat().flatMap((cell) => (cell?.kind === "money" ? [cell.currency] : [])),
     );
     expect([...currencies]).toEqual(["EUR"]);
+  });
+});
+
+const label = (cell: unknown) => (cell as { value: string } | null)?.value;
+
+describe("doklady bez kurzu a zarovnání období", () => {
+  test("[REP-003] předpověď i její export ukážou doklady bez kurzu", () => {
+    const owner = reportOwner(db);
+    const customer = namedCustomer(owner, "Alfa s.r.o.");
+    at(REPORT_TODAY);
+    savePlan(owner, customer, {
+      startsOn: "2026-11-01",
+      document: planDocument({ currency: "USD", paymentMethod: "cash" }),
+    });
+    setClockForTests({ now: () => NOW });
+    const data = reportBundle(owner, filter({ zalozka: "predpoved" }), REPORT_TODAY);
+    expect(forecastUnconverted(data.forecast)).toEqual({
+      count: 6,
+      byCurrency: [{ currency: "USD", amountMinor: 600_000 }],
+    });
+    const sheet = buildSheet("predpoved", data);
+    const missing = sheet.rows.find((row) => label(row[0]) === "6 dokladů bez kurzu (USD)");
+    expect(missing).toBeDefined();
+    expect(missing![1]).toEqual({ kind: "money", minor: 600_000, currency: "USD" });
+    expect(missing).toHaveLength(sheet.columns.length);
+  });
+
+  test("[REP-001] vlastní rozsah porovná předchozí koše od konce a součet sedí se souhrnem", () => {
+    const owner = reportOwner(db, "2025-09-01");
+    const customer = namedCustomer(owner, "Alfa s.r.o.");
+    issuedDocument(owner, customer, { issueDate: "2025-12-05", totalMinor: 30_000 });
+    issuedDocument(owner, customer, { issueDate: "2026-01-10", totalMinor: 50_000 });
+    issuedDocument(owner, customer, { issueDate: "2026-02-10", totalMinor: 70_000 });
+    issuedDocument(owner, customer, { issueDate: "2026-03-01", totalMinor: 20_000 });
+    issuedDocument(owner, customer, { issueDate: "2026-04-10", totalMinor: 90_000 });
+    setClockForTests({ now: () => NOW });
+    const data = reportBundle(
+      owner,
+      filter({ obdobi: "vlastni", od: "2026-03-02", do: "2026-05-31" }),
+      REPORT_TODAY,
+    );
+    expect(data.previousRange).toEqual({ from: "2025-12-01", to: "2026-03-01" });
+    expect(data.previousInvoiced.points).toHaveLength(4);
+    expect(data.invoiced.points).toHaveLength(3);
+
+    expect(alignPrevious(data.invoiced, data.previousInvoiced)).toEqual([80_000, 70_000, 20_000]);
+    const rows = buildSheet("fakturace", data).rows;
+    expect(rows.slice(0, 3).map((row) => [label(row[0]), minor(row[1]), minor(row[2])])).toEqual([
+      ["březen 2026", 0, 80_000],
+      ["duben 2026", 90_000, 70_000],
+      ["květen 2026", 0, 20_000],
+    ]);
+    expect(minor(totalRow(rows)[2])).toBe(data.previous.invoicedMinor);
+    expect(data.previous.invoicedMinor).toBe(170_000);
+  });
+
+  test("[REP-001] kratší předchozí období se doplní nulou na začátku", () => {
+    const current = {
+      points: [1, 2, 3].map((n) => ({ key: `k${n}`, amountMinor: n })),
+      unconverted: { count: 0, byCurrency: [] },
+    };
+    const previous = {
+      points: [
+        { key: "a", amountMinor: 5 },
+        { key: "b", amountMinor: 7 },
+      ],
+      unconverted: { count: 0, byCurrency: [] },
+    };
+    expect(alignPrevious(current, previous)).toEqual([0, 5, 7]);
   });
 });
 

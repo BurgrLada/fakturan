@@ -25,7 +25,7 @@ import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
 import { cachedReport } from "@/server/report-cache";
 import type { SummaryMetric } from "@/server/reports/types";
-import { buildSheet } from "@/server/services/report-export";
+import { buildSheet, forecastUnconverted } from "@/server/services/report-export";
 import { accountStamp, type ReportBundle } from "@/server/services/reports";
 
 const T = TEXTS.reports;
@@ -71,6 +71,11 @@ function Summary({ bundle }: { bundle: ReportBundle }) {
               <dd data-testid={`change-${metric}`}>{signed(now - before, currency)}</dd>
             </dl>
             <UnconvertedNote unconverted={summary.unconverted[metric]} />
+            <UnconvertedNote
+              unconverted={previous.unconverted[metric]}
+              prefix={T.summary.previous}
+              testId="previous-unconverted"
+            />
           </div>
         );
       })}
@@ -138,8 +143,18 @@ function TabPanel({ filter, bundle }: { filter: ParsedReportFilter; bundle: Repo
       <h2 id="report-panel" className="text-lg">
         {T.tabs[tab]}
       </h2>
+      {(tab === "limity" || tab === "predpoved") && (
+        <p data-testid="fixed-scope" className="text-sm text-muted-foreground">
+          {T.fixedScope}
+        </p>
+      )}
       {tab === "limity" && <LimitsCard limits={bundle.limits} />}
-      {tab === "predpoved" && <p className="text-sm text-muted-foreground">{T.forecast.note}</p>}
+      {tab === "predpoved" && (
+        <>
+          <p className="text-sm text-muted-foreground">{T.forecast.note}</p>
+          <UnconvertedNote unconverted={forecastUnconverted(bundle.forecast)} />
+        </>
+      )}
       {reportCharts(tab, bundle).map((spec) => (
         <figure key={spec.ariaLabel} className="min-w-0 space-y-1">
           <figcaption className="text-sm font-medium">{spec.ariaLabel}</figcaption>
