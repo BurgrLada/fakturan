@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test as base, expect } from "@playwright/test";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { registerSqlFunctions } from "@/lib/sql-functions";
 import * as schema from "@/server/db/schema";
 import type { Db } from "@/server/db";
 import { assertConsistent } from "../helpers/consistency";
@@ -116,6 +117,7 @@ function assertDataDirConsistent(dataDir: string) {
   const path = join(dataDir, "fakturan.db");
   if (!existsSync(path)) return;
   const sqlite = new Database(path, { readonly: true });
+  registerSqlFunctions(sqlite);
   try {
     const db = drizzle(sqlite, { schema }) as unknown as Db;
     const ids = sqlite.prepare("SELECT id FROM user").pluck().all() as string[];

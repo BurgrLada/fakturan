@@ -7,10 +7,8 @@ import {
   desc,
   eq,
   exists,
-  gt,
   gte,
   inArray,
-  lt,
   lte,
   ne,
   notInArray,
@@ -25,7 +23,6 @@ import { EXCHANGE_RATE_SOURCES, MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
 import {
   addDays,
   appearanceFrom,
-  AWAITING_PAYMENT,
   daysBetween,
   INVOICE_STATUSES,
   INVOICE_TYPES,
@@ -62,6 +59,7 @@ import {
   numberSeries,
 } from "../db/schema";
 import { czech } from "../db/collation";
+import { dueSql, NOT_IN_TOTALS, openCondition, overdueCondition } from "../db/invoice-sql";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import type { Page } from "./audit-read";
@@ -74,6 +72,8 @@ import { averagePaymentDays } from "./payments";
 import { colorSchema, designIdSchema, getPreferences, logoPositionSchema } from "./preferences";
 import { clauseDefaultsOf } from "./supplier";
 import { linkTags, listTags, tagsOf, type Tag } from "./tags";
+
+export { dueSql, fullDue, openCondition, overdueCondition } from "../db/invoice-sql";
 
 const V = TEXTS.invoices.validation;
 const MAX_LINES = 500;
@@ -855,8 +855,6 @@ const MAX_QUERY_CHARS = 100;
 const MAX_ID_CHARS = 100;
 const CUSTOMER_CARD_ROWS = 10;
 // Credited stays in: without it +1000 and its -1000 credit note would not net out.
-const NOT_IN_TOTALS = ["draft", "cancelled"] as const satisfies InvoiceStatus[];
-
 function keyOf<K extends string>(map: Record<K, string>, value: string | undefined): K | undefined {
   return (Object.keys(map) as K[]).find((key) => map[key] === value);
 }
@@ -945,24 +943,7 @@ export function isFiltered(filter: InvoiceFilter): boolean {
   return Object.keys(rest).length > 0;
 }
 
-const fullDue = sql`${invoice.totalMinor} + ${invoice.creditsMinor} - ${invoice.advanceMinor} - ${invoice.paidMinor}`;
-
-// The SQL form of amountDue in lib/qr-payload.
-export const dueSql: SQL<number> = sql<number>`CASE WHEN ${invoice.supersededAt} IS NULL THEN ${fullDue} ELSE min(0, ${fullDue}) END`;
-
-// A zero document keeps a stranded payment as awaiting, and that must not lower what is owed.
-const openCondition = and(inArray(invoice.status, AWAITING_PAYMENT), gt(dueSql, 0));
-
 const invoicedSql = sql<number>`coalesce(sum(CASE WHEN ${invoice.type} <> 'advance' THEN ${invoice.totalMinor} ELSE 0 END), 0)`;
-
-// The SQL form of isOverdue in lib/invoice; tests compare the two.
-function overdueCondition(today: string): SQL {
-  return and(
-    inArray(invoice.status, AWAITING_PAYMENT),
-    gt(dueSql, 0),
-    lt(invoice.dueDate, today),
-  ) as SQL;
-}
 
 function statusCondition(status: InvoiceStatusFilter): SQL {
   return status === "overdue"

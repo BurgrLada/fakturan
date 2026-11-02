@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
-import { daysBetween, isFinalInvoice, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
+import { isFinalInvoice, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
   canAmendPayment,
@@ -23,6 +23,7 @@ import { clock } from "../clock";
 import { db, type Tx } from "../db";
 import { bankNotification, invoice, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { paymentDays } from "../reports/queries";
 import { ServiceError, type Reader } from "./access";
 import { advanceBalanceDropped, afterAdvancePaid, resolveFinalReview } from "./advance-automation";
 import { cnbRate } from "./exchange-rates";
@@ -520,28 +521,9 @@ export function closeDifference(
   });
 }
 
-// A closed difference says nothing about how fast the client paid, so its document stays out.
+const ALL_TIME = { from: "1000-01-01", to: "9999-12-31" };
+
 export function averagePaymentDays(ownerId: string, customerId: string): number | null {
-  const rows = db
-    .select({
-      issueDate: invoice.issueDate,
-      lastPaidOn: sql<
-        string | null
-      >`max(CASE WHEN ${payment.kind} = 'payment' AND ${payment.creditedMinor} > 0 THEN ${payment.paidOn} END)`,
-      differences: sql<number>`sum(CASE WHEN ${payment.kind} = 'difference' THEN 1 ELSE 0 END)`,
-    })
-    .from(payment)
-    .innerJoin(invoice, eq(invoice.id, payment.invoiceId))
-    .where(
-      scoped(ownerId).where(invoice, (t, { eq, and }) =>
-        and(eq(t.customerId, customerId), eq(t.status, "paid")),
-      ),
-    )
-    .groupBy(invoice.id)
-    .all();
-  const days = rows.flatMap(({ issueDate, lastPaidOn, differences }) =>
-    issueDate && lastPaidOn && differences === 0 ? [daysBetween(issueDate, lastPaidOn)] : [],
-  );
-  if (days.length === 0) return null;
-  return days.reduce((sum, value) => sum + value, 0) / days.length;
+  const filter = { range: ALL_TIME, includeExternal: true, customerIds: [customerId] };
+  return paymentDays(db, ownerId, filter).averageDays;
 }

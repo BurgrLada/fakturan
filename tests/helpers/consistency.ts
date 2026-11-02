@@ -1,11 +1,15 @@
 import { asc, eq, getTableColumns, getTableName, is, sql } from "drizzle-orm";
 import { SQLiteTable } from "drizzle-orm/sqlite-core";
-import { EXCHANGE_RATE_SOURCES } from "@/lib/fx";
-import { isActiveDocument, toDiscount } from "@/lib/invoice";
+import { documentCzkMinor, EXCHANGE_RATE_SOURCES, paymentCzkMinor } from "@/lib/fx";
+import { addDays, AWAITING_PAYMENT, isActiveDocument, isOverdue, toDiscount } from "@/lib/invoice";
 import { computeTotals } from "@/lib/invoice-totals";
+import { calendarDateInPrague } from "@/lib/number-format";
 import { deriveStatus } from "@/lib/payments";
+import { amountDue } from "@/lib/qr-payload";
+import { clock } from "@/server/clock";
 import type { Db } from "@/server/db";
 import * as schema from "@/server/db/schema";
+import { reportSummary } from "@/server/reports/queries";
 
 const OWNER_COLUMNS = ["userId", "ownerId"] as const;
 
@@ -348,6 +352,95 @@ function rateListProblems(db: Db): string[] {
   return partial > 0 ? [`exchange_rate: ${partial} lístků bez EUR`] : [];
 }
 
+const czkOrNull = (convert: () => number | null): number | null => {
+  try {
+    return convert();
+  } catch {
+    return null;
+  }
+};
+
+// Recomputes each year from the rows in JS, so a mistake in the report SQL cannot hide itself.
+function reportProblems(db: Db, ownerId: string): string[] {
+  const { invoice, payment, exchangeRate } = schema;
+  const today = calendarDateInPrague(clock.now());
+  const documents = db.select().from(invoice).where(eq(invoice.userId, ownerId)).all();
+  const byId = new Map(documents.map((row) => [row.id, row]));
+  const payments = db.select().from(payment).where(eq(payment.userId, ownerId)).all();
+  const lists = db.select().from(exchangeRate).all();
+  const listedRate = (currency: string, paidOn: string): number | null =>
+    lists
+      .filter(
+        (row) =>
+          row.currency === currency &&
+          row.listDate <= paidOn &&
+          row.listDate >= addDays(paidOn, -7),
+      )
+      .sort((a, b) => (a.listDate < b.listDate ? 1 : -1))[0]?.rateMicros ?? null;
+  const counted = documents.filter((row) => row.status !== "draft" && row.status !== "cancelled");
+  const years = new Set([
+    ...counted.flatMap((row) => (row.issueDate ? [row.issueDate.slice(0, 4)] : [])),
+    ...payments.map((row) => row.paidOn.slice(0, 4)),
+  ]);
+
+  const problems: string[] = [];
+  for (const year of [...years].sort()) {
+    const inYear = (date: string | null) => date !== null && date.slice(0, 4) === year;
+    const expected = {
+      invoicedMinor: 0,
+      incomeMinor: 0,
+      outstandingMinor: 0,
+      overdueMinor: 0,
+      advanceOpenMinor: 0,
+      unconverted: 0,
+    };
+    for (const row of counted.filter((other) => inYear(other.issueDate))) {
+      const due = amountDue(row);
+      const open = (AWAITING_PAYMENT as readonly string[]).includes(row.status) && due > 0;
+      const advance = row.type === "advance";
+      if (advance && !open) continue;
+      const rate = { currency: row.currency, exchangeRateMicros: row.exchangeRateMicros };
+      const total = czkOrNull(() => documentCzkMinor({ ...rate, totalMinor: row.totalMinor }));
+      if (total === null) {
+        expected.unconverted += 1;
+        continue;
+      }
+      const dueCzk = documentCzkMinor({ ...rate, totalMinor: due })!;
+      if (!advance) expected.invoicedMinor += total;
+      if (open && advance) expected.advanceOpenMinor += dueCzk;
+      if (open && !advance) expected.outstandingMinor += dueCzk;
+      if (!advance && isOverdue(row, today)) expected.overdueMinor += dueCzk;
+    }
+    for (const row of payments.filter((other) => inYear(other.paidOn))) {
+      const document = byId.get(row.invoiceId);
+      if (row.kind !== "payment" || !document) continue;
+      if (document.status === "draft" || document.status === "cancelled") continue;
+      const rateMicros = row.rateMicros ?? listedRate(row.currency, row.paidOn);
+      const czk = czkOrNull(() => paymentCzkMinor({ ...row, rateMicros }));
+      if (czk === null) expected.unconverted += 1;
+      else expected.incomeMinor += czk;
+    }
+
+    const range = { from: `${year}-01-01`, to: `${year}-12-31` };
+    const actual = reportSummary(db, ownerId, { range, includeExternal: true }, today);
+    const labels = {
+      invoicedMinor: "fakturováno",
+      incomeMinor: "příjmy",
+      outstandingMinor: "pohledávky",
+      overdueMinor: "po splatnosti",
+      advanceOpenMinor: "neuhrazené zálohy",
+      unconverted: "bez kurzu",
+    } as const;
+    for (const key of Object.keys(labels) as (keyof typeof labels)[]) {
+      const value = key === "unconverted" ? actual.unconverted.count : actual[key];
+      if (value !== expected[key]) {
+        problems.push(`přehled ${year}: ${labels[key]} ${value}, z dokladů ${expected[key]}`);
+      }
+    }
+  }
+  return problems;
+}
+
 // Throws on the first broken invariant. Plans extend it as new entities arrive.
 export function assertConsistent(db: Db, ownerId: string): void {
   const problems: string[] = [];
@@ -384,6 +477,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
   problems.push(...recurringProblems(db, ownerId));
   problems.push(...noticeProblems(db, ownerId));
   problems.push(...rateListProblems(db));
+  problems.push(...reportProblems(db, ownerId));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

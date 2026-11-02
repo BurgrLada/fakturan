@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { appearanceFrom } from "@/lib/invoice";
 import type { CustomerSnapshot, SupplierSnapshot } from "@/lib/invoice-document";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
@@ -17,6 +17,16 @@ import {
 import { seedCreditNote } from "../fixtures/invoices";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
+
+const shifted = vi.hoisted(() => ({ by: 0 }));
+vi.mock("@/server/reports/queries", async (original) => {
+  const real = await original<typeof import("@/server/reports/queries")>();
+  const reportSummary: typeof real.reportSummary = (...args) => {
+    const summary = real.reportSummary(...args);
+    return { ...summary, invoicedMinor: summary.invoicedMinor + shifted.by };
+  };
+  return { ...real, reportSummary };
+});
 
 const db = createTestDb();
 
@@ -391,6 +401,34 @@ describe("assertConsistent", () => {
       db.update(invoice).set({ status: "partially_paid" }).where(eq(invoice.id, id)).run();
 
       expect(() => assertConsistent(db, owner)).toThrow(/neodpovídá platbám/);
+    });
+
+    test("[TST-018] změněná částka platby, doklad bez kurzu ani posunutý souhrn kontrolou neprojde", () => {
+      const owner = createUser();
+      const id = paidInvoice(owner);
+      const row = eq(invoice.id, id);
+      db.update(invoice).set({ issueDate: "2026-03-01" }).where(row).run();
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+
+      db.update(payment).set({ amountMinor: 9_000 }).where(eq(payment.invoiceId, id)).run();
+      expect(() => assertConsistent(db, owner)).toThrow(/jinou připsanou/);
+      db.update(payment).set({ amountMinor: 10_000 }).where(eq(payment.invoiceId, id)).run();
+
+      db.update(invoice).set({ currency: "EUR", exchangeRateSource: "manual" }).where(row).run();
+      db.update(payment)
+        .set({ currency: "EUR", rateMicros: 25_000_000 })
+        .where(eq(payment.invoiceId, id))
+        .run();
+      expect(() => assertConsistent(db, owner)).toThrow(/nemá kurz/);
+      db.update(invoice).set({ exchangeRateMicros: 25_000_000 }).where(row).run();
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+
+      shifted.by = 1;
+      try {
+        expect(() => assertConsistent(db, owner)).toThrow(/přehled 2026: fakturováno/);
+      } finally {
+        shifted.by = 0;
+      }
     });
 
     test("[TST-018] odhalí platbu cizího vlastníka na dokladu", () => {

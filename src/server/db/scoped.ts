@@ -1,4 +1,3 @@
-import "server-only";
 import { and, eq, type AnyColumn, type SQL } from "drizzle-orm";
 
 type Operators = { eq: typeof eq; and: typeof and };

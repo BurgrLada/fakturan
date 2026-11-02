@@ -4,14 +4,10 @@ PDF-007	Vizuální reference pokrývají jen první stranu	po schválení TST-01
 TST-009	Matice nemá roli administrátora ani entity plánů 7 a 8	plán 7 a 8
 TST-013	Změřeno jen s unit testy po souborech: payments 91,43 (6 přeživších ekvivalentních, 1 chyba), fx 99,17, cnb-rates 97,06, invoice-totals 96,55, qr-payload 95,15, payment-matching 99,16, fio 97,81, auth 98,02, mask 100, bank-notices/index 94,74, czech-holidays 100, money 91,53 %; number-format 84,92 % bez backendových testů, recurrence neměřená, celý běh se nevejde do limitu; fronta úloh, lease a tick nejsou ve stryker.config.json	plán 9
 TST-015	Chybí zpětné čtení ISDOC proti schématu	plán 8
-TST-018	Kontrola nepokrývá přehledy	plán 7
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 UI-011	Chybí blížící se limity, spec je nedefinuje	plán 8
 INV-024	Chybí export (plán 8)	plán 8
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
-CRN-003	Chybí statistiky a dashboard	plán 7
-FOR-008	Chybí statistiky, hotový je přepočet	plán 7
-ADV-005	Chybí příjmy ve statistikách a daňovém přehledu	plán 7 a 8
-ADV-007	Chybí řádek záloh ve statistikách	plán 7
+ADV-005	Chybí daňový přehled	plán 8

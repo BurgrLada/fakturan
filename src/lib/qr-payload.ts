@@ -61,7 +61,7 @@ export type Balance = {
   supersededAt: Date | null;
 };
 
-// The SQL form is dueSql in services/invoices. A replaced advance has nothing left to collect.
+// The SQL form is dueSql in server/db/invoice-sql. A replaced advance has nothing left to collect.
 export function amountDue(row: Balance): number {
   const due = row.totalMinor + row.creditsMinor - row.advanceMinor - row.paidMinor;
   return row.supersededAt ? Math.min(0, due) : due;
