@@ -1044,6 +1044,8 @@ export const TEXTS = {
         `Faktury po splatnosti: ${p.count ?? 0}, nejstarší ${p.oldest ?? ""}.`,
       invoices_due_soon: (p: Record<string, unknown>) =>
         `Faktury se splatností do ${p.days ?? 3} dnů: ${p.count ?? 0}, nejbližší ${p.nearest ?? ""}.`,
+      turnover_limit: (p: Record<string, unknown>) =>
+        `Obrat za rok ${p.year ?? ""} je ${p.percent ?? 0} % limitu ${p.limit === "vat" ? "pro registraci k DPH" : "pro paušální daň"} (${p.turnover ?? ""} z ${p.limitAmount ?? ""})${p.over ? ", limit je překročený" : ""}. Jde o podklad, ověřte ho s poradcem.`,
       bank_connection_failed: () =>
         "Schránku s avízy se opakovaně nepodařilo přečíst. Platby se teď samy nespárují, zkontrolujte nastavení schránky.",
       payments_unmatched: (p: Record<string, unknown>) =>
@@ -1989,6 +1991,7 @@ export const TEXTS = {
       texts: "Texty",
       formats: "Datum a variabilní symbol",
       foreign: "Zahraniční faktury",
+      limits: "Limity obratu",
     },
     fields: {
       dueDays: "Splatnost ve dnech",
@@ -2011,6 +2014,18 @@ export const TEXTS = {
       rounding: "Zaokrouhlení celkové částky",
       pdfFileName: "Název souboru PDF",
       fxBasis: "Rozhodný den pro kurz",
+      turnoverBasis: "Základ obratu pro limity",
+      turnoverVatLimitMinor: "Limit obratu pro registraci k DPH (Kč)",
+      turnoverFlatLimitMinor: "Limit obratu pro paušální daň (Kč)",
+    },
+    turnoverBases: {
+      taxable: "Datum zdanitelného plnění, jinak datum vystavení",
+      paid: "Datum úhrady",
+    },
+    turnoverLimits: {
+      title: "Limity obratu",
+      hint: "Podklad pro vlastní orientaci, ne daňové poradenství. Prázdné pole znamená zákonný limit, aktuálně",
+      invalid: "Limit obratu musí být kladná částka v korunách",
     },
     fxBases: {
       issue_date: "Datum vystavení",
@@ -2057,6 +2072,8 @@ export const TEXTS = {
       pdfFileName: "Neplatný název souboru PDF",
       fxBasis: "Neplatný základ pro kurz",
       advanceFinalMode: "Neplatný režim po úhradě zálohy",
+      turnoverLimit: "Limit obratu musí být kladná částka",
+      turnoverBasis: "Neplatný základ obratu",
       fixedRates: "Pevný kurz musí být kladné číslo a měna nesmí být koruna",
     },
   },

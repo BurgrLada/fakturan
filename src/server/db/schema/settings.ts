@@ -9,6 +9,7 @@ import {
   LANGUAGES,
   LOGO_POSITIONS,
   PAYMENT_METHODS,
+  TURNOVER_BASES,
   VARIABLE_SYMBOL_FORMATS,
 } from "@/lib/preferences";
 import { CURRENCIES } from "@/lib/currency";
@@ -57,6 +58,11 @@ export const preferences = sqliteTable("preferences", {
   advanceFinalMode: text("advance_final_mode", { enum: ADVANCE_FINAL_MODES })
     .notNull()
     .default(D.advanceFinalMode),
+  turnoverVatLimitMinor: integer("turnover_vat_limit_minor"),
+  turnoverFlatLimitMinor: integer("turnover_flat_limit_minor"),
+  turnoverBasis: text("turnover_basis", { enum: TURNOVER_BASES })
+    .notNull()
+    .default(D.turnoverBasis),
   fixedRates: text("fixed_rates", { mode: "json" })
     .$type<Record<string, number>>()
     .notNull()

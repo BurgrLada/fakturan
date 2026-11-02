@@ -10,6 +10,7 @@ export const VARIABLE_SYMBOL_FORMATS = ["digits", "empty"] as const;
 export const LOGO_POSITIONS = ["left", "right", "none"] as const;
 export const FX_BASES = ["issue_date", "taxable_date"] as const;
 export const ADVANCE_FINAL_MODES = ["off", "draft", "issue"] as const;
+export const TURNOVER_BASES = ["taxable", "paid"] as const;
 
 export type Language = (typeof LANGUAGES)[number];
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
@@ -19,6 +20,7 @@ export type VariableSymbolFormat = (typeof VARIABLE_SYMBOL_FORMATS)[number];
 export type LogoPosition = (typeof LOGO_POSITIONS)[number];
 export type FxBasis = (typeof FX_BASES)[number];
 export type AdvanceFinalMode = (typeof ADVANCE_FINAL_MODES)[number];
+export type TurnoverBasis = (typeof TURNOVER_BASES)[number];
 
 export type Preferences = {
   dueDays: number;
@@ -48,6 +50,10 @@ export type Preferences = {
   fxBasis: FxBasis;
   fixedRates: Record<string, number>;
   advanceFinalMode: AdvanceFinalMode;
+  // null = the statutory limit from lib/turnover-limits.
+  turnoverVatLimitMinor: number | null;
+  turnoverFlatLimitMinor: number | null;
+  turnoverBasis: TurnoverBasis;
 };
 
 export type DesignChoice = { id: string; name: string };
@@ -80,6 +86,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   fxBasis: "issue_date",
   fixedRates: {},
   advanceFinalMode: "draft",
+  turnoverVatLimitMinor: null,
+  turnoverFlatLimitMinor: null,
+  turnoverBasis: "taxable",
 };
 
 export function defaultIssueDate(mode: IssueDateMode, now: Date): CalendarDate {

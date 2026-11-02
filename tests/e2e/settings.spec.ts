@@ -191,3 +191,33 @@ test("[SET-014] [SEC-005] logo 1,5 MB projde a soubor nad 2 MB ukáže českou h
   await expect(page.getByText("Soubor je větší než 2 MB")).toBeVisible();
   await expect(page.getByRole("img", { name: "Podpis nebo razítko" })).toBeHidden();
 });
+
+test("[REP-005] limity a základ jdou změnit v Nastavení", async ({ page, freshApp }) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/vychozi`);
+  await page.waitForLoadState("networkidle");
+  const vat = page.getByLabel("Limit obratu pro registraci k DPH (Kč)");
+  await expect(vat).toHaveValue("");
+  await expect(vat).toHaveAttribute("placeholder", "2000000,00");
+
+  await vat.fill("1 000 000");
+  await page.getByLabel("Základ obratu pro limity").selectOption("paid");
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Uloženo.")).toBeVisible();
+
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await expect(vat).toHaveValue("1000000,00");
+  await expect(page.getByLabel("Základ obratu pro limity")).toHaveValue("paid");
+
+  await vat.fill("");
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Uloženo.")).toBeVisible();
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await expect(vat).toHaveValue("");
+
+  await vat.fill("abc");
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Limit obratu musí být kladná částka v korunách")).toBeVisible();
+});

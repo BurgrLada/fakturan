@@ -292,3 +292,32 @@ describe("izolace a mazání účtu", () => {
     expect(rows("x1")).toEqual([]);
   });
 });
+
+describe("limity obratu", () => {
+  test("[REP-005] limity jsou ve výchozím stavu prázdné a vlastní hodnota se uloží i vrátí", () => {
+    seed("l1");
+    expect(getPreferences("l1")).toMatchObject({
+      turnoverVatLimitMinor: null,
+      turnoverFlatLimitMinor: null,
+      turnoverBasis: "taxable",
+    });
+
+    savePreferences(actor("l1"), { turnoverVatLimitMinor: 100_000_000, turnoverBasis: "paid" });
+    expect(getPreferences("l1")).toMatchObject({
+      turnoverVatLimitMinor: 100_000_000,
+      turnoverFlatLimitMinor: null,
+      turnoverBasis: "paid",
+    });
+
+    savePreferences(actor("l1"), { turnoverVatLimitMinor: null });
+    expect(getPreferences("l1").turnoverVatLimitMinor).toBeNull();
+  });
+
+  test("[REP-005] neplatný limit a základ se odmítnou", () => {
+    seed("l2");
+
+    expect(() => savePreferences(actor("l2"), { turnoverFlatLimitMinor: -5 })).toThrow();
+    expect(() => savePreferences(actor("l2"), { turnoverBasis: "bank" as never })).toThrow();
+    expect(rows("l2")).toEqual([]);
+  });
+});

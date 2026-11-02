@@ -3,7 +3,7 @@ import { isNull } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES } from "@/lib/currency";
 import { MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
-import { ROUNDING_MODES } from "@/lib/invoice-totals";
+import { MAX_DOCUMENT_MINOR, ROUNDING_MODES } from "@/lib/invoice-totals";
 import {
   ADVANCE_FINAL_MODES,
   DATE_FORMATS,
@@ -13,6 +13,7 @@ import {
   LANGUAGES,
   LOGO_POSITIONS,
   PAYMENT_METHODS,
+  TURNOVER_BASES,
   VARIABLE_SYMBOL_FORMATS,
   type Preferences,
 } from "@/lib/preferences";
@@ -37,6 +38,13 @@ export const designIdSchema = z
   .regex(/^[a-z0-9-]{1,40}$/, V.designId);
 export const knownDesignIdSchema = designIdSchema.refine(isDesignId, V.designId);
 export const logoPositionSchema = z.enum(LOGO_POSITIONS, V.logoPosition);
+
+const limitSchema = z
+  .number(V.turnoverLimit)
+  .int(V.turnoverLimit)
+  .min(1, V.turnoverLimit)
+  .max(MAX_DOCUMENT_MINOR, V.turnoverLimit)
+  .nullable();
 
 export const preferencesSchema = z.object({
   dueDays: z.number(V.dueDays).int(V.dueDays).min(0, V.dueDays).max(365, V.dueDays),
@@ -78,6 +86,9 @@ export const preferencesSchema = z.object({
     V.fixedRates,
   ),
   advanceFinalMode: z.enum(ADVANCE_FINAL_MODES, V.advanceFinalMode),
+  turnoverVatLimitMinor: limitSchema,
+  turnoverFlatLimitMinor: limitSchema,
+  turnoverBasis: z.enum(TURNOVER_BASES, V.turnoverBasis),
 });
 
 export const preferencesPatchSchema = preferencesSchema.partial();

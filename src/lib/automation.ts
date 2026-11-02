@@ -58,6 +58,7 @@ export const NOTIFICATION_KINDS = [
   "payments_unmatched",
   "notices_unrecognized",
   "notices_over_limit",
+  "turnover_limit",
   "receipt_no_address",
   "receipt_bad_mail",
   "advance_final_failed",

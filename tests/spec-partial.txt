@@ -6,7 +6,6 @@ TST-013	Změřeno jen s unit testy po souborech: payments 91,43 (6 přeživšíc
 TST-015	Chybí zpětné čtení ISDOC proti schématu	plán 8
 SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
-UI-011	Chybí blížící se limity, spec je nedefinuje	plán 8
 INV-024	Chybí export (plán 8)	plán 8
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele

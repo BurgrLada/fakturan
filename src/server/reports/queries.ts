@@ -253,25 +253,55 @@ function summaryIn(
     .from(invoice)
     .where(where)
     .get()!;
-  const payments = paymentFilter(q, ownerId, filter);
-  const { incomeMinor } = q
-    .select({ incomeMinor: total(paymentMoney(filter)) })
-    .from(payment)
-    .innerJoin(invoice, eq(invoice.id, payment.invoiceId))
-    .where(payments)
-    .get()!;
+  const income = incomeTotal(q, ownerId, filter);
   const missing = summaryUnconverted(q, where, metrics, !filter.currency);
   return {
     ...documents,
-    incomeMinor,
+    incomeMinor: income.amountMinor,
     unconverted: {
       invoiced: missing.invoiced,
-      income: paymentsUnconverted(q, payments, filter),
+      income: income.unconverted,
       outstanding: missing.outstanding,
       overdue: missing.overdue,
       advanceOpen: missing.advanceOpen,
     },
   };
+}
+
+export function incomeTotal(
+  q: Reader,
+  ownerId: string,
+  filter: ReportFilter,
+): { amountMinor: number; unconverted: Unconverted } {
+  const where = paymentFilter(q, ownerId, filter);
+  const { amountMinor } = q
+    .select({ amountMinor: total(paymentMoney(filter)) })
+    .from(payment)
+    .innerJoin(invoice, eq(invoice.id, payment.invoiceId))
+    .where(where)
+    .get()!;
+  return { amountMinor, unconverted: paymentsUnconverted(q, where, filter) };
+}
+
+// Final invoices and corrections by the date of the taxable supply, advances never (R-15).
+export function taxableTurnover(
+  q: Reader,
+  ownerId: string,
+  range: { from: CalendarDate; to: CalendarDate },
+): { amountMinor: number; unconverted: Unconverted } {
+  const taxed = sql`coalesce(${invoice.taxableDate}, ${invoice.issueDate})`;
+  const where = and(
+    scoped(ownerId).where(invoice, (t) => notInArray(t.status, NOT_IN_TOTALS)),
+    notAdvance,
+    gte(taxed, range.from),
+    lte(taxed, range.to),
+  ) as SQL;
+  const { amountMinor } = q
+    .select({ amountMinor: total(documentCzk(invoice.totalMinor)) })
+    .from(invoice)
+    .where(where)
+    .get()!;
+  return { amountMinor, unconverted: documentsUnconverted(q, where, invoice.totalMinor, true) };
 }
 
 function filled(keys: string[], rows: { key: string | null; amountMinor: number }[]) {

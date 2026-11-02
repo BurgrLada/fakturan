@@ -16,10 +16,13 @@ import {
   ISSUE_DATE_MODES,
   LANGUAGES,
   PAYMENT_METHODS,
+  TURNOVER_BASES,
   VARIABLE_SYMBOL_FORMATS,
   type Preferences,
 } from "@/lib/preferences";
+import { formatMoney, formatMoneyInput, parseMoney } from "@/lib/money";
 import { TEXTS } from "@/lib/texts";
+import { FLAT_TAX_LIMIT_MINOR, VAT_REGISTRATION_LIMIT_MINOR } from "@/lib/turnover-limits";
 import { FixedRates, FOREIGN_CURRENCIES } from "./fixed-rates";
 
 const T = TEXTS.preferences;
@@ -35,7 +38,8 @@ type ChoiceKey =
   | "dateFormat"
   | "variableSymbolFormat"
   | "rounding"
-  | "fxBasis";
+  | "fxBasis"
+  | "turnoverBasis";
 
 export type ChoiceOption = { value: string; label: string };
 
@@ -50,6 +54,11 @@ const OWNED_ELSEWHERE: readonly string[] = [
   "lineColor",
   "logoPosition",
 ];
+
+const LIMIT_FIELDS = [
+  { name: "turnoverVatLimitMinor", statutory: VAT_REGISTRATION_LIMIT_MINOR },
+  { name: "turnoverFlatLimitMinor", statutory: FLAT_TAX_LIMIT_MINOR },
+] as const;
 
 const FLAGS: FlagKey[] = ["showLogo", "showQr", "showQrLogo", "showSignature", "showDuzp"];
 
@@ -80,6 +89,10 @@ const CHOICES: Record<
     label: (v) => T.roundings[v as keyof typeof T.roundings],
   },
   fxBasis: { values: FX_BASES, label: (v) => T.fxBases[v as keyof typeof T.fxBases] },
+  turnoverBasis: {
+    values: TURNOVER_BASES,
+    label: (v) => T.turnoverBases[v as keyof typeof T.turnoverBases],
+  },
 };
 
 export function ChoiceField({
@@ -129,6 +142,14 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
       Object.entries(initial.fixedRates).map(([code, micros]) => [code, formatRate(micros)]),
     ),
   );
+  const [limits, setLimits] = useState({
+    turnoverVatLimitMinor:
+      initial.turnoverVatLimitMinor === null ? "" : formatMoneyInput(initial.turnoverVatLimitMinor),
+    turnoverFlatLimitMinor:
+      initial.turnoverFlatLimitMinor === null
+        ? ""
+        : formatMoneyInput(initial.turnoverFlatLimitMinor),
+  });
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -160,12 +181,25 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
       setMessage({ ok: false, text: T.fixedRates.invalid(wrong[0]) });
       return;
     }
+    const parsedLimits = LIMIT_FIELDS.map(({ name }) => {
+      const typed = limits[name].trim();
+      return [name, typed === "" ? null : parseMoney(typed)] as const;
+    });
+    if (
+      parsedLimits.some(
+        ([name, minor]) => limits[name].trim() !== "" && (minor === null || minor < 1),
+      )
+    ) {
+      setMessage({ ok: false, text: T.turnoverLimits.invalid });
+      return;
+    }
     startTransition(async () => {
       const owned = Object.entries(values).filter(([key]) => !OWNED_ELSEWHERE.includes(key));
       const result = await savePreferencesAction({
         ...Object.fromEntries(owned),
         dueDays: dueDays.trim() === "" ? Number.NaN : Number(dueDays),
         fixedRates: Object.fromEntries(rates),
+        ...Object.fromEntries(parsedLimits),
       });
       setMessage(result.ok ? { ok: true, text: T.saved } : { ok: false, text: result.error });
     });
@@ -235,6 +269,27 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
           rates={fixedRates}
           onChange={(code, text) => setFixedRates((current) => ({ ...current, [code]: text }))}
         />
+      </section>
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg">{T.sections.limits}</h2>
+        <ChoiceField name="turnoverBasis" value={values.turnoverBasis} onChange={choose} />
+        {LIMIT_FIELDS.map(({ name, statutory }) => (
+          <div key={name} className="flex flex-col gap-2">
+            <Label htmlFor={`pref-${name}`}>{T.fields[name]}</Label>
+            <Input
+              id={`pref-${name}`}
+              inputMode="decimal"
+              value={limits[name]}
+              placeholder={formatMoneyInput(statutory)}
+              onChange={(event) =>
+                setLimits((current) => ({ ...current, [name]: event.target.value }))
+              }
+            />
+            <p className="text-sm text-muted-foreground">
+              {T.turnoverLimits.hint} {formatMoney(statutory, "CZK")}.
+            </p>
+          </div>
+        ))}
       </section>
       <div>
         <Button type="submit" disabled={pending}>
