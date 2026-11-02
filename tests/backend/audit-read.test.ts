@@ -130,6 +130,7 @@ describe("entityHistory", () => {
       /\.tsx?$/.test(f),
     );
     const cached = files.filter((f) => readFileSync(join(root, f), "utf8").includes('"use cache"'));
+    expect(cached).toEqual([join("server", "report-cache.ts")]);
     for (const file of cached) {
       const source = readFileSync(join(root, file), "utf8");
       const blocks = source
@@ -138,9 +139,18 @@ describe("entityHistory", () => {
         .filter((b) => b.includes('"use cache"'));
       expect(blocks.length, file).toBeGreaterThan(0);
       for (const block of blocks) {
-        expect(block, file).toMatch(/^\w+\(\s*userId: string/);
+        expect(block, file).toMatch(
+          /^\w+\(\s*userId: string,\s*stamp: string,\s*today: string,\s*query: string,?\s*\)/,
+        );
         expect(block, file).toMatch(/cacheTag\(accountTag\(userId\)\)/);
+        expect(block, file).toMatch(/cacheLife\("hours"\)/);
       }
+    }
+    const reportCore = readdirSync(join(root, "server", "reports"));
+    for (const file of reportCore) {
+      expect(readFileSync(join(root, "server", "reports", file), "utf8"), file).not.toMatch(
+        /from "next\//,
+      );
     }
   });
 });

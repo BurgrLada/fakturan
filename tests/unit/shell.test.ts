@@ -26,9 +26,9 @@ describe("navigace", () => {
 
   test("[UI-009] nehotové sekce vedou na prázdný stav a jedním příznakem se skryjí", () => {
     const planned = NAV_ITEMS.filter((item) => item.planned);
-    expect(planned.length).toBeGreaterThan(0);
     const hidden = visibleNavItems("admin", false).map((item) => item.key);
     for (const item of planned) expect(hidden).not.toContain(item.key);
-    expect(hidden).toEqual(expect.arrayContaining(["overview", "settings", "admin"]));
+    expect(hidden).toEqual(NAV_ITEMS.filter((item) => !item.planned).map((item) => item.key));
+    expect(hidden).toContain("reports");
   });
 });

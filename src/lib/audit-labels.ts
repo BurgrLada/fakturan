@@ -130,6 +130,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "recurring.resume": "Obnovení pravidelné faktury",
   "recurring.run": "Běh pravidelné faktury",
   "recurring.save": "Uložení pravidelné faktury",
+  "report.export": "Export statistik",
   "supplier.image_clear": "Odebrání obrázku dodavatele",
   "reminder_rule.delete": "Smazání stupně upomínky",
   "reminder_rule.save": "Uložení stupně upomínky",

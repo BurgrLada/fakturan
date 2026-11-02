@@ -2,6 +2,7 @@ import "server-only";
 import { and, desc, eq, gte, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { auditActionLabel } from "@/lib/audit-labels";
+import { neutralizeCsvCell } from "@/lib/tabular";
 import type { Actor } from "../audit/context";
 import { db, type Tx } from "../db";
 import { auditLog } from "../db/schema";
@@ -159,10 +160,7 @@ export async function entityHistory(
     .map((row) => maskForeignActor(row, userId));
 }
 
-// A leading apostrophe makes spreadsheets read the cell as text (EXP-008).
-export function neutralizeCsvCell(value: string): string {
-  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-}
+export { neutralizeCsvCell };
 
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";

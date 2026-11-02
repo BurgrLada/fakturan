@@ -28,7 +28,7 @@ test("[UI-009] přehled bez dat ukazuje prázdný stav s další akcí", async (
   await expect(page.getByRole("heading", { name: "Účet", level: 1 })).toBeVisible();
 });
 
-test("[UI-009] nehotová sekce ukáže prázdný stav Připravujeme, neznámá adresa 404", async ({
+test("[UI-009] Statistiky už nejsou Připravujeme a neznámá adresa vrátí 404", async ({
   page,
   freshApp,
 }) => {
@@ -41,8 +41,9 @@ test("[UI-009] nehotová sekce ukáže prázdný stav Připravujeme, neznámá a
     .getByRole("navigation", { name: "Hlavní navigace" })
     .getByRole("link", { name: "Statistiky" })
     .click();
-  await expect(page.getByRole("heading", { name: "Statistiky" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Připravujeme" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Statistiky", level: 1 })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Nová faktura" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Připravujeme" })).toHaveCount(0);
   const missing = await page.goto(`${freshApp.baseURL}/neexistuje`);
   expect(missing?.status()).toBe(404);
 });

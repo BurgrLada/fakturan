@@ -554,7 +554,7 @@ Pravidla:
 - **ARC-002** Peníze se ukládají jako celé číslo v nejmenší jednotce měny, množství jako celé číslo v tisícinách. Žádná aritmetika v plovoucí desetinné čárce.
 - **ARC-003** Čas se ukládá v UTC, obchodní data (vystavení, splatnost) jako kalendářní datum.
 - **ARC-004** Aktuální čas se bere z injektovatelných hodin, aby šly testovat plány.
-- **ARC-005** Cache Components: stránky mají statický shell a data účtu ve streamovaných částech. Každá položka `use cache` s daty účtu má ID uživatele v klíči a cache tag, který mutace invalidují. Test ověří, že cache nepřekročí hranici účtu.
+- **ARC-005** Cache Components: stránky mají statický shell a data účtu ve streamovaných částech. Každá položka `use cache` s daty účtu má ID uživatele v klíči a cache tag, který mutace invalidují. Test ověří, že cache nepřekročí hranici účtu. Mutace mimo požadavek (plánovač, fronta, avízo) tag zneplatnit neumí, proto má každá taková položka v klíči i razítko dat účtu (nejvyšší ID auditního záznamu účtu a čas posledního kurzovního lístku), které se změní s každou mutací v téže transakci.
 - **ARC-006** Grafy jsou za vlastním obalem `Chart`, aby šlo knihovnu vyměnit. Použité jsou TanStack Charts 1.1.0 (viz 24).
 - **ARC-007** Odeslání a automatika jsou úlohy v databázové frontě s idempotenčním klíčem.
 - **ARC-008** Jedna instance běží jako jeden proces. SQLite ani plánovač nepočítají s více replikami.
