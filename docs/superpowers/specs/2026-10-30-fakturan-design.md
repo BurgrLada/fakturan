@@ -555,7 +555,7 @@ Pravidla:
 - **ARC-003** Čas se ukládá v UTC, obchodní data (vystavení, splatnost) jako kalendářní datum.
 - **ARC-004** Aktuální čas se bere z injektovatelných hodin, aby šly testovat plány.
 - **ARC-005** Cache Components: stránky mají statický shell a data účtu ve streamovaných částech. Každá položka `use cache` s daty účtu má ID uživatele v klíči a cache tag, který mutace invalidují. Test ověří, že cache nepřekročí hranici účtu.
-- **ARC-006** Grafy jsou za vlastním obalem `Chart`, aby šlo knihovnu vyměnit. TanStack Charts jsou nové a jejich stabilita je nejasná (viz 24).
+- **ARC-006** Grafy jsou za vlastním obalem `Chart`, aby šlo knihovnu vyměnit. Použité jsou TanStack Charts 1.1.0 (viz 24).
 - **ARC-007** Odeslání a automatika jsou úlohy v databázové frontě s idempotenčním klíčem.
 - **ARC-008** Jedna instance běží jako jeden proces. SQLite ani plánovač nepočítají s více replikami.
 
@@ -677,5 +677,5 @@ Kritické e2e toky: první spuštění a onboarding, pozvánka, faktura od nuly 
 | Vzorek českého avíza Fio | Bez něj nejde ověřit BNK-005, formát není veřejně popsaný. Staví se proti anglické variantě známé z veřejných zmínek, česká je do dodání vzorku prozatímní. | zadavatel |
 | Vzorky ISDOC a CSV z Fakturoidu a iDokladu | Fakturovač je ověřený na 40 reálných dokladech, ostatní jen z dokumentace | implementace |
 | Znění doložky FOR-006, náležitosti neplátce, TAX-001, použití pevného kurzu FOR-010 | Daňová správnost, zatím z obecné znalosti | daňový poradce |
-| TanStack Charts | Zdroje se rozcházejí, zda jde o stabilní 1.x, nebo alfu; ověřit před začátkem kapitoly 14 | implementace |
+| TanStack Charts | Uzavřeno: stabilní řada 1.x, použito přesně `@tanstack/charts@1.1.0` za obalem `Chart`; hydratace, CSP a tmavý režim ověřeny, při budoucím problému obal dostane `recharts@3.10.1` beze změny `ChartSpec` | implementace |
 

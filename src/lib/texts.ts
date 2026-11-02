@@ -14,6 +14,12 @@ export const TEXTS = {
     settings: "Nastavení",
     admin: "Administrace",
   },
+  reports: {
+    chart: {
+      table: "Tabulka hodnot",
+      category: "Období",
+    },
+  },
   shell: {
     mainNav: "Hlavní navigace",
     openMenu: "Otevřít nabídku",
