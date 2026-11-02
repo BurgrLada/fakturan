@@ -7,6 +7,7 @@ import { bucketsBetween, resolvePeriod, type BucketUnit } from "@/lib/report-per
 import { dueSql, NOT_IN_TOTALS, openCondition, overdueCondition } from "../db/invoice-sql";
 import { customer, exchangeRate, invoice, invoiceLine, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
+import type { Db, Tx } from "../db";
 import type { Reader } from "../services/access";
 import {
   AGING_BANDS,
@@ -20,12 +21,14 @@ import {
   type ReportFilter,
   type ReportSummary,
   type Series,
+  type SummaryMetric,
   type Unconverted,
 } from "./types";
 
 // Pure over a Reader and free of server-only, so the consistency check of e2e runs can load it.
 
 type Amount = SQL | SQLiteColumn;
+export type SnapshotReader = Pick<Db | Tx, "select" | "transaction">;
 
 const NOTHING: Unconverted = { count: 0, byCurrency: [] };
 const DEFAULT_TOP_ROWS = 10;
@@ -81,19 +84,25 @@ function customerCondition(q: Reader, ownerId: string, ids: string[] | undefined
   return owned.length === 0 ? sql`0` : inArray(invoice.customerId, owned);
 }
 
-function documentFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
+// Balances are the state as of today: the period never narrows them, the other filters do.
+function stateFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
   checkFilter(filter);
   const customers = customerCondition(q, ownerId, filter.customerIds);
   return scoped(ownerId).where(invoice, (t, { and, eq }) =>
     and(
       notInArray(t.status, NOT_IN_TOTALS),
-      gte(t.issueDate, filter.range.from),
-      lte(t.issueDate, filter.range.to),
       filter.currency ? eq(t.currency, filter.currency) : undefined,
       filter.includeExternal ? undefined : eq(t.external, false),
       customers,
     ),
   );
+}
+
+const issuedIn = (filter: ReportFilter): SQL =>
+  and(gte(invoice.issueDate, filter.range.from), lte(invoice.issueDate, filter.range.to)) as SQL;
+
+function documentFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
+  return and(stateFilter(q, ownerId, filter), issuedIn(filter)) as SQL;
 }
 
 // Both sides of the join belong to the account; the document decides the customer and import.
@@ -125,21 +134,6 @@ function unconvertedOf(rows: UnconvertedRow[]): Unconverted {
   return {
     count: rows.reduce((sum, row) => sum + row.count, 0),
     byCurrency: rows.map(({ currency, amountMinor }) => ({ currency, amountMinor })),
-  };
-}
-
-function mergeUnconverted(...parts: Unconverted[]): Unconverted {
-  const amounts = new Map<Currency, number>();
-  for (const part of parts) {
-    for (const { currency, amountMinor } of part.byCurrency) {
-      amounts.set(currency, (amounts.get(currency) ?? 0) + amountMinor);
-    }
-  }
-  return {
-    count: parts.reduce((sum, part) => sum + part.count, 0),
-    byCurrency: [...amounts]
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([currency, amountMinor]) => ({ currency, amountMinor })),
   };
 }
 
@@ -177,21 +171,83 @@ function paymentsUnconverted(q: Reader, where: SQL, filter: ReportFilter): Uncon
   return unconvertedOf(rows);
 }
 
-export function reportSummary(
+type DocumentMetric = Exclude<SummaryMetric, "income">;
+
+// One pass over the documents: per currency, what each balance or flow is missing.
+function summaryUnconverted(
   q: Reader,
+  where: SQL,
+  metrics: Record<DocumentMetric, { condition: SQL; amount: Amount }>,
+  converted: boolean,
+): Record<DocumentMetric, Unconverted> {
+  const names = Object.keys(metrics) as DocumentMetric[];
+  if (!converted) return Object.fromEntries(names.map((name) => [name, NOTHING])) as never;
+  const missing = sql`${documentCzk(invoice.totalMinor)} IS NULL`;
+  const columns = Object.fromEntries(
+    names.flatMap((name) => {
+      const { condition, amount } = metrics[name];
+      const when = sql`${condition} AND ${missing}`;
+      return [
+        [`${name}Count`, totalWhen(when, sql`1`)],
+        [`${name}Amount`, totalWhen(when, sql`${amount}`)],
+      ];
+    }),
+  ) as Record<string, SQL<number>>;
+  const rows = q
+    .select({ currency: invoice.currency, ...columns })
+    .from(invoice)
+    .where(and(where, missing))
+    .groupBy(invoice.currency)
+    .orderBy(asc(invoice.currency))
+    .all() as ({ currency: Currency } & Record<string, number>)[];
+  return Object.fromEntries(
+    names.map((name) => [
+      name,
+      unconvertedOf(
+        rows
+          .filter((row) => row[`${name}Count`]! > 0)
+          .map((row) => ({
+            currency: row.currency,
+            count: row[`${name}Count`]!,
+            amountMinor: row[`${name}Amount`]!,
+          })),
+      ),
+    ]),
+  ) as Record<DocumentMetric, Unconverted>;
+}
+
+// One deferred read transaction, so sums and missing rates come from the same WAL snapshot.
+export function reportSummary(
+  q: SnapshotReader,
   ownerId: string,
   filter: ReportFilter,
   today: CalendarDate,
 ): ReportSummary {
   checkToday(today);
-  const where = documentFilter(q, ownerId, filter);
+  return q.transaction((tx: Reader) => summaryIn(tx, ownerId, filter, today), {
+    behavior: "deferred",
+  });
+}
+
+function summaryIn(
+  q: Reader,
+  ownerId: string,
+  filter: ReportFilter,
+  today: CalendarDate,
+): ReportSummary {
+  const where = stateFilter(q, ownerId, filter);
   const money = (amount: Amount) => documentMoney(filter, amount);
-  const overdue = and(overdueCondition(today), notAdvance) as SQL;
+  const metrics = {
+    invoiced: { condition: and(notAdvance, issuedIn(filter)) as SQL, amount: invoice.totalMinor },
+    outstanding: { condition: outstanding, amount: dueSql },
+    overdue: { condition: and(overdueCondition(today), notAdvance) as SQL, amount: dueSql },
+    advanceOpen: { condition: advanceOpen, amount: dueSql },
+  };
   const documents = q
     .select({
-      invoicedMinor: totalWhen(notAdvance, money(invoice.totalMinor)),
+      invoicedMinor: totalWhen(metrics.invoiced.condition, money(invoice.totalMinor)),
       outstandingMinor: totalWhen(outstanding, money(dueSql)),
-      overdueMinor: totalWhen(overdue, money(dueSql)),
+      overdueMinor: totalWhen(metrics.overdue.condition, money(dueSql)),
       advanceOpenMinor: totalWhen(advanceOpen, money(dueSql)),
     })
     .from(invoice)
@@ -204,14 +260,17 @@ export function reportSummary(
     .innerJoin(invoice, eq(invoice.id, payment.invoiceId))
     .where(payments)
     .get()!;
-  const counted = and(where, sql`(${notAdvance} OR ${openCondition})`) as SQL;
+  const missing = summaryUnconverted(q, where, metrics, !filter.currency);
   return {
     ...documents,
     incomeMinor,
-    unconverted: mergeUnconverted(
-      documentsUnconverted(q, counted, invoice.totalMinor, !filter.currency),
-      paymentsUnconverted(q, payments, filter),
-    ),
+    unconverted: {
+      invoiced: missing.invoiced,
+      income: paymentsUnconverted(q, payments, filter),
+      outstanding: missing.outstanding,
+      overdue: missing.overdue,
+      advanceOpen: missing.advanceOpen,
+    },
   };
 }
 
@@ -261,7 +320,7 @@ export function incomeSeries(
   return { points: filled(keys, rows), unconverted: paymentsUnconverted(q, where, filter) };
 }
 
-// Age is today - due date. A document due today or later, or without a due date, is not overdue
+// A balance as of today, so the period does not narrow it. Age is today - due date. A document due today or later, or without a due date, is not overdue
 // yet, so the four bands of REP-002 add up to overdueMinor exactly (R-11).
 export function agingBands(
   q: Reader,
@@ -270,7 +329,7 @@ export function agingBands(
   today: CalendarDate,
 ): Aging {
   checkToday(today);
-  const where = and(documentFilter(q, ownerId, filter), outstanding) as SQL;
+  const where = and(stateFilter(q, ownerId, filter), outstanding) as SQL;
   const age = sql`CAST(julianday(${today}) - julianday(${invoice.dueDate}) AS INTEGER)`;
   const band = sql<AgingBand>`CASE
     WHEN ${invoice.dueDate} IS NULL OR ${invoice.dueDate} >= ${today} THEN 'current'

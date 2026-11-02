@@ -360,7 +360,32 @@ const czkOrNull = (convert: () => number | null): number | null => {
   }
 };
 
+type Missing = Map<string, { count: number; amountMinor: number }>;
+
+function addMissing(missing: Missing, currency: string, amountMinor: number): void {
+  const row = missing.get(currency) ?? { count: 0, amountMinor: 0 };
+  missing.set(currency, { count: row.count + 1, amountMinor: row.amountMinor + amountMinor });
+}
+
+function missingText(missing: Missing): string {
+  const byCurrency = [...missing]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([currency, row]) => ({ currency, amountMinor: row.amountMinor }));
+  const total = [...missing.values()].reduce((sum, row) => sum + row.count, 0);
+  return JSON.stringify({ count: total, byCurrency });
+}
+
+const SUMMARY_LABELS = {
+  invoiced: "fakturováno",
+  income: "příjmy",
+  outstanding: "pohledávky",
+  overdue: "po splatnosti",
+  advanceOpen: "neuhrazené zálohy",
+} as const;
+type Metric = keyof typeof SUMMARY_LABELS;
+
 // Recomputes each year from the rows in JS, so a mistake in the report SQL cannot hide itself.
+// Flows follow the year; balances are the state as of today in every year.
 function reportProblems(db: Db, ownerId: string): string[] {
   const { invoice, payment, exchangeRate } = schema;
   const today = calendarDateInPrague(clock.now());
@@ -382,34 +407,40 @@ function reportProblems(db: Db, ownerId: string): string[] {
     ...counted.flatMap((row) => (row.issueDate ? [row.issueDate.slice(0, 4)] : [])),
     ...payments.map((row) => row.paidOn.slice(0, 4)),
   ]);
+  if (years.size === 0 && counted.length > 0) years.add(today.slice(0, 4));
 
   const problems: string[] = [];
   for (const year of [...years].sort()) {
     const inYear = (date: string | null) => date !== null && date.slice(0, 4) === year;
-    const expected = {
-      invoicedMinor: 0,
-      incomeMinor: 0,
-      outstandingMinor: 0,
-      overdueMinor: 0,
-      advanceOpenMinor: 0,
-      unconverted: 0,
+    const sums: Record<Metric, number> = {
+      invoiced: 0,
+      income: 0,
+      outstanding: 0,
+      overdue: 0,
+      advanceOpen: 0,
     };
-    for (const row of counted.filter((other) => inYear(other.issueDate))) {
+    const missing: Record<Metric, Missing> = {
+      invoiced: new Map(),
+      income: new Map(),
+      outstanding: new Map(),
+      overdue: new Map(),
+      advanceOpen: new Map(),
+    };
+    const add = (metric: Metric, currency: string, original: number, czk: number | null) => {
+      if (czk === null) addMissing(missing[metric], currency, original);
+      else sums[metric] += czk;
+    };
+    for (const row of counted) {
       const due = amountDue(row);
       const open = (AWAITING_PAYMENT as readonly string[]).includes(row.status) && due > 0;
       const advance = row.type === "advance";
-      if (advance && !open) continue;
       const rate = { currency: row.currency, exchangeRateMicros: row.exchangeRateMicros };
       const total = czkOrNull(() => documentCzkMinor({ ...rate, totalMinor: row.totalMinor }));
-      if (total === null) {
-        expected.unconverted += 1;
-        continue;
-      }
-      const dueCzk = documentCzkMinor({ ...rate, totalMinor: due })!;
-      if (!advance) expected.invoicedMinor += total;
-      if (open && advance) expected.advanceOpenMinor += dueCzk;
-      if (open && !advance) expected.outstandingMinor += dueCzk;
-      if (!advance && isOverdue(row, today)) expected.overdueMinor += dueCzk;
+      const dueCzk = czkOrNull(() => documentCzkMinor({ ...rate, totalMinor: due }));
+      if (!advance && inYear(row.issueDate)) add("invoiced", row.currency, row.totalMinor, total);
+      if (open && advance) add("advanceOpen", row.currency, due, dueCzk);
+      if (open && !advance) add("outstanding", row.currency, due, dueCzk);
+      if (!advance && isOverdue(row, today)) add("overdue", row.currency, due, dueCzk);
     }
     for (const row of payments.filter((other) => inYear(other.paidOn))) {
       const document = byId.get(row.invoiceId);
@@ -417,24 +448,19 @@ function reportProblems(db: Db, ownerId: string): string[] {
       if (document.status === "draft" || document.status === "cancelled") continue;
       const rateMicros = row.rateMicros ?? listedRate(row.currency, row.paidOn);
       const czk = czkOrNull(() => paymentCzkMinor({ ...row, rateMicros }));
-      if (czk === null) expected.unconverted += 1;
-      else expected.incomeMinor += czk;
+      add("income", row.currency, row.amountMinor, czk);
     }
 
     const range = { from: `${year}-01-01`, to: `${year}-12-31` };
     const actual = reportSummary(db, ownerId, { range, includeExternal: true }, today);
-    const labels = {
-      invoicedMinor: "fakturováno",
-      incomeMinor: "příjmy",
-      outstandingMinor: "pohledávky",
-      overdueMinor: "po splatnosti",
-      advanceOpenMinor: "neuhrazené zálohy",
-      unconverted: "bez kurzu",
-    } as const;
-    for (const key of Object.keys(labels) as (keyof typeof labels)[]) {
-      const value = key === "unconverted" ? actual.unconverted.count : actual[key];
-      if (value !== expected[key]) {
-        problems.push(`přehled ${year}: ${labels[key]} ${value}, z dokladů ${expected[key]}`);
+    for (const metric of Object.keys(SUMMARY_LABELS) as Metric[]) {
+      const label = `přehled ${year}: ${SUMMARY_LABELS[metric]}`;
+      const value = actual[`${metric}Minor`];
+      if (value !== sums[metric]) problems.push(`${label} ${value}, z dokladů ${sums[metric]}`);
+      const reported = JSON.stringify(actual.unconverted[metric]);
+      const expected = missingText(missing[metric]);
+      if (reported !== expected) {
+        problems.push(`${label} bez kurzu ${reported}, z dokladů ${expected}`);
       }
     }
   }

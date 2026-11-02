@@ -50,6 +50,13 @@ const db = createTestDb();
 const TODAY = REPORT_TODAY;
 const YEAR = { from: "2026-01-01", to: "2026-12-31" };
 const NONE = { count: 0, byCurrency: [] };
+const NONE_BY_METRIC = {
+  invoiced: NONE,
+  income: NONE,
+  outstanding: NONE,
+  overdue: NONE,
+  advanceOpen: NONE,
+};
 
 let s: ReportScenario;
 
@@ -83,7 +90,7 @@ describe("scénář 2026", () => {
       outstandingMinor: 200_000,
       overdueMinor: 200_000,
       advanceOpenMinor: 200_000,
-      unconverted: NONE,
+      unconverted: NONE_BY_METRIC,
     });
     assertConsistent(db, s.owner);
   });
@@ -129,7 +136,7 @@ describe("scénář 2026", () => {
       outstandingMinor: 0,
       overdueMinor: 0,
       advanceOpenMinor: 0,
-      unconverted: NONE,
+      unconverted: NONE_BY_METRIC,
     });
     expect(Object.values(months(owner)).every((value) => value === 0)).toBe(true);
     expect(topCustomers(db, owner, filter()).rows).toEqual([]);
@@ -160,8 +167,8 @@ describe("scénář 2026", () => {
     const october = summary(s.owner, { range: { from: "2026-10-01", to: "2026-10-31" } });
     expect(october).toMatchObject({
       invoicedMinor: 0,
-      outstandingMinor: 0,
-      overdueMinor: 0,
+      outstandingMinor: 200_000,
+      overdueMinor: 200_000,
       advanceOpenMinor: 200_000,
     });
     const aging = agingBands(db, s.owner, filter(), TODAY);
@@ -175,7 +182,7 @@ describe("scénář 2026", () => {
       outstandingMinor: 0,
       overdueMinor: 0,
       advanceOpenMinor: 0,
-      unconverted: NONE,
+      unconverted: NONE_BY_METRIC,
     });
     expect(summary(s.owner, { currency: "CZK" })).toMatchObject({
       invoicedMinor: 2_160_000,
@@ -190,6 +197,35 @@ describe("scénář 2026", () => {
     });
   });
 
+  test("pohledávky, po splatnosti, zálohy a stárnutí jsou stav k dnešku bez ohledu na období", () => {
+    const range = { from: "2025-01-01", to: "2025-12-31" };
+    expect(summary(s.owner, { range })).toEqual({
+      invoicedMinor: 0,
+      incomeMinor: 0,
+      outstandingMinor: 200_000,
+      overdueMinor: 200_000,
+      advanceOpenMinor: 200_000,
+      unconverted: NONE_BY_METRIC,
+    });
+    expect(agingBands(db, s.owner, filter({ range }), TODAY).bands.days31to60).toBe(200_000);
+    expect(summary(s.owner, { range, customerIds: [s.customers.alfa] })).toMatchObject({
+      outstandingMinor: 0,
+      advanceOpenMinor: 0,
+    });
+    expect(summary(s.owner, { range, currency: "EUR" }).outstandingMinor).toBe(0);
+  });
+
+  test("souhrn čte součty i chybějící kurzy v jedné čtecí transakci", () => {
+    const spy = vi.spyOn(db, "transaction");
+    try {
+      summary(s.owner);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]![1]).toEqual({ behavior: "deferred" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("přehled souhlasí s invoiceSummary pro každou měnu a období", () => {
     at(TODAY);
     const ranges = [
@@ -201,18 +237,21 @@ describe("scénář 2026", () => {
       { from: "2026-05-01", to: "2026-05-31" },
       { from: "2026-09-01", to: "2026-10-31" },
     ];
-    for (const range of ranges) {
+    try {
       for (const currency of ["CZK", "EUR"] as Currency[]) {
-        const listed = invoiceSummary(s.owner, { currency, from: range.from, to: range.to })[0];
-        const report = summary(s.owner, { range, currency });
-        expect(report, `${currency} ${range.from}`).toMatchObject({
-          invoicedMinor: listed?.invoicedMinor ?? 0,
-          overdueMinor: listed?.overdueMinor ?? 0,
-          advanceOpenMinor: listed?.advanceOpenMinor ?? 0,
-        });
+        const state = invoiceSummary(s.owner, { currency })[0];
+        for (const range of ranges) {
+          const listed = invoiceSummary(s.owner, { currency, from: range.from, to: range.to })[0];
+          expect(summary(s.owner, { range, currency }), `${currency} ${range.from}`).toMatchObject({
+            invoicedMinor: listed?.invoicedMinor ?? 0,
+            overdueMinor: state?.overdueMinor ?? 0,
+            advanceOpenMinor: state?.advanceOpenMinor ?? 0,
+          });
+        }
       }
+    } finally {
+      setClockForTests(null);
     }
-    setClockForTests(null);
   });
 
   test("dny do úhrady: 17 a 9 dní dají průměr 13", () => {
@@ -334,7 +373,10 @@ describe("účty mimo scénář", () => {
 
     expect(summary(owner, { range })).toMatchObject({
       incomeMinor: 240_000,
-      unconverted: { count: 1, byCurrency: [{ currency: "EUR", amountMinor: 20_000 }] },
+      unconverted: {
+        ...NONE_BY_METRIC,
+        income: { count: 1, byCurrency: [{ currency: "EUR", amountMinor: 20_000 }] },
+      },
     });
     expect(incomeSeries(db, owner, filter({ range }), "month").unconverted).toEqual({
       count: 1,
@@ -363,18 +405,35 @@ describe("účty mimo scénář", () => {
       rateMicros: 25_000_000,
     });
     issuedDocument(owner, customerId, { issueDate: "2026-03-02", totalMinor: 50_000 });
+    pay(owner, id, "2026-03-20", 40_000, "EUR");
     db.update(invoice).set({ exchangeRateMicros: null }).where(eq(invoice.id, id)).run();
-    const unconverted = { count: 1, byCurrency: [{ currency: "EUR", amountMinor: 100_000 }] };
-
-    expect(summary(owner)).toMatchObject({
-      invoicedMinor: 50_000,
-      outstandingMinor: 50_000,
-      unconverted,
+    const eur = (amountMinor: number) => ({
+      count: 1,
+      byCurrency: [{ currency: "EUR", amountMinor }],
     });
-    expect(summary(owner, { currency: "EUR" })).toMatchObject({
+    const unconverted = eur(100_000);
+
+    expect(summary(owner)).toEqual({
+      invoicedMinor: 50_000,
+      incomeMinor: 0,
+      outstandingMinor: 50_000,
+      overdueMinor: 50_000,
+      advanceOpenMinor: 0,
+      unconverted: {
+        invoiced: unconverted,
+        income: eur(40_000),
+        outstanding: eur(60_000),
+        overdue: eur(60_000),
+        advanceOpen: NONE,
+      },
+    });
+    expect(summary(owner, { currency: "EUR" })).toEqual({
       invoicedMinor: 100_000,
-      outstandingMinor: 100_000,
-      unconverted: NONE,
+      incomeMinor: 40_000,
+      outstandingMinor: 60_000,
+      overdueMinor: 60_000,
+      advanceOpenMinor: 0,
+      unconverted: NONE_BY_METRIC,
     });
     expect(invoicedSeries(db, owner, filter(), "year")).toEqual({
       points: [{ key: "2026", amountMinor: 50_000 }],
@@ -386,7 +445,7 @@ describe("účty mimo scénář", () => {
       rows: [{ currency: "CZK", amountMinor: 50_000, czkMinor: 50_000 }],
       unconverted,
     });
-    expect(agingBands(db, owner, filter(), TODAY).unconverted).toEqual(unconverted);
+    expect(agingBands(db, owner, filter(), TODAY).unconverted).toEqual(eur(60_000));
   });
 
   function agingAccount(dueDates: string[]) {
@@ -522,7 +581,7 @@ describe("účty mimo scénář", () => {
       outstandingMinor: 0,
       overdueMinor: 0,
       advanceOpenMinor: 0,
-      unconverted: NONE,
+      unconverted: NONE_BY_METRIC,
     });
     expect(summary(s.owner, { customerIds: [] }).invoicedMinor).toBe(0);
     expect(summary(s.owner, { customerIds: [foreign, s.customers.alfa] })).toMatchObject({

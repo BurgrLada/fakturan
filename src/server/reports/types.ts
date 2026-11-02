@@ -16,13 +16,24 @@ export type Unconverted = {
   byCurrency: { currency: Currency; amountMinor: number }[];
 };
 
+export const SUMMARY_METRICS = [
+  "invoiced",
+  "income",
+  "outstanding",
+  "overdue",
+  "advanceOpen",
+] as const;
+export type SummaryMetric = (typeof SUMMARY_METRICS)[number];
+
+// Flows (invoiced, income) follow the period; the balances are the state as of today. Each number
+// lists what it is missing: totals for invoiced, payments for income, balances for the rest.
 export type ReportSummary = {
   invoicedMinor: number;
   incomeMinor: number;
   outstandingMinor: number;
   overdueMinor: number;
   advanceOpenMinor: number;
-  unconverted: Unconverted;
+  unconverted: Record<SummaryMetric, Unconverted>;
 };
 
 export type SeriesPoint = { key: string; amountMinor: number };

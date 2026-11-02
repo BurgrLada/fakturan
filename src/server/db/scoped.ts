@@ -1,3 +1,4 @@
+// No server-only: Playwright loads this through reports/queries, where the marker would throw.
 import { and, eq, type AnyColumn, type SQL } from "drizzle-orm";
 
 type Operators = { eq: typeof eq; and: typeof and };

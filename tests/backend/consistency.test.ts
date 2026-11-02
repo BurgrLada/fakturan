@@ -18,12 +18,26 @@ import { seedCreditNote } from "../fixtures/invoices";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 
-const shifted = vi.hoisted(() => ({ by: 0 }));
+const shifted = vi.hoisted(() => ({ by: 0, unconverted: 0 }));
 vi.mock("@/server/reports/queries", async (original) => {
   const real = await original<typeof import("@/server/reports/queries")>();
   const reportSummary: typeof real.reportSummary = (...args) => {
     const summary = real.reportSummary(...args);
-    return { ...summary, invoicedMinor: summary.invoicedMinor + shifted.by };
+    const income = summary.unconverted.income;
+    return {
+      ...summary,
+      invoicedMinor: summary.invoicedMinor + shifted.by,
+      unconverted: {
+        ...summary.unconverted,
+        income: {
+          ...income,
+          byCurrency: income.byCurrency.map((row) => ({
+            ...row,
+            amountMinor: row.amountMinor + shifted.unconverted,
+          })),
+        },
+      },
+    };
   };
   return { ...real, reportSummary };
 });
@@ -428,6 +442,18 @@ describe("assertConsistent", () => {
         expect(() => assertConsistent(db, owner)).toThrow(/přehled 2026: fakturováno/);
       } finally {
         shifted.by = 0;
+      }
+
+      db.update(payment)
+        .set({ rateMicros: null, paidOn: "2026-02-10" })
+        .where(eq(payment.invoiceId, id))
+        .run();
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+      shifted.unconverted = 1;
+      try {
+        expect(() => assertConsistent(db, owner)).toThrow(/přehled 2026: příjmy bez kurzu/);
+      } finally {
+        shifted.unconverted = 0;
       }
     });
 
