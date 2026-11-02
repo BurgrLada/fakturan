@@ -30,11 +30,11 @@ import {
 type Amount = SQL | SQLiteColumn;
 export type SnapshotReader = Pick<Db | Tx, "select" | "transaction">;
 
-const NOTHING: Unconverted = { count: 0, byCurrency: [] };
+export const NOTHING: Unconverted = { count: 0, byCurrency: [] };
 const DEFAULT_TOP_ROWS = 10;
 
-const notAdvance = ne(invoice.type, "advance");
-const outstanding = and(openCondition, notAdvance) as SQL;
+export const notAdvance = ne(invoice.type, "advance");
+export const outstanding = and(openCondition, notAdvance) as SQL;
 const advanceOpen = and(openCondition, eq(invoice.type, "advance")) as SQL;
 
 function checkFilter(filter: ReportFilter): void {
@@ -49,7 +49,7 @@ const documentCzk = (amount: Amount): SQL =>
   sql`fx_czk(${invoice.currency}, ${amount}, ${invoice.exchangeRateMicros})`;
 
 // Without a currency filter everything is in CZK; with one, amounts stay in that currency (R-8).
-const documentMoney = (filter: ReportFilter, amount: Amount): SQL =>
+export const documentMoney = (filter: ReportFilter, amount: Amount): SQL =>
   filter.currency ? sql`${amount}` : documentCzk(amount);
 
 // A payment without its own rate takes the latest list from the week before (R-9).
@@ -60,7 +60,7 @@ const paymentRate = sql`coalesce(${payment.rateMicros}, (
     AND ${exchangeRate.listDate} >= date(${payment.paidOn}, '-7 days')
   ORDER BY ${exchangeRate.listDate} DESC LIMIT 1))`;
 
-const paymentMoney = (filter: ReportFilter): SQL =>
+export const paymentMoney = (filter: ReportFilter): SQL =>
   filter.currency
     ? sql`${payment.amountMinor}`
     : sql`fx_czk(${payment.currency}, ${payment.amountMinor}, ${paymentRate})`;
@@ -70,7 +70,11 @@ const totalWhen = (condition: SQL, value: SQL): SQL<number> =>
   sql<number>`coalesce(sum(CASE WHEN ${condition} THEN ${value} END), 0)`;
 
 // A foreign or unknown ID never widens the filter: it leaves nothing to match.
-function customerCondition(q: Reader, ownerId: string, ids: string[] | undefined): SQL | undefined {
+export function customerCondition(
+  q: Reader,
+  ownerId: string,
+  ids: string[] | undefined,
+): SQL | undefined {
   if (ids === undefined) return undefined;
   const owned =
     ids.length === 0
@@ -85,7 +89,7 @@ function customerCondition(q: Reader, ownerId: string, ids: string[] | undefined
 }
 
 // Balances are the state as of today: the period never narrows them, the other filters do.
-function stateFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
+export function stateFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
   checkFilter(filter);
   const customers = customerCondition(q, ownerId, filter.customerIds);
   return scoped(ownerId).where(invoice, (t, { and, eq }) =>
@@ -101,12 +105,12 @@ function stateFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
 const issuedIn = (filter: ReportFilter): SQL =>
   and(gte(invoice.issueDate, filter.range.from), lte(invoice.issueDate, filter.range.to)) as SQL;
 
-function documentFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
+export function documentFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
   return and(stateFilter(q, ownerId, filter), issuedIn(filter)) as SQL;
 }
 
 // Both sides of the join belong to the account; the document decides the customer and import.
-function paymentFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
+export function paymentFilter(q: Reader, ownerId: string, filter: ReportFilter): SQL {
   checkFilter(filter);
   const customers = customerCondition(q, ownerId, filter.customerIds);
   return and(
@@ -138,7 +142,7 @@ function unconvertedOf(rows: UnconvertedRow[]): Unconverted {
 }
 
 // `sum` skips NULL, so documents without a CZK value are counted here instead of vanishing (R-9).
-function documentsUnconverted(q: Reader, where: SQL, amount: Amount, converted: boolean) {
+export function documentsUnconverted(q: Reader, where: SQL, amount: Amount, converted: boolean) {
   if (!converted) return NOTHING;
   const rows = q
     .select({
@@ -154,7 +158,7 @@ function documentsUnconverted(q: Reader, where: SQL, amount: Amount, converted: 
   return unconvertedOf(rows);
 }
 
-function paymentsUnconverted(q: Reader, where: SQL, filter: ReportFilter): Unconverted {
+export function paymentsUnconverted(q: Reader, where: SQL, filter: ReportFilter): Unconverted {
   if (filter.currency) return NOTHING;
   const rows = q
     .select({

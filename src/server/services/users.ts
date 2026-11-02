@@ -14,6 +14,8 @@ import {
   bankAccount,
   catalogItem,
   customer,
+  dashboard,
+  dashboardWidget,
   file,
   invitation,
   invoice,
@@ -59,6 +61,8 @@ export type Role = "admin" | "user";
 // Every table with account data, enforced by a schema test in users.test.ts (ADM-006). Deleted in
 // this order, so a table with a non-cascading foreign key must precede the table it references.
 export const USER_OWNED_TABLES = [
+  dashboardWidget,
+  dashboard,
   session,
   account,
   supplier,

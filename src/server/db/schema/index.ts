@@ -21,3 +21,4 @@ export * from "./automation";
 export * from "./notification";
 export * from "./mail";
 export * from "./reminder";
+export * from "./dashboard";

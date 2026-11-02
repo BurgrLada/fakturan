@@ -5,7 +5,8 @@ import { TEXTS } from "@/lib/texts";
 import { FORECAST_SERIES } from "@/server/reports/forecast";
 import { AGING_BANDS, type RankedRow, type Series } from "@/server/reports/types";
 import type { ReportBundle } from "@/server/services/reports";
-import { alignPrevious, rankedName } from "@/server/services/report-export";
+import { alignPrevious } from "@/server/reports/align";
+import { rankedName } from "@/server/services/report-export";
 
 const T = TEXTS.reports;
 const token = (index: number) => CHART_TOKENS[index % CHART_TOKENS.length]!;

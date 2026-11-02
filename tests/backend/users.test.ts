@@ -13,6 +13,8 @@ import {
   account,
   auditLog,
   auditPurge,
+  dashboard,
+  dashboardWidget,
   invoice,
   instanceMeta,
   invitation,
@@ -22,6 +24,7 @@ import {
   verification,
 } from "@/server/db/schema";
 import { createCreditNote } from "@/server/services/credit-notes";
+import { createDashboard, ensureDashboards } from "@/server/services/dashboards";
 import { issueInvoice } from "@/server/services/invoice-lifecycle";
 import { mutate } from "@/server/services/mutation";
 import { listInstanceAudit } from "@/server/services/instance-audit";
@@ -291,6 +294,30 @@ describe("smazání účtu s navázanými doklady", () => {
 
     expect(db.select().from(invoice).where(eq(invoice.userId, owner)).all()).toEqual([]);
     expect(find(owner)).toBeUndefined();
+  });
+});
+
+describe("smazání účtu s dashboardy", () => {
+  test("[ADM-006] smazání účtu odstraní dashboardy a widgety", () => {
+    const owner = seedOwner(db, new Date());
+    const keep = seedOwner(db, new Date());
+    ensureDashboards(webActor(owner));
+    createDashboard(webActor(owner), { name: "Druhý" });
+    ensureDashboards(webActor(keep));
+    expect(
+      db.select().from(dashboardWidget).where(eq(dashboardWidget.userId, owner)).all(),
+    ).not.toEqual([]);
+
+    deleteUser(admin, owner, `${owner}@example.cz`);
+
+    expect(db.select().from(dashboard).where(eq(dashboard.userId, owner)).all()).toEqual([]);
+    expect(
+      db.select().from(dashboardWidget).where(eq(dashboardWidget.userId, owner)).all(),
+    ).toEqual([]);
+    expect(db.select().from(dashboard).where(eq(dashboard.userId, keep)).all()).toHaveLength(1);
+    expect(USER_OWNED_TABLES.indexOf(dashboardWidget)).toBe(
+      USER_OWNED_TABLES.indexOf(dashboard) - 1,
+    );
   });
 });
 

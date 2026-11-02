@@ -103,6 +103,20 @@ import { getRecurring } from "@/server/services/recurring";
 import { listPayments, markPaid } from "@/server/services/payments";
 import { listReminderRules, saveReminderRule } from "@/server/services/reminders";
 import { pauseRecurring, processOccurrence } from "@/server/services/recurring-run";
+import { WIDGET_GALLERY } from "@/lib/dashboard-defaults";
+import {
+  createDashboard,
+  deleteDashboard,
+  duplicateDashboard,
+  ensureDashboards,
+  getDashboard,
+  listDashboards,
+  renameDashboard,
+  saveLayout,
+  setDefaultDashboard,
+} from "@/server/services/dashboards";
+import { addWidget, removeWidget, updateWidget } from "@/server/services/widgets";
+import { assertIsolated } from "../helpers/isolation";
 import { createTestDb } from "../helpers/db";
 import { planInput, savePlan } from "../helpers/fixtures-recurring";
 
@@ -695,5 +709,72 @@ describe("cizí id přes server actions", () => {
       candidates: [{ id: mine.invoiceId, suggested: true }],
     });
     expect(await dismissNoticeAction({ id: noticeId })).toEqual({ ok: true });
+  });
+});
+
+describe("dashboardy", () => {
+  const chart = WIDGET_GALLERY.find((item) => item.id === "revenue_by_month")!.config;
+  let round = 0;
+  const owners = (): [string, string] => {
+    round += 1;
+    const pair: [string, string] = [`dash-a-${round}`, `dash-b-${round}`];
+    for (const id of pair) seed(id);
+    return pair;
+  };
+  const widgetOf = (ownerId: string, id: string) =>
+    listDashboards(ownerId)
+      .flatMap((row) => getDashboard(ownerId, row.id)!.widgets)
+      .find((widget) => widget.id === id);
+
+  test("[TST-009] cizí dashboard i widget nejde číst, měnit ani smazat", async () => {
+    await assertIsolated({
+      owners: owners(),
+      create: (ownerId) => {
+        ensureDashboards(actor(ownerId));
+        return createDashboard(actor(ownerId), { name: "Obchod" }).id;
+      },
+      find: (ownerId, id) => getDashboard(ownerId, id),
+      list: (ownerId) => listDashboards(ownerId).map((row) => row.id),
+      update: (ownerId, id) => {
+        renameDashboard(actor(ownerId), { id, name: `Přejmenováno ${ownerId}` });
+        return 1;
+      },
+      remove: (ownerId, id) => {
+        deleteDashboard(actor(ownerId), { id });
+        return 1;
+      },
+    });
+
+    await assertIsolated({
+      owners: owners(),
+      create: (ownerId) => {
+        const [home] = ensureDashboards(actor(ownerId));
+        return addWidget(actor(ownerId), { dashboardId: home!.id, config: chart }).id;
+      },
+      find: (ownerId, id) => widgetOf(ownerId, id),
+      update: (ownerId, id) => {
+        updateWidget(actor(ownerId), { id, config: { ...chart, title: ownerId } });
+        return 1;
+      },
+      remove: (ownerId, id) => {
+        removeWidget(actor(ownerId), { id });
+        return 1;
+      },
+    });
+
+    const [mine, stranger] = owners();
+    const [home] = ensureDashboards(actor(mine));
+    ensureDashboards(actor(stranger));
+    const before = getDashboard(mine, home!.id)!;
+    const items = before.widgets.map(({ id, x, y, w, h }) => ({ id, x, y, w: w + 1, h }));
+    const attempts = [
+      () => duplicateDashboard(actor(stranger), { id: home!.id }),
+      () => setDefaultDashboard(actor(stranger), { id: home!.id }),
+      () => saveLayout(actor(stranger), { id: home!.id, revision: before.revision, items }),
+      () => addWidget(actor(stranger), { dashboardId: home!.id, config: chart }),
+    ];
+    for (const attempt of attempts) expect(attempt).toThrow();
+    expect(getDashboard(mine, home!.id)).toEqual(before);
+    expect(listDashboards(stranger)).toHaveLength(1);
   });
 });

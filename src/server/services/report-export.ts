@@ -7,6 +7,7 @@ import { TEXTS } from "@/lib/texts";
 import { toXlsx } from "@/lib/xlsx-writer";
 import type { Actor } from "../audit/context";
 import { FORECAST_SERIES } from "../reports/forecast";
+import { alignPrevious } from "../reports/align";
 import { AGING_BANDS, type RankedRow, type Series, type Unconverted } from "../reports/types";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError } from "./access";
@@ -28,19 +29,6 @@ function unconvertedRows(unconverted: Unconverted, width: number): Cell[][] {
     money(amountMinor, currency),
     ...pad,
   ]);
-}
-
-// The previous period can have one bucket more or less than the current one (a custom range of
-// equal days crosses another number of month ends). Buckets pair from the end, and any surplus
-// previous buckets fold into the first row, so the column still adds up to the previous summary.
-export function alignPrevious(current: Series, previous: Series): number[] {
-  const values = previous.points.map((point) => point.amountMinor);
-  const surplus = values.length - current.points.length;
-  if (surplus > 0 && current.points.length > 0) {
-    const head = values.slice(0, surplus + 1).reduce((sum, value) => sum + value, 0);
-    return [head, ...values.slice(surplus + 1)];
-  }
-  return current.points.map((_, index) => values[index + surplus] ?? 0);
 }
 
 function merged(list: Unconverted[]): Unconverted {
