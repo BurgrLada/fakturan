@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import GridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
+// Loaded with the editor chunk only; the overrides must come after the library's own rules.
+import "react-grid-layout/css/styles.css";
+import "./grid-editor.css";
 import { removeWidgetAction, saveLayoutAction } from "@/app/(app)/dashboardy/actions";
 import {
   AlertDialog,

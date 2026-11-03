@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { calendarDateInPrague } from "@/lib/number-format";
 import type { QueryWidgetConfig } from "@/lib/widget-config";
 import { expect, test } from "./fixtures";
+import { watchGridChunk } from "./grid-chunk";
 import { addCustomer, addSupplier, CUSTOMER, PASSWORD, register } from "./invoice-helpers";
 import { accountWithInvoice, cashInvoice, money, openReports } from "./report-helpers";
 
@@ -194,8 +195,8 @@ test("[DSH-004] [UI-007] na šířce 390 px jsou widgety pod sebou a RGL se nena
   freshApp,
 }) => {
   const { baseURL } = freshApp;
-  const scripts: string[] = [];
-  page.on("request", (request) => scripts.push(request.url()));
+  const gridScript = watchGridChunk(page);
+  const gridStyles = watchGridChunk(page, "stylesheet");
   await page.setViewportSize({ width: 390, height: 844 });
   await register(page, baseURL);
   await page.goto(baseURL);
@@ -215,8 +216,10 @@ test("[DSH-004] [UI-007] na šířce 390 px jsou widgety pod sebou a RGL se nena
   }
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
-  expect(scripts.filter((url) => /react-grid-layout/i.test(url))).toEqual([]);
   await expect(page.locator(".react-grid-layout")).toHaveCount(0);
+  // dashboard-edit.spec.ts shows the same watchers find both once the editor opens.
+  expect(gridScript()).toBe(false);
+  expect(gridStyles()).toBe(false);
 });
 
 test("[REM-009] výchozí Přehled ukazuje po splatnosti a blížící se splatnost", async ({

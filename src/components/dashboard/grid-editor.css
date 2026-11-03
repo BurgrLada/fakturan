@@ -1,0 +1,21 @@
+/* react-grid-layout ships fixed colours; the editor uses the theme tokens instead (UI-003). */
+.react-grid-item.react-grid-placeholder {
+  background: var(--primary);
+  border-radius: var(--radius);
+  opacity: 0.15;
+}
+
+.react-grid-item > .react-resizable-handle {
+  opacity: 1;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  border-color: var(--muted-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-grid-layout,
+  .react-grid-item {
+    transition: none;
+  }
+}

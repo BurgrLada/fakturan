@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import Database from "better-sqlite3";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { expect, test } from "./fixtures";
+import { watchGridChunk } from "./grid-chunk";
 import { register } from "./invoice-helpers";
 import { accountWithInvoice, cashInvoice, money } from "./report-helpers";
 
@@ -46,19 +47,6 @@ async function dragBy(page: Page, handle: Locator, dx: number, dy: number) {
 async function gridStep(page: Page) {
   const width = (await page.getByTestId("grid-editor").boundingBox())!.width;
   return { column: (width - 16 * 11) / 12 + 16, row: 72 + 16 };
-}
-
-// The drag library's own class name, found only in the chunk that bundles it.
-const GRID_MARKER = "react-grid-placeholder";
-
-function watchGridChunk(page: Page): () => boolean {
-  let loaded = false;
-  page.on("response", async (response) => {
-    if (response.request().resourceType() !== "script") return;
-    const body = await response.text().catch(() => "");
-    if (body.includes(GRID_MARKER)) loaded = true;
-  });
-  return () => loaded;
 }
 
 function previewRequests(page: Page, delayed: (body: string) => boolean, ms: number) {
@@ -400,6 +388,7 @@ test("[REM-009] karta REM-009 nemá v úpravách akci odebrat", async ({ page, f
 test("[UI-007] na telefonu chybí vstup do úprav a Přehled jde číst", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
   const gridLoaded = watchGridChunk(page);
+  const gridStyles = watchGridChunk(page, "stylesheet");
   await page.setViewportSize({ width: 390, height: 844 });
   await register(page, baseURL);
   await page.goto(baseURL);
@@ -415,9 +404,11 @@ test("[UI-007] na telefonu chybí vstup do úprav a Přehled jde číst", async 
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
   expect(gridLoaded()).toBe(false);
+  expect(gridStyles()).toBe(false);
 
   // The same check finds the library once the editor is wide enough to load it.
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(page.locator(".react-grid-layout")).toBeVisible();
   await expect.poll(gridLoaded).toBe(true);
+  await expect.poll(gridStyles).toBe(true);
 });
