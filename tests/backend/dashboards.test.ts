@@ -252,6 +252,36 @@ describe("widgety a rozložení", () => {
     ).toMatchObject({ title: "Splatnosti" });
   });
 
+  test("[REM-009] karta je na novém i duplikovaném dashboardu a nejde odebrat", () => {
+    const id = owner();
+    const [home] = ensureDashboards(actor(id));
+    const { id: fresh } = createDashboard(actor(id), { name: "Nový" });
+    const { id: copy } = duplicateDashboard(actor(id), { id: home!.id });
+    for (const dashboardId of [home!.id, fresh, copy]) {
+      const pinned = getDashboard(id, dashboardId)!.widgets.filter(
+        (w) => w.config && isPinnedWidget(w.config),
+      );
+      expect(pinned, dashboardId).toHaveLength(1);
+      expect(() => removeWidget(actor(id), { id: pinned[0]!.id })).toThrow(E.pinned);
+    }
+  });
+
+  test("poškozený uložený JSON vrátí jen tento widget bez konfigurace", () => {
+    const id = owner();
+    const [home] = ensureDashboards(actor(id));
+    const [first, second] = getDashboard(id, home!.id)!.widgets;
+    db.$client
+      .prepare("UPDATE dashboard_widget SET config = ? WHERE id = ?")
+      .run("{nejde o json", first!.id);
+    db.$client
+      .prepare("UPDATE dashboard_widget SET config = ? WHERE id = ?")
+      .run(JSON.stringify({ v: 1, kind: "query", title: "Vadný" }), second!.id);
+    const widgets = getDashboard(id, home!.id)!.widgets;
+    expect(widgets.find((w) => w.id === first!.id)!.config).toBeNull();
+    expect(widgets.find((w) => w.id === second!.id)!.config).toBeNull();
+    expect(widgets.filter((w) => w.config !== null)).toHaveLength(widgets.length - 2);
+  });
+
   test("[DSH-018] uložení widgetu odmítne neplatnou konfiguraci s cestou", () => {
     const id = owner();
     const [home] = ensureDashboards(actor(id));

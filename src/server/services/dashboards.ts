@@ -76,11 +76,23 @@ export function listDashboards(ownerId: string): DashboardSummary[] {
   return listIn(db, ownerId);
 }
 
+// Read as text, so a row that is not even JSON fails alone instead of the whole query.
+function storedConfig(raw: string): WidgetConfig | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const parsed = widgetConfigSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 export function widgetsIn(q: Reader, ownerId: string, dashboardId: string): DashboardWidgetView[] {
   return q
     .select({
       id: dashboardWidget.id,
-      config: dashboardWidget.config,
+      raw: sql<string>`${dashboardWidget.config}`,
       x: dashboardWidget.x,
       y: dashboardWidget.y,
       w: dashboardWidget.w,
@@ -90,10 +102,7 @@ export function widgetsIn(q: Reader, ownerId: string, dashboardId: string): Dash
     .where(scoped(ownerId).where(dashboardWidget, (t, { eq }) => eq(t.dashboardId, dashboardId)))
     .orderBy(asc(dashboardWidget.y), asc(dashboardWidget.x), asc(dashboardWidget.id))
     .all()
-    .map((row) => {
-      const parsed = widgetConfigSchema.safeParse(row.config);
-      return { ...row, config: parsed.success ? parsed.data : null };
-    });
+    .map(({ raw, ...row }) => ({ ...row, config: storedConfig(raw) }));
 }
 
 export function dashboardIn(q: Reader, ownerId: string, id: string): DashboardSummary {

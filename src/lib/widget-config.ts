@@ -79,6 +79,8 @@ export type WidgetMeasure = (typeof WIDGET_MEASURES)[number];
 export type WidgetGroup = (typeof WIDGET_GROUPS)[number];
 export type CategoryGroup = (typeof CATEGORY_GROUPS)[number];
 export type WidgetFilter = (typeof WIDGET_FILTERS)[number];
+export type WidgetFormat = (typeof WIDGET_FORMATS)[number];
+export type WidgetDisplay = (typeof WIDGET_DISPLAYS)[number];
 export type SystemWidgetId = (typeof SYSTEM_WIDGET_IDS)[number];
 
 type SourceFields = {

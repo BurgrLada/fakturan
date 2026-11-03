@@ -21,11 +21,24 @@ test("[UI-009] nepřihlášený je z přehledu poslán na přihlášení", async
   await expect(page).toHaveURL(/\/prihlaseni$/);
 });
 
-test("[UI-009] přehled bez dat ukazuje prázdný stav s další akcí", async ({ page, freshApp }) => {
+test("[UI-009] přehled bez dat ukazuje prázdné widgety s další akcí", async ({
+  page,
+  freshApp,
+}) => {
   await registerAdmin(page, freshApp.baseURL);
-  await expect(page.getByRole("heading", { name: "Vítejte ve Fakturanu" })).toBeVisible();
-  await page.getByRole("link", { name: "Otevřít nastavení účtu" }).click();
-  await expect(page.getByRole("heading", { name: "Účet", level: 1 })).toBeVisible();
+  const card = page.getByRole("region", { name: "Fakturováno letos", exact: true });
+  await expect(card.getByTestId("widget-empty")).toBeVisible();
+  await card.getByRole("link", { name: "Nová faktura" }).click();
+  await expect(page).toHaveURL(/\/faktury\//);
+});
+
+test("logo v hlavičce je odkaz na Přehled", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await registerAdmin(page, baseURL);
+  await page.goto(`${baseURL}/faktury`);
+  await page.getByRole("link", { name: "Fakturan, přejít na Přehled" }).click();
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await expect(page.getByRole("heading", { name: "Přehled", level: 1 })).toBeVisible();
 });
 
 test("[UI-009] Statistiky už nejsou Připravujeme a neznámá adresa vrátí 404", async ({

@@ -1,6 +1,7 @@
 "use client";
 
 import { Menu, X } from "lucide-react";
+import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -60,7 +61,9 @@ export function AppShell({
         )}
       >
         <div className="flex items-center justify-between">
-          <Logo className="w-36" />
+          <Link href="/" aria-label={TEXTS.shell.home} className="rounded-sm">
+            <Logo className="w-36" />
+          </Link>
           <div className="hidden md:block">{bell}</div>
         </div>
         {nav}

@@ -6,7 +6,6 @@ import { TEXTS } from "@/lib/texts";
 import type { AlertRow } from "@/server/services/due-alerts";
 
 const T = TEXTS.reminders.alerts;
-const MAX_ROWS = 5;
 
 function Group({
   title,
@@ -14,12 +13,14 @@ function Group({
   testId,
   href,
   dateFormat,
+  limit,
 }: {
   title: string;
   rows: AlertRow[];
   dateFormat: DateFormat;
   testId: string;
   href: string;
+  limit: number;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -28,7 +29,7 @@ function Group({
         {title} ({rows.length})
       </h3>
       <ul className="flex flex-col gap-1 text-sm">
-        {rows.slice(0, MAX_ROWS).map((row) => (
+        {rows.slice(0, limit).map((row) => (
           <li key={row.id} className="flex flex-wrap gap-x-2">
             <Link href={`/faktury/${row.id}`} className="underline underline-offset-4">
               {row.number}
@@ -48,29 +49,27 @@ function Group({
   );
 }
 
+// The card around it is the pinned due_alerts widget, which gives it its title (R-20).
 export function DueAlerts({
   overdue,
   dueSoon,
   dateFormat,
+  limit,
 }: {
   overdue: AlertRow[];
   dueSoon: AlertRow[];
   dateFormat: DateFormat;
+  limit: number;
 }) {
   if (overdue.length + dueSoon.length === 0) return null;
   return (
-    <section
-      aria-labelledby="due-alerts-title"
-      className="flex flex-col gap-3 rounded-lg border p-4 sm:max-w-xl"
-    >
-      <h2 id="due-alerts-title" className="text-lg">
-        {T.title}
-      </h2>
+    <div className="flex flex-col gap-3">
       <Group
         title={T.overdue}
         rows={overdue}
         testId="alerts-overdue"
         dateFormat={dateFormat}
+        limit={limit}
         href="/faktury?stav=po-splatnosti"
       />
       <Group
@@ -78,8 +77,9 @@ export function DueAlerts({
         rows={dueSoon}
         testId="alerts-due-soon"
         dateFormat={dateFormat}
+        limit={limit}
         href="/faktury?razeni=splatnost&smer=asc"
       />
-    </section>
+    </div>
   );
 }

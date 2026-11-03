@@ -1,16 +1,14 @@
 import "server-only";
 import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
-import type { Currency } from "@/lib/currency";
+import type { GlobalFilter } from "@/lib/dashboard-filter";
 import { isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
   bucketsBetween,
   previousRange,
   resolvePeriod,
   type BucketUnit,
-  type CompareMode,
   type DateRange,
-  type Period,
 } from "@/lib/report-period";
 import { TEXTS } from "@/lib/texts";
 import {
@@ -36,6 +34,7 @@ import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "../services/access";
 import { alignPrevious } from "./align";
 import * as core from "./queries";
+import type { SystemDetail } from "./system-widgets";
 import type { ReportFilter, Unconverted } from "./types";
 
 const C = TEXTS.dashboard.config;
@@ -43,7 +42,7 @@ const C = TEXTS.dashboard.config;
 export type WidgetContext = {
   today: CalendarDate;
   // The dashboard filter in the URL (R-21): its period wins, its currency intersects.
-  globalFilter?: { period?: Period; currency?: Currency; compare?: CompareMode };
+  globalFilter?: GlobalFilter;
 };
 
 export type WidgetPoint = { key: string; value: number | null };
@@ -67,10 +66,12 @@ export type WidgetResult = {
   unconverted: Unconverted;
   // A median, average, minimum or maximum cannot fold into "Ostatní", so rows past 50 are dropped.
   truncated?: true;
+  // What a system widget shows beyond numbers, such as the rows of the due alerts card.
+  detail?: SystemDetail;
 };
 
 export type SystemWidgetRunner = (
-  q: Reader,
+  q: core.SnapshotReader & Reader,
   ownerId: string,
   config: SystemWidgetConfig,
   context: WidgetContext,
@@ -428,15 +429,28 @@ function compute(
   return { total, series, rows, unconverted, ...(truncated && { truncated: true as const }) };
 }
 
-function checkRange(range: DateRange, config: QueryWidgetConfig): void {
-  if (rangeTooLong(range)) throw new ServiceError(C.periodTooLong(MAX_PERIOD_YEARS));
+function rangeProblem(range: DateRange, config: QueryWidgetConfig): string | null {
+  if (rangeTooLong(range)) return C.periodTooLong(MAX_PERIOD_YEARS);
   if (isBucketUnit(config.groupBy) && tooManyBuckets(range, config.groupBy)) {
-    throw new ServiceError(C.tooManyBuckets(MAX_BUCKETS));
+    return C.tooManyBuckets(MAX_BUCKETS);
   }
+  return null;
 }
 
 function isBalance(config: QueryWidgetConfig): boolean {
   return config.measure === "outstanding" || config.measure === "overdue";
+}
+
+// A balance is the state as of today: neither its own nor the dashboard period narrows it.
+function queryRange(config: QueryWidgetConfig, context: WidgetContext): DateRange {
+  if (isBalance(config)) return { from: context.today, to: context.today };
+  return resolvePeriod(context.globalFilter?.period ?? config.period!, context.today);
+}
+
+// The reason runWidget would refuse the period, checked before the cache so the card can say it.
+export function widgetProblem(config: WidgetConfig, context: WidgetContext): string | null {
+  if (config.kind !== "query" || isBalance(config)) return null;
+  return rangeProblem(queryRange(config, context), config);
 }
 
 function asSeries(series: WidgetSeries | undefined) {
@@ -452,11 +466,9 @@ function runQuery(
 ): WidgetResult {
   const global = context.globalFilter ?? {};
   const balance = isBalance(config);
-  // A balance is the state as of today: neither its own nor the dashboard period narrows it.
-  const range = balance
-    ? { from: context.today, to: context.today }
-    : resolvePeriod(global.period ?? config.period!, context.today);
-  if (!balance) checkRange(range, config);
+  const range = queryRange(config, context);
+  const problem = balance ? null : rangeProblem(range, config);
+  if (problem) throw new ServiceError(problem);
   const kind = isBucketUnit(config.groupBy) ? "series" : config.groupBy ? "rows" : "total";
   const own = config.filters?.currency;
   if (own && global.currency && own !== global.currency) {
@@ -506,7 +518,7 @@ export function runWidget(
   if (!isCalendarDate(context.today)) throw new RangeError(`Neplatné datum: ${context.today}`);
   const checked = parsed(config);
   return q.transaction(
-    (tx: Reader) => {
+    (tx: core.SnapshotReader & Reader) => {
       if (checked.kind === "query") return runQuery(tx, ownerId, checked, context);
       const runner = SYSTEM_WIDGET_RUNNERS[checked.systemId];
       if (!runner) throw new ServiceError(TEXTS.dashboard.errors.systemWidget);

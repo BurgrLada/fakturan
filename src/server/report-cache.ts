@@ -1,8 +1,14 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
+import { parseWidgetQuery } from "@/lib/dashboard-filter";
 import { filterFromQuery } from "@/lib/report-filter";
 import { accountTag } from "./account-cache";
+import { registerSystemWidgets } from "./reports/system-widgets";
+import type { WidgetResult } from "./reports/widget-query";
 import { reportBundle, type ReportBundle } from "./services/reports";
+import { checkedConfig, widgetResult } from "./services/widgets";
+
+registerSystemWidgets();
 
 // The only module with "use cache" and next/cache: the report core stays free of Next (ARC-001).
 // The stamp is in the key only, so any write to the account, even from the scheduler, misses the
@@ -18,4 +24,18 @@ export async function cachedReport(
   cacheTag(accountTag(userId));
   void stamp;
   return reportBundle(userId, filterFromQuery(query), today);
+}
+
+export async function cachedWidget(
+  userId: string,
+  stamp: string,
+  today: string,
+  query: string,
+): Promise<WidgetResult> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(accountTag(userId));
+  void stamp;
+  const { config, filter } = parseWidgetQuery(query);
+  return widgetResult(userId, checkedConfig(config), { today, globalFilter: filter });
 }
