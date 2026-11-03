@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
-import { invoice, recurringInvoice, recurringRun } from "@/server/db/schema";
+import { exchangeRate, invoice, recurringInvoice, recurringRun } from "@/server/db/schema";
 import { forecast, type ForecastSeries } from "@/server/reports/forecast";
 import { pauseRecurring } from "@/server/services/recurring-run";
 import {
@@ -212,6 +212,59 @@ describe("předpověď příjmů", () => {
 
     expect(series(owner, "open")).toEqual([0, 300_000, 0, 0, 0, 0]);
     expect(series(owner, "advances")).toEqual([70_000, 0, 0, 0, 0, 0]);
+  });
+
+  test("[REP-003] koncept konečné faktury po záloze přidá doplatek k připraveným konceptům", () => {
+    const { owner, customer } = account();
+    const advance = issuedDocument(owner, customer, {
+      type: "advance",
+      issueDate: "2026-10-25",
+      dueDate: "2026-11-30",
+      totalMinor: 70_000,
+    });
+    pay(owner, advance, REPORT_TODAY, 70_000);
+    const final = db.select().from(invoice).where(eq(invoice.relatedInvoiceId, advance)).get()!;
+    expect(final).toMatchObject({ status: "draft", type: "invoice", advanceMinor: 70_000 });
+    db.update(invoice).set({ totalMinor: 100_000 }).where(eq(invoice.id, final.id)).run();
+    at(REPORT_TODAY);
+
+    expect(series(owner, "plannedDrafts")).toEqual([0, 30_000, 0, 0, 0, 0]);
+    expect(series(owner, "advances")).toEqual([0, 0, 0, 0, 0, 0]);
+  });
+
+  test("[REP-003] kurz výskytu se odvodí z dnešního data, ne z hodin", () => {
+    const { owner, customer } = account();
+    for (const [listDate, rateMicros] of [
+      ["2026-10-30", 30_000_000],
+      ["2026-11-02", 31_000_000],
+    ] as const) {
+      db.insert(exchangeRate)
+        .values({
+          currency: "GBP",
+          listDate,
+          rateMicros,
+          fetchedAt: new Date(`${listDate}T13:00:00Z`),
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+    // The first occurrence is today, the only day whose rate depends on the hour of publication.
+    plan(owner, customer, {
+      issueDay: 2,
+      document: planDocument({ currency: "GBP", paymentMethod: "cash" }),
+    });
+    const at = (iso: string) => {
+      setClockForTests({ now: () => new Date(iso) });
+      return forecast(db, owner, REPORT_TODAY).map((month) => month.planned);
+    };
+
+    const morning = at(`${REPORT_TODAY}T08:00:00Z`);
+    const afternoon = at(`${REPORT_TODAY}T15:00:00Z`);
+    const later = at("2027-03-01T08:00:00Z");
+
+    expect(morning).toEqual(afternoon);
+    expect(later).toEqual(afternoon);
+    expect(morning[0]).toBeGreaterThan(0);
   });
 
   test("předpověď ani limity nevidí data cizího účtu", () => {

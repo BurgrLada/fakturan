@@ -176,9 +176,9 @@ export const TEXTS = {
       overdue: "Po splatnosti",
       open: "Otevřené faktury",
       planned: "Pravidelné faktury",
-      plannedDrafts: "Koncepty z plánů",
+      plannedDrafts: "Koncepty z plánů a záloh",
       advances: "Zálohy",
-      note: "Odhad z otevřených faktur podle splatnosti a z aktivních pravidelných faktur na 6 měsíců.",
+      note: "Odhad z otevřených faktur podle splatnosti, z aktivních pravidelných faktur a z konceptů konečných faktur po záloze na 6 měsíců.",
     },
   },
   dashboard: {

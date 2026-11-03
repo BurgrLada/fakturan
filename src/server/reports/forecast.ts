@@ -7,7 +7,6 @@ import { isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import { dueSql, openCondition } from "../db/invoice-sql";
 import { invoice, recurringInvoice } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { clock } from "../clock";
 import type { Reader } from "../services/access";
 import { resolveRate } from "../services/exchange-rates";
 import { totalsOf } from "../services/invoices";
@@ -66,6 +65,12 @@ export function forecast(
   });
 }
 
+// Late evening in Prague on `today`, after the CNB list is out: rates then follow the stored lists
+// and `today` alone, never the hour the cached result happened to be computed at.
+function rateMoment(today: CalendarDate): Date {
+  return new Date(`${today}T20:00:00Z`);
+}
+
 function forecastIn(
   q: Reader,
   ownerId: string,
@@ -73,6 +78,7 @@ function forecastIn(
   months: number,
 ): ForecastMonth[] {
   const keys = monthKeys(today, months);
+  const now = rateMoment(today);
   const result: ForecastMonth[] = keys.map((month) => ({
     month,
     overdue: 0,
@@ -127,7 +133,13 @@ function forecastIn(
     .from(invoice)
     .where(
       scoped(ownerId).where(invoice, (t) =>
-        or(openCondition, and(eq(t.status, "draft"), isNotNull(t.recurringId))),
+        or(
+          openCondition,
+          and(eq(t.status, "draft"), isNotNull(t.recurringId)),
+          // The final invoice the advance automation (or the convert button) drafted: the rest
+          // after the advance is expected, unlike a draft typed by hand (REP-007).
+          and(eq(t.status, "draft"), eq(t.type, "invoice"), isNotNull(t.relatedInvoiceId)),
+        ),
       ),
     )
     .all();
@@ -138,8 +150,8 @@ function forecastIn(
         row.rateMicros ??
         (row.currency === "CZK"
           ? null
-          : (resolveRate(q, ownerId, row.currency, row.issueDate ?? today, clock.now())
-              ?.rateMicros ?? null));
+          : (resolveRate(q, ownerId, row.currency, row.issueDate ?? today, now)?.rateMicros ??
+            null));
       add(
         advance ? "advances" : "plannedDrafts",
         row.dueDate,
@@ -169,8 +181,7 @@ function forecastIn(
       const rate =
         document.currency === "CZK"
           ? null
-          : (resolveRate(q, ownerId, document.currency, occurrence, clock.now())?.rateMicros ??
-            null);
+          : (resolveRate(q, ownerId, document.currency, occurrence, now)?.rateMicros ?? null);
       add(series, due, document.currency, amountMinor, rate);
     }
   }
