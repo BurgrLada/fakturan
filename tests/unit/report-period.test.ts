@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { bucketKey, bucketsBetween, previousRange, resolvePeriod } from "@/lib/report-period";
+import {
+  bucketKey,
+  bucketsBetween,
+  comparisonRange,
+  previousRange,
+  resolvePeriod,
+} from "@/lib/report-period";
 
 const TODAY = "2026-11-02";
 
@@ -93,6 +99,64 @@ describe("období", () => {
       from: "2027-02-01",
       to: "2027-02-28",
     });
+  });
+});
+
+describe("porovnání neukončeného období", () => {
+  const compared = (token: "this_month" | "this_quarter" | "this_year", today: string) => {
+    const range = resolvePeriod(token, today);
+    return {
+      previous: comparisonRange(range, "previous", today),
+      year: comparisonRange(range, "year", today),
+    };
+  };
+
+  test("[REP-001] letos k 3. 11. 2026 se porovná s 1. 1. až 3. 11. 2025", () => {
+    expect(compared("this_year", "2026-11-03")).toEqual({
+      previous: { from: "2025-01-01", to: "2025-11-03" },
+      year: { from: "2025-01-01", to: "2025-11-03" },
+    });
+  });
+
+  test("[REP-001] měsíc a čtvrtletí se porovnají do stejného dne", () => {
+    expect(compared("this_month", "2026-11-03")).toEqual({
+      previous: { from: "2026-10-01", to: "2026-10-03" },
+      year: { from: "2025-11-01", to: "2025-11-03" },
+    });
+    expect(compared("this_quarter", "2026-11-03")).toEqual({
+      previous: { from: "2026-07-01", to: "2026-08-03" },
+      year: { from: "2025-10-01", to: "2025-11-03" },
+    });
+  });
+
+  test("[REP-001] den, který kratší měsíc nemá, přejde na jeho konec", () => {
+    expect(compared("this_month", "2026-03-31").previous).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
+    expect(compared("this_quarter", "2026-05-31").previous).toEqual({
+      from: "2026-01-01",
+      to: "2026-02-28",
+    });
+    expect(compared("this_year", "2028-02-29").year).toEqual({
+      from: "2027-01-01",
+      to: "2027-02-28",
+    });
+  });
+
+  test("[REP-001] ukončené období a vlastní rozsah se porovnají celé", () => {
+    const today = "2026-11-03";
+    for (const range of [
+      resolvePeriod("last_year", today),
+      resolvePeriod("last_30_days", today),
+      resolvePeriod("last_12_months", today),
+      { from: "2026-10-01", to: "2026-10-31" },
+      { from: "2026-11-01", to: "2026-11-15" },
+    ]) {
+      for (const mode of ["previous", "year"] as const) {
+        expect(comparisonRange(range, mode, today)).toEqual(previousRange(range, mode));
+      }
+    }
   });
 });
 

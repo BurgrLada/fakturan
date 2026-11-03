@@ -1,6 +1,12 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
-import { bucketKey, bucketsBetween, previousRange, resolvePeriod } from "@/lib/report-period";
+import {
+  bucketKey,
+  bucketsBetween,
+  comparisonRange,
+  previousRange,
+  resolvePeriod,
+} from "@/lib/report-period";
 
 const DAY = 86_400_000;
 const START = Date.UTC(2000, 0, 1);
@@ -47,6 +53,8 @@ describe("předchozí období", () => {
     );
     fc.assert(
       fc.property(range, (current) => {
+        const end = new Date(Date.parse(current.to) + DAY).toISOString();
+        fc.pre(!(current.from.endsWith("-01") && end.slice(8, 10) === "01"));
         const previous = previousRange(current, "previous");
         expect(bucketsBetween(previous, "day")).toHaveLength(bucketsBetween(current, "day").length);
       }),
@@ -61,6 +69,32 @@ describe("předchozí období", () => {
         const seen = [...new Set(days.map((day) => bucketKey(day, unit as "week")))];
         expect(keys).toEqual(seen);
       }),
+    );
+  });
+
+  test("[REP-001] neukončené období se porovná se stejně dlouhým začátkem předchozího", () => {
+    fc.assert(
+      fc.property(
+        date,
+        fc.constantFrom("this_month", "this_quarter", "this_year"),
+        fc.constantFrom("previous", "year"),
+        (today, token, mode) => {
+          const current = resolvePeriod(token as "this_month", today);
+          const full = previousRange(current, mode as "year");
+          const cut = comparisonRange(current, mode as "year", today);
+          expect(cut.from).toBe(full.from);
+          expect(cut.from <= cut.to && cut.to <= full.to).toBe(true);
+          const elapsed = bucketsBetween({ from: current.from, to: today }, "month").length;
+          expect(bucketsBetween(cut, "month")).toHaveLength(elapsed);
+          const day = Number(today.slice(8));
+          expect(Number(cut.to.slice(8))).toBe(
+            Math.min(
+              day,
+              new Date(Date.UTC(+cut.to.slice(0, 4), +cut.to.slice(5, 7), 0)).getUTCDate(),
+            ),
+          );
+        },
+      ),
     );
   });
 });

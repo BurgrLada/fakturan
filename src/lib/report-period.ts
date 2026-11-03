@@ -113,6 +113,37 @@ export function previousRange(range: DateRange, mode: CompareMode): DateRange {
   return { from: addDays(to, -days), to };
 }
 
+function shiftMonths(date: CalendarDate, months: number): CalendarDate {
+  const { year, month, day } = parts(date);
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const last = lastDay(target.getUTCFullYear(), target.getUTCMonth() + 1);
+  return dateOf(target.getUTCFullYear(), target.getUTCMonth(), Math.min(day, last));
+}
+
+const ONGOING: Partial<Record<PeriodToken, number>> = {
+  this_month: 1,
+  this_quarter: 3,
+  this_year: 12,
+};
+
+// A running month, quarter or year compares with the previous one only up to the same day, so
+// "this year so far" is not set against a whole year. Finished and custom ranges compare whole;
+// a custom range equal to a running token cannot be told apart and counts as that token.
+export function comparisonRange(
+  range: DateRange,
+  mode: CompareMode,
+  today: CalendarDate,
+): DateRange {
+  const full = previousRange(range, mode);
+  const months = (Object.keys(ONGOING) as PeriodToken[]).find((token) => {
+    const resolved = resolvePeriod(token, today);
+    return resolved.from === range.from && resolved.to === range.to;
+  });
+  if (!months) return full;
+  const back = mode === "year" ? 12 : ONGOING[months]!;
+  return { from: full.from, to: shiftMonths(today, -back) };
+}
+
 // ISO 8601: the week belongs to the year of its Thursday.
 function isoWeek(date: CalendarDate): string {
   const value = new Date(Date.parse(date));

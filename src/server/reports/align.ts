@@ -1,3 +1,4 @@
+import { bucketsBetween, type BucketUnit, type DateRange } from "@/lib/report-period";
 import type { Series } from "./types";
 
 // The previous period can have one bucket more or less than the current one (a custom range of
@@ -11,4 +12,14 @@ export function alignPrevious(current: Series, previous: Series): number[] {
     return [head, ...values.slice(surplus + 1)];
   }
   return current.points.map((_, index) => values[index + surplus] ?? 0);
+}
+
+// A previous period cut short at today's date gets the buckets of the whole period back as zeros,
+// so pairing from the end still matches month with month.
+export function spanSeries(series: Series, span: DateRange, unit: BucketUnit): Series {
+  const values = new Map(series.points.map((point) => [point.key, point.amountMinor]));
+  return {
+    ...series,
+    points: bucketsBetween(span, unit).map((key) => ({ key, amountMinor: values.get(key) ?? 0 })),
+  };
 }

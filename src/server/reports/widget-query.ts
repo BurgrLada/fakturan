@@ -5,6 +5,7 @@ import type { GlobalFilter } from "@/lib/dashboard-filter";
 import { isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
   bucketsBetween,
+  comparisonRange,
   previousRange,
   resolvePeriod,
   type BucketUnit,
@@ -32,7 +33,7 @@ import { dueSql, overdueCondition } from "../db/invoice-sql";
 import { customer, invoice, invoiceLine, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "../services/access";
-import { alignPrevious } from "./align";
+import { alignPrevious, spanSeries } from "./align";
 import * as core from "./queries";
 import type { SystemDetail } from "./system-widgets";
 import type { ReportFilter, Unconverted } from "./types";
@@ -485,15 +486,15 @@ function runQuery(
   const mode = config.compare ?? (balance || config.splitBy ? undefined : global.compare);
   if (!mode || (config.groupBy && kind === "rows")) return result;
 
-  const before = { ...filter, range: previousRange(range, mode) };
+  const before = { ...filter, range: comparisonRange(range, mode, context.today) };
   const previous = compute(q, ownerId, config, before, context.today);
   const delta =
     current.total === null || previous.total === null ? null : current.total - previous.total;
   result.compare = { range: before.range, total: previous.total, delta };
-  if (kind === "series" && isAdditive(config.metric) && !config.cumulative) {
+  if (isBucketUnit(config.groupBy) && isAdditive(config.metric) && !config.cumulative) {
     result.compare.points = alignPrevious(
       asSeries(current.series[0]),
-      asSeries(previous.series[0]),
+      spanSeries(asSeries(previous.series[0]), previousRange(range, mode), config.groupBy),
     );
   }
   return result;

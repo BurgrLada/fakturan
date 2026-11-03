@@ -3,11 +3,17 @@ import type { Currency } from "@/lib/currency";
 import type { CalendarDate } from "@/lib/number-format";
 import type { TurnoverBasis } from "@/lib/preferences";
 import { bucketUnitFor, type ReportQueryFilter } from "@/lib/report-filter";
-import { previousRange, type BucketUnit, type CompareMode } from "@/lib/report-period";
+import {
+  comparisonRange,
+  previousRange,
+  type BucketUnit,
+  type CompareMode,
+} from "@/lib/report-period";
 import { NOT_IN_TOTALS } from "../db/invoice-sql";
 import { invoice, preferences } from "../db/schema";
 import { scoped } from "../db/scoped";
 import type { Reader } from "../services/access";
+import { spanSeries } from "./align";
 import { forecast, type ForecastMonth } from "./forecast";
 import * as core from "./queries";
 import { limitStates, type LimitState } from "./turnover";
@@ -67,7 +73,8 @@ export function reportBundle(
   return q.transaction(
     (tx: core.SnapshotReader & Reader) => {
       const unit = bucketUnitFor(filter.range);
-      const before = { ...filter, range: previousRange(filter.range, compare) };
+      const span = previousRange(filter.range, compare);
+      const before = { ...filter, range: comparisonRange(filter.range, compare, today) };
       const year = Number(today.slice(0, 4));
       const basis =
         tx
@@ -87,8 +94,8 @@ export function reportBundle(
         previous: core.reportSummary(tx, ownerId, before, today),
         invoiced: core.invoicedSeries(tx, ownerId, filter, unit),
         income: core.incomeSeries(tx, ownerId, filter, unit),
-        previousInvoiced: core.invoicedSeries(tx, ownerId, before, unit),
-        previousIncome: core.incomeSeries(tx, ownerId, before, unit),
+        previousInvoiced: spanSeries(core.invoicedSeries(tx, ownerId, before, unit), span, unit),
+        previousIncome: spanSeries(core.incomeSeries(tx, ownerId, before, unit), span, unit),
         aging: core.agingBands(tx, ownerId, filter, today),
         customers: core.topCustomers(tx, ownerId, filter, REPORT_TOP_ROWS),
         items: core.topItems(tx, ownerId, filter, REPORT_TOP_ROWS),

@@ -18,6 +18,9 @@ import {
   topItems,
 } from "@/server/reports/queries";
 import { runWidget, type WidgetContext } from "@/server/reports/widget-query";
+import { alignPrevious } from "@/server/reports/align";
+import { reportBundle } from "@/server/reports/bundle";
+import { parseReportFilter } from "@/lib/report-filter";
 import { ServiceError } from "@/server/services/access";
 import {
   issuedDocument,
@@ -255,6 +258,34 @@ describe("filtry a období", () => {
     expect(result.compare!.points).toEqual(core.points.map((p) => p.amountMinor));
     expect(result.compare!.total).toBe(4_410_000);
     expect(result.compare!.delta).toBe(-4_410_000);
+  });
+
+  test("[DSH-015] letošek se porovná s loňskem do stejného dne a koše sedí po měsících", () => {
+    const owner = reportOwner(db);
+    const customer = namedCustomer(owner, "Loni s.r.o.");
+    issuedDocument(owner, customer, { issueDate: "2025-03-10", totalMinor: 30_000 });
+    issuedDocument(owner, customer, { issueDate: "2025-11-02", totalMinor: 11_000 });
+    issuedDocument(owner, customer, { issueDate: "2025-11-03", totalMinor: 70_000 });
+    issuedDocument(owner, customer, { issueDate: "2026-03-05", totalMinor: 5_000 });
+
+    for (const compare of ["year", "previous"] as const) {
+      const result = run({ period: "this_year", display: "bar", groupBy: "month", compare }, owner);
+      expect(result.compare!.range).toEqual({ from: "2025-01-01", to: "2025-11-02" });
+      expect(result.compare!.total).toBe(41_000);
+      expect(result.compare!.points).toEqual([0, 0, 30_000, 0, 0, 0, 0, 0, 0, 0, 11_000, 0]);
+    }
+
+    const bundle = reportBundle(
+      db,
+      owner,
+      { ...parseReportFilter({ obdobi: "rok", porovnani: "rok" }, TODAY) },
+      TODAY,
+    );
+    expect(bundle.previousRange).toEqual({ from: "2025-01-01", to: "2025-11-02" });
+    expect(bundle.previous.invoicedMinor).toBe(41_000);
+    expect(alignPrevious(bundle.invoiced, bundle.previousInvoiced)).toEqual([
+      0, 0, 30_000, 0, 0, 0, 0, 0, 0, 0, 11_000, 0,
+    ]);
   });
 
   test("widget s období 11 let nebo denními koši nad 400 je odmítnutý", () => {
