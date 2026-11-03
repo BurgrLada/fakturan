@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { accountWithInvoice } from "./report-helpers";
 
 const PASSWORD = "správné-kůň-baterie-sponka";
 const PNG = Buffer.from(
@@ -227,7 +228,8 @@ test("[UI-011] hlídání každého limitu jde vypnout a Statistiky ho pak nehl�
   freshApp,
 }) => {
   const { baseURL } = freshApp;
-  await register(page, baseURL);
+  // Statistics show the limits only once the account has an issued document.
+  await accountWithInvoice(page, baseURL);
   await page.goto(`${baseURL}/nastaveni/vychozi`);
   await page.waitForLoadState("networkidle");
   const vatWatch = page.getByLabel("Hlídat limit pro registraci k DPH");
