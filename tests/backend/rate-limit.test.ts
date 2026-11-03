@@ -380,3 +380,12 @@ describe("cookies relace", () => {
     expect(line).toMatch(/SameSite=Lax/i);
   });
 });
+
+test("[SEC-001] dotaz za více pokusů spotřebuje svou cenu a nepřetáhne limit", () => {
+  const rule = { name: "costTest", limit: 10, windowSeconds: 60 };
+  const key = `cost-${Date.now()}`;
+  expect(checkRateLimit(key, rule, 6).allowed).toBe(true);
+  expect(checkRateLimit(key, rule, 5).allowed).toBe(false);
+  expect(checkRateLimit(key, rule, 4).allowed).toBe(true);
+  expect(checkRateLimit(key, rule).allowed).toBe(false);
+});

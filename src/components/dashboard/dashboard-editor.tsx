@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
@@ -9,6 +9,7 @@ import { dashboardHref } from "@/lib/dashboard-filter";
 import type { DateFormat } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import { DashboardDialogs } from "./dashboard-dialogs";
+import { ExportButton } from "./export-button";
 import type { EditorWidget } from "./grid-editor";
 import { ImportDialog } from "./import-dialog";
 
@@ -71,12 +72,7 @@ export function DashboardEditor({
           <Plus aria-hidden />
           {T.add}
         </Link>
-        <form method="post" action={`/dashboardy/${dashboard.id}/export`}>
-          <button type="submit" className={buttonVariants({ variant: "outline" })}>
-            <Download aria-hidden />
-            {S.export}
-          </button>
-        </form>
+        <ExportButton href={`/dashboardy/${dashboard.id}/export`} label={S.export} />
         <ImportDialog dateFormat={dateFormat} />
       </div>
       <DashboardDialogs dashboard={dashboard} count={count} />

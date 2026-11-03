@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   DASHBOARD_FILE_FORMAT,
   MAX_FILE_BYTES,
@@ -12,7 +12,7 @@ import {
 import { WIDGET_GALLERY } from "@/lib/dashboard-defaults";
 import { MAX_WIDGETS } from "@/lib/dashboard-layout";
 import { TEXTS } from "@/lib/texts";
-import type { WidgetConfig } from "@/lib/widget-config";
+import { widgetConfigSchema, type WidgetConfig } from "@/lib/widget-config";
 
 const S = TEXTS.dashboard.share;
 const C = TEXTS.dashboard.config;
@@ -153,5 +153,20 @@ describe("import", () => {
       ...Array(MAX_WIDGETS - 1).fill(gallery("revenue_by_month")),
     ]);
     expect(parseDashboardFile(JSON.stringify(withPinned)).ok).toBe(true);
+  });
+
+  test("[DSH-031] příliš mnoho widgetů se odmítne dřív, než se který ověří", () => {
+    const spy = vi.spyOn(widgetConfigSchema, "safeParse");
+    try {
+      const file = toDashboardFile("Plný", Array(MAX_WIDGETS + 1).fill(gallery("due_alerts")));
+      expect(parseDashboardFile(JSON.stringify(file))).toEqual({
+        ok: false,
+        path: "widgets",
+        message: S.tooManyWidgets(MAX_WIDGETS),
+      });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

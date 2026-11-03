@@ -857,9 +857,11 @@ describe("dashboardy", () => {
     const filtered = { ...chart, filters: { customerIds: [customerId] } };
     const { id: widgetId } = addWidget(actor(mine), { dashboardId: home!.id, config: filtered });
 
-    expect(() => exportDashboard(stranger, home!.id)).toThrow("Dashboard neexistuje");
-    expect(() => exportWidget(stranger, home!.id, widgetId)).toThrow("Dashboard neexistuje");
-    expect(() => exportWidget(stranger, foreignHome!.id, widgetId)).toThrow("Widget neexistuje");
+    expect(() => exportDashboard(actor(stranger), home!.id)).toThrow("Dashboard neexistuje");
+    expect(() => exportWidget(actor(stranger), home!.id, widgetId)).toThrow("Dashboard neexistuje");
+    expect(() => exportWidget(actor(stranger), foreignHome!.id, widgetId)).toThrow(
+      "Widget neexistuje",
+    );
 
     const post = (url: string) =>
       new Request(`http://localhost:3000${url}`, {

@@ -443,25 +443,44 @@ export function saveLayout(actor: Actor, raw: unknown): SavedLayout {
   }
 }
 
-// R-25: what travels is the configuration only, so a widget that no longer parses stays home.
-export function exportDashboard(ownerId: string, id: string): DashboardFile {
-  const target = dashboardIn(db, ownerId, id);
-  const configs = widgetsIn(db, ownerId, id).flatMap(({ config }) => (config ? [config] : []));
-  return toDashboardFile(target.name, configs);
+function auditedExport(actor: Actor, id: string, file: DashboardFile): DashboardFile {
+  const ownerId = ownerOf(actor);
+  mutate(actor, "dashboard.export", (_tx, audit) =>
+    audit({
+      entity: "dashboard",
+      entityId: id,
+      ownerId,
+      scope: "user",
+      after: { widgets: file.widgets.length },
+    }),
+  );
+  return file;
 }
 
-export function exportWidget(
-  ownerId: string,
-  dashboardId: string,
-  widgetId: string,
-): DashboardFile {
+// R-25: only the configuration travels. A widget that no longer parses stops the export, so the
+// file never silently misses part of the dashboard.
+export function exportDashboard(actor: Actor, id: string): DashboardFile {
+  const ownerId = ownerOf(actor);
+  enforceRateLimit(actor, RATE_RULES.exportUser);
+  const target = dashboardIn(db, ownerId, id);
+  const widgets = widgetsIn(db, ownerId, id);
+  const broken = widgets.filter((widget) => !widget.config).length;
+  if (broken > 0) throw new ServiceError(S.brokenWidgets(broken));
+  const configs = widgets.flatMap(({ config }) => (config ? [config] : []));
+  return auditedExport(actor, id, toDashboardFile(target.name, configs));
+}
+
+export function exportWidget(actor: Actor, dashboardId: string, widgetId: string): DashboardFile {
+  const ownerId = ownerOf(actor);
+  enforceRateLimit(actor, RATE_RULES.exportUser);
   dashboardIn(db, ownerId, dashboardId);
   const widget = widgetsIn(db, ownerId, dashboardId).find((row) => row.id === widgetId);
   if (!widget) throw new ServiceError(E.widgetNotFound);
   const { config } = widget;
   if (!config) throw new ServiceError(S.brokenWidget);
   const title = config.title || (config.kind === "system" ? T.gallery[config.systemId] : "");
-  return toDashboardFile((title || T.view.untitled).slice(0, 60), [config]);
+  const file = toDashboardFile((title || T.view.untitled).slice(0, 60), [config]);
+  return auditedExport(actor, dashboardId, file);
 }
 
 type Imported = { config: WidgetConfig; droppedCustomers: boolean };
@@ -544,10 +563,11 @@ export type ImportPreview = {
 export function previewImport(actor: Actor, raw: unknown): ImportPreview {
   const ownerId = ownerOf(actor);
   const file = readFile(raw);
-  enforceRateLimit(actor, RATE_RULES.widgetPreviewUser);
+  const layout = importLayout(ownWidgets(db, ownerId, file));
+  // Every widget runs a query, so the preview spends one attempt per widget, not per file.
+  enforceRateLimit(actor, RATE_RULES.widgetPreviewUser, layout.length);
   registerSystemWidgets();
   const today = calendarDateInPrague(clock.now());
-  const layout = importLayout(ownWidgets(db, ownerId, file));
   return {
     name: importName(db, ownerId, file.name),
     addedPinned: !file.widgets.some(isPinnedWidget),
@@ -573,6 +593,7 @@ export function previewImport(actor: Actor, raw: unknown): ImportPreview {
 // Always a new dashboard, never over an existing one (R-25), with the due alerts card (R-20).
 export function importDashboard(actor: Actor, raw: unknown): { id: string } {
   const ownerId = ownerOf(actor);
+  enforceRateLimit(actor, RATE_RULES.importUser);
   const file = readFile(raw);
   return mutate(actor, "dashboard.import", (tx, audit) => {
     const imported = ownWidgets(tx, ownerId, file);

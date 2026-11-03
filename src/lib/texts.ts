@@ -378,6 +378,9 @@ export const TEXTS = {
       tooManyWidgets: (max: number) =>
         `Dashboard může mít nejvýš ${max} widgetů včetně upozornění na splatnost`,
       brokenWidget: "Widget má neplatné nastavení a nejde exportovat",
+      brokenWidgets: (n: number) =>
+        `Dashboard má widgetů s neplatným nastavením: ${n}. Opravte je nebo odeberte a export zopakujte.`,
+      exportFailed: "Export se nepovedl. Zkuste to znovu.",
       importName: (name: string, n: number) => `${name} (${n})`,
       export: "Exportovat JSON",
       exportWidget: "Export",

@@ -86,6 +86,7 @@ export function parseDashboardFile(text: string): ParsedDashboardFile {
     return fail("v", S.newerVersion(value.v));
   }
   if (Array.isArray(value.widgets)) {
+    if (value.widgets.length > MAX_WIDGETS) return fail("widgets", S.tooManyWidgets(MAX_WIDGETS));
     // The import adds the due alerts card when the file has none (R-20), and it must still fit.
     const pinned = value.widgets.some((widget) => {
       const parsed = widgetConfigSchema.safeParse(widget);

@@ -14,7 +14,7 @@ import { TEXTS } from "@/lib/texts";
 import { isPinnedWidget, type WidgetConfig } from "@/lib/widget-config";
 import { accountTag } from "@/server/account-cache";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, dashboard, dashboardWidget, user } from "@/server/db/schema";
+import { auditLog, dashboard, dashboardWidget, rateLimit, user } from "@/server/db/schema";
 import { checkRateLimit } from "@/server/rate-limit";
 import { RATE_RULES } from "@/server/rate-limit";
 import {
@@ -508,7 +508,7 @@ describe("sdílení JSON", () => {
       config: { ...base, filters: { customerIds: [customerId], currency: "CZK" } },
     });
 
-    const file = exportDashboard(id, home!.id);
+    const file = exportDashboard(actor(id), home!.id);
     const text = JSON.stringify(file);
     expect(file.format).toBe("fakturan.dashboard");
     expect(file.name).toBe(home!.name);
@@ -518,16 +518,16 @@ describe("sdílení JSON", () => {
     }
     expect(file.widgets).toContainEqual({ ...base, filters: { currency: "CZK" } });
 
-    const single = exportWidget(id, home!.id, widgetId);
+    const single = exportWidget(actor(id), home!.id, widgetId);
     expect(single).toEqual({
       format: "fakturan.dashboard",
       v: 1,
       name: base.title,
       widgets: [{ ...base, filters: { currency: "CZK" } }],
     });
-    expect(() => exportWidget(id, "jiny", widgetId)).toThrow(E.notFound);
+    expect(() => exportWidget(actor(id), "jiny", widgetId)).toThrow(E.notFound);
     const [other] = ensureDashboards(actor(owner()));
-    expect(() => exportWidget(id, other!.id, widgetId)).toThrow(E.notFound);
+    expect(() => exportWidget(actor(id), other!.id, widgetId)).toThrow(E.notFound);
   });
 
   test("[DSH-032] náhled nezapíše nic a ukáže widgety nad vlastními daty", () => {
@@ -632,5 +632,63 @@ describe("sdílení JSON", () => {
     const stored = JSON.stringify(getDashboard(mine.id, id)!.widgets);
     expect(stored).not.toContain(stranger.customerId);
     expect(stored).toContain(mine.customerId);
+  });
+
+  test("[AUD-002] export dashboardu a widgetu je v auditu a má limit exportů", () => {
+    const id = owner();
+    const [home] = ensureDashboards(actor(id));
+    const widgets = getDashboard(id, home!.id)!.widgets;
+    exportDashboard(actor(id), home!.id);
+    exportWidget(actor(id), home!.id, widgets[0]!.id);
+    expect(audits(id, "dashboard.export").map((row) => row.after)).toEqual([
+      { widgets: widgets.length },
+      { widgets: 1 },
+    ]);
+    for (let i = 2; i < RATE_RULES.exportUser.limit; i++) {
+      checkRateLimit(id, RATE_RULES.exportUser);
+    }
+    expect(() => exportDashboard(actor(id), home!.id)).toThrow("Příliš mnoho pokusů");
+    expect(audits(id, "dashboard.export")).toHaveLength(2);
+  });
+
+  test("[DSH-030] dashboard s rozbitým widgetem se neexportuje potichu bez něj", () => {
+    const id = owner();
+    const [home] = ensureDashboards(actor(id));
+    const [first] = getDashboard(id, home!.id)!.widgets;
+    db.$client
+      .prepare("UPDATE dashboard_widget SET config = ? WHERE id = ?")
+      .run("{nejde o json", first!.id);
+    expect(() => exportDashboard(actor(id), home!.id)).toThrow(
+      TEXTS.dashboard.share.brokenWidgets(1),
+    );
+    expect(() => exportWidget(actor(id), home!.id, first!.id)).toThrow(
+      TEXTS.dashboard.share.brokenWidget,
+    );
+    expect(audits(id, "dashboard.export")).toHaveLength(0);
+  });
+
+  test("[DSH-032] import má limit importů a náhled stojí tolik, kolik spustí widgetů", () => {
+    const id = owner();
+    ensureDashboards(actor(id));
+    const preview = previewImport(actor(id), fixture);
+    const used = db
+      .select({ count: rateLimit.count })
+      .from(rateLimit)
+      .where(eq(rateLimit.key, `widgetPreviewUser:${id}`))
+      .get();
+    expect(used?.count).toBe(preview.widgets.length);
+    const left = RATE_RULES.widgetPreviewUser.limit - preview.widgets.length;
+    for (let i = 0; i < left - preview.widgets.length + 1; i++) {
+      checkRateLimit(id, RATE_RULES.widgetPreviewUser);
+    }
+    expect(() => previewImport(actor(id), fixture)).toThrow("Příliš mnoho pokusů");
+
+    importDashboard(actor(id), fixture);
+    for (let i = 1; i < RATE_RULES.importUser.limit; i++) {
+      checkRateLimit(id, RATE_RULES.importUser);
+    }
+    const before = listDashboards(id).length;
+    expect(() => importDashboard(actor(id), fixture)).toThrow("Příliš mnoho pokusů");
+    expect(listDashboards(id)).toHaveLength(before);
   });
 });

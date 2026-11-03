@@ -4,7 +4,7 @@ import { dashboardFileResponse } from "../../export-response";
 
 export async function POST(request: NextRequest, ctx: RouteContext<"/dashboardy/[id]/export">) {
   const { id } = await ctx.params;
-  return dashboardFileResponse(request, "fakturan-dashboard.json", (ownerId) =>
-    exportDashboard(ownerId, id),
+  return dashboardFileResponse(request, "fakturan-dashboard.json", (actor) =>
+    exportDashboard(actor, id),
   );
 }

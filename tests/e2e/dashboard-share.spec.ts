@@ -1,7 +1,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Browser, Page } from "@playwright/test";
+import Database from "better-sqlite3";
 import { expect, test } from "./fixtures";
-import { addCustomer, addSupplier, PASSWORD } from "./invoice-helpers";
+import { addCustomer, addSupplier, PASSWORD, register } from "./invoice-helpers";
 import { accountWithInvoice, cashInvoice, money } from "./report-helpers";
 
 test.setTimeout(120_000);
@@ -156,4 +158,36 @@ test("přizpůsobení dashboardu a import JSON od začátku do konce", async ({
   await expect(card(page, "Fakturováno letos").getByTestId("widget-value")).toHaveText(
     money("1 000,00 Kč"),
   );
+});
+
+test("[DSH-030] rozbitý widget nejde exportovat a chyba exportu nechá editor otevřený", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL, dataDir } = freshApp;
+  await register(page, baseURL);
+  await openEditor(page, baseURL);
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  try {
+    sqlite
+      .prepare("UPDATE dashboard_widget SET config = '{nejde o json' WHERE config LIKE ?")
+      .run("%Fakturováno letos%");
+  } finally {
+    sqlite.close();
+  }
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  const exportButtons = page.getByRole("button", { name: /^Exportovat widget .* jako JSON$/ });
+  await expect(exportButtons.first()).toBeVisible();
+  const cards = page.getByTestId("edit-widget").filter({ visible: true });
+  await expect(exportButtons).toHaveCount((await cards.count()) - 1);
+
+  await page.getByRole("button", { name: "Posunout vpravo: Uhrazeno letos" }).click();
+  await expect(page.getByText("Rozložení má neuložené změny.")).toBeVisible();
+  await page.getByRole("button", { name: "Exportovat JSON" }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "neplatným nastavením: 1" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/upravit$/);
+  await expect(page.getByText("Rozložení má neuložené změny.")).toBeVisible();
 });

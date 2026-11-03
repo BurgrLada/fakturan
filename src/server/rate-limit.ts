@@ -47,9 +47,11 @@ export const RATE_RULES = {
 } as const satisfies Record<string, RateRule>;
 
 // Fixed window. Denied attempts are not counted, so hammering a blocked key does not extend it.
+// `cost` lets one request that does the work of several spend that many attempts.
 export function checkRateLimit(
   key: string,
   rateRule: RateRule,
+  cost = 1,
 ): { allowed: boolean; retryAfterSeconds: number; firstDenial: boolean } {
   const id = `${rateRule.name}:${key}`;
   const now = clock.now();
@@ -60,10 +62,10 @@ export function checkRateLimit(
       const row = tx.select().from(rateLimit).where(eq(rateLimit.key, id)).get();
       if (!row || row.windowStart.getTime() + windowMs <= now.getTime()) {
         tx.insert(rateLimit)
-          .values({ key: id, windowStart: now, count: 1 })
+          .values({ key: id, windowStart: now, count: cost })
           .onConflictDoUpdate({
             target: rateLimit.key,
-            set: { windowStart: now, count: 1, denied: false },
+            set: { windowStart: now, count: cost, denied: false },
           })
           .run();
         tx.delete(rateLimit)
@@ -71,7 +73,7 @@ export function checkRateLimit(
           .run();
         return { allowed: true, retryAfterSeconds: 0, firstDenial: false };
       }
-      if (row.count >= rateRule.limit) {
+      if (row.count + cost > rateRule.limit) {
         const remainingMs = row.windowStart.getTime() + windowMs - now.getTime();
         if (!row.denied) {
           tx.update(rateLimit).set({ denied: true }).where(eq(rateLimit.key, id)).run();
@@ -83,7 +85,7 @@ export function checkRateLimit(
         };
       }
       tx.update(rateLimit)
-        .set({ count: row.count + 1 })
+        .set({ count: row.count + cost })
         .where(eq(rateLimit.key, id))
         .run();
       return { allowed: true, retryAfterSeconds: 0, firstDenial: false };

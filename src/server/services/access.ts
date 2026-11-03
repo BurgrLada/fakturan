@@ -26,8 +26,8 @@ export function assertAdmin(q: Reader, actor: Actor): void {
   if (row?.role !== "admin" || row.banned) throw new ServiceError("Na tuto akci nemáte oprávnění");
 }
 
-export function enforceRateLimit(actor: Actor, rule: RateRule): void {
-  const result = checkRateLimit(actor.userId ?? "system", rule);
+export function enforceRateLimit(actor: Actor, rule: RateRule, cost = 1): void {
+  const result = checkRateLimit(actor.userId ?? "system", rule, cost);
   if (result.allowed) return;
   if (result.firstDenial) {
     mutate(actor, "rate_limit.exceeded", (_tx, audit) =>

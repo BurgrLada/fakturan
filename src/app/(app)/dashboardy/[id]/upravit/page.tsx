@@ -36,6 +36,7 @@ async function EditContent({ params }: Pick<PageProps<"/dashboardy/[id]/upravit"
     title: widgetTitle(config),
     summary: summary(config),
     pinned: config !== null && isPinnedWidget(config),
+    broken: config === null,
   }));
   return (
     <>

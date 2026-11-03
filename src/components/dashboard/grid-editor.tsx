@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, GripVertical, Settings2, Trash2 } from "lucide-react";
+import { GripVertical, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -28,6 +28,7 @@ import {
 } from "@/lib/dashboard-layout";
 import { setLeaveGuard } from "@/lib/leave-guard";
 import { TEXTS } from "@/lib/texts";
+import { ExportButton } from "./export-button";
 import { LayoutButtons, type LayoutStep } from "./layout-buttons";
 
 const T = TEXTS.dashboard.edit;
@@ -41,6 +42,7 @@ export type EditorWidget = LayoutItem & {
   title: string;
   summary: string;
   pinned: boolean;
+  broken: boolean;
 };
 
 type Saved = { revision: number; items: LayoutItem[] };
@@ -294,19 +296,14 @@ export function GridEditor({
                       <Settings2 aria-hidden />
                       {T.configure}
                     </Link>
-                    <form
-                      method="post"
-                      action={`/dashboardy/${dashboard.id}/widget/${widget.id}/export`}
-                    >
-                      <button
-                        type="submit"
-                        aria-label={S.exportWidgetLabel(widget.title)}
-                        className={buttonVariants({ variant: "outline", size: "sm" })}
-                      >
-                        <Download aria-hidden />
-                        {S.exportWidget}
-                      </button>
-                    </form>
+                    {!widget.broken && (
+                      <ExportButton
+                        href={`/dashboardy/${dashboard.id}/widget/${widget.id}/export`}
+                        label={S.exportWidget}
+                        ariaLabel={S.exportWidgetLabel(widget.title)}
+                        size="sm"
+                      />
+                    )}
                     {widget.pinned ? (
                       <p className="text-xs text-muted-foreground">{T.pinned}</p>
                     ) : (

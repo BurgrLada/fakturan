@@ -7,7 +7,7 @@ export async function POST(
   ctx: RouteContext<"/dashboardy/[id]/widget/[widgetId]/export">,
 ) {
   const { id, widgetId } = await ctx.params;
-  return dashboardFileResponse(request, "fakturan-widget.json", (ownerId) =>
-    exportWidget(ownerId, id, widgetId),
+  return dashboardFileResponse(request, "fakturan-widget.json", (actor) =>
+    exportWidget(actor, id, widgetId),
   );
 }
