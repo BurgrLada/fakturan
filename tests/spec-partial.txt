@@ -10,4 +10,3 @@ INV-024	Chybí export (plán 8)	plán 8
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 ADV-005	Chybí daňový přehled	plán 8
-DSH-002	chybí UI	plán 7

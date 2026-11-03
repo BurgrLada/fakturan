@@ -16,12 +16,16 @@ import { db, type Tx } from "../db";
 import { dashboardWidget } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { RATE_RULES } from "../rate-limit";
+import { registerSystemWidgets } from "../reports/system-widgets";
 import { runWidget, type WidgetContext, type WidgetResult } from "../reports/widget-query";
 import { enforceRateLimit, ServiceError } from "./access";
 import { bumpRevision, dashboardIn, ownerOf, parseInput, Unchanged, widgetsIn } from "./dashboards";
 import { mutate } from "./mutation";
 
 const E = TEXTS.dashboard.errors;
+
+// The report core leaves system widgets to whoever runs them, and the preview runs them too.
+registerSystemWidgets();
 
 const idSchema = z.string(E.invalid).min(1, E.invalid).max(64, E.invalid);
 const addSchema = z.strictObject({ dashboardId: idSchema, config: z.unknown() });

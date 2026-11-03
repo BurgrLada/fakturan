@@ -21,6 +21,8 @@ export type ChartSpec = {
   format: ValueFormat;
   ariaLabel: string;
   ariaDescription?: string;
+  // Values written on the marks (DSH-016); ignored where marks overlap, as in grouped bars.
+  labels?: boolean;
 };
 
 const NUMBER = new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 });

@@ -1,17 +1,11 @@
 import { Suspense, type CSSProperties } from "react";
 import { TEXTS } from "@/lib/texts";
-import type { WidgetConfig } from "@/lib/widget-config";
 import type { DashboardWidgetView } from "@/server/services/dashboards";
 import { WidgetBody, type WidgetEnv } from "./widget-body";
 import { WidgetErrorBoundary, WidgetErrorMessage } from "./widget-error";
+import { widgetTitle } from "./widget-view";
 
 const V = TEXTS.dashboard.view;
-
-export function widgetTitle(config: WidgetConfig | null): string {
-  if (!config) return V.untitled;
-  if (config.title) return config.title;
-  return config.kind === "system" ? TEXTS.dashboard.gallery[config.systemId] : V.untitled;
-}
 
 function WidgetLoading() {
   return (

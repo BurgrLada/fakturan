@@ -1,6 +1,16 @@
 "use client";
 
-import { areaY, barY, cell, colorLegend, defineChart, group, lineY, stack } from "@tanstack/charts";
+import {
+  areaY,
+  barY,
+  cell,
+  colorLegend,
+  defineChart,
+  group,
+  lineY,
+  stack,
+  text,
+} from "@tanstack/charts";
 import { pie, polar, radialArc } from "@tanstack/charts/polar";
 import { Chart as TanChart, type ChartProps } from "@tanstack/charts/react";
 import { scaleBand } from "@tanstack/charts/scales/band";
@@ -40,6 +50,20 @@ function buildDefinition(spec: ChartSpec) {
       `${point.datum.label}\n${point.datum.series}: ${money(point.datum.value)}`,
   };
   const xTicks = { format: xLabel };
+  const valueLabels = (single: boolean) =>
+    spec.labels && (single ? spec.series.length === 1 : true)
+      ? [
+          text(data, {
+            x: "x",
+            y: "value",
+            text: (datum: ChartDatum) => money(datum.value),
+            key: (datum: ChartDatum) => `${datum.series}|${datum.x}`,
+            fill: "var(--foreground)",
+            fontSize: 11,
+            dy: -8,
+          }),
+        ]
+      : [];
   const yScale = {
     scale: scaleLinear,
     grid: true,
@@ -58,6 +82,7 @@ function buildDefinition(spec: ChartSpec) {
             layout: spec.kind === "bar" ? group() : stack(),
             radius: { end: 2 },
           }),
+          ...(spec.kind === "bar" ? valueLabels(true) : []),
         ],
         scales: {
           x: { scale: () => scaleBand<string>().padding(0.2), axis: { ticks: xTicks } },
@@ -68,7 +93,10 @@ function buildDefinition(spec: ChartSpec) {
       });
     case "line":
       return defineChart({
-        marks: [lineY(data, { x: "x", y: "value", z: "series", color: "series", strokeWidth: 2 })],
+        marks: [
+          lineY(data, { x: "x", y: "value", z: "series", color: "series", strokeWidth: 2 }),
+          ...valueLabels(false),
+        ],
         scales: {
           x: { scale: () => scalePoint<string>().padding(0.3), axis: { ticks: xTicks } },
           y: yScale,
@@ -80,6 +108,7 @@ function buildDefinition(spec: ChartSpec) {
       return defineChart({
         marks: [
           areaY(data, { x: "x", y: "value", z: "series", color: "series", fillOpacity: 0.7 }),
+          ...valueLabels(false),
         ],
         scales: {
           x: { scale: () => scalePoint<string>().padding(0.3), axis: { ticks: xTicks } },

@@ -3,12 +3,9 @@ import { cacheLife, cacheTag } from "next/cache";
 import { parseWidgetQuery } from "@/lib/dashboard-filter";
 import { filterFromQuery } from "@/lib/report-filter";
 import { accountTag } from "./account-cache";
-import { registerSystemWidgets } from "./reports/system-widgets";
 import type { WidgetResult } from "./reports/widget-query";
 import { reportBundle, type ReportBundle } from "./services/reports";
 import { checkedConfig, widgetResult } from "./services/widgets";
-
-registerSystemWidgets();
 
 // The only module with "use cache" and next/cache: the report core stays free of Next (ARC-001).
 // The stamp is in the key only, so any write to the account, even from the scheduler, misses the

@@ -3,9 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  addWidgetAction,
+  previewWidgetAction,
+  saveLayoutAction,
+  updateWidgetAction,
+} from "@/app/(app)/dashboardy/actions";
 import { DEFAULT_DASHBOARD, WIDGET_GALLERY } from "@/lib/dashboard-defaults";
 import { TEXTS } from "@/lib/texts";
 import { isPinnedWidget, type WidgetConfig } from "@/lib/widget-config";
+import { accountTag } from "@/server/account-cache";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, dashboard, dashboardWidget, user } from "@/server/db/schema";
 import { checkRateLimit } from "@/server/rate-limit";
@@ -25,6 +32,14 @@ import { addWidget, previewWidget, removeWidget, updateWidget } from "@/server/s
 import { createTestDb } from "../helpers/db";
 import { runDashboardWorkers } from "../helpers/run-workers";
 
+const session = vi.hoisted(() => ({ userId: "" }));
+const cache = vi.hoisted(() => ({ revalidatePath: vi.fn(), updateTag: vi.fn() }));
+
+vi.mock("@/server/auth/session", () => ({
+  getCurrentSession: async () => (session.userId ? { user: { id: session.userId } } : null),
+  actorFromRequest: async () => ({ userId: session.userId, source: "web" }),
+}));
+vi.mock("next/cache", () => cache);
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
 vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
@@ -367,5 +382,91 @@ describe("widgety a rozložení", () => {
     });
     expect(home).toBeDefined();
     expect(db.select().from(dashboard).where(eq(dashboard.userId, id)).all()).toHaveLength(2);
+  });
+});
+
+describe("akce dashboardu", () => {
+  const boxes = (dashboardId: string, ownerId: string) =>
+    getDashboard(ownerId, dashboardId)!.widgets.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
+
+  test("[DSH-001] stará revize rozložení je odmítnutá", async () => {
+    const id = owner();
+    session.userId = id;
+    const [home] = ensureDashboards(actor(id));
+    const view = getDashboard(id, home!.id)!;
+    const items = boxes(home!.id, id);
+    const wider = items.map((item, index) => (index === 0 ? { ...item, w: item.w + 1 } : item));
+    cache.updateTag.mockClear();
+    cache.revalidatePath.mockClear();
+
+    const byId = (list: { id: string }[]) => [...list].sort((a, b) => a.id.localeCompare(b.id));
+    const saved = await saveLayoutAction({ id: home!.id, revision: view.revision, items: wider });
+    if (!saved.ok) throw new Error(saved.error);
+    expect(saved.revision).toBe(view.revision + 1);
+    expect(byId(saved.items)).toEqual(byId(boxes(home!.id, id)));
+    expect(cache.updateTag).toHaveBeenCalledWith(accountTag(id));
+    expect(cache.revalidatePath).toHaveBeenCalledWith("/");
+    const after = getDashboard(id, home!.id);
+
+    expect(await saveLayoutAction({ id: home!.id, revision: view.revision, items })).toEqual({
+      ok: false,
+      error: E.staleLayout,
+    });
+    expect(getDashboard(id, home!.id)).toEqual(after);
+  });
+
+  test("[DSH-016] barva je token a hodnota mimo výčet je odmítnutá", async () => {
+    const id = owner();
+    session.userId = id;
+    const [home] = ensureDashboards(actor(id));
+    const base = gallery("revenue_by_month");
+    const added = await addWidgetAction({ dashboardId: home!.id, config: base });
+    if (!added.ok) throw new Error(added.error);
+    const refused: [unknown, string][] = [
+      [{ ...base, color: "#ff0000" }, "color: Nepovolená hodnota"],
+      [{ ...base, color: "var(--chart-1)" }, "color: Nepovolená hodnota"],
+      [{ ...base, format: "millions" }, "format: Nepovolená hodnota"],
+      [{ ...base, labels: "ano" }, "labels: Neplatný typ hodnoty"],
+    ];
+    for (const [config, error] of refused) {
+      expect(await updateWidgetAction({ id: added.id, config })).toEqual({ ok: false, error });
+    }
+
+    const wanted = { ...base, title: "Tržby", color: "chart-3", format: "thousands", labels: true };
+    expect(await updateWidgetAction({ id: added.id, config: wanted })).toEqual({ ok: true });
+    const stored = db
+      .select({ config: dashboardWidget.config })
+      .from(dashboardWidget)
+      .where(eq(dashboardWidget.id, added.id))
+      .get()!;
+    expect(stored.config).toEqual(wanted);
+  });
+
+  test("[DSH-017] překročený limit náhledu vrátí chybu a nespadne", async () => {
+    const id = owner();
+    session.userId = id;
+    expect(await previewWidgetAction({ config: gallery("invoiced_this_year") })).toMatchObject({
+      ok: true,
+      result: { kind: "total", total: 0 },
+    });
+    expect(await previewWidgetAction({ config: gallery("due_alerts") })).toMatchObject({
+      ok: true,
+      result: { kind: "system", detail: { kind: "due_alerts", overdue: [], dueSoon: [] } },
+    });
+    expect(
+      await previewWidgetAction({ config: { ...gallery("heatmap"), display: "number" } }),
+    ).toEqual({ ok: false, error: `groupBy: ${TEXTS.dashboard.config.numberGroup}` });
+    expect(await previewWidgetAction({ config: gallery("heatmap"), extra: 1 })).toMatchObject({
+      ok: false,
+    });
+
+    for (let i = 3; i < RATE_RULES.widgetPreviewUser.limit; i++) {
+      checkRateLimit(id, RATE_RULES.widgetPreviewUser);
+    }
+    expect(await previewWidgetAction({ config: gallery("invoiced_this_year") })).toEqual({
+      ok: false,
+      error: "Příliš mnoho pokusů, zkuste to později",
+    });
+    expect(audits(id, "rate_limit.exceeded")).toHaveLength(1);
   });
 });

@@ -11,6 +11,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { DASHBOARD_PARAM, parseDashboardFilter } from "@/lib/dashboard-filter";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
+import { cn } from "@/lib/utils";
 import { webActor } from "@/server/auth/request-actor";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
@@ -46,9 +47,20 @@ async function OverviewContent({ searchParams }: Pick<PageProps<"/">, "searchPar
           </AlertDescription>
         </Alert>
       )}
-      {dashboards.length > 1 && (
-        <DashboardSwitcher dashboards={dashboards} currentId={dashboard.id} filter={filter} />
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {dashboards.length > 1 ? (
+          <DashboardSwitcher dashboards={dashboards} currentId={dashboard.id} filter={filter} />
+        ) : (
+          <span />
+        )}
+        {/* Editing needs the 12-column grid, so a phone only reads (UI-007). */}
+        <Link
+          href={`/dashboardy/${dashboard.id}/upravit`}
+          className={cn(buttonVariants({ variant: "outline" }), "hidden md:inline-flex")}
+        >
+          {TEXTS.dashboard.edit.open}
+        </Link>
+      </div>
       <DashboardFilter filter={filter} dashboardId={current.isDefault ? null : current.id} />
       <DashboardGrid
         dashboard={dashboard}

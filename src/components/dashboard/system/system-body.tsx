@@ -4,10 +4,10 @@ import { DueAlerts } from "@/components/overview/due-alerts";
 import { LimitsCard } from "@/components/reports/limits-card";
 import { bucketLabel } from "@/lib/report-filter";
 import { CHART_TOKENS } from "@/lib/chart-tokens";
+import type { DateFormat } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import type { SystemWidgetConfig } from "@/lib/widget-config";
 import type { WidgetResult } from "@/server/reports/widget-query";
-import type { WidgetEnv } from "../widget-body";
 import { WidgetEmpty } from "../widget-empty";
 import { WidgetNumber, type WidgetUnit } from "../widget-number";
 import { AdvancesList, AutomationState, NoticeList, PlanList } from "./lists";
@@ -26,13 +26,13 @@ function token(config: SystemWidgetConfig, offset: number) {
 export function SystemBody({
   config,
   result,
-  env,
+  dateFormat,
   unit,
   height,
 }: {
   config: SystemWidgetConfig;
   result: WidgetResult;
-  env: WidgetEnv;
+  dateFormat: DateFormat;
   unit: WidgetUnit;
   height: number;
 }) {
@@ -54,7 +54,7 @@ export function SystemBody({
         <DueAlerts
           overdue={detail.overdue}
           dueSoon={detail.dueSoon}
-          dateFormat={env.dateFormat}
+          dateFormat={dateFormat}
           limit={rows}
         />
       );
@@ -69,7 +69,7 @@ export function SystemBody({
           />
         );
       }
-      return <PlanList detail={detail} dateFormat={env.dateFormat} />;
+      return <PlanList detail={detail} dateFormat={dateFormat} />;
     case "unmatched_payments":
       if (detail?.kind !== "unmatched_payments") break;
       if (detail.pending + detail.unrecognized === 0) {
@@ -80,7 +80,7 @@ export function SystemBody({
           />
         );
       }
-      return <NoticeList detail={detail} dateFormat={env.dateFormat} />;
+      return <NoticeList detail={detail} dateFormat={dateFormat} />;
     case "open_advances":
       if (detail?.kind !== "open_advances") break;
       if (detail.count === 0 && result.unconverted.count === 0) {
@@ -94,12 +94,12 @@ export function SystemBody({
       return (
         <>
           <WidgetNumber result={result} unit={unit} format={config.format} />
-          <AdvancesList detail={detail} dateFormat={env.dateFormat} />
+          <AdvancesList detail={detail} dateFormat={dateFormat} />
         </>
       );
     case "automation_status":
       if (detail?.kind !== "automation_status") break;
-      return <AutomationState detail={detail} dateFormat={env.dateFormat} />;
+      return <AutomationState detail={detail} dateFormat={dateFormat} />;
     case "limits":
       if (detail?.kind !== "limits") break;
       return <LimitsCard limits={detail} />;

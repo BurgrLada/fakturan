@@ -103,6 +103,18 @@ import { getRecurring } from "@/server/services/recurring";
 import { listPayments, markPaid } from "@/server/services/payments";
 import { listReminderRules, saveReminderRule } from "@/server/services/reminders";
 import { pauseRecurring, processOccurrence } from "@/server/services/recurring-run";
+import {
+  addWidgetAction,
+  createDashboardAction,
+  deleteDashboardAction,
+  duplicateDashboardAction,
+  previewWidgetAction,
+  removeWidgetAction,
+  renameDashboardAction,
+  saveLayoutAction,
+  setDefaultDashboardAction,
+  updateWidgetAction,
+} from "@/app/(app)/dashboardy/actions";
 import { WIDGET_GALLERY } from "@/lib/dashboard-defaults";
 import {
   createDashboard,
@@ -124,10 +136,10 @@ const session = vi.hoisted(() => ({ userId: "a1" }));
 
 vi.mock("@/server/auth/session", () => ({
   requireSession: async () => ({ user: { id: session.userId } }),
-  getCurrentSession: async () => ({ user: { id: session.userId } }),
+  getCurrentSession: async () => (session.userId ? { user: { id: session.userId } } : null),
   actorFromRequest: async () => ({ userId: session.userId, source: "web" }),
 }));
-vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.mock("next/cache", () => ({ revalidatePath: () => {}, updateTag: () => {} }));
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
 vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
@@ -776,5 +788,50 @@ describe("dashboardy", () => {
     for (const attempt of attempts) expect(attempt).toThrow(new Error("Dashboard neexistuje"));
     expect(getDashboard(mine, home!.id)).toEqual(before);
     expect(listDashboards(stranger)).toHaveLength(1);
+  });
+
+  test("[TST-009] akce dashboardu odmítnou cizí ID a neplatnou session", async () => {
+    const [mine, stranger] = owners();
+    const [home] = ensureDashboards(actor(mine));
+    ensureDashboards(actor(stranger));
+    const { id: second } = createDashboard(actor(mine), { name: "Obchod" });
+    const { id: widgetId } = addWidget(actor(mine), { dashboardId: second, config: chart });
+    const snapshot = () => listDashboards(mine).map((row) => getDashboard(mine, row.id));
+    const before = snapshot();
+    const view = getDashboard(mine, second)!;
+    const items = view.widgets.map(({ id, x, y, w, h }) => ({ id, x, y, w: w + 1, h }));
+    const foreign = () => [
+      renameDashboardAction({ id: second, name: "Cizí" }),
+      duplicateDashboardAction({ id: second }),
+      deleteDashboardAction({ id: second }),
+      setDefaultDashboardAction({ id: second }),
+      saveLayoutAction({ id: second, revision: view.revision, items }),
+      addWidgetAction({ dashboardId: second, config: chart }),
+      updateWidgetAction({ id: widgetId, config: { ...chart, title: "Cizí" } }),
+      removeWidgetAction({ id: widgetId }),
+    ];
+
+    session.userId = stranger;
+    for (const reply of await Promise.all(foreign())) {
+      expect(reply).toMatchObject({ ok: false, error: expect.any(String) });
+      expect(reply).not.toHaveProperty("expired");
+    }
+    expect(snapshot()).toEqual(before);
+    expect(listDashboards(stranger)).toHaveLength(1);
+
+    session.userId = "";
+    const signedOut = await Promise.all([
+      ...foreign(),
+      createDashboardAction({ name: "Bez session" }),
+      previewWidgetAction({ config: chart }),
+    ]);
+    for (const reply of signedOut) expect(reply).toMatchObject({ ok: false, expired: true });
+    expect(snapshot()).toEqual(before);
+
+    session.userId = mine;
+    expect(await renameDashboardAction({ id: second, name: "Prodej" })).toEqual({ ok: true });
+    expect(await setDefaultDashboardAction({ id: second })).toEqual({ ok: true });
+    expect(listDashboards(mine).find((row) => row.isDefault)?.id).toBe(second);
+    expect(home).toBeDefined();
   });
 });
