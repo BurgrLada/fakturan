@@ -38,11 +38,12 @@ function withDb<T>(dataDir: string, action: (sqlite: Database.Database) => T): T
   }
 }
 
-function addWidgets(dataDir: string, configs: QueryWidgetConfig[]) {
+function addWidgets(dataDir: string, configs: QueryWidgetConfig[], dashboardId?: string) {
   withDb(dataDir, (sqlite) => {
     const board = sqlite
       .prepare("SELECT id, user_id AS userId FROM dashboard WHERE is_default = 1")
       .get() as { id: string; userId: string };
+    if (dashboardId) board.id = dashboardId;
     const insert = sqlite.prepare(
       `INSERT INTO dashboard_widget (id, dashboard_id, user_id, config, x, y, w, h, created_at, updated_at)
        VALUES (?, ?, ?, ?, 0, ?, 6, 4, ?, ?)`,
@@ -188,7 +189,7 @@ test("[DSH-014] všech devět zobrazení se vykreslí z jednoho výsledku", asyn
   }
 });
 
-test("[DSH-004] na šířce 390 px jsou widgety pod sebou a RGL se nenačte", async ({
+test("[DSH-004] [UI-007] na šířce 390 px jsou widgety pod sebou a RGL se nenačte", async ({
   page,
   freshApp,
 }) => {
@@ -296,15 +297,33 @@ test("poškozený config v databázi shodí jen svůj widget", async ({ page, fr
       )
       .run(),
   );
-  addWidgets(dataDir, [
-    query("Denní koše", { display: "heatmap", groupBy: "day", period: "last_30_days" }),
-  ]);
-  await page.goto(`${baseURL}/?obdobi=vlastni&od=${Number(year()) - 3}-01-01&do=${year()}-12-31`);
+  const days = query("Denní koše", { display: "heatmap", groupBy: "day", period: "last_30_days" });
+  addWidgets(dataDir, [days]);
+  const range = `obdobi=vlastni&od=${Number(year()) - 3}-01-01&do=${year()}-12-31`;
+  await page.goto(`${baseURL}/?${range}`);
   await expect(page.getByRole("heading", { name: "Přehled", level: 1 })).toBeVisible();
   await expect(grid(page).getByTestId("widget-error")).toHaveCount(1);
   await expect(widget(page, "Fakturováno letos").getByTestId("widget-value")).toBeVisible();
   await expect(widget(page, "Denní koše")).toContainText("Období může mít nejvýš 400 košů");
   await expect(grid(page).getByTestId("widget")).toHaveCount(10);
+  await expect(
+    widget(page, "Denní koše").getByRole("link", { name: "Zrušit filtr" }),
+  ).toHaveAttribute("href", "/");
+
+  const second = randomUUID();
+  withDb(dataDir, (sqlite) =>
+    sqlite
+      .prepare(
+        `INSERT INTO dashboard (id, user_id, name, is_default, position, revision, created_at, updated_at)
+         SELECT ?, user_id, 'Druhý', 0, 1, 1, created_at, updated_at FROM dashboard WHERE is_default = 1`,
+      )
+      .run(second),
+  );
+  addWidgets(dataDir, [days], second);
+  await page.goto(`${baseURL}/?dashboard=${second}&${range}`);
+  await expect(
+    widget(page, "Denní koše").getByRole("link", { name: "Zrušit filtr" }),
+  ).toHaveAttribute("href", `/?dashboard=${second}`);
 });
 
 test("cachedWidget je oddělený podle účtu", async ({ page, browser, freshApp }) => {

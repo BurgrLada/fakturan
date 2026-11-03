@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ChartToken } from "@/lib/chart-tokens";
-import { widgetQuery, type GlobalFilter } from "@/lib/dashboard-filter";
+import { dashboardHref, widgetQuery, type GlobalFilter } from "@/lib/dashboard-filter";
 import type { CalendarDate } from "@/lib/number-format";
 import type { DateFormat } from "@/lib/preferences";
 import type { CompareMode } from "@/lib/report-period";
@@ -50,6 +50,8 @@ export type WidgetEnv = {
   today: CalendarDate;
   dateFormat: DateFormat;
   filter: GlobalFilter;
+  // null for the default dashboard, whose address is plain "/".
+  dashboardId: string | null;
 };
 
 // Only paid_ratio of the system widgets has a period; the rest ignore the dashboard filter (R-21).
@@ -353,21 +355,26 @@ export async function WidgetBody({
   const filter = effectiveFilter(config, env.filter);
   const context: WidgetContext = { today: env.today, globalFilter: filter };
   const unit = widgetUnit(config, filter);
+  // Only a set filter can be the cause, so only then is resetting it the next step.
+  const reset =
+    Object.keys(filter).length > 0
+      ? { href: dashboardHref(env.dashboardId, {}), label: T.filter.reset }
+      : undefined;
   if (config.kind === "query") {
     const own = config.filters?.currency;
     if (own && filter.currency && own !== filter.currency) {
-      return <WidgetEmpty text={V.excluded} action={{ href: "/", label: T.filter.reset }} />;
+      return <WidgetEmpty text={V.excluded} action={reset} />;
     }
   }
   const problem = widgetProblem(config, context);
-  if (problem) return <WidgetEmpty text={problem} action={{ href: "/", label: T.filter.reset }} />;
+  if (problem) return <WidgetEmpty text={problem} action={reset} />;
 
   let result: WidgetResult;
   try {
     result = await load(config, env);
   } catch (error) {
     if (error instanceof ServiceError) {
-      return <WidgetEmpty text={error.message} action={{ href: "/", label: T.filter.reset }} />;
+      return <WidgetEmpty text={error.message} action={reset} />;
     }
     reportFailure(error, { task: "dashboard.widget", userId: env.userId });
     return <WidgetErrorMessage />;

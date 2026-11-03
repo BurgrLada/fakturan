@@ -32,6 +32,17 @@ test("[UI-009] přehled bez dat ukazuje prázdné widgety s další akcí", asyn
   await expect(page).toHaveURL(/\/faktury\//);
 });
 
+test("[UI-007] logo v horní liště telefonu je odkaz na Přehled", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await registerAdmin(page, baseURL);
+  await page.goto(`${baseURL}/faktury`);
+  await expect(page.getByRole("button", { name: "Otevřít nabídku" })).toBeVisible();
+  await page.getByRole("link", { name: "Fakturan, přejít na Přehled" }).click();
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await expect(page.getByRole("heading", { name: "Přehled", level: 1 })).toBeVisible();
+});
+
 test("logo v hlavičce je odkaz na Přehled", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
   await registerAdmin(page, baseURL);

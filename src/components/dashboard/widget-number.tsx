@@ -63,10 +63,15 @@ export function formatWidgetValue(
 }
 
 // Whole percent, half away from zero; a zero base has no meaningful share, so none is shown.
+// Average days to pay are not whole, so both values go to whole tenths first; money already is.
 export function percentChange(current: number | null, previous: number | null): number | null {
-  if (current === null || previous === null || previous === 0) return null;
-  const delta = BigInt(current - previous) * BigInt(100);
-  const base = BigInt(Math.abs(previous));
+  if (current === null || previous === null) return null;
+  const tenths = (value: number) => BigInt(rounded(value * 10, 1));
+  const now = Number.isInteger(current) ? BigInt(current) * BigInt(10) : tenths(current);
+  const before = Number.isInteger(previous) ? BigInt(previous) * BigInt(10) : tenths(previous);
+  if (before === BigInt(0)) return null;
+  const delta = (now - before) * BigInt(100);
+  const base = before < BigInt(0) ? -before : before;
   const magnitude = ((delta < BigInt(0) ? -delta : delta) * BigInt(2) + base) / (BigInt(2) * base);
   return Number(delta < BigInt(0) ? -magnitude : magnitude);
 }

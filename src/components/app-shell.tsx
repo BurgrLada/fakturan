@@ -33,7 +33,9 @@ export function AppShell({
         {TEXTS.shell.skipToContent}
       </a>
       <div className="flex items-center justify-between border-b bg-sidebar px-4 py-2 md:hidden">
-        <span className="font-brand text-lg">{TEXTS.appName}</span>
+        <Link href="/" aria-label={TEXTS.shell.home} className="rounded-sm font-brand text-lg">
+          {TEXTS.appName}
+        </Link>
         <div className="flex items-center gap-2">
           {bell}
           <Button

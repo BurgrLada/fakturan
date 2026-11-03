@@ -20,7 +20,14 @@ export function DashboardGrid({
   today: CalendarDate;
   dateFormat: DateFormat;
 }) {
-  const env = { userId, stamp: accountStamp(userId), today, dateFormat, filter };
+  const env = {
+    userId,
+    stamp: accountStamp(userId),
+    today,
+    dateFormat,
+    filter,
+    dashboardId: dashboard.isDefault ? null : dashboard.id,
+  };
   for (const widget of dashboard.widgets) {
     if (widget.config) continue;
     reportFailure(new Error(`Neplatná konfigurace widgetu ${widget.id}`), {

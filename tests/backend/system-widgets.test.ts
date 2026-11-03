@@ -12,7 +12,11 @@ import { reportSummary } from "@/server/reports/queries";
 import { registerSystemWidgets } from "@/server/reports/system-widgets";
 import { runWidget, type WidgetContext } from "@/server/reports/widget-query";
 import { setPaused } from "@/server/services/automation";
+import { percentChange } from "@/components/dashboard/widget-number";
 import {
+  issuedDocument,
+  namedCustomer,
+  pay,
   REPORT_TODAY,
   reportOwner,
   seedReportScenario,
@@ -232,5 +236,28 @@ describe("systémové widgety", () => {
     });
     expect(ratio.range).toEqual({ from: "2025-01-01", to: "2025-12-31" });
     expect(ratio.total).toBe(0);
+  });
+});
+
+describe("porovnání dnů do úhrady", () => {
+  test("necelý průměr dnů s globálním porovnáním dá rozdíl i procento", () => {
+    const owner = reportOwner(db, "2026-01-01");
+    const customer = namedCustomer(owner, "Omega s.r.o.");
+    for (const [issueDate, paidOn] of [
+      ["2026-02-01", "2026-02-03"],
+      ["2026-03-02", "2026-03-05"],
+      ["2026-03-10", "2026-03-14"],
+    ] as const) {
+      const id = issuedDocument(owner, customer, { issueDate, totalMinor: 10_000 });
+      pay(owner, id, paidOn, 10_000);
+    }
+    setClockForTests(null);
+    const result = runWidget(db, owner, gallery("payment_days"), {
+      today: REPORT_TODAY,
+      globalFilter: { period: { from: "2026-03-01", to: "2026-03-31" }, compare: "previous" },
+    });
+    expect(result.total).toBe(3.5);
+    expect(result.compare).toMatchObject({ total: 2, delta: 1.5 });
+    expect(percentChange(result.total, result.compare!.total)).toBe(75);
   });
 });
