@@ -1,3 +1,4 @@
+import { splitVatId } from "@/lib/clauses";
 import { isDomesticCountry, DOMESTIC_COUNTRY } from "@/lib/customers";
 import { RATE_UNIT, toCzkMinor } from "@/lib/fx";
 import type { CustomerSnapshot, InvoiceDocument, SupplierSnapshot } from "@/lib/invoice-document";
@@ -27,7 +28,7 @@ const PAYMENT_CODES = { transfer: "42", cash: "10", card: "48" } as const;
 
 function escapeXml(value: string): string {
   return value
-    .replace(/[^\t\n\r -퟿-�\u{10000}-\u{10FFFF}]/gu, "")
+    .replace(/[^\t\n\r\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu, "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -56,6 +57,49 @@ function micros(value: number): string {
 
 type Party = SupplierSnapshot | CustomerSnapshot;
 
+// The app stores a country as free text; the code comes from it, else from the VAT ID prefix.
+const COUNTRY_CODES: Record<string, string> = {
+  slovensko: "SK",
+  slovakia: "SK",
+  německo: "DE",
+  germany: "DE",
+  deutschland: "DE",
+  rakousko: "AT",
+  austria: "AT",
+  polsko: "PL",
+  poland: "PL",
+  maďarsko: "HU",
+  hungary: "HU",
+  francie: "FR",
+  france: "FR",
+  itálie: "IT",
+  italy: "IT",
+  nizozemsko: "NL",
+  netherlands: "NL",
+  belgie: "BE",
+  belgium: "BE",
+  španělsko: "ES",
+  spain: "ES",
+  švýcarsko: "CH",
+  switzerland: "CH",
+  "spojené království": "GB",
+  "velká británie": "GB",
+  "united kingdom": "GB",
+  "spojené státy": "US",
+  "spojené státy americké": "US",
+  usa: "US",
+  "united states": "US",
+};
+
+function countryCode(p: Party): string {
+  const country = p.country.trim();
+  if (/^[A-Za-z]{2}$/.test(country)) return country.toUpperCase();
+  const known = COUNTRY_CODES[country.toLowerCase()];
+  if (known) return known;
+  const prefix = splitVatId(p.dic)?.country;
+  return prefix === "EL" ? "GR" : (prefix ?? "");
+}
+
 function party(p: Party, contactName: string): string {
   const domestic = isDomesticCountry(p.country);
   const taxScheme = p.dic
@@ -82,7 +126,7 @@ function party(p: Party, contactName: string): string {
       el("PostalZone", p.zip),
       nest(
         "Country",
-        el("IdentificationCode", domestic ? "CZ" : ""),
+        el("IdentificationCode", domestic ? "CZ" : countryCode(p)),
         el("Name", domestic ? DOMESTIC_COUNTRY : p.country),
       ),
     ),

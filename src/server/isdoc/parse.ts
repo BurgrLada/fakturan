@@ -7,6 +7,7 @@ import type {
   ImportParty,
   ImportReference,
 } from "@/lib/import-document";
+import { MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
 import type { CalendarDate, DocumentType } from "@/lib/number-format";
 import { decimalToMicros, decimalToMinor, quantityToMilli } from "@/lib/safe-input/decimal";
 import { InputRejected, XML_LIMITS } from "@/lib/safe-input/limits";
@@ -35,6 +36,8 @@ const TYPES: Record<string, DocumentType | null> = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RATE_UNIT = BigInt(1_000_000);
 const TWO = BigInt(2);
+// The same ceiling as a rate typed in by hand.
+const MAX_RATE = BigInt(MAX_EXCHANGE_RATE_MICROS);
 const MAX_ISSUING_SYSTEM = 200;
 
 const noNegativeZero = (value: number) => (value === 0 ? 0 : value);
@@ -128,8 +131,9 @@ function rateMicros(root: XmlNode): number | null {
     return null;
   }
   if (quoted <= BigInt(0) || unit <= BigInt(0)) return null;
-  const micros = Number((TWO * quoted * RATE_UNIT + unit) / (TWO * unit));
-  return micros === 1_000_000 ? null : micros;
+  const micros = (TWO * quoted * RATE_UNIT + unit) / (TWO * unit);
+  if (micros > MAX_RATE) throw new IsdocInvalid("Kurz v CurrRate a RefCurrRate je mimo rozsah");
+  return micros === RATE_UNIT ? null : Number(micros);
 }
 
 export function parseIsdoc(bytes: Uint8Array): ImportDocument {
@@ -173,7 +177,8 @@ export function isdocFromXml(root: XmlNode): ImportDocument {
       }
       const direction = quantity < 0 ? -1 : 1;
       const quantityMilli = Math.abs(quantity);
-      const netMinor = noNegativeZero(direction * money(line, "LineExtensionAmountTaxInclusive"));
+      // The amount carries its own sign; only the unit price takes it from the quantity.
+      const netMinor = money(line, "LineExtensionAmountTaxInclusive");
       let unitPriceMinor = 0;
       if (!foreign) {
         unitPriceMinor = noNegativeZero(

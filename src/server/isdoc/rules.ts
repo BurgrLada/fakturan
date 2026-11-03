@@ -127,8 +127,16 @@ export function isdocRules(xml: XmlNode): string[] {
     errors.push(`Doklad typu ${type} nemá odkaz na původní doklad`);
   }
 
-  const local = firstChild(xml, "LocalCurrencyCode")?.text.trim() ?? "";
-  const foreignCode = firstChild(xml, "ForeignCurrencyCode")?.text.trim() ?? "";
+  if (type === "2") {
+    const totals = firstChild(xml, "LegalMonetaryTotal");
+    const negative = ["TaxInclusiveAmount", "TaxInclusiveAmountCurr"].some(
+      (name) => (amount(totals, name) ?? 0) < 0,
+    );
+    if (negative) errors.push("Dobropis má mít kladné částky, celek s daní je záporný");
+  }
+
+  const local = firstChild(xml, "LocalCurrencyCode")?.text.trim().toUpperCase() ?? "";
+  const foreignCode = firstChild(xml, "ForeignCurrencyCode")?.text.trim().toUpperCase() ?? "";
   const foreign = foreignCode !== "" && foreignCode !== local;
   if (foreign) {
     const missing = new Set<string>();

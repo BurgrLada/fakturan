@@ -119,6 +119,41 @@ describe("čtení ISDOC", () => {
     expect(parseIsdoc(one).exchangeRateMicros).toBeNull();
   });
 
+  test("[IMP-003] řádek se záporným množstvím nese znaménko z částky, i u dobropisu", () => {
+    const negative = edited(
+      "faktura-czk.isdoc",
+      '<InvoicedQuantity unitCode="ks">1.000</InvoicedQuantity><LineExtensionAmount>350.50</LineExtensionAmount><LineExtensionAmountTaxInclusive>350.50</LineExtensionAmountTaxInclusive>',
+      '<InvoicedQuantity unitCode="ks">-1.000</InvoicedQuantity><LineExtensionAmount>-350.50</LineExtensionAmount><LineExtensionAmountTaxInclusive>-350.50</LineExtensionAmountTaxInclusive>',
+    );
+    const doc = parseIsdoc(negative);
+    expect(doc.lines[1]).toMatchObject({
+      quantityMilli: 1000,
+      unitPriceMinor: -35_050,
+      netMinor: -35_050,
+    });
+    expect(doc.subtotalMinor).toBe(264_950);
+
+    const credit = edited(
+      "dobropis.isdoc",
+      '<InvoiceLine><ID>1</ID><InvoicedQuantity unitCode="hod">1.000</InvoicedQuantity><LineExtensionAmount>1500.00</LineExtensionAmount><LineExtensionAmountTaxInclusive>1500.00</LineExtensionAmountTaxInclusive>',
+      '<InvoiceLine><ID>1</ID><InvoicedQuantity unitCode="hod">-1.000</InvoicedQuantity><LineExtensionAmount>-1500.00</LineExtensionAmount><LineExtensionAmountTaxInclusive>-1500.00</LineExtensionAmountTaxInclusive>',
+    );
+    expect(parseIsdoc(credit).lines[0]).toMatchObject({
+      quantityMilli: 1000,
+      unitPriceMinor: 150_000,
+      netMinor: 150_000,
+    });
+  });
+
+  test("[IMP-003] kurz nad mez ručního kurzu je chyba", () => {
+    const huge = edited(
+      "faktura-eur.isdoc",
+      "<CurrRate>25.125</CurrRate>",
+      "<CurrRate>2000000</CurrRate>",
+    );
+    expect(() => parseIsdoc(huge)).toThrow("Kurz");
+  });
+
   test("[IMP-003] záloha, konečná faktura, úhrady, 6.0.1 a vrubopis", () => {
     expect(parseIsdoc(fixture("zalohova.isdoc")).type).toBe("advance");
     const final = parseIsdoc(fixture("konecna-se-zalohou.isdoc"));

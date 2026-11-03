@@ -72,6 +72,17 @@ describe("validace ISDOC proti XSD", () => {
     expect(other!.errors).toEqual(["Soubor není faktura ISDOC"]);
   });
 
+  test("[SEC-005] do xmllint jde jen dokument prověřený celý, ne jen kořen", async () => {
+    const many = text("faktura-czk.isdoc").replace("<Note>", `${"<Note/>".repeat(200_001)}<Note>`);
+    const deep = text("faktura-czk.isdoc").replace(
+      "<Note>",
+      `<Note>${"<a>".repeat(40)}${"</a>".repeat(40)}`,
+    );
+    const [nodes, depth] = await validateIsdoc([doc("n", many), doc("d", deep)]);
+    expect(nodes!.errors).toEqual(["Soubor není platné XML (xml_nodes)"]);
+    expect(depth!.errors).toEqual(["Soubor není platné XML (xml_depth)"]);
+  });
+
   test("dávky po 200 dokladech vrátí výsledek každému", async () => {
     const valid = text("zalohova.isdoc");
     const broken = valid.replace(/<IssueDate>[^<]*<\/IssueDate>/, "");

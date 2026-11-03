@@ -65,6 +65,22 @@ describe("pravidla ISDOC mimo schéma", () => {
     expect(rules(curr)).toEqual([expect.stringMatching(/^K úhradě \(cizí měna\)/)]);
   });
 
+  test("[EXP-005] dobropis se záporným celkem neprojde", () => {
+    const negative = text("dobropis.isdoc").replace(
+      /(<LegalMonetaryTotal>[\s\S]*?<TaxInclusiveAmount>)1500\.00/,
+      "$1-1500.00",
+    );
+    expect(rules(negative)).toContain("Dobropis má mít kladné částky, celek s daní je záporný");
+  });
+
+  test("měny se porovnávají bez ohledu na velikost písmen", () => {
+    const lower = text("faktura-czk.isdoc").replace(
+      "<LocalCurrencyCode>CZK</LocalCurrencyCode>",
+      "<LocalCurrencyCode>czk</LocalCurrencyCode><ForeignCurrencyCode>CZK</ForeignCurrencyCode>",
+    );
+    expect(rules(lower)).toEqual([]);
+  });
+
   test("jiný kořen není ISDOC", () => {
     expect(rules("<Invoice/>")).toEqual(["Soubor není faktura ISDOC"]);
   });

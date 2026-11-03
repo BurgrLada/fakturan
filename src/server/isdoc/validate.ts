@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { memoryPages, validateXML } from "xmllint-wasm";
 import { InputRejected, XML_LIMITS } from "@/lib/safe-input/limits";
 import { ISDOC_NAMESPACE } from "@/lib/safe-input/pdf-embedded";
-import { xmlRoot } from "@/lib/safe-input/xml";
+import { walkXml, type XmlRoot } from "@/lib/safe-input/xml";
 import { SUPPORTED_VERSIONS } from "./parse";
 
 export type IsdocValidation = { name: string; version: string | null; errors: string[] };
@@ -64,12 +64,21 @@ export async function validateIsdoc(
 
   docs.forEach((doc, index) => {
     const result = results[index]!;
-    let root;
+    let root: XmlRoot | undefined;
     try {
-      root = xmlRoot(doc.xml, XML_LIMITS);
+      // The whole document, not only its root, must pass the limits before xmllint sees it.
+      walkXml(doc.xml, XML_LIMITS, {
+        open(name, ns, attributes) {
+          root ??= { name, ns, attributes };
+        },
+      });
     } catch (error) {
       if (!(error instanceof InputRejected)) throw error;
       result.errors.push(`Soubor není platné XML (${error.code})`);
+      return;
+    }
+    if (!root) {
+      result.errors.push("Soubor není platné XML (xml_malformed)");
       return;
     }
     const version = root.attributes.version ?? "";

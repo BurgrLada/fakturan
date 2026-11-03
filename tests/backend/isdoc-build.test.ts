@@ -170,6 +170,36 @@ describe("export ISDOC", () => {
     ]);
   });
 
+  test("[EXP-005] zahraniční strana dostane kód země a platné znaky zůstanou", async () => {
+    const foreign: InvoiceDocument = {
+      ...F.short,
+      note: "ﬁnance \uE000 \u{1F600} \uFFFD",
+      snapshot: {
+        ...F.short.snapshot,
+        customer: {
+          ...F.short.snapshot.customer!,
+          country: "Německo",
+          dic: "DE999999999",
+          ico: "",
+        },
+      },
+    };
+    const { xml, parsed } = await exported(foreign);
+    expect(xml).toMatch(/<IdentificationCode>DE<\/IdentificationCode><Name>Německo<\/Name>/);
+    expect(parsed.note).toContain("ﬁnance \uE000 \u{1F600} \uFFFD");
+    const byName = buildIsdoc(
+      {
+        ...foreign,
+        snapshot: {
+          ...foreign.snapshot,
+          customer: { ...foreign.snapshot.customer!, dic: "", country: "Slovensko" },
+        },
+      },
+      { uuid: UUID },
+    );
+    expect(byName).toContain("<IdentificationCode>SK</IdentificationCode>");
+  });
+
   test("koncept a cizí měna bez kurzu se neexportují", () => {
     expect(() => buildIsdoc({ ...F.short, status: "draft" }, { uuid: UUID })).toThrow(
       IsdocBuildError,
