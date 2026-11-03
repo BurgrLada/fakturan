@@ -90,7 +90,7 @@ type Plan = {
   value: SQL | null;
   date: SQL | SQLiteColumn;
   dims: Partial<Record<CategoryGroup, Dimension>>;
-  rows: (fields: Fields, groupBy: SQL[]) => Row[];
+  rows: (fields: Fields, groupBy: SQL[], having?: SQL) => Row[];
   unconverted: () => Unconverted;
 };
 
@@ -109,15 +109,16 @@ function invoiceConditions(config: QueryWidgetConfig): (SQL | undefined)[] {
   ];
 }
 
+type Grouped = { having: (condition: SQL) => { all: () => Row[] }; all: () => Row[] };
+
 function grouped(
-  base: (fields: Fields) => { groupBy: (...keys: SQL[]) => { all: () => Row[] }; all: () => Row[] },
+  base: (fields: Fields) => { groupBy: (...keys: SQL[]) => Grouped; all: () => Row[] },
 ) {
-  return (fields: Fields, groupBy: SQL[]): Row[] =>
-    groupBy.length > 0
-      ? base(fields)
-          .groupBy(...groupBy)
-          .all()
-      : base(fields).all();
+  return (fields: Fields, groupBy: SQL[], having?: SQL): Row[] => {
+    if (groupBy.length === 0) return base(fields).all();
+    const rows = base(fields).groupBy(...groupBy);
+    return having ? rows.having(having).all() : rows.all();
+  };
 }
 
 function invoicesPlan(
@@ -367,8 +368,11 @@ function categoryRows(
   const dim = plan.dims[group];
   if (!dim) throw new ServiceError(TEXTS.dashboard.errors.invalid);
   const fields = metricFields(config.metric, plan.value);
+  // A group whose every amount lacks a rate has no value, only unconverted ones, as on Statistics.
+  const valued =
+    plan.value && config.metric !== "count" ? sql`count(${plan.value}) > 0` : undefined;
   const rows = plan
-    .rows({ key: dim.key, ...(dim.name && { name: dim.name }), ...fields }, [dim.key])
+    .rows({ key: dim.key, ...(dim.name && { name: dim.name }), ...fields }, [dim.key], valued)
     .map((row) => ({
       kind: "row" as RowKind,
       key: row.key as string,

@@ -349,6 +349,33 @@ describe("filtry a období", () => {
   });
 });
 
+describe("zákazník bez kurzu", () => {
+  test("[FOR-008] zákazník jen s doklady bez kurzu chybí v řádcích jako ve Statistikách", () => {
+    const owner = reportOwner(db);
+    const rated = namedCustomer(owner, "Kappa s.r.o.");
+    const unrated = namedCustomer(owner, "Lambda GmbH");
+    issuedDocument(owner, rated, { issueDate: "2026-03-02", totalMinor: 50_000 });
+    const id = issuedDocument(owner, unrated, {
+      issueDate: "2026-03-02",
+      totalMinor: 100_000,
+      currency: "EUR",
+      rateMicros: 25_000_000,
+    });
+    db.update(invoice).set({ exchangeRateMicros: null }).where(eq(invoice.id, id)).run();
+
+    const result = run({ display: "table", groupBy: "customer" }, owner);
+    expect(result.rows).toEqual([{ kind: "row", key: rated, name: "Kappa s.r.o.", value: 50_000 }]);
+    expect(result.unconverted.count).toBe(1);
+    const lines = run(
+      { source: "lines", measure: undefined, display: "table", groupBy: "customer" },
+      owner,
+    );
+    expect(lines.rows.map((row) => row.key)).toEqual([rated]);
+    const counted = run({ display: "table", groupBy: "customer", metric: "count" }, owner);
+    expect(counted.rows.map((row) => row.key).sort()).toEqual([rated, unrated].sort());
+  });
+});
+
 describe("bezpečnost a výkon", () => {
   test("[DSH-018] každý dotaz má podmínku účtu i bez filtrů", () => {
     const configs: Partial<QueryWidgetConfig>[] = [
