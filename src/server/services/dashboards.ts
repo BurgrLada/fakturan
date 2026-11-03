@@ -8,9 +8,11 @@ import {
   dashboardNameSchema,
   layoutSchema,
   normalizeWidgets,
+  type LayoutItem,
   type WidgetDraft,
 } from "@/lib/dashboard-layout";
 import { TEXTS } from "@/lib/texts";
+import { czechError, issueText } from "@/lib/validation-issue";
 import { widgetConfigSchema, type WidgetConfig } from "@/lib/widget-config";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -215,16 +217,14 @@ export function ensureDashboards(actor: Actor): DashboardSummary[] {
   return listDashboards(ownerId);
 }
 
-function parseName(raw: unknown): string {
-  const parsed = dashboardNameSchema.safeParse(raw);
-  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
+export function parseInput<T>(schema: z.ZodType<T>, raw: unknown): T {
+  const parsed = schema.safeParse(raw, { error: czechError });
+  if (!parsed.success) throw new ServiceError(issueText(parsed.error));
   return parsed.data;
 }
 
-function parseInput<T>(schema: z.ZodType<T>, raw: unknown): T {
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
-  return parsed.data;
+function parseName(raw: unknown): string {
+  return parseInput(dashboardNameSchema, raw);
 }
 
 const idSchema = z.string(E.invalid).min(1, E.invalid).max(64, E.invalid);
@@ -370,7 +370,11 @@ export function setDefaultDashboard(actor: Actor, raw: unknown): void {
 }
 
 // The audit keeps only the number of widgets, never the layout itself (R-26).
-export function saveLayout(actor: Actor, raw: unknown): { revision: number } {
+type SavedLayout = { revision: number; items: LayoutItem[] };
+
+const boxOf = ({ id, x, y, w, h }: LayoutItem): LayoutItem => ({ id, x, y, w, h });
+
+export function saveLayout(actor: Actor, raw: unknown): SavedLayout {
   const ownerId = ownerOf(actor);
   const input = parseInput(layoutSchema, raw);
   try {
@@ -410,10 +414,10 @@ export function saveLayout(actor: Actor, raw: unknown): { revision: number } {
         scope: "user",
         after: { widgets: layout.length },
       });
-      return { revision };
+      return { revision, items: layout.map(boxOf) };
     });
   } catch (error) {
     if (!(error instanceof Unchanged)) throw error;
-    return { revision: input.revision };
+    return { revision: input.revision, items: widgetsIn(db, ownerId, input.id).map(boxOf) };
   }
 }

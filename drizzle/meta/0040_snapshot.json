@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2d22cac0-6509-42b1-bb87-69d47701c7b1",
+  "id": "5b9fa040-c02d-45ab-a6c8-371c2f434682",
   "prevId": "a244feb8-756e-443d-b3cf-1eba9d9cb3b6",
   "tables": {
     "audit_log": {
@@ -5466,6 +5466,13 @@
         }
       },
       "indexes": {
+        "dashboard_widget_user_idx": {
+          "name": "dashboard_widget_user_idx",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        },
         "dashboard_widget_dashboard_idx": {
           "name": "dashboard_widget_dashboard_idx",
           "columns": [

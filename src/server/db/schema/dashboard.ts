@@ -44,7 +44,10 @@ export const dashboardWidget = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
-  (t) => [index("dashboard_widget_dashboard_idx").on(t.dashboardId, t.userId)],
+  (t) => [
+    index("dashboard_widget_user_idx").on(t.userId),
+    index("dashboard_widget_dashboard_idx").on(t.dashboardId, t.userId),
+  ],
 );
 
 export type Dashboard = typeof dashboard.$inferSelect;

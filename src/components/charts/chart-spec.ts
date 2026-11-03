@@ -2,12 +2,9 @@ import type { Currency } from "@/lib/currency";
 import { formatMoney } from "@/lib/money";
 import { TEXTS } from "@/lib/texts";
 
-export const CHART_TOKENS = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"] as const;
-export type ChartToken = (typeof CHART_TOKENS)[number];
+import type { ChartToken } from "@/lib/chart-tokens";
 
-export function isChartToken(value: unknown): value is ChartToken {
-  return typeof value === "string" && (CHART_TOKENS as readonly string[]).includes(value);
-}
+export { CHART_TOKENS, isChartToken, type ChartToken } from "@/lib/chart-tokens";
 
 export type ChartKind = "bar" | "stacked_bar" | "line" | "area" | "donut" | "heatmap";
 

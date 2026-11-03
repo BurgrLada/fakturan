@@ -101,7 +101,12 @@ describe("správa dashboardů", () => {
     expect(() => renameDashboard(actor(id), { id: sales, name: "x".repeat(61) })).toThrow(
       E.nameTooLong,
     );
-    expect(() => createDashboard(actor(id), { name: "A", extra: 1 })).toThrow();
+    expect(() => createDashboard(actor(id), { name: "A", extra: 1 })).toThrow(
+      new Error("extra: Neznámý klíč"),
+    );
+    expect(() => renameDashboard(actor(id), { id: 5, name: "A" })).toThrow(
+      new Error(`id: ${E.invalid}`),
+    );
 
     addWidget(actor(id), { dashboardId: sales, config: gallery("top_customers") });
     const { id: copy } = duplicateDashboard(actor(id), { id: sales });
@@ -143,6 +148,54 @@ describe("správa dashboardů", () => {
 });
 
 describe("widgety a rozložení", () => {
+  test("saveLayout vrátí uložené zkompaktněné pozice a česky odmítne vadný vstup", () => {
+    const id = owner();
+    const [home] = ensureDashboards(actor(id));
+    const view = getDashboard(id, home!.id)!;
+    const items = view.widgets.map(({ id: widgetId, x, y, w, h }) => ({
+      id: widgetId,
+      x,
+      y: y + 20,
+      w,
+      h,
+    }));
+    const saved = saveLayout(actor(id), { id: home!.id, revision: view.revision, items });
+    const after = getDashboard(id, home!.id)!;
+    expect(saved.revision).toBe(after.revision);
+    expect([...saved.items].sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+      after.widgets
+        .map(({ id: widgetId, x, y, w, h }) => ({ id: widgetId, x, y, w, h }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    );
+    expect(saved.items.map(({ y }) => y)).toEqual(items.map(({ y }) => y - 20));
+
+    expect(() => saveLayout(actor(id), { id: home!.id, revision: "1", items: [] })).toThrow(
+      new Error("revision: Neplatný typ hodnoty"),
+    );
+    expect(() =>
+      saveLayout(actor(id), {
+        id: home!.id,
+        revision: after.revision,
+        items: [{ id: "a", x: -1, y: 0, w: 2, h: 2 }],
+      }),
+    ).toThrow(new Error("items.0.x: Hodnota je příliš malá"));
+  });
+
+  test("dashboard_widget má index začínající user_id", () => {
+    const indexes = db.$client
+      .prepare("SELECT name FROM pragma_index_list('dashboard_widget')")
+      .all() as { name: string }[];
+    const leading = indexes.map(
+      ({ name }) =>
+        (
+          db.$client.prepare("SELECT name FROM pragma_index_info(?) WHERE seqno = 0").get(name) as {
+            name: string;
+          }
+        ).name,
+    );
+    expect(leading).toContain("user_id");
+  });
+
   test("saveLayout se starou revizí nic nezmění", () => {
     const id = owner();
     const [home] = ensureDashboards(actor(id));
@@ -203,7 +256,12 @@ describe("widgety a rozložení", () => {
     const id = owner();
     const [home] = ensureDashboards(actor(id));
     const config = { ...gallery("top_customers"), groupBy: "1; DROP TABLE invoice" };
-    expect(() => addWidget(actor(id), { dashboardId: home!.id, config })).toThrow(/^groupBy:/);
+    expect(() => addWidget(actor(id), { dashboardId: home!.id, config })).toThrow(
+      new Error("groupBy: Nepovolená hodnota"),
+    );
+    expect(() =>
+      addWidget(actor(id), { dashboardId: home!.id, config: { ...gallery("overdue"), v: 2 } }),
+    ).toThrow(new Error("v: Nepovolená hodnota"));
     expect(() =>
       addWidget(actor(id), {
         dashboardId: home!.id,

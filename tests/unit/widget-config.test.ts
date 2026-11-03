@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { DEFAULT_DASHBOARD, WIDGET_GALLERY } from "@/lib/dashboard-defaults";
 import {
@@ -76,6 +78,56 @@ describe("schéma konfigurace widgetu", () => {
     expect(rejection(null).path).toBe("");
   });
 
+  test("[DSH-018] chyba konfigurace je česky s cestou a důvodem", () => {
+    const message = (raw: unknown) => rejection(raw).message;
+    expect(message({ ...base, display: "table", groupBy: "1; DROP TABLE invoice" })).toBe(
+      "groupBy: Nepovolená hodnota",
+    );
+    expect(message({ ...base, v: 2 })).toBe("v: Nepovolená hodnota");
+    expect(message({ ...base, kind: "script" })).toBe("kind: Nepovolená hodnota");
+    expect(message({ ...base, extra: 1 })).toBe("extra: Neznámý klíč");
+    expect(message({ ...base, title: undefined })).toBe("title: Chybí hodnota");
+    expect(message({ ...base, title: 5 })).toBe("title: Neplatný typ hodnoty");
+    expect(message({ ...base, title: "x".repeat(81) })).toBe("title: Text je příliš dlouhý");
+    const table = { ...base, display: "table", groupBy: "customer" };
+    expect(message({ ...table, topN: "5 OR 1=1" })).toBe("topN: Neplatný typ hodnoty");
+    expect(message({ ...table, topN: 51 })).toBe("topN: Hodnota je příliš velká");
+    expect(message({ ...table, topN: 0 })).toBe("topN: Hodnota je příliš malá");
+    expect(message({ ...base, filters: { status: [] } })).toBe(
+      "filters.status: Příliš málo položek",
+    );
+    expect(message({ ...base, period: { from: "2026-02-30", to: "2026-03-01" } })).toBe(
+      "period.from: Neplatné datum",
+    );
+    expect(message(null)).toBe("Neplatný typ hodnoty");
+  });
+
+  test("stav k dnešku nemá období, ostatní míry ho mají povinné", () => {
+    const { period: _period, ...noPeriod } = base;
+    expect(rejection({ ...base, measure: "outstanding" }).message).toBe(
+      "period: Stav k dnešku nemá období",
+    );
+    expect(rejection({ ...base, measure: "overdue" }).path).toBe("period");
+    expect(parseWidgetConfig({ ...noPeriod, measure: "overdue" })).toEqual({
+      ...noPeriod,
+      measure: "overdue",
+    });
+    expect(rejection(noPeriod).message).toBe("period: Chybí období");
+    for (const item of WIDGET_GALLERY) {
+      if (item.config.kind !== "query") continue;
+      const balance = item.config.measure === "outstanding" || item.config.measure === "overdue";
+      expect("period" in item.config, item.id).toBe(!balance);
+    }
+  });
+
+  test("knihovna v src/lib neimportuje z komponent", () => {
+    const dir = join(process.cwd(), "src/lib");
+    const offenders = readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.tsx?$/.test(file))
+      .filter((file) => /from "@\/components\//.test(readFileSync(join(dir, file), "utf8")));
+    expect(offenders).toEqual([]);
+  });
+
   test('[DSH-018] groupBy "1; DROP TABLE invoice" neprojde schématem', () => {
     const error = rejection({ ...base, display: "table", groupBy: "1; DROP TABLE invoice" });
     expect(error.path).toBe("groupBy");
@@ -120,9 +172,9 @@ describe("schéma konfigurace widgetu", () => {
       "cumulative",
     );
     expect(rejection({ ...base, display: "stacked_bar", groupBy: "month" }).path).toBe("splitBy");
-    expect(rejection({ ...base, measure: "overdue", display: "bar", groupBy: "month" }).path).toBe(
-      "groupBy",
-    );
+    expect(
+      rejection({ ...base, measure: "overdue", display: "table", groupBy: "month" }).path,
+    ).toBe("groupBy");
     expect(rejection({ ...base, measure: "outstanding", compare: "previous" }).path).toBe(
       "compare",
     );

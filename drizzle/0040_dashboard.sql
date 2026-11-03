@@ -27,4 +27,5 @@ CREATE TABLE `dashboard_widget` (
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `dashboard_widget_user_idx` ON `dashboard_widget` (`user_id`);--> statement-breakpoint
 CREATE INDEX `dashboard_widget_dashboard_idx` ON `dashboard_widget` (`dashboard_id`,`user_id`);

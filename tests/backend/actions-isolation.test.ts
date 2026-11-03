@@ -773,7 +773,7 @@ describe("dashboardy", () => {
       () => saveLayout(actor(stranger), { id: home!.id, revision: before.revision, items }),
       () => addWidget(actor(stranger), { dashboardId: home!.id, config: chart }),
     ];
-    for (const attempt of attempts) expect(attempt).toThrow();
+    for (const attempt of attempts) expect(attempt).toThrow(new Error("Dashboard neexistuje"));
     expect(getDashboard(mine, home!.id)).toEqual(before);
     expect(listDashboards(stranger)).toHaveLength(1);
   });

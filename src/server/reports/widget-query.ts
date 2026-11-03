@@ -65,6 +65,8 @@ export type WidgetResult = {
   compare?: WidgetCompare;
   range: DateRange;
   unconverted: Unconverted;
+  // A median, average, minimum or maximum cannot fold into "Ostatní", so rows past 50 are dropped.
+  truncated?: true;
 };
 
 export type SystemWidgetRunner = (
@@ -287,7 +289,12 @@ function readMetric(metric: WidgetMetric, row: Row | undefined): number | null {
   }
 }
 
-type Computed = { total: number | null; series: WidgetSeries[]; rows: WidgetRow[] };
+type Computed = {
+  total: number | null;
+  series: WidgetSeries[];
+  rows: WidgetRow[];
+  truncated?: true;
+};
 
 function ranked<T extends { kind: RowKind; key: string; name: string }>(
   items: (T & { value: number | null })[],
@@ -350,7 +357,11 @@ function timeSeries(plan: Plan, config: QueryWidgetConfig, range: DateRange, uni
   }).map(({ value: _value, ...item }) => item);
 }
 
-function categoryRows(plan: Plan, config: QueryWidgetConfig, group: CategoryGroup): WidgetRow[] {
+function categoryRows(
+  plan: Plan,
+  config: QueryWidgetConfig,
+  group: CategoryGroup,
+): { rows: WidgetRow[]; truncated: boolean } {
   const dim = plan.dims[group];
   if (!dim) throw new ServiceError(TEXTS.dashboard.errors.invalid);
   const fields = metricFields(config.metric, plan.value);
@@ -363,12 +374,14 @@ function categoryRows(plan: Plan, config: QueryWidgetConfig, group: CategoryGrou
       value: readMetric(config.metric, row),
     }))
     .sort(byValue);
-  return ranked(rows, config.topN ?? MAX_TOP_N, isAdditive(config.metric), (rest) => ({
+  const additive = isAdditive(config.metric);
+  const limited = ranked(rows, config.topN ?? MAX_TOP_N, additive, (rest) => ({
     kind: "others",
     key: "others",
     name: "",
     value: rest.reduce((sum, row) => sum + (row.value ?? 0), 0),
   }));
+  return { rows: limited, truncated: !additive && rows.length > MAX_TOP_N };
 }
 
 // Lines miss the document discount and rounding, so the item table ends with the difference
@@ -398,10 +411,11 @@ function compute(
   let total = readMetric(config.metric, plan.rows(fields, [])[0]);
   let series: WidgetSeries[] = [];
   let rows: WidgetRow[] = [];
+  let truncated = false;
   const { groupBy } = config;
   if (isBucketUnit(groupBy)) series = timeSeries(plan, config, filter.range, groupBy);
   else if (groupBy) {
-    rows = categoryRows(plan, config, groupBy);
+    ({ rows, truncated } = categoryRows(plan, config, groupBy));
     if (config.source === "lines" && groupBy === "item" && config.metric === "sum") {
       const adjustment = itemAdjustment(q, plan, filter, rows);
       if (adjustment !== 0) {
@@ -411,7 +425,7 @@ function compute(
     }
   }
   const unconverted = config.metric === "count" ? core.NOTHING : plan.unconverted();
-  return { total, series, rows, unconverted };
+  return { total, series, rows, unconverted, ...(truncated && { truncated: true as const }) };
 }
 
 function checkRange(range: DateRange, config: QueryWidgetConfig): void {
@@ -419,6 +433,10 @@ function checkRange(range: DateRange, config: QueryWidgetConfig): void {
   if (isBucketUnit(config.groupBy) && tooManyBuckets(range, config.groupBy)) {
     throw new ServiceError(C.tooManyBuckets(MAX_BUCKETS));
   }
+}
+
+function isBalance(config: QueryWidgetConfig): boolean {
+  return config.measure === "outstanding" || config.measure === "overdue";
 }
 
 function asSeries(series: WidgetSeries | undefined) {
@@ -433,8 +451,12 @@ function runQuery(
   context: WidgetContext,
 ): WidgetResult {
   const global = context.globalFilter ?? {};
-  const range = resolvePeriod(global.period ?? config.period, context.today);
-  checkRange(range, config);
+  const balance = isBalance(config);
+  // A balance is the state as of today: neither its own nor the dashboard period narrows it.
+  const range = balance
+    ? { from: context.today, to: context.today }
+    : resolvePeriod(global.period ?? config.period!, context.today);
+  if (!balance) checkRange(range, config);
   const kind = isBucketUnit(config.groupBy) ? "series" : config.groupBy ? "rows" : "total";
   const own = config.filters?.currency;
   if (own && global.currency && own !== global.currency) {
@@ -448,7 +470,6 @@ function runQuery(
   };
   const current = compute(q, ownerId, config, filter, context.today);
   const result: WidgetResult = { kind, ...current, range };
-  const balance = config.measure === "outstanding" || config.measure === "overdue";
   const mode = config.compare ?? (balance || config.splitBy ? undefined : global.compare);
   if (!mode || (config.groupBy && kind === "rows")) return result;
 

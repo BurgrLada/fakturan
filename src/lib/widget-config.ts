@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHART_TOKENS } from "@/components/charts/chart-spec";
+import { CHART_TOKENS } from "./chart-tokens";
 import { CURRENCIES } from "./currency";
 import { INVOICE_STATUSES, INVOICE_TYPES } from "./invoice";
 import { isCalendarDate } from "./number-format";
@@ -11,6 +11,7 @@ import {
   type DateRange,
 } from "./report-period";
 import { TEXTS } from "./texts";
+import { czechError, firstIssue } from "./validation-issue";
 
 // Declarative only (DSH-018): every field is an enum, a number or a date, so nothing in a widget
 // can name a column, an expression or code. The server maps each value to its own SQL.
@@ -159,7 +160,7 @@ const queryWidgetSchema = z.strictObject({
   groupBy: z.enum(WIDGET_GROUPS).optional(),
   splitBy: z.enum(CATEGORY_GROUPS).optional(),
   filters: filtersSchema.optional(),
-  period: periodSchema,
+  period: periodSchema.optional(),
   compare: z.enum(["previous", "year"]).optional(),
   display: z.enum(WIDGET_DISPLAYS),
   cumulative: z.boolean().optional(),
@@ -254,6 +255,8 @@ function queryIssues(config: QueryWidgetConfig): Issue[] {
       fail(["groupBy"], C.tooManyBuckets(MAX_BUCKETS));
     }
   }
+  if (balance && config.period !== undefined) fail(["period"], C.balancePeriod);
+  if (!balance && config.period === undefined) fail(["period"], C.periodMissing);
   return issues;
 }
 
@@ -284,18 +287,11 @@ export class WidgetConfigError extends Error {
   }
 }
 
-function issuePath(issue: z.core.$ZodIssue): string {
-  const path = issue.path.map(String);
-  if (issue.code === "unrecognized_keys") path.push(issue.keys[0] ?? "");
-  return path.join(".");
-}
-
 export function parseWidgetConfig(raw: unknown): WidgetConfig {
-  const parsed = widgetConfigSchema.safeParse(raw);
+  const parsed = widgetConfigSchema.safeParse(raw, { error: czechError });
   if (parsed.success) return parsed.data;
-  const issue = parsed.error.issues[0]!;
-  const message = issue.code === "unrecognized_keys" ? C.unknownKey : issue.message;
-  throw new WidgetConfigError(issuePath(issue), message);
+  const { path, message } = firstIssue(parsed.error);
+  throw new WidgetConfigError(path, message);
 }
 
 export function isPinnedWidget(config: WidgetConfig): boolean {

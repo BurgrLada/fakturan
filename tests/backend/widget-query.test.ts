@@ -55,19 +55,23 @@ beforeAll(() => {
 });
 afterAll(() => setClockForTests(null));
 
-const widget = (over: Partial<QueryWidgetConfig> = {}): QueryWidgetConfig => ({
-  v: 1,
-  kind: "query",
-  title: "",
-  color: "chart-1",
-  format: "auto",
-  source: "invoices",
-  metric: "sum",
-  measure: "invoiced",
-  period: YEAR,
-  display: "number",
-  ...over,
-});
+// Balances are the state as of today and take no period.
+const widget = (over: Partial<QueryWidgetConfig> = {}): QueryWidgetConfig => {
+  const balance = over.measure === "outstanding" || over.measure === "overdue";
+  return {
+    v: 1,
+    kind: "query",
+    title: "",
+    color: "chart-1",
+    format: "auto",
+    source: "invoices",
+    metric: "sum",
+    measure: "invoiced",
+    ...(balance ? {} : { period: YEAR }),
+    display: "number",
+    ...over,
+  };
+};
 const run = (over: Partial<QueryWidgetConfig> = {}, owner = s.owner, ctx = context) =>
   runWidget(db, owner, widget(over), ctx);
 const total = (over: Partial<QueryWidgetConfig> = {}, owner = s.owner) => run(over, owner).total;
@@ -140,7 +144,11 @@ describe("zdroje a metriky", () => {
     const summary = reportSummary(db, s.owner, { range: YEAR, includeExternal: true }, TODAY);
     expect(total({ measure: "outstanding" })).toBe(summary.outstandingMinor);
     expect(total({ measure: "overdue" })).toBe(summary.overdueMinor);
-    expect(total({ measure: "overdue", period: "last_year" })).toBe(200_000);
+    const asOfToday = run({ measure: "overdue" }, s.owner, {
+      today: TODAY,
+      globalFilter: { period: "last_year" },
+    });
+    expect(asOfToday).toMatchObject({ total: 200_000, range: { from: TODAY, to: TODAY } });
     expect(total({ measure: "outstanding", metric: "count" })).toBe(1);
   });
 
@@ -277,6 +285,24 @@ describe("filtry a období", () => {
     const sum = (rows: { value: number | null }[]) => rows.reduce((t, r) => t + (r.value ?? 0), 0);
     expect(sum(top.rows)).toBe(sum(all.rows));
     expect(top.total).toBe(150_000);
+  });
+
+  test("nesčítatelná metrika přes 50 kategorií má příznak truncated", () => {
+    const owner = reportOwner(db);
+    for (let index = 0; index < 51; index++) {
+      const id = namedCustomer(owner, `Zákazník ${index}`);
+      issuedDocument(owner, id, { issueDate: "2026-03-03", totalMinor: (index + 1) * 1_000 });
+    }
+    setClockForTests(null);
+    const median = run({ display: "table", groupBy: "customer", metric: "median" }, owner);
+    expect(median.rows).toHaveLength(50);
+    expect(median.truncated).toBe(true);
+    const sum = run({ display: "table", groupBy: "customer" }, owner);
+    expect(sum.rows.at(-1)).toMatchObject({ kind: "others", value: 1_000 });
+    expect(sum.truncated).toBeUndefined();
+    expect(
+      run({ display: "table", groupBy: "customer", metric: "median" }).truncated,
+    ).toBeUndefined();
   });
 
   test("systémový widget bez registrace skončí chybou služby", () => {

@@ -18,7 +18,7 @@ import { scoped } from "../db/scoped";
 import { RATE_RULES } from "../rate-limit";
 import { runWidget, type WidgetContext, type WidgetResult } from "../reports/widget-query";
 import { enforceRateLimit, ServiceError } from "./access";
-import { bumpRevision, dashboardIn, ownerOf, Unchanged, widgetsIn } from "./dashboards";
+import { bumpRevision, dashboardIn, ownerOf, parseInput, Unchanged, widgetsIn } from "./dashboards";
 import { mutate } from "./mutation";
 
 const E = TEXTS.dashboard.errors;
@@ -27,12 +27,6 @@ const idSchema = z.string(E.invalid).min(1, E.invalid).max(64, E.invalid);
 const addSchema = z.strictObject({ dashboardId: idSchema, config: z.unknown() });
 const updateSchema = z.strictObject({ id: idSchema, config: z.unknown() });
 const removeSchema = z.strictObject({ id: idSchema });
-
-function parseInput<T>(schema: z.ZodType<T>, raw: unknown): T {
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
-  return parsed.data;
-}
 
 export function checkedConfig(raw: unknown): WidgetConfig {
   try {
