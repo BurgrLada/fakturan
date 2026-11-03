@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { CHART_TOKENS, type ChartToken } from "@/lib/chart-tokens";
+import type { CalendarDate } from "@/lib/number-format";
 import type { DateFormat } from "@/lib/preferences";
 import { PERIOD_TOKENS, type Period } from "@/lib/report-period";
 import { TEXTS } from "@/lib/texts";
@@ -28,6 +29,7 @@ import {
   type QueryField,
 } from "@/lib/widget-options";
 import { cn } from "@/lib/utils";
+import { widgetUnit } from "./widget-number";
 import { WidgetPreview } from "./widget-preview";
 
 const T = TEXTS.dashboard.configurator;
@@ -124,10 +126,12 @@ function QuerySelect({
 function PeriodField({
   period,
   allowed,
+  today,
   onChange,
 }: {
   period: Period | undefined;
   allowed: readonly unknown[];
+  today: CalendarDate;
   onChange: (period: Period | undefined) => void;
 }) {
   const range = typeof period === "object" ? period : null;
@@ -141,10 +145,7 @@ function PeriodField({
           onChange={(event) => {
             const value = event.target.value;
             if (value === CUSTOM) {
-              onChange({
-                from: `${new Date().getFullYear()}-01-01`,
-                to: `${new Date().getFullYear()}-12-31`,
-              });
+              onChange({ from: `${today.slice(0, 4)}-01-01`, to: today });
             } else onChange(value as Period);
           }}
         >
@@ -178,11 +179,47 @@ function PeriodField({
   );
 }
 
+// The draft text may be empty or out of range while typing; only a whole number in range is passed on.
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [shown, setShown] = useState(value);
+  if (value !== shown) {
+    setShown(value);
+    setDraft(String(value));
+  }
+  return (
+    <FilterField label={label}>
+      <Input
+        type="number"
+        min={1}
+        max={MAX_TOP_N}
+        value={draft}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          const next = Number(event.target.value);
+          if (Number.isInteger(next) && next >= 1 && next <= MAX_TOP_N) onChange(next);
+        }}
+        onBlur={() => setDraft(String(value))}
+      />
+    </FilterField>
+  );
+}
+
 function QueryFields({
   config,
+  today,
   onChange,
 }: {
   config: QueryWidgetConfig;
+  today: CalendarDate;
   onChange: (config: QueryWidgetConfig) => void;
 }) {
   const set = (field: QueryField, value: unknown) => onChange(setQueryField(config, field, value));
@@ -210,7 +247,12 @@ function QueryFields({
       <PeriodField
         period={config.period}
         allowed={queryOptions(config, "period")}
-        onChange={(period) => onChange({ ...config, period })}
+        today={today}
+        onChange={(period) => {
+          const next = setQueryField(config, "period", period);
+          // A range the schema refuses still reaches the preview, which then says why.
+          onChange(getQueryField(next, "period") === period ? next : { ...config, period });
+        }}
       />
       {select(T.compare, "compare", R.compares, T.noCompare)}
       {select(T.currency, "filter:currency", {}, R.allCurrencies)}
@@ -222,18 +264,11 @@ function QueryFields({
             onChange={(checked) => set("topN", checked ? 5 : undefined)}
           />
           {config.topN !== undefined && (
-            <FilterField label={T.topN}>
-              <Input
-                type="number"
-                min={1}
-                max={MAX_TOP_N}
-                value={config.topN}
-                onChange={(event) => {
-                  const value = Math.trunc(Number(event.target.value));
-                  if (value >= 1 && value <= MAX_TOP_N) set("topN", value);
-                }}
-              />
-            </FilterField>
+            <NumberField
+              label={T.topN}
+              value={config.topN}
+              onChange={(value) => set("topN", value)}
+            />
           )}
         </div>
       )}
@@ -257,9 +292,11 @@ function QueryFields({
 
 function SystemFields({
   config,
+  today,
   onChange,
 }: {
   config: SystemWidgetConfig;
+  today: CalendarDate;
   onChange: (config: SystemWidgetConfig) => void;
 }) {
   const rows = ROWS_SYSTEM.has(config.systemId);
@@ -268,23 +305,17 @@ function SystemFields({
   return (
     <Section title={T.data}>
       {rows && (
-        <FilterField label={T.rows}>
-          <Input
-            type="number"
-            min={1}
-            max={MAX_TOP_N}
-            value={config.rows ?? 5}
-            onChange={(event) => {
-              const value = Math.trunc(Number(event.target.value));
-              if (value >= 1 && value <= MAX_TOP_N) onChange({ ...config, rows: value });
-            }}
-          />
-        </FilterField>
+        <NumberField
+          label={T.rows}
+          value={config.rows ?? 5}
+          onChange={(value) => onChange({ ...config, rows: value })}
+        />
       )}
       {period && (
         <PeriodField
           period={config.period}
           allowed={PERIOD_TOKENS}
+          today={today}
           onChange={(next) => onChange({ ...config, period: next })}
         />
       )}
@@ -336,16 +367,27 @@ const SWATCH: Record<ChartToken, string> = {
   "chart-5": "bg-chart-5",
 };
 
+const MONEY_SYSTEM = new Set(["aging", "open_advances"]);
+
+// The number format rounds money in numbers and tables only; charts and other units ignore it.
+function formatApplies(config: WidgetConfig): boolean {
+  if (config.kind === "system") return MONEY_SYSTEM.has(config.systemId);
+  if (widgetUnit(config, {}).kind !== "money") return false;
+  return ["number", "number_compare", "table"].includes(config.display);
+}
+
 export function WidgetConfigurator({
   dashboardId,
   widgetId,
   initial,
   dateFormat,
+  today,
 }: {
   dashboardId: string;
   widgetId: string | null;
   initial: WidgetConfig;
   dateFormat: DateFormat;
+  today: CalendarDate;
 }) {
   const router = useRouter();
   const [config, setConfig] = useState<WidgetConfig>(initial);
@@ -387,20 +429,22 @@ export function WidgetConfigurator({
               onChange={(event) => update({ ...config, title: event.target.value })}
             />
           </FilterField>
-          <FilterField label={T.format}>
-            <NativeSelect
-              value={config.format}
-              onChange={(event) =>
-                update({ ...config, format: event.target.value as WidgetFormat })
-              }
-            >
-              {WIDGET_FORMATS.map((format) => (
-                <option key={format} value={format}>
-                  {T.formats[format]}
-                </option>
-              ))}
-            </NativeSelect>
-          </FilterField>
+          {formatApplies(config) && (
+            <FilterField label={T.format}>
+              <NativeSelect
+                value={config.format}
+                onChange={(event) =>
+                  update({ ...config, format: event.target.value as WidgetFormat })
+                }
+              >
+                {WIDGET_FORMATS.map((format) => (
+                  <option key={format} value={format}>
+                    {T.formats[format]}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FilterField>
+          )}
           <ColorField value={config.color} onChange={(color) => update({ ...config, color })} />
           {query && labelsAllowed(query) && (
             <Check
@@ -411,9 +455,11 @@ export function WidgetConfigurator({
           )}
         </Section>
         {query ? (
-          <QueryFields config={query} onChange={update} />
+          <QueryFields config={query} today={today} onChange={update} />
         ) : (
-          config.kind === "system" && <SystemFields config={config} onChange={update} />
+          config.kind === "system" && (
+            <SystemFields config={config} today={today} onChange={update} />
+          )
         )}
         {error && (
           <p role="alert" className="text-sm text-destructive">

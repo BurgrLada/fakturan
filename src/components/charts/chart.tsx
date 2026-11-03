@@ -54,6 +54,7 @@ function buildDefinition(spec: ChartSpec) {
     spec.labels && (single ? spec.series.length === 1 : true)
       ? [
           text(data, {
+            id: "value-label",
             x: "x",
             y: "value",
             text: (datum: ChartDatum) => money(datum.value),

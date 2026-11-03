@@ -6,9 +6,11 @@ import { WidgetConfigurator } from "@/components/dashboard/widget-configurator";
 import { WidgetGallery } from "@/components/dashboard/widget-gallery";
 import { PageLoading } from "@/components/page-loading";
 import { WIDGET_GALLERY } from "@/lib/dashboard-defaults";
+import { calendarDateInPrague } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import { isPinnedWidget } from "@/lib/widget-config";
 import { requireSession } from "@/server/auth/session";
+import { clock } from "@/server/clock";
 import { getDashboard } from "@/server/services/dashboards";
 import { getPreferences } from "@/server/services/preferences";
 
@@ -35,6 +37,7 @@ async function WidgetContent({ params, searchParams }: Pick<Props, "params" | "s
     </Link>
   );
   const dateFormat = getPreferences(user.id).dateFormat;
+  const today = calendarDateInPrague(clock.now());
 
   if (widgetId === NEW) {
     const template = WIDGET_GALLERY.find((item) => item.id === sablona);
@@ -60,6 +63,7 @@ async function WidgetContent({ params, searchParams }: Pick<Props, "params" | "s
           widgetId={null}
           initial={template.config}
           dateFormat={dateFormat}
+          today={today}
         />
       </>
     );
@@ -76,6 +80,7 @@ async function WidgetContent({ params, searchParams }: Pick<Props, "params" | "s
         widgetId={widget.id}
         initial={widget.config ?? FALLBACK}
         dateFormat={dateFormat}
+        today={today}
       />
     </>
   );

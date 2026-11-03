@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import Database from "better-sqlite3";
+import { calendarDateInPrague } from "@/lib/number-format";
 import { expect, test } from "./fixtures";
 import { register } from "./invoice-helpers";
 import { accountWithInvoice, cashInvoice, money } from "./report-helpers";
@@ -13,6 +14,7 @@ const overviewCard = (page: Page, title: string) =>
 const editCards = (page: Page) => page.getByTestId("edit-widget").filter({ visible: true });
 const editCard = (page: Page, title: string) =>
   editCards(page).filter({ has: page.getByRole("heading", { name: title }) });
+const VALUE_LABEL = '[data-ts-key^="value-label:"]';
 const preview = (page: Page) => page.getByTestId("widget-preview");
 const announcement = (page: Page) => page.getByTestId("layout-announcement");
 
@@ -29,6 +31,7 @@ async function openConfigurator(page: Page, title: string) {
 }
 
 async function dragBy(page: Page, handle: Locator, dx: number, dy: number) {
+  await handle.hover();
   const box = (await handle.boundingBox())!;
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
@@ -43,6 +46,19 @@ async function dragBy(page: Page, handle: Locator, dx: number, dy: number) {
 async function gridStep(page: Page) {
   const width = (await page.getByTestId("grid-editor").boundingBox())!.width;
   return { column: (width - 16 * 11) / 12 + 16, row: 72 + 16 };
+}
+
+// The drag library's own class name, found only in the chunk that bundles it.
+const GRID_MARKER = "react-grid-placeholder";
+
+function watchGridChunk(page: Page): () => boolean {
+  let loaded = false;
+  page.on("response", async (response) => {
+    if (response.request().resourceType() !== "script") return;
+    const body = await response.text().catch(() => "");
+    if (body.includes(GRID_MARKER)) loaded = true;
+  });
+  return () => loaded;
 }
 
 function previewRequests(page: Page, delayed: (body: string) => boolean, ms: number) {
@@ -81,6 +97,19 @@ test("[DSH-001] widget jde přetáhnout, zvětšit a po obnovení zůstane na m�
   await page.getByRole("link", { name: "Zpět na přehled" }).click();
   await expect.poll(() => warning).toBe("Rozložení není uložené. Opravdu odejít bez uložení?");
   await expect(page).toHaveURL(/\/upravit$/);
+  let asked = 0;
+  page.on("dialog", (dialog) => {
+    asked += 1;
+    void dialog.dismiss();
+  });
+  const manage = page.getByRole("group", { name: "Správa dashboardu" });
+  await manage.getByRole("button", { name: "Duplikovat" }).click();
+  await expect.poll(() => asked).toBe(1);
+  await manage.getByRole("button", { name: "Nový dashboard" }).click();
+  await page.getByLabel("Název dashboardu").fill("Nechtěný");
+  await page.getByRole("button", { name: "Uložit", exact: true }).click();
+  await expect.poll(() => asked).toBe(2);
+  await expect(page).toHaveURL(/\/upravit$/);
 
   await page.getByRole("button", { name: "Uložit rozložení" }).click();
   await expect(page.getByText("Rozložení je uložené.")).toBeVisible();
@@ -92,6 +121,7 @@ test("[DSH-001] widget jde přetáhnout, zvětšit a po obnovení zůstane na m�
   const style = await overviewCard(page, "Průměrná doba úhrady").getAttribute("style");
   expect(style).toContain("--x: 10;");
   expect(style).toContain("--h: 3;");
+  await expect(page.getByRole("navigation", { name: "Dashboardy" })).toHaveCount(0);
 });
 
 test("[UI-008] rozložení jde změnit jen klávesnicí a změna se oznámí", async ({
@@ -188,10 +218,15 @@ test("[DSH-016] název, barva, popisky a formát čísla se projeví", async ({ 
   await expect(page).toHaveURL(/\/upravit$/);
 
   await openConfigurator(page, "Tržby po měsících");
+  await expect(preview(page).getByRole("img")).toBeVisible();
+  await expect(preview(page).locator(VALUE_LABEL)).toHaveCount(0);
   await page.locator("label", { hasText: "Modrá" }).filter({ visible: true }).click();
   await expect(page.getByRole("radio", { name: "Modrá" })).toBeChecked();
   await page.getByLabel("Hodnoty přímo v grafu").check();
   await expect(preview(page).locator('svg [fill="var(--chart-4)"]').first()).toBeAttached();
+  await expect(preview(page).locator(VALUE_LABEL, { hasText: money("1 000,00 Kč") })).toHaveCount(
+    1,
+  );
   await page.getByRole("button", { name: "Uložit widget" }).click();
   await expect(page).toHaveURL(/\/upravit$/);
 
@@ -201,7 +236,8 @@ test("[DSH-016] název, barva, popisky a formát čísla se projeví", async ({ 
   );
   const chart = overviewCard(page, "Tržby po měsících").getByRole("img");
   await expect(chart.locator('[fill="var(--chart-4)"]').first()).toBeAttached();
-  await expect(chart.locator("text", { hasText: money("1 000,00 Kč") }).first()).toBeAttached();
+  await expect(chart.locator(VALUE_LABEL, { hasText: money("1 000,00 Kč") })).toHaveCount(1);
+  await expect(overviewCard(page, "Meziroční porovnání").locator(VALUE_LABEL)).toHaveCount(0);
 });
 
 test("[DSH-017] změna metriky se ukáže v náhledu bez uložení", async ({ page, freshApp }) => {
@@ -275,6 +311,42 @@ test("konfigurátor nenabídne neplatnou kombinaci", async ({ page, freshApp }) 
     "month",
   );
 
+  await expect(page.getByRole("combobox", { name: "Formát čísel" })).toHaveCount(0);
+  await page
+    .getByRole("combobox", { name: "Seskupit podle", exact: true })
+    .selectOption({ label: "Dnů" });
+  await page
+    .getByRole("combobox", { name: "Období", exact: true })
+    .selectOption({ label: "Vlastní podle dat" });
+  const today = calendarDateInPrague(new Date());
+  await expect(page.getByLabel("Od", { exact: true }).filter({ visible: true })).toHaveValue(
+    `${today.slice(0, 4)}-01-01`,
+  );
+  await expect(page.getByLabel("Do", { exact: true }).filter({ visible: true })).toHaveValue(today);
+  await page.getByLabel("Od", { exact: true }).filter({ visible: true }).fill("2020-01-01");
+  await expect(page.getByRole("combobox", { name: "Seskupit podle", exact: true })).toHaveValue(
+    "month",
+  );
+  await expect(page.getByTestId("preview-invalid")).toHaveCount(0);
+
+  await page
+    .getByRole("combobox", { name: "Zobrazení", exact: true })
+    .selectOption({ label: "Tabulka" });
+  await expect(page.getByRole("combobox", { name: "Formát čísel" })).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Seskupit podle", exact: true })
+    .selectOption({ label: "Zákazníků" });
+  await page.getByLabel("Jen nejvyšší řádky").check();
+  const top = page.getByLabel("Počet nejvyšších řádků");
+  await expect(top).toHaveValue("5");
+  await top.press("End");
+  await top.press("Backspace");
+  await expect(top).toHaveValue("");
+  await top.pressSequentially("12");
+  await expect(top).toHaveValue("12");
+  await top.blur();
+  await expect(top).toHaveValue("12");
+
   await page
     .getByRole("combobox", { name: "Zdroj dat", exact: true })
     .selectOption({ label: "Zákazníci" });
@@ -327,8 +399,7 @@ test("[REM-009] karta REM-009 nemá v úpravách akci odebrat", async ({ page, f
 
 test("[UI-007] na telefonu chybí vstup do úprav a Přehled jde číst", async ({ page, freshApp }) => {
   const { baseURL } = freshApp;
-  const scripts: string[] = [];
-  page.on("request", (request) => scripts.push(request.url()));
+  const gridLoaded = watchGridChunk(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await register(page, baseURL);
   await page.goto(baseURL);
@@ -341,7 +412,12 @@ test("[UI-007] na telefonu chybí vstup do úprav a Přehled jde číst", async 
   await expect(page.getByTestId("edit-narrow")).toBeVisible();
   await page.waitForLoadState("networkidle");
   await expect(page.locator(".react-grid-layout")).toHaveCount(0);
-  expect(scripts.filter((url) => /react-grid-layout/i.test(url))).toEqual([]);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
+  expect(gridLoaded()).toBe(false);
+
+  // The same check finds the library once the editor is wide enough to load it.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(page.locator(".react-grid-layout")).toBeVisible();
+  await expect.poll(gridLoaded).toBe(true);
 });

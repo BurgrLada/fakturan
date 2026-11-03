@@ -95,10 +95,16 @@ export function DashboardDialogs({
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function act(work: () => Promise<Reply>, done: (reply: Reply & { ok: true }) => Promise<void>) {
+  // An action that leaves the page asks first, so a refusal writes nothing.
+  function act(
+    work: () => Promise<Reply>,
+    done: (reply: Reply & { ok: true }) => Promise<void>,
+    leaves = false,
+  ) {
     setDialog(null);
     setMessage(null);
     startTransition(async () => {
+      if (leaves && !(await mayLeave())) return;
       try {
         const reply = await work();
         if (!reply.ok) {
@@ -110,10 +116,6 @@ export function DashboardDialogs({
         setMessage({ ok: false, text: T.failed });
       }
     });
-  }
-
-  async function go(href: string) {
-    if (await mayLeave()) router.push(href);
   }
 
   return (
@@ -151,7 +153,8 @@ export function DashboardDialogs({
           onClick={() =>
             act(
               () => duplicateDashboardAction({ id: dashboard.id }),
-              (reply) => go(editorHref(reply.id!)),
+              async (reply) => router.push(editorHref(reply.id!)),
+              true,
             )
           }
         >
@@ -207,7 +210,8 @@ export function DashboardDialogs({
         onSubmit={(name) =>
           act(
             () => createDashboardAction({ name }),
-            (reply) => go(editorHref(reply.id!)),
+            async (reply) => router.push(editorHref(reply.id!)),
+            true,
           )
         }
       />
