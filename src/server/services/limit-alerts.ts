@@ -17,7 +17,7 @@ const THRESHOLD: Record<Exclude<LimitLevel, "ok">, number> = {
 function alertsFor(ownerId: string, today: string): Alert[] {
   const year = Number(today.slice(0, 4));
   return limitStates(db, ownerId, year).flatMap((state) =>
-    state.level === "ok"
+    !state.watched || state.level === "ok"
       ? []
       : [
           {

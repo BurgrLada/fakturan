@@ -16,14 +16,15 @@ import type { Unconverted } from "./types";
 
 export type Turnover = { minor: number; unconverted: Unconverted };
 
+// An unwatched limit still shows the turnover, but neither a share of the limit nor a level.
 export type LimitState = {
   key: LimitKey;
   limitMinor: number;
   turnoverMinor: number;
-  percent: number;
-  level: LimitLevel;
   unconverted: Unconverted;
-};
+} & ({ watched: true; percent: number; level: LimitLevel } | { watched: false });
+
+const WATCH = { vat: "vatWatch", flat: "flatWatch" } as const;
 
 export function turnover(q: Reader, ownerId: string, year: number, basis: TurnoverBasis): Turnover {
   if (!Number.isInteger(year) || year < 1000 || year > 9999) {
@@ -48,20 +49,22 @@ export function limitStates(q: SnapshotReader, ownerId: string, year: number): L
           vat: preferences.turnoverVatLimitMinor,
           flat: preferences.turnoverFlatLimitMinor,
           basis: preferences.turnoverBasis,
+          vatWatch: preferences.turnoverVatWatch,
+          flatWatch: preferences.turnoverFlatWatch,
         })
         .from(preferences)
         .where(scoped(ownerId).where(preferences))
         .get();
       const { minor, unconverted } = turnover(tx, ownerId, year, row?.basis ?? "taxable");
-      return LIMIT_KEYS.map((key) => {
+      return LIMIT_KEYS.map((key): LimitState => {
         const limitMinor = effectiveLimit(key, row?.[key] ?? null);
+        const base = { key, limitMinor, turnoverMinor: minor, unconverted };
+        if (!(row?.[WATCH[key]] ?? true)) return { ...base, watched: false };
         return {
-          key,
-          limitMinor,
-          turnoverMinor: minor,
+          ...base,
+          watched: true,
           percent: limitPercent(minor, limitMinor),
           level: limitLevel(minor, limitMinor),
-          unconverted,
         };
       });
     },

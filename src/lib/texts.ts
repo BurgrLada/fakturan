@@ -167,6 +167,8 @@ export const TEXTS = {
         high: "Nad 95 %",
         over: "Překročeno",
       },
+      unwatched: "Nehlídá se",
+      turnoverOnly: (turnover: string) => `Obrat ${turnover}`,
       note: "Jde o podklad pro vlastní orientaci, ne o daňové poradenství. Hranice a výpočet ověřte s daňovým poradcem.",
       settings: "Upravit limity v nastavení",
     },
@@ -2532,14 +2534,16 @@ export const TEXTS = {
       turnoverBasis: "Základ obratu pro limity",
       turnoverVatLimitMinor: "Limit obratu pro registraci k DPH (Kč)",
       turnoverFlatLimitMinor: "Limit obratu pro paušální daň (Kč)",
+      turnoverVatWatch: "Hlídat limit pro registraci k DPH",
+      turnoverFlatWatch: "Hlídat limit pro paušální daň",
     },
     turnoverBases: {
       taxable: "Datum zdanitelného plnění, jinak datum vystavení",
       paid: "Datum úhrady",
     },
     turnoverLimits: {
-      title: "Limity obratu",
-      hint: "Podklad pro vlastní orientaci, ne daňové poradenství. Prázdné pole znamená zákonný limit, aktuálně",
+      hint: (statutory: string) =>
+        `Podklad pro vlastní orientaci, ne daňové poradenství. Prázdné pole znamená zákonný limit, aktuálně ${statutory}.`,
       invalid: "Limit obratu musí být kladná částka v korunách",
     },
     fxBases: {

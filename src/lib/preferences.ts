@@ -54,6 +54,8 @@ export type Preferences = {
   turnoverVatLimitMinor: number | null;
   turnoverFlatLimitMinor: number | null;
   turnoverBasis: TurnoverBasis;
+  turnoverVatWatch: boolean;
+  turnoverFlatWatch: boolean;
 };
 
 export type DesignChoice = { id: string; name: string };
@@ -89,6 +91,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   turnoverVatLimitMinor: null,
   turnoverFlatLimitMinor: null,
   turnoverBasis: "taxable",
+  turnoverVatWatch: true,
+  turnoverFlatWatch: true,
 };
 
 export function defaultIssueDate(mode: IssueDateMode, now: Date): CalendarDate {

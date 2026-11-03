@@ -63,6 +63,8 @@ export const preferences = sqliteTable("preferences", {
   turnoverBasis: text("turnover_basis", { enum: TURNOVER_BASES })
     .notNull()
     .default(D.turnoverBasis),
+  turnoverVatWatch: flag("turnover_vat_watch", D.turnoverVatWatch),
+  turnoverFlatWatch: flag("turnover_flat_watch", D.turnoverFlatWatch),
   fixedRates: text("fixed_rates", { mode: "json" })
     .$type<Record<string, number>>()
     .notNull()

@@ -288,6 +288,13 @@
       "when": 1793656276759,
       "tag": "0040_dashboard",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1793705174187,
+      "tag": "0041_limit_watch",
+      "breakpoints": true
     }
   ]
 }

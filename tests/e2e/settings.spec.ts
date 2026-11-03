@@ -221,3 +221,39 @@ test("[REP-005] limity a základ jdou změnit v Nastavení", async ({ page, fres
   await page.getByRole("button", { name: "Uložit" }).click();
   await expect(page.getByText("Limit obratu musí být kladná částka v korunách")).toBeVisible();
 });
+
+test("[UI-011] hlídání každého limitu jde vypnout a Statistiky ho pak nehlídají", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await page.goto(`${baseURL}/nastaveni/vychozi`);
+  await page.waitForLoadState("networkidle");
+  const vatWatch = page.getByLabel("Hlídat limit pro registraci k DPH");
+  const flatWatch = page.getByLabel("Hlídat limit pro paušální daň");
+  await expect(vatWatch).toBeChecked();
+  await expect(flatWatch).toBeChecked();
+
+  await vatWatch.uncheck();
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Uloženo.")).toBeVisible();
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await expect(vatWatch).not.toBeChecked();
+  await expect(flatWatch).toBeChecked();
+
+  await page.goto(`${baseURL}/prehledy?zalozka=limity`);
+  await expect(page.getByTestId("limit-vat")).toContainText("Nehlídá se");
+  await expect(page.getByTestId("limit-vat")).not.toContainText("%");
+  await expect(page.getByTestId("limit-flat")).toContainText("V pořádku");
+
+  await page.goto(`${baseURL}/nastaveni/vychozi`);
+  await page.waitForLoadState("networkidle");
+  await vatWatch.check();
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Uloženo.")).toBeVisible();
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await expect(vatWatch).toBeChecked();
+});

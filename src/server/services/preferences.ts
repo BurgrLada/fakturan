@@ -89,6 +89,8 @@ export const preferencesSchema = z.object({
   turnoverVatLimitMinor: limitSchema,
   turnoverFlatLimitMinor: limitSchema,
   turnoverBasis: z.enum(TURNOVER_BASES, V.turnoverBasis),
+  turnoverVatWatch: z.boolean(),
+  turnoverFlatWatch: z.boolean(),
 });
 
 export const preferencesPatchSchema = preferencesSchema.partial();

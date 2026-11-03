@@ -175,8 +175,8 @@ export function buildSheet(report: ReportTab, bundle: ReportBundle): Sheet {
             text(T.limits[state.key]),
             money(state.limitMinor, "CZK"),
             money(state.turnoverMinor, "CZK"),
-            count(state.percent),
-            text(T.limits.levels[state.level]),
+            state.watched ? count(state.percent) : null,
+            text(state.watched ? T.limits.levels[state.level] : T.limits.unwatched),
           ]),
           [
             text(T.limits.basis),

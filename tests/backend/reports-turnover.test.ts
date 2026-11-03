@@ -11,10 +11,10 @@ import {
 } from "@/lib/turnover-limits";
 import { setClockForTests } from "@/server/clock";
 import { invoice } from "@/server/db/schema";
-import { limitStates, turnover } from "@/server/reports/turnover";
+import { limitStates, turnover, type LimitState } from "@/server/reports/turnover";
 import { cancelInvoice } from "@/server/services/invoice-lifecycle";
 import "@/server/services/limit-alerts";
-import { derivedAlerts } from "@/server/services/notifications";
+import { derivedAlerts, unreadCount } from "@/server/services/notifications";
 import { getPreferences, savePreferences } from "@/server/services/preferences";
 import {
   at,
@@ -50,7 +50,8 @@ function withTurnover(totalMinor: number) {
   return owner;
 }
 
-const vat = (owner: string) => limitStates(db, owner, 2026).find((s) => s.key === "vat")!;
+const vat = (owner: string) =>
+  limitStates(db, owner, 2026).find((s) => s.key === "vat")! as LimitState & { level?: string };
 
 describe("obrat", () => {
   test("[REP-005] obrat za rok jde podle DUZP a bez něj podle data vystavení", () => {
@@ -217,6 +218,8 @@ describe("limity", () => {
       turnoverVatLimitMinor: null,
       turnoverFlatLimitMinor: null,
       turnoverBasis: "taxable",
+      turnoverVatWatch: true,
+      turnoverFlatWatch: true,
     });
     expect(limitStates(db, owner, 2026).map((s) => [s.key, s.limitMinor])).toEqual([
       ["vat", VAT_REGISTRATION_LIMIT_MINOR],
@@ -277,6 +280,30 @@ describe("upozornění na limity", () => {
 
     expect(before).toEqual(["limit:flat:2026:80", "limit:vat:2026:80"]);
     expect(keys(owner)).toEqual(["limit:flat:2026:95", "limit:vat:2026:95"]);
+  });
+
+  test("[UI-011] vypnutý limit nevytvoří upozornění a zvonek ho nepočítá", () => {
+    const owner = withTurnover(195_000_000);
+    const before = unreadCount(owner);
+
+    savePreferences(webActor(owner), { turnoverVatWatch: false });
+
+    expect(keys(owner)).toEqual(["limit:flat:2026:95"]);
+    expect(unreadCount(owner)).toBe(before - 1);
+    expect(vat(owner)).toEqual({
+      key: "vat",
+      watched: false,
+      limitMinor: VAT_REGISTRATION_LIMIT_MINOR,
+      turnoverMinor: 195_000_000,
+      unconverted: { count: 0, byCurrency: [] },
+    });
+
+    savePreferences(webActor(owner), { turnoverFlatWatch: false });
+    expect(keys(owner)).toEqual([]);
+    expect(unreadCount(owner)).toBe(before - 2);
+
+    savePreferences(webActor(owner), { turnoverVatWatch: true });
+    expect(keys(owner)).toEqual(["limit:vat:2026:95"]);
   });
 
   test("[UI-011] upozornění čte jen aktuální rok a cizí účet ho nevidí", () => {

@@ -56,8 +56,12 @@ const OWNED_ELSEWHERE: readonly string[] = [
 ];
 
 const LIMIT_FIELDS = [
-  { name: "turnoverVatLimitMinor", statutory: VAT_REGISTRATION_LIMIT_MINOR },
-  { name: "turnoverFlatLimitMinor", statutory: FLAT_TAX_LIMIT_MINOR },
+  {
+    name: "turnoverVatLimitMinor",
+    watch: "turnoverVatWatch",
+    statutory: VAT_REGISTRATION_LIMIT_MINOR,
+  },
+  { name: "turnoverFlatLimitMinor", watch: "turnoverFlatWatch", statutory: FLAT_TAX_LIMIT_MINOR },
 ] as const;
 
 const FLAGS: FlagKey[] = ["showLogo", "showQr", "showQrLogo", "showSignature", "showDuzp"];
@@ -273,8 +277,18 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
       <section className="flex flex-col gap-4">
         <h2 className="text-lg">{T.sections.limits}</h2>
         <ChoiceField name="turnoverBasis" value={values.turnoverBasis} onChange={choose} />
-        {LIMIT_FIELDS.map(({ name, statutory }) => (
+        {LIMIT_FIELDS.map(({ name, watch, statutory }) => (
           <div key={name} className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                id={`pref-${watch}`}
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={values[watch]}
+                onChange={(event) => set(watch, event.target.checked)}
+              />
+              <Label htmlFor={`pref-${watch}`}>{T.fields[watch]}</Label>
+            </div>
             <Label htmlFor={`pref-${name}`}>{T.fields[name]}</Label>
             <Input
               id={`pref-${name}`}
@@ -286,7 +300,7 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
               }
             />
             <p className="text-sm text-muted-foreground">
-              {T.turnoverLimits.hint} {formatMoney(statutory, "CZK")}.
+              {T.turnoverLimits.hint(formatMoney(statutory, "CZK"))}
             </p>
           </div>
         ))}
