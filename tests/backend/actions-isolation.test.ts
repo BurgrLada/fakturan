@@ -81,6 +81,7 @@ import {
 } from "@/app/(app)/faktury/actions";
 import {
   bankNotification,
+  customer,
   emailLog,
   invoice,
   payment,
@@ -108,6 +109,8 @@ import {
   createDashboardAction,
   deleteDashboardAction,
   duplicateDashboardAction,
+  importDashboardAction,
+  previewImportAction,
   previewWidgetAction,
   removeWidgetAction,
   renameDashboardAction,
@@ -121,6 +124,8 @@ import {
   deleteDashboard,
   duplicateDashboard,
   ensureDashboards,
+  exportDashboard,
+  exportWidget,
   getDashboard,
   listDashboards,
   renameDashboard,
@@ -824,6 +829,8 @@ describe("dashboardy", () => {
       ...foreign(),
       createDashboardAction({ name: "Bez session" }),
       previewWidgetAction({ config: chart }),
+      previewImportAction({ text: "{}" }),
+      importDashboardAction({ text: "{}" }),
     ]);
     for (const reply of signedOut) expect(reply).toMatchObject({ ok: false, expired: true });
     expect(snapshot()).toEqual(before);
@@ -833,5 +840,73 @@ describe("dashboardy", () => {
     expect(await setDefaultDashboardAction({ id: second })).toEqual({ ok: true });
     expect(listDashboards(mine).find((row) => row.isDefault)?.id).toBe(second);
     expect(home).toBeDefined();
+  });
+
+  test("[TST-009] import ani export neprojde s cizím ID", async () => {
+    const { POST: exportPost } = await import("@/app/(app)/dashboardy/[id]/export/route");
+    const { POST: widgetPost } =
+      await import("@/app/(app)/dashboardy/[id]/widget/[widgetId]/export/route");
+    const [mine, stranger] = owners();
+    const [home] = ensureDashboards(actor(mine));
+    const [foreignHome] = ensureDashboards(actor(stranger));
+    const now = new Date();
+    const customerId = `cust-${mine}`;
+    db.insert(customer)
+      .values({ id: customerId, userId: mine, name: "Alfa", createdAt: now, updatedAt: now })
+      .run();
+    const filtered = { ...chart, filters: { customerIds: [customerId] } };
+    const { id: widgetId } = addWidget(actor(mine), { dashboardId: home!.id, config: filtered });
+
+    expect(() => exportDashboard(stranger, home!.id)).toThrow("Dashboard neexistuje");
+    expect(() => exportWidget(stranger, home!.id, widgetId)).toThrow("Dashboard neexistuje");
+    expect(() => exportWidget(stranger, foreignHome!.id, widgetId)).toThrow("Widget neexistuje");
+
+    const post = (url: string) =>
+      new Request(`http://localhost:3000${url}`, {
+        method: "POST",
+        headers: { origin: "http://localhost:3000" },
+      }) as never;
+    const params = <T>(value: T) => ({ params: Promise.resolve(value) });
+    session.userId = stranger;
+    expect((await exportPost(post("/x"), params({ id: home!.id }))).status).toBe(404);
+    expect((await widgetPost(post("/x"), params({ id: foreignHome!.id, widgetId }))).status).toBe(
+      404,
+    );
+
+    session.userId = mine;
+    const own = await exportPost(post("/x"), params({ id: home!.id }));
+    expect(own.status).toBe(200);
+    const text = await own.text();
+    expect(text).not.toContain(customerId);
+    expect(text).not.toContain(mine);
+    const crossSite = new Request("http://localhost:3000/x", {
+      method: "POST",
+      headers: { origin: "https://evil.example" },
+    }) as never;
+    expect((await exportPost(crossSite, params({ id: home!.id }))).status).toBe(403);
+
+    // A hand-made file naming the other account's customer imports without the filter.
+    const file = JSON.stringify({
+      format: "fakturan.dashboard",
+      v: 1,
+      name: "Cizí",
+      widgets: [filtered],
+    });
+    session.userId = stranger;
+    const before = listDashboards(mine).map((row) => getDashboard(mine, row.id));
+    const preview = await previewImportAction({ text: file });
+    if (!preview.ok) throw new Error(preview.error);
+    expect(preview.preview.widgets.find((w) => w.config.title === chart.title)).toMatchObject({
+      droppedCustomers: true,
+    });
+    const imported = await importDashboardAction({ text: file });
+    if (!imported.ok) throw new Error(imported.error);
+    expect(JSON.stringify(getDashboard(stranger, imported.id))).not.toContain(customerId);
+    expect(getDashboard(mine, imported.id)).toBeNull();
+    expect(listDashboards(mine).map((row) => getDashboard(mine, row.id))).toEqual(before);
+    expect(await importDashboardAction({ text: 1 })).toEqual({
+      ok: false,
+      error: "Neplatná data",
+    });
   });
 });

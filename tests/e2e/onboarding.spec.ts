@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { addCustomer, chooseCustomer, fillLine, openForm, settled } from "./invoice-helpers";
 
 const PASSWORD = "správné-kůň-baterie-sponka";
 
@@ -89,4 +90,31 @@ test("[SET-030] výchozí hodnoty se uloží a neplatná splatnost ukáže chybu
   await page.reload();
   await expect(page.getByLabel("Splatnost ve dnech")).toHaveValue("30");
   await expect(page.getByLabel("Datum vystavení")).toHaveValue("last_day_previous_month");
+});
+
+test("[SET-002] nový účet vidí v UI, co doplnit před vystavením", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await expect(page.getByText("Dokončete nastavení")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Pokračovat v průvodci" })).toBeVisible();
+
+  await addCustomer(page, baseURL);
+  await openForm(page, baseURL);
+  await chooseCustomer(page);
+  await page.getByLabel("Způsob platby").selectOption("cash");
+  await fillLine(page, 0, "Konzultace", "1000");
+  await settled(page);
+  await page.getByRole("button", { name: "Vystavit" }).click();
+
+  const summary = page.getByRole("alert", { name: "Před vystavením doplňte" });
+  await expect(summary).toBeVisible();
+  for (const field of ["Jméno nebo firma", "Ulice", "Město", "PSČ", "IČO"]) {
+    const link = summary.getByRole("link", { name: `Doplňte u dodavatele: ${field}` });
+    await expect(link).toHaveAttribute("href", "/nastaveni/dodavatel");
+  }
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/upravit$/);
+
+  await summary.getByRole("link", { name: "Doplňte u dodavatele: IČO" }).click();
+  await expect(page.getByText("Před vystavením faktury doplňte:")).toBeVisible();
 });

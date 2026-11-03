@@ -4,7 +4,6 @@ PDF-007	Vizuální reference pokrývají jen první stranu	po schválení TST-01
 TST-009	Matice nemá roli administrátora ani entity plánu 8	plán 8
 TST-013	Změřeno jen s unit testy po souborech: payments 91,43 (6 přeživších ekvivalentních, 1 chyba), fx 99,17, cnb-rates 97,06, invoice-totals 96,55, qr-payload 95,15, payment-matching 99,16, fio 97,81, auth 98,02, mask 100, bank-notices/index 94,74, czech-holidays 100, money 91,53 %; number-format 84,92 % bez backendových testů, recurrence neměřená, celý běh se nevejde do limitu; fronta úloh, lease a tick nejsou ve stryker.config.json	plán 9
 TST-015	Chybí zpětné čtení ISDOC proti schématu	plán 8
-SET-002	Testy s tímto ID jsou jen backendové, UI kryje e2e INV-010	plán 7
 MAIL-001	Chybí volitelná příloha ISDOC v dialogu odeslání	plán 8
 INV-024	Chybí export (plán 8)	plán 8
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele

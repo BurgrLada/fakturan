@@ -35,13 +35,27 @@ export function czechError(issue: RawIssue): string {
   }
 }
 
-// The JSON path of the first problem and what is wrong with it (R-25).
-export function firstIssue(error: z.ZodError): { path: string; message: string } {
+function firstSegments(error: z.ZodError): { segments: PropertyKey[]; message: string } {
   const issue = error.issues[0];
-  if (!issue) return { path: "", message: C.invalidValue };
-  const path = issue.path.map(String);
-  if (issue.code === "unrecognized_keys") path.push(issue.keys[0] ?? "");
-  return { path: path.join("."), message: issue.message };
+  if (!issue) return { segments: [], message: C.invalidValue };
+  const segments: PropertyKey[] = [...issue.path];
+  if (issue.code === "unrecognized_keys") segments.push(issue.keys[0] ?? "");
+  return { segments, message: issue.message };
+}
+
+export function firstIssue(error: z.ZodError): { path: string; message: string } {
+  const { segments, message } = firstSegments(error);
+  return { path: segments.map(String).join("."), message };
+}
+
+// The same first problem with array indexes in brackets, as a JSON file reads (R-25).
+export function firstJsonIssue(error: z.ZodError): { path: string; message: string } {
+  const { segments, message } = firstSegments(error);
+  const path = segments.reduce<string>((out, segment) => {
+    if (typeof segment === "number") return `${out}[${segment}]`;
+    return out ? `${out}.${String(segment)}` : String(segment);
+  }, "");
+  return { path, message };
 }
 
 export function issueText(error: z.ZodError): string {

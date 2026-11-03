@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { asc, ne, sql } from "drizzle-orm";
+import { asc, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_DASHBOARD } from "@/lib/dashboard-defaults";
 import {
@@ -11,19 +11,31 @@ import {
   type LayoutItem,
   type WidgetDraft,
 } from "@/lib/dashboard-layout";
+import {
+  parseDashboardFile,
+  placeWidgets,
+  toDashboardFile,
+  type DashboardFile,
+} from "@/lib/dashboard-share";
+import { calendarDateInPrague } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import { czechError, issueText } from "@/lib/validation-issue";
-import { widgetConfigSchema, type WidgetConfig } from "@/lib/widget-config";
+import { isPinnedWidget, widgetConfigSchema, type WidgetConfig } from "@/lib/widget-config";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { dashboard, dashboardWidget } from "../db/schema";
+import { customer, dashboard, dashboardWidget } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { ServiceError, type Reader } from "./access";
+import { RATE_RULES } from "../rate-limit";
+import { registerSystemWidgets } from "../reports/system-widgets";
+import { runWidget, type WidgetResult } from "../reports/widget-query";
+import { reportFailure } from "../scheduler/report";
+import { enforceRateLimit, ServiceError, type Reader } from "./access";
 import { mutate } from "./mutation";
 
 const T = TEXTS.dashboard;
 const E = T.errors;
+const S = T.share;
 
 export type DashboardSummary = {
   id: string;
@@ -429,4 +441,158 @@ export function saveLayout(actor: Actor, raw: unknown): SavedLayout {
     if (!(error instanceof Unchanged)) throw error;
     return { revision: input.revision, items: widgetsIn(db, ownerId, input.id).map(boxOf) };
   }
+}
+
+// R-25: what travels is the configuration only, so a widget that no longer parses stays home.
+export function exportDashboard(ownerId: string, id: string): DashboardFile {
+  const target = dashboardIn(db, ownerId, id);
+  const configs = widgetsIn(db, ownerId, id).flatMap(({ config }) => (config ? [config] : []));
+  return toDashboardFile(target.name, configs);
+}
+
+export function exportWidget(
+  ownerId: string,
+  dashboardId: string,
+  widgetId: string,
+): DashboardFile {
+  dashboardIn(db, ownerId, dashboardId);
+  const widget = widgetsIn(db, ownerId, dashboardId).find((row) => row.id === widgetId);
+  if (!widget) throw new ServiceError(E.widgetNotFound);
+  const { config } = widget;
+  if (!config) throw new ServiceError(S.brokenWidget);
+  const title = config.title || (config.kind === "system" ? T.gallery[config.systemId] : "");
+  return toDashboardFile((title || T.view.untitled).slice(0, 60), [config]);
+}
+
+type Imported = { config: WidgetConfig; droppedCustomers: boolean };
+
+function readFile(raw: unknown): DashboardFile {
+  if (typeof raw !== "string") throw new ServiceError(S.notJson);
+  const parsed = parseDashboardFile(raw);
+  if (!parsed.ok) {
+    throw new ServiceError(parsed.path ? `${parsed.path}: ${parsed.message}` : parsed.message);
+  }
+  return parsed.file;
+}
+
+// A customer filter from another account is not an error: the ids that are not ours go, and the
+// preview says so (R-25). The check runs again on import, never trusted from the preview.
+function ownWidgets(q: Reader, ownerId: string, file: DashboardFile): Imported[] {
+  const wanted = [
+    ...new Set(
+      file.widgets.flatMap((config) =>
+        config.kind === "query" ? (config.filters?.customerIds ?? []) : [],
+      ),
+    ),
+  ];
+  const own = new Set(
+    wanted.length === 0
+      ? []
+      : q
+          .select({ id: customer.id })
+          .from(customer)
+          .where(scoped(ownerId).where(customer, (t) => inArray(t.id, wanted)))
+          .all()
+          .map((row) => row.id),
+  );
+  return file.widgets.map((config) => {
+    if (config.kind !== "query" || !config.filters?.customerIds) {
+      return { config, droppedCustomers: false };
+    }
+    const { customerIds, ...others } = config.filters;
+    const kept = customerIds.filter((id) => own.has(id));
+    if (kept.length === customerIds.length) return { config, droppedCustomers: false };
+    const filters = kept.length > 0 ? { ...others, customerIds: kept } : others;
+    const { filters: _filters, ...rest } = config;
+    return {
+      config: Object.keys(filters).length > 0 ? { ...rest, filters } : rest,
+      droppedCustomers: true,
+    };
+  });
+}
+
+function importName(q: Reader, ownerId: string, name: string): string {
+  const taken = new Set(listIn(q, ownerId).map((row) => row.name));
+  if (!taken.has(name)) return name;
+  for (let n = 2; ; n++) {
+    const suffix = S.importName("", n);
+    const candidate = `${name.slice(0, 60 - suffix.length)}${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+function importLayout(widgets: Imported[]) {
+  const dropped = new Map(widgets.map((widget) => [widget.config, widget.droppedCustomers]));
+  return normalizeWidgets(placeWidgets(widgets.map((widget) => widget.config))).map((draft) => ({
+    draft,
+    droppedCustomers: dropped.get(draft.config) ?? false,
+  }));
+}
+
+export type ImportPreviewWidget = {
+  config: WidgetConfig;
+  droppedCustomers: boolean;
+} & ({ ok: true; result: WidgetResult } | { ok: false; error: string });
+
+export type ImportPreview = {
+  name: string;
+  addedPinned: boolean;
+  widgets: ImportPreviewWidget[];
+};
+
+// DSH-032: reads only. Every widget runs over the importing account's own data.
+export function previewImport(actor: Actor, raw: unknown): ImportPreview {
+  const ownerId = ownerOf(actor);
+  const file = readFile(raw);
+  enforceRateLimit(actor, RATE_RULES.widgetPreviewUser);
+  registerSystemWidgets();
+  const today = calendarDateInPrague(clock.now());
+  const layout = importLayout(ownWidgets(db, ownerId, file));
+  return {
+    name: importName(db, ownerId, file.name),
+    addedPinned: !file.widgets.some(isPinnedWidget),
+    widgets: layout.map(({ draft: { config }, droppedCustomers }) => {
+      try {
+        return {
+          config,
+          droppedCustomers,
+          ok: true,
+          result: runWidget(db, ownerId, config, { today }),
+        };
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          return { config, droppedCustomers, ok: false, error: error.message };
+        }
+        reportFailure(error, { task: "dashboard.import_preview", userId: ownerId });
+        return { config, droppedCustomers, ok: false, error: S.widgetFailed };
+      }
+    }),
+  };
+}
+
+// Always a new dashboard, never over an existing one (R-25), with the due alerts card (R-20).
+export function importDashboard(actor: Actor, raw: unknown): { id: string } {
+  const ownerId = ownerOf(actor);
+  const file = readFile(raw);
+  return mutate(actor, "dashboard.import", (tx, audit) => {
+    const imported = ownWidgets(tx, ownerId, file);
+    const name = importName(tx, ownerId, file.name);
+    const hasDefault = listIn(tx, ownerId).some((row) => row.isDefault);
+    const id = insertDashboard(tx, ownerId, name, !hasDefault);
+    if (!id) throw new ServiceError(E.invalid);
+    const widgets = importLayout(imported).map(({ draft }) => draft);
+    insertWidgets(tx, ownerId, id, widgets);
+    audit({
+      entity: "dashboard",
+      entityId: id,
+      ownerId,
+      scope: "user",
+      after: {
+        name,
+        widgets: widgets.length,
+        droppedCustomers: imported.filter((widget) => widget.droppedCustomers).length,
+      },
+    });
+    return { id };
+  });
 }

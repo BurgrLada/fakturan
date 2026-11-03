@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
@@ -22,13 +22,24 @@ import {
   deleteDashboard,
   duplicateDashboard,
   ensureDashboards,
+  exportDashboard,
+  exportWidget,
   getDashboard,
+  importDashboard,
   listDashboards,
+  previewImport,
   renameDashboard,
   saveLayout,
   setDefaultDashboard,
 } from "@/server/services/dashboards";
 import { addWidget, previewWidget, removeWidget, updateWidget } from "@/server/services/widgets";
+import {
+  at,
+  issuedDocument,
+  namedCustomer,
+  REPORT_TODAY,
+  reportOwner,
+} from "../fixtures/report-scenario";
 import { createTestDb } from "../helpers/db";
 import { runDashboardWorkers } from "../helpers/run-workers";
 
@@ -468,5 +479,158 @@ describe("akce dashboardu", () => {
       error: "Příliš mnoho pokusů, zkuste to později",
     });
     expect(audits(id, "rate_limit.exceeded")).toHaveLength(1);
+  });
+});
+
+describe("sdílení JSON", () => {
+  const fixture = readFileSync(join("tests", "fixtures", "dashboards", "platny.json"), "utf8");
+  const counts = (ownerId: string) => ({
+    dashboards: listDashboards(ownerId).length,
+    widgets: db.select().from(dashboardWidget).where(eq(dashboardWidget.userId, ownerId)).all()
+      .length,
+    audits: audits(ownerId).length,
+  });
+
+  function withSales(): { id: string; customerId: string } {
+    const id = reportOwner(db, REPORT_TODAY);
+    const customerId = namedCustomer(id, "Alfa s.r.o.");
+    issuedDocument(id, customerId, { issueDate: "2026-03-02", totalMinor: 121_000 });
+    at(REPORT_TODAY);
+    return { id, customerId };
+  }
+
+  test("[DSH-030] export dashboardu a widgetu je JSON bez ID, účtu, zákazníků a čísel", () => {
+    const { id, customerId } = withSales();
+    const [home] = ensureDashboards(actor(id));
+    const base = gallery("top_customers");
+    const { id: widgetId } = addWidget(actor(id), {
+      dashboardId: home!.id,
+      config: { ...base, filters: { customerIds: [customerId], currency: "CZK" } },
+    });
+
+    const file = exportDashboard(id, home!.id);
+    const text = JSON.stringify(file);
+    expect(file.format).toBe("fakturan.dashboard");
+    expect(file.name).toBe(home!.name);
+    expect(file.widgets).toHaveLength(getDashboard(id, home!.id)!.widgets.length);
+    for (const secret of [id, home!.id, widgetId, customerId, "Alfa", "1210", "121000"]) {
+      expect(text).not.toContain(secret);
+    }
+    expect(file.widgets).toContainEqual({ ...base, filters: { currency: "CZK" } });
+
+    const single = exportWidget(id, home!.id, widgetId);
+    expect(single).toEqual({
+      format: "fakturan.dashboard",
+      v: 1,
+      name: base.title,
+      widgets: [{ ...base, filters: { currency: "CZK" } }],
+    });
+    expect(() => exportWidget(id, "jiny", widgetId)).toThrow(E.notFound);
+    const [other] = ensureDashboards(actor(owner()));
+    expect(() => exportWidget(id, other!.id, widgetId)).toThrow(E.notFound);
+  });
+
+  test("[DSH-032] náhled nezapíše nic a ukáže widgety nad vlastními daty", () => {
+    const { id } = withSales();
+    ensureDashboards(actor(id));
+    const before = counts(id);
+
+    const preview = previewImport(actor(id), fixture);
+    expect(counts(id)).toEqual(before);
+    expect(preview.name).toBe("Obchod");
+    const configs = preview.widgets.map((widget) => widget.config);
+    expect(configs.filter(isPinnedWidget)).toHaveLength(1);
+    expect(preview.addedPinned).toBe(true);
+    const invoiced = preview.widgets.find((widget) => widget.config.title === "Fakturováno letos");
+    expect(invoiced).toMatchObject({ ok: true, result: { kind: "total", total: 121_000 } });
+    const top = preview.widgets.find((widget) => widget.config.title === "Nejlepší zákazníci");
+    expect(top).toMatchObject({ ok: true, result: { rows: [{ name: "Alfa s.r.o." }] } });
+
+    expect(() => previewImport(actor(id), "{")).toThrow(TEXTS.dashboard.share.notJson);
+    const broken = JSON.stringify({
+      ...JSON.parse(fixture),
+      widgets: [{ ...JSON.parse(fixture).widgets[0], display: "donut" }],
+    });
+    expect(() => previewImport(actor(id), broken)).toThrow(
+      `widgets[0].groupBy: ${TEXTS.dashboard.config.donutCategory}`,
+    );
+    expect(counts(id)).toEqual(before);
+  });
+
+  test("[DSH-032] soubor nenese data a import založí nový dashboard", () => {
+    const { id } = withSales();
+    const [home] = ensureDashboards(actor(id));
+    const homeBefore = getDashboard(id, home!.id);
+    createDashboard(actor(id), { name: "Obchod" });
+
+    const { id: imported } = importDashboard(actor(id), fixture);
+    expect(imported).not.toBe(home!.id);
+    expect(getDashboard(id, home!.id)).toEqual(homeBefore);
+    const view = getDashboard(id, imported)!;
+    expect(view.name).toBe("Obchod (2)");
+    expect(view.isDefault).toBe(false);
+    const titles = view.widgets.map((widget) => widget.config?.title);
+    expect(titles).toEqual(
+      expect.arrayContaining(JSON.parse(fixture).widgets.map((w: WidgetConfig) => w.title)),
+    );
+    expect(importDashboard(actor(id), fixture).id).not.toBe(imported);
+    expect(listDashboards(id).map((row) => row.name)).toEqual(
+      expect.arrayContaining(["Obchod", "Obchod (2)", "Obchod (3)"]),
+    );
+    expect(audits(id, "dashboard.import")).toHaveLength(2);
+    expect(() => importDashboard(actor(id), "[]")).toThrow(TEXTS.dashboard.share.foreignFormat);
+  });
+
+  test("[DSH-032] po importu je na dashboardu karta due_alerts", () => {
+    const id = owner();
+    ensureDashboards(actor(id));
+    const { id: imported } = importDashboard(actor(id), fixture);
+    const widgets = getDashboard(id, imported)!.widgets;
+    expect(widgets.filter((widget) => widget.config && isPinnedWidget(widget.config))).toHaveLength(
+      1,
+    );
+    expect(widgets).toHaveLength(JSON.parse(fixture).widgets.length + 1);
+    const twice = JSON.stringify({
+      ...JSON.parse(fixture),
+      widgets: [gallery("due_alerts"), gallery("due_alerts"), gallery("overdue")],
+    });
+    const again = getDashboard(id, importDashboard(actor(id), twice).id)!.widgets;
+    expect(again.filter((widget) => widget.config && isPinnedWidget(widget.config))).toHaveLength(
+      1,
+    );
+    expect(again).toHaveLength(2);
+  });
+
+  test("[DSH-032] filtr se zákazníky cizího účtu projde, zahodí se a náhled to řekne", () => {
+    const mine = withSales();
+    const stranger = withSales();
+    const base = gallery("top_customers");
+    const file = JSON.stringify({
+      ...JSON.parse(fixture),
+      widgets: [
+        { ...base, title: "Cizí", filters: { customerIds: [stranger.customerId] } },
+        {
+          ...base,
+          title: "Smíšený",
+          filters: { customerIds: [stranger.customerId, mine.customerId], currency: "CZK" },
+        },
+      ],
+    });
+
+    const preview = previewImport(actor(mine.id), file);
+    const byTitle = (title: string) => preview.widgets.find((w) => w.config.title === title)!;
+    expect(byTitle("Cizí")).toMatchObject({ droppedCustomers: true });
+    expect(byTitle("Cizí").config).toEqual({ ...base, title: "Cizí" });
+    expect(byTitle("Smíšený")).toMatchObject({ droppedCustomers: true });
+    expect(byTitle("Smíšený").config).toEqual({
+      ...base,
+      title: "Smíšený",
+      filters: { customerIds: [mine.customerId], currency: "CZK" },
+    });
+
+    const { id } = importDashboard(actor(mine.id), file);
+    const stored = JSON.stringify(getDashboard(mine.id, id)!.widgets);
+    expect(stored).not.toContain(stranger.customerId);
+    expect(stored).toContain(mine.customerId);
   });
 });

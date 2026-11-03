@@ -1,0 +1,15 @@
+{
+  "format": "fakturan.dashboard",
+  "v": 1,
+  "name": "Obchod",
+  "widgets": [
+    {
+      "v": 1,
+      "kind": "system",
+      "systemId": "custom_script",
+      "title": "Stárnutí pohledávek",
+      "color": "chart-1",
+      "format": "auto"
+    }
+  ]
+}

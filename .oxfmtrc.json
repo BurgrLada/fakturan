@@ -8,6 +8,7 @@
     "docs",
     "drizzle/meta",
     "pnpm-lock.yaml",
-    "next-env.d.ts"
+    "next-env.d.ts",
+    "tests/fixtures/dashboards/neplatne/rozbity-json.json"
   ]
 }

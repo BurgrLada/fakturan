@@ -1,6 +1,6 @@
 "use client";
 
-import { GripVertical, Settings2, Trash2 } from "lucide-react";
+import { Download, GripVertical, Settings2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -31,6 +31,7 @@ import { TEXTS } from "@/lib/texts";
 import { LayoutButtons, type LayoutStep } from "./layout-buttons";
 
 const T = TEXTS.dashboard.edit;
+const S = TEXTS.dashboard.share;
 
 // Matches the read-only grid of the overview: 4.5rem rows and a 1rem gap.
 const ROW_HEIGHT = 72;
@@ -293,6 +294,19 @@ export function GridEditor({
                       <Settings2 aria-hidden />
                       {T.configure}
                     </Link>
+                    <form
+                      method="post"
+                      action={`/dashboardy/${dashboard.id}/widget/${widget.id}/export`}
+                    >
+                      <button
+                        type="submit"
+                        aria-label={S.exportWidgetLabel(widget.title)}
+                        className={buttonVariants({ variant: "outline", size: "sm" })}
+                      >
+                        <Download aria-hidden />
+                        {S.exportWidget}
+                      </button>
+                    </form>
                     {widget.pinned ? (
                       <p className="text-xs text-muted-foreground">{T.pinned}</p>
                     ) : (

@@ -1,16 +1,19 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Download, Plus } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { dashboardHref } from "@/lib/dashboard-filter";
+import type { DateFormat } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import { DashboardDialogs } from "./dashboard-dialogs";
 import type { EditorWidget } from "./grid-editor";
+import { ImportDialog } from "./import-dialog";
 
 const T = TEXTS.dashboard.edit;
+const S = TEXTS.dashboard.share;
 
 function EditorLoading() {
   return (
@@ -46,10 +49,12 @@ export function DashboardEditor({
   dashboard,
   count,
   widgets,
+  dateFormat,
 }: {
   dashboard: { id: string; name: string; isDefault: boolean; revision: number };
   count: number;
   widgets: EditorWidget[];
+  dateFormat: DateFormat;
 }) {
   const wide = useWide();
   const overview = dashboardHref(dashboard.isDefault ? null : dashboard.id, {});
@@ -66,6 +71,13 @@ export function DashboardEditor({
           <Plus aria-hidden />
           {T.add}
         </Link>
+        <form method="post" action={`/dashboardy/${dashboard.id}/export`}>
+          <button type="submit" className={buttonVariants({ variant: "outline" })}>
+            <Download aria-hidden />
+            {S.export}
+          </button>
+        </form>
+        <ImportDialog dateFormat={dateFormat} />
       </div>
       <DashboardDialogs dashboard={dashboard} count={count} />
       <p className="text-sm text-muted-foreground md:hidden" data-testid="edit-narrow">

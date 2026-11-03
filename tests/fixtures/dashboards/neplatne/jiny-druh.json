@@ -1,0 +1,19 @@
+{
+  "format": "fakturan.dashboard",
+  "v": 1,
+  "name": "Obchod",
+  "widgets": [
+    {
+      "v": 1,
+      "kind": "script",
+      "title": "Fakturováno letos",
+      "color": "chart-1",
+      "format": "auto",
+      "source": "invoices",
+      "metric": "sum",
+      "measure": "invoiced",
+      "period": "this_year",
+      "display": "number"
+    }
+  ]
+}

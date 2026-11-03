@@ -50,6 +50,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "dashboard.create": "Založení dashboardu",
   "dashboard.delete": "Smazání dashboardu",
   "dashboard.duplicate": "Duplikace dashboardu",
+  "dashboard.import": "Import dashboardu z JSON",
   "dashboard.layout": "Změna rozložení dashboardu",
   "dashboard.rename": "Přejmenování dashboardu",
   "dashboard.set_default": "Nastavení výchozího dashboardu",

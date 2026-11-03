@@ -369,6 +369,36 @@ export const TEXTS = {
       box: (x: number, y: number, w: number, h: number) => `Sloupec ${x}, řádek ${y}, ${w} × ${h}`,
       add: "Přidat widget",
     },
+    share: {
+      notJson: "Soubor není platný JSON",
+      foreignFormat: "Soubor není export dashboardu z Fakturanu",
+      newerVersion: (v: number) =>
+        `Soubor je z novější verze Fakturanu (verze ${v}). Aktualizujte aplikaci a zkuste to znovu.`,
+      tooLarge: (kib: number) => `Soubor může mít nejvýš ${kib} KiB`,
+      tooManyWidgets: (max: number) =>
+        `Dashboard může mít nejvýš ${max} widgetů včetně upozornění na splatnost`,
+      brokenWidget: "Widget má neplatné nastavení a nejde exportovat",
+      importName: (name: string, n: number) => `${name} (${n})`,
+      export: "Exportovat JSON",
+      exportWidget: "Export",
+      exportWidgetLabel: (title: string) => `Exportovat widget ${title} jako JSON`,
+      import: "Importovat JSON",
+      importTitle: "Import dashboardu z JSON",
+      importBody:
+        "Soubor nese jen nastavení widgetů, žádná data. Import založí nový dashboard a stávající nezmění.",
+      file: "Soubor JSON",
+      previewing: "Načítám náhled",
+      previewTitle: (name: string) => `Náhled: ${name}`,
+      previewNote: "Náhled počítá s daty vašeho účtu. Dokud import nepotvrdíte, nic se neuloží.",
+      widgets: (n: number) => `Widgetů: ${n}`,
+      droppedCustomers:
+        "Filtr zákazníků odkazuje na zákazníky, které ve svém účtu nemáte, a při importu se zahodí.",
+      addedPinned: "Upozornění na splatnost přidá import, je na každém dashboardu.",
+      widgetFailed: "Widget se nepodařilo spočítat",
+      confirm: "Importovat",
+      cancel: "Zrušit",
+      failed: "Import se nepovedl. Zkuste to znovu.",
+    },
     manage: {
       label: "Správa dashboardu",
       create: "Nový dashboard",

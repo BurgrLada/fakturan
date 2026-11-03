@@ -1,0 +1,54 @@
+{
+  "format": "fakturan.dashboard",
+  "v": 1,
+  "name": "Obchod",
+  "widgets": [
+    {
+      "v": 1,
+      "kind": "query",
+      "title": "Fakturováno letos",
+      "color": "chart-1",
+      "format": "auto",
+      "source": "invoices",
+      "metric": "sum",
+      "measure": "invoiced",
+      "period": "this_year",
+      "display": "number"
+    },
+    {
+      "v": 1,
+      "kind": "query",
+      "title": "Tržby po měsících",
+      "color": "chart-2",
+      "format": "thousands",
+      "source": "invoices",
+      "metric": "sum",
+      "measure": "invoiced",
+      "groupBy": "month",
+      "period": "last_12_months",
+      "display": "bar"
+    },
+    {
+      "v": 1,
+      "kind": "query",
+      "title": "Nejlepší zákazníci",
+      "color": "chart-3",
+      "format": "auto",
+      "source": "invoices",
+      "metric": "sum",
+      "measure": "invoiced",
+      "groupBy": "customer",
+      "period": "this_year",
+      "topN": 5,
+      "display": "table"
+    },
+    {
+      "v": 1,
+      "kind": "system",
+      "systemId": "aging",
+      "title": "Stárnutí pohledávek",
+      "color": "chart-1",
+      "format": "auto"
+    }
+  ]
+}

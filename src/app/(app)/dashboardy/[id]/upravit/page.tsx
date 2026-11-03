@@ -9,6 +9,7 @@ import { TEXTS } from "@/lib/texts";
 import { isPinnedWidget, type WidgetConfig } from "@/lib/widget-config";
 import { requireSession } from "@/server/auth/session";
 import { getDashboard, listDashboards } from "@/server/services/dashboards";
+import { getPreferences } from "@/server/services/preferences";
 
 const T = TEXTS.dashboard;
 const C = T.configurator;
@@ -49,6 +50,7 @@ async function EditContent({ params }: Pick<PageProps<"/dashboardy/[id]/upravit"
         }}
         count={listDashboards(user.id).length}
         widgets={widgets}
+        dateFormat={getPreferences(user.id).dateFormat}
       />
     </>
   );

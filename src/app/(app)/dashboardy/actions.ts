@@ -14,10 +14,13 @@ import {
   createDashboard,
   deleteDashboard,
   duplicateDashboard,
+  importDashboard,
   ownerOf,
+  previewImport,
   renameDashboard,
   saveLayout,
   setDefaultDashboard,
+  type ImportPreview,
 } from "@/server/services/dashboards";
 import { addWidget, previewWidget, removeWidget, updateWidget } from "@/server/services/widgets";
 
@@ -28,6 +31,13 @@ type Reply<Output extends object = object> = ({ ok: true } & Output) | Failure;
 type Actor = Awaited<ReturnType<typeof actorFromRequest>>;
 
 const previewInput = z.strictObject({ config: z.unknown() }, E.invalid);
+const fileInput = z.strictObject({ text: z.string() }, E.invalid);
+
+function fileText(raw: unknown): string {
+  const parsed = fileInput.safeParse(raw);
+  if (!parsed.success) throw new ServiceError(E.invalid);
+  return parsed.data.text;
+}
 
 // The services validate their own input with Czech paths, so only the session is checked here.
 // An expired session is reported instead of redirected, so the editor keeps unsaved changes.
@@ -104,4 +114,15 @@ export async function previewWidgetAction(raw: unknown): Promise<Reply<{ result:
     const today = calendarDateInPrague(clock.now());
     return { result: previewWidget(actor, parsed.data.config, { today }) };
   });
+}
+
+// DSH-032: the preview writes nothing; the import checks the same text again on its own.
+export async function previewImportAction(
+  raw: unknown,
+): Promise<Reply<{ preview: ImportPreview }>> {
+  return run(raw, (input, actor) => ({ preview: previewImport(actor, fileText(input)) }));
+}
+
+export async function importDashboardAction(raw: unknown): Promise<Reply<{ id: string }>> {
+  return write(raw, (input, actor) => importDashboard(actor, fileText(input)));
 }

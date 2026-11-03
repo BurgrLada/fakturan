@@ -1,6 +1,14 @@
 import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, test } from "vitest";
-import { money, neutralizeCsvCell, text, toCsv, type Sheet } from "@/lib/tabular";
+import {
+  count,
+  decimalMinor,
+  money,
+  neutralizeCsvCell,
+  text,
+  toCsv,
+  type Sheet,
+} from "@/lib/tabular";
 import { toXlsx } from "@/lib/xlsx-writer";
 
 const sheet = (rows: Sheet["rows"]): Sheet => ({
@@ -48,5 +56,25 @@ describe("CSV", () => {
   test("neutralizace nechá běžný text beze změny", () => {
     expect(neutralizeCsvCell("Faktura 1")).toBe("Faktura 1");
     expect(neutralizeCsvCell("\tx")).toBe("'\tx");
+  });
+});
+
+describe("buňky a částky", () => {
+  test("[REP-004] počet je číselná buňka a nula nemá znaménko", () => {
+    expect(count(3)).toEqual({ kind: "number", value: 3 });
+    expect(toCsv(sheet([[count(2.5), money(0, "CZK")]])).split("\r\n")[1]).toBe("2,5;0,00");
+    expect(decimalMinor(-5, ".")).toBe("-0.05");
+  });
+
+  test("[REP-004] neplatná částka je chyba, ne zaokrouhlené číslo", () => {
+    for (const minor of [1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => decimalMinor(minor, ",")).toThrow(new RangeError(`Neplatná částka: ${minor}`));
+    }
+  });
+
+  test("[REP-004] neutralizuje se jen nebezpečný začátek textu", () => {
+    for (const value of ["a=b", "1+1", "e-mail", "a@b.cz", "x\ty"]) {
+      expect(neutralizeCsvCell(value)).toBe(value);
+    }
   });
 });
