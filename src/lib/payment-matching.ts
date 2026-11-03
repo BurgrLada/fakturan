@@ -21,6 +21,7 @@ export const QUEUE_REASONS = [
   "conflict",
   "manual_duplicate",
   "future_date",
+  "external",
 ] as const;
 export type QueueReason = (typeof QUEUE_REASONS)[number];
 
@@ -41,6 +42,7 @@ export type MatchCandidate = Balance & {
   currency: Currency;
   bankAccountId: string | null;
   variableSymbol: string | null;
+  external: boolean;
   manualPayments: readonly { amountMinor: number; paidOn: CalendarDate }[];
 };
 
@@ -103,6 +105,8 @@ export function matchNotice(
   if (onAccount.length === 0) return queue("other_account", sameAmount);
   if (onAccount.length > 1) return queue("multiple", onAccount);
   const [only] = onAccount as [MatchCandidate];
+  // An import does not tell whose money this is, so a person decides (R-19).
+  if (only.external) return queue("external", onAccount);
   // The user may have written this very money down by hand before the notice arrived, and the
   // date they typed need not be the bank's.
   const recorded = only.manualPayments.some(

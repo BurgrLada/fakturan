@@ -148,8 +148,15 @@ describe("isEligibleForReminder", () => {
     sentAt: new Date("2026-03-01T10:00:00Z"),
     remindersOff: false,
     remindersPartial: false,
+    external: false,
   };
   const client = { remindersEnabled: null };
+
+  test("[TST-016] importovaný doklad nikdy, ani odeslaný a po splatnosti", () => {
+    expect(isEligibleForReminder({ ...row, external: true }, client)).toBe(false);
+    const partial = { ...row, status: "partially_paid" as const, paidMinor: 400, external: true };
+    expect(isEligibleForReminder({ ...partial, remindersPartial: true }, client)).toBe(false);
+  });
 
   test("odeslaná dlužná faktura i záloha ano, dobropis ne", () => {
     expect(isEligibleForReminder(row, client)).toBe(true);

@@ -13,6 +13,7 @@ import { ServiceError } from "./access";
 import { finalOf, refreshBalance } from "./invoice-balance";
 import {
   accountForCopy,
+  assertNotExternal,
   auditSnapshot,
   findOwned,
   insertLines,
@@ -119,6 +120,7 @@ export function convertAdvance(actor: Actor, advanceId: string): { id: string } 
   return unlessUnchanged(() =>
     mutate(actor, "invoice.final_from_advance", (tx, audit) => {
       const advance = findOwned(tx, userId, advanceId);
+      assertNotExternal(advance);
       if (!isConvertibleAdvance(advance)) throw new ServiceError(V.notConvertible);
       const existing = finalOf(tx, userId, advanceId);
       if (existing) throw new Unchanged({ id: existing.id });
@@ -132,7 +134,18 @@ export function convertAdvance(actor: Actor, advanceId: string): { id: string } 
 export function syncSuperseded(tx: Tx, audit: Audit, userId: string, finalId: string): void {
   const final = findOwned(tx, userId, finalId);
   if (!isFinalInvoice(final)) return;
-  const advance = findOwned(tx, userId, final.relatedInvoiceId!);
+  syncAdvance(tx, audit, userId, final.relatedInvoiceId!, finalId);
+}
+
+// Also after the final invoice is gone, when only the advance is left to read.
+export function syncAdvance(
+  tx: Tx,
+  audit: Audit,
+  userId: string,
+  advanceId: string,
+  finalId: string,
+): void {
+  const advance = findOwned(tx, userId, advanceId);
   const active = finalOf(tx, userId, advance.id);
   const replaced = active !== null && active.status !== "draft";
   if (replaced === (advance.supersededAt !== null)) return;

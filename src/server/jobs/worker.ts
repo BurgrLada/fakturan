@@ -10,6 +10,8 @@ import { claimNext, completeJob, failJob, retryJob } from "./queue";
 import { jobDefinition, RetryLater } from "./registry";
 
 const RETRY_DELAY_MS = 5 * 60_000;
+// Well inside the 120 s lease, so a long run never lets it lapse between two renewals (R-8).
+const HEAVY_RENEW_MS = 30_000;
 
 // The app and instrumentation are separate bundles with separate module state, so a route reaches
 // the one worker through globalThis.
@@ -17,6 +19,9 @@ const shared = globalThis as typeof globalThis & { __fakturanKick?: () => void }
 
 let draining = false;
 let inFlight = false;
+let heavyDraining = false;
+let heavyInFlight = false;
+let heavyRenewedAt = 0;
 let halted: string | null = null;
 
 function failureContext(row: Job) {
@@ -108,7 +113,7 @@ export async function drainQueue(
       const lease = acquireLease(worker);
       if (lease === "busy") return { done, ok: false };
       if (lease === "taken_over") recoverInterrupted(worker);
-      const next = claimNext(worker);
+      const next = claimNext(worker, "light");
       if (!next) break;
       inFlight = true;
       try {
@@ -128,13 +133,58 @@ export async function drainJobs(worker: string): Promise<number> {
   return (await drainQueue(worker)).done;
 }
 
+// The second lane: one heavy job at a time, apart from `draining`, so mail never waits for it.
+export async function drainHeavy(worker: string): Promise<{ done: number; ok: boolean }> {
+  if (heavyDraining) return { done: 0, ok: false };
+  heavyDraining = true;
+  let done = 0;
+  try {
+    for (;;) {
+      if (worker === halted) return { done, ok: false };
+      const lease = acquireLease(worker);
+      if (lease === "busy") return { done, ok: false };
+      if (lease === "taken_over") recoverInterrupted(worker);
+      const next = claimNext(worker, "heavy");
+      if (!next) break;
+      heavyInFlight = true;
+      heavyRenewedAt = clock.now().getTime();
+      try {
+        await runJob(next, worker);
+      } finally {
+        heavyInFlight = false;
+      }
+      done += 1;
+    }
+  } finally {
+    heavyDraining = false;
+  }
+  return { done, ok: true };
+}
+
+export function startHeavy(worker: string): void {
+  drainHeavy(worker).catch((error) => reportFailure(error, { task: "heavy" }));
+}
+
+// Called by a heavy job after each block. Losing the lease means another process may already be
+// recovering this very job, so the run stops instead of writing alongside it.
+export async function yieldHeavy(row: Job): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const now = clock.now().getTime();
+  if (now - heavyRenewedAt < HEAVY_RENEW_MS) return;
+  if (!row.lockedBy || acquireLease(row.lockedBy) !== "held") {
+    throw new Error("Úloha přišla o zámek plánovače");
+  }
+  heavyRenewedAt = now;
+}
+
 export function jobInFlight(): boolean {
-  return inFlight;
+  return inFlight || heavyInFlight;
 }
 
 export function bindWorker(holder: string): void {
   shared.__fakturanKick = () => {
     drainJobs(holder).catch((error) => reportFailure(error, { task: "kick" }));
+    startHeavy(holder);
   };
 }
 

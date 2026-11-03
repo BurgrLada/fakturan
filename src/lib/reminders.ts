@@ -142,6 +142,7 @@ type EligibleInvoice = Balance & {
   sentAt: Date | null;
   remindersOff: boolean;
   remindersPartial: boolean;
+  external: boolean;
 };
 
 // The customer's true adds nothing: it may only block, never override the account switch (R-12).
@@ -149,6 +150,8 @@ export function isEligibleForReminder(
   invoice: EligibleInvoice,
   customer: { remindersEnabled: boolean | null } | null,
 ): boolean {
+  // An import does not say what the client was told, so it never starts a reminder (R-19).
+  if (invoice.external) return false;
   if (!REMINDABLE_TYPES.includes(invoice.type) || amountDue(invoice) <= 0) return false;
   if (!invoice.sentAt) return false;
   if (invoice.remindersOff || customer?.remindersEnabled === false) return false;

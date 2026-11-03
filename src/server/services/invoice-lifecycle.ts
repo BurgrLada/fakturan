@@ -17,13 +17,20 @@ import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { bankAccount, catalogItem, invoice, invoiceLine, numberSeries } from "../db/schema";
+import {
+  bankAccount,
+  catalogItem,
+  invoice,
+  invoiceLine,
+  numberSeries,
+  payment,
+} from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
 import { creditNoteProblem } from "./credit-notes";
 import { resolveRate } from "./exchange-rates";
-import { syncSuperseded } from "./advances";
+import { syncAdvance, syncSuperseded } from "./advances";
 import { finalOf, refreshBalance } from "./invoice-balance";
 import {
   currentParties,
@@ -32,6 +39,7 @@ import {
   variablesFor,
 } from "./invoice-document";
 import {
+  assertNotExternal,
   auditSnapshot,
   findOwned,
   linesOf,
@@ -551,6 +559,7 @@ function changeStatus(
   const userId = ownerOf(actor);
   mutate(actor, action, (tx, audit) => {
     const row = findOwned(tx, userId, id);
+    assertNotExternal(row);
     const values = change(row, tx);
     tx.update(invoice)
       .set({ ...values, revision: row.revision + 1, updatedAt: clock.now() })
@@ -654,6 +663,7 @@ export function markSent(actor: Actor, id: string): void {
 // Only an issued document changes status: a paid one stays paid when it is sent (INV-005).
 export function applySent(tx: Tx, userId: string, invoiceId: string): void {
   const row = findOwned(tx, userId, invoiceId);
+  if (row.external) return;
   if (row.status !== "issued" && !paidBeforeSending(row)) return;
   const now = clock.now();
   tx.update(invoice)
@@ -680,4 +690,53 @@ export function markSentMany(actor: Actor, ids: string[]): { done: number; skipp
     }
   }
   return { done, skipped: unique.length - done };
+}
+
+// Payments go with the document. A linked document or an assigned notice would be left pointing at
+// nothing, so those must be undone first (R-18).
+export function deleteImported(actor: Actor, id: string): void {
+  const userId = ownerOf(actor);
+  mutate(actor, "invoice.delete_imported", (tx, audit) => {
+    const row = findOwned(tx, userId, id);
+    if (!row.external) throw new ServiceError(V.notImported);
+    const linked = tx
+      .select({ id: invoice.id })
+      .from(invoice)
+      .where(scoped(userId).where(invoice, (t, { eq }) => eq(t.relatedInvoiceId, id)))
+      .get();
+    if (linked) throw new ServiceError(V.importedLinked);
+    const payments = tx
+      .select()
+      .from(payment)
+      .where(scoped(userId).where(payment, (t, { eq }) => eq(t.invoiceId, id)))
+      .all();
+    if (payments.some((item) => item.notificationId !== null)) {
+      throw new ServiceError(V.importedNotice);
+    }
+    const lines = linesOf(tx, userId, id);
+    tx.delete(payment)
+      .where(scoped(userId).where(payment, (t, { eq }) => eq(t.invoiceId, id)))
+      .run();
+    tx.delete(invoice)
+      .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
+      .run();
+    audit({
+      entity: "invoice",
+      entityId: id,
+      ownerId: userId,
+      scope: "user",
+      before: {
+        ...auditSnapshot(row, lines.length),
+        importBatchId: row.importBatchId,
+        payments: payments.length,
+      },
+    });
+    if (row.type === "credit_note" && row.relatedInvoiceId) {
+      refreshBalance(tx, audit, userId, row.relatedInvoiceId);
+    }
+    if (isFinalInvoice(row)) {
+      syncAdvance(tx, audit, userId, row.relatedInvoiceId!, id);
+      resolveEntityNotifications(tx, userId, "advance_final_review", id);
+    }
+  });
 }

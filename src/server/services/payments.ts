@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { RATE_UNIT } from "@/lib/fx";
 import { isFinalInvoice, MAX_BULK_DOCUMENTS } from "@/lib/invoice";
 import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import {
@@ -144,7 +145,9 @@ function lastPaidOn(tx: Tx, userId: string, invoiceId: string): CalendarDate {
     .get()!.day;
 }
 
+// An imported advance had its final invoice made elsewhere, so nothing follows here (R-19).
 function settleAdvance(tx: Tx, audit: Audit, userId: string, before: Invoice, after: Invoice) {
+  if (after.external) return;
   if (before.status === "paid" || after.status !== "paid" || after.type !== "advance") return;
   const paidOn = lastPaidOn(tx, userId, after.id);
   afterAdvancePaid(tx, audit, { userId, advanceId: after.id, paidOn, today: today() });
@@ -190,6 +193,69 @@ export function insertPayment(
     after: { ...auditFields(readPayment(tx, userId, id)), status: after.status },
   });
   settleAdvance(tx, audit, userId, before, after);
+  return { id };
+}
+
+export type ImportedPayment = {
+  userId: string;
+  invoiceId: string;
+  paidOn: CalendarDate;
+  amountMinor: number;
+  // The document's rate: ISDOC knows no other, so a foreign payment is an estimate too (R-14).
+  rateMicros: number | null;
+  dateEstimated: boolean;
+  method?: PaymentChannel;
+};
+
+// Unlike insertPayment, nothing follows: no final invoice and no receipt for an imported document.
+export function insertImportedPayment(
+  tx: Tx,
+  audit: Audit,
+  input: ImportedPayment,
+): { id: string } {
+  const { userId, invoiceId, paidOn, amountMinor } = input;
+  assertPaidOn(paidOn);
+  const before = findOwned(tx, userId, invoiceId);
+  if (!before.external) throw new ServiceError(TEXTS.invoices.validation.notImported);
+  assertPayable(before);
+  if (before.supersededAt) throw new ServiceError(E.superseded);
+  if (amountMinor <= 0 || amountMinor > amountDue(before)) throw new ServiceError(E.amount);
+
+  const id = randomUUID();
+  const now = clock.now();
+  tx.insert(payment)
+    .values({
+      id,
+      userId,
+      invoiceId,
+      kind: "payment",
+      source: "import",
+      paidOn,
+      amountMinor,
+      currency: before.currency,
+      creditedMinor: amountMinor,
+      rateMicros: before.currency === "CZK" ? RATE_UNIT : input.rateMicros,
+      method: input.method ?? CHANNEL_OF_METHOD[before.paymentMethod],
+      note: "",
+      dateEstimated: input.dateEstimated,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  const after = applyPayments(tx, audit, userId, invoiceId);
+  audit({
+    action: "payment.import",
+    entity: "payment",
+    entityId: id,
+    ownerId: userId,
+    scope: "user",
+    before: { invoiceId, status: before.status },
+    after: {
+      ...auditFields(readPayment(tx, userId, id)),
+      dateEstimated: input.dateEstimated,
+      status: after.status,
+    },
+  });
   return { id };
 }
 
@@ -382,6 +448,7 @@ export function updatePayment(actor: Actor, id: string, raw: PaymentInput): { id
           paidOn === before.paidOn && currency === before.currency
             ? before.rateMicros
             : cnbRate(tx, currency, paidOn),
+        dateEstimated: false,
         updatedAt: clock.now(),
       })
       .where(scoped(userId).where(payment, (t, { eq }) => eq(t.id, id)))

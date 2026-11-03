@@ -43,6 +43,7 @@ function draftReceipt(
 // new revision. It must never throw over the message: that would take the payment back with it.
 export function queueAutomaticReceipt(tx: Tx, audit: Audit, input: ReceiptInput): void {
   const { userId, invoiceId, paymentId, paidOn, today } = input;
+  if (findOwned(tx, userId, invoiceId).external) return;
   if (!automaticSendAllowed(userId, "paymentReceipt")) return;
   if (daysBetween(paidOn, today) > MAX_PAYMENT_AGE_DAYS) return;
 

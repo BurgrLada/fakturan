@@ -16,6 +16,7 @@ import {
 import { addPayment } from "@/server/services/payments";
 import { saveCustomer } from "@/server/services/customers";
 import { seedOwner, webActor } from "../helpers/fixtures-mail";
+import { seedImportBatch } from "./external-invoice";
 
 export const REPORT_TODAY = "2026-11-02";
 
@@ -210,8 +211,11 @@ export function seedReportScenario(db: Db): ReportScenario {
     totalMinor: 150_000,
   });
   pay(owner, g, "2026-06-10", 150_000);
-  // No service imports documents yet, so the flag an import would set is written here.
-  db.update(invoice).set({ external: true }).where(eq(invoice.id, g)).run();
+  // Turned into an imported document in place, so the scenario keeps its customer and numbers.
+  db.update(invoice)
+    .set({ external: true, sentAt: null, importBatchId: seedImportBatch(db, owner) })
+    .where(eq(invoice.id, g))
+    .run();
 
   const d = issuedDocument(owner, gama, { issueDate: "2026-07-01", totalMinor: 777_700 });
   cancelInvoice(webActor(owner), d);

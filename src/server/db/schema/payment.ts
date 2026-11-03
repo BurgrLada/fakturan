@@ -27,6 +27,8 @@ export const payment = sqliteTable(
     method: text({ enum: PAYMENT_CHANNELS }).notNull(),
     note: text().notNull().default(""),
     source: text({ enum: PAYMENT_SOURCES }).notNull(),
+    // Set only by an import, which guesses the day; a person editing the payment confirms it.
+    dateEstimated: integer("date_estimated", { mode: "boolean" }).notNull().default(false),
     notificationId: text("notification_id").references(() => bankNotification.id, {
       onDelete: "set null",
     }),

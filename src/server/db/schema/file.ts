@@ -1,7 +1,18 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { user } from "./auth";
+import { importBatch } from "./import";
 
-export const FILE_KINDS = ["logo", "qr_logo", "signature", "sent_pdf"] as const;
+export const FILE_KINDS = [
+  "logo",
+  "qr_logo",
+  "signature",
+  "sent_pdf",
+  "import_upload",
+  "import_pdf",
+  "sent_isdoc",
+  "export",
+  "audit_archive",
+] as const;
 export type FileKind = (typeof FILE_KINDS)[number];
 
 export const file = sqliteTable(
@@ -15,7 +26,10 @@ export const file = sqliteTable(
     mimeType: text("mime_type").notNull(),
     name: text().notNull(),
     size: integer().notNull(),
+    importBatchId: text("import_batch_id").references(() => importBatch.id, {
+      onDelete: "cascade",
+    }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
-  (t) => [index("file_user_idx").on(t.userId)],
+  (t) => [index("file_user_idx").on(t.userId), index("file_import_batch_idx").on(t.importBatchId)],
 );

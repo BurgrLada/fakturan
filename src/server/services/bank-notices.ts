@@ -123,6 +123,7 @@ function candidatesFor(tx: Tx, userId: string, variableSymbol: string | null): M
       creditsMinor: invoice.creditsMinor,
       advanceMinor: invoice.advanceMinor,
       supersededAt: invoice.supersededAt,
+      external: invoice.external,
     })
     .from(invoice)
     .where(

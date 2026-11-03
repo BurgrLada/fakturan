@@ -30,6 +30,7 @@ const candidate = (over: Partial<MatchCandidate> = {}): MatchCandidate => ({
   creditsMinor: 0,
   advanceMinor: 0,
   supersededAt: null,
+  external: false,
   manualPayments: [],
   ...over,
 });
@@ -69,6 +70,17 @@ describe("autoMatchAllowed", () => {
 });
 
 describe("matchNotice", () => {
+  test("[BNK-008] importovaný doklad se sám nespáruje a jde do fronty s nabídkou", () => {
+    const imported = candidate({ external: true });
+    expect(match(notice(), [imported])).toEqual({
+      result: "queue",
+      reason: "external",
+      invoiceIds: ["inv-1"],
+    });
+    const own = candidate({ id: "inv-2" });
+    expect(match(notice(), [imported, own])).toMatchObject({ reason: "multiple" });
+  });
+
   test("[BNK-008] shoda VS, částky a měny na otevřené faktuře spáruje", () => {
     expect(match(notice(), [candidate()])).toEqual({ result: "match", invoiceId: "inv-1" });
   });
@@ -197,6 +209,7 @@ describe("matchNotice", () => {
         candidate({ manualPayments: [{ amountMinor: 100_000, paidOn: "2026-10-30" }] }),
       ]),
     future_date: () => match(notice({ paidOn: "2026-11-02" }), [candidate()]),
+    external: () => match(notice(), [candidate({ external: true })]),
   };
 
   test.each(QUEUE_REASONS.filter((reason) => reason !== "undone" && reason !== "conflict"))(

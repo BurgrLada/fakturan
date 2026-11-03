@@ -24,6 +24,7 @@ import { bankAccount } from "./bank-account";
 import { catalogItem } from "./catalog";
 import { customer } from "./customer";
 import { file } from "./file";
+import { importBatch } from "./import";
 import { numberSeries } from "./number-series";
 import { recurringInvoice } from "./recurring";
 
@@ -94,6 +95,10 @@ export const invoice = sqliteTable(
     // Frozen when issuing: renumbering the original must not rewrite an issued document.
     relatedSnapshot: text("related_snapshot", { mode: "json" }).$type<RelatedSnapshot>(),
     external: integer({ mode: "boolean" }).notNull().default(false),
+    // Not cascading: only undoBatch removes the documents of a batch (R-20).
+    importBatchId: text("import_batch_id").references(() => importBatch.id),
+    importUuid: text("import_uuid"),
+    sourceSystem: text("source_system"),
     recurringId: text("recurring_id").references((): AnySQLiteColumn => recurringInvoice.id, {
       onDelete: "set null",
     }),
@@ -120,6 +125,10 @@ export const invoice = sqliteTable(
     index("invoice_user_customer_idx").on(t.userId, t.customerId),
     index("invoice_user_variable_symbol_idx").on(t.userId, t.variableSymbol),
     index("invoice_recurring_idx").on(t.recurringId),
+    uniqueIndex("invoice_user_import_uuid_idx")
+      .on(t.userId, t.importUuid)
+      .where(sql`import_uuid IS NOT NULL`),
+    index("invoice_import_batch_idx").on(t.importBatchId),
     index("invoice_user_related_idx").on(t.userId, t.relatedInvoiceId),
     // Repeated payment or a race cannot produce a second final invoice (R-26).
     uniqueIndex("invoice_final_of_advance_idx")

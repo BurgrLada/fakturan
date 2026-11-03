@@ -5,7 +5,7 @@ import type { FxBasis } from "./preferences";
 
 export const RATE_UNIT = 1_000_000;
 export const MAX_EXCHANGE_RATE_MICROS = 1_000_000_000_000;
-export const EXCHANGE_RATE_SOURCES = ["cnb", "last_known", "fixed", "manual"] as const;
+export const EXCHANGE_RATE_SOURCES = ["cnb", "last_known", "fixed", "manual", "import"] as const;
 export type ExchangeRateSource = (typeof EXCHANGE_RATE_SOURCES)[number];
 
 const PUBLISHED_FROM = "14:30";

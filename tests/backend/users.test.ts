@@ -1,8 +1,8 @@
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { eq, getTableName } from "drizzle-orm";
+import { getTableConfig, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { ACTION_LABELS, auditActionLabel } from "@/lib/audit-labels";
 import { auth } from "@/server/auth";
@@ -422,6 +422,24 @@ describe("smazání účtu", () => {
   test("[ADM-006] každá tabulka s vlastníkem je v seznamu dat účtu nebo ve výjimkách", () => {
     expect(USER_OWNED_TABLES).toEqual(expect.arrayContaining([session, account]));
     expect(findUnregisteredOwnedTables(schema, USER_OWNED_TABLES, EXCEPTIONS)).toEqual([]);
+  });
+
+  test("[ADM-006] tabulka s nekaskádovým odkazem na jinou tabulku účtu se maže před ní", () => {
+    const order: string[] = USER_OWNED_TABLES.map((table) => getTableName(table));
+    const late = USER_OWNED_TABLES.flatMap((table) =>
+      getTableConfig(table).foreignKeys.flatMap((key) => {
+        const target = getTableName(key.reference().foreignTable);
+        const cascades = key.onDelete === "cascade" || key.onDelete === "set null";
+        const name = getTableName(table);
+        return !cascades && target !== name && order.indexOf(target) < order.indexOf(name)
+          ? [`${name} -> ${target}`]
+          : [];
+      }),
+    );
+    expect(late).toEqual([]);
+    expect(order.indexOf("import_batch")).toBeGreaterThan(order.indexOf("invoice"));
+    expect(order.indexOf("import_batch")).toBeGreaterThan(order.indexOf("customer"));
+    expect(order.indexOf("import_batch")).toBeGreaterThan(order.indexOf("catalog_item"));
   });
 
   test("[ADM-006] výjimka platí jen pro tabulku, která vlastníka opravdu má", () => {

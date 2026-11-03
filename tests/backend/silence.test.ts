@@ -18,13 +18,14 @@ import {
 } from "@/server/scheduler/start";
 import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
 import { setAutomation, setPaused } from "@/server/services/automation";
-import { ingestNotice } from "@/server/services/bank-notices";
+import { assignNotice, ingestNotice } from "@/server/services/bank-notices";
 import { deliverDigest } from "@/server/services/due-alerts";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
 import { savePreferences } from "@/server/services/preferences";
 import { deliverUserNotice, runRecurringJob } from "@/server/services/recurring-run";
 import { saveReminderRule, snoozeReminders } from "@/server/services/reminders";
 import { deactivateUser, reactivateUser } from "@/server/services/users";
+import { externalInvoice } from "../fixtures/external-invoice";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { seedBankAccount, TARGET, VS } from "../helpers/fixtures-bank";
@@ -254,6 +255,93 @@ describe("[TST-016] matice ticha", () => {
       await everyDay();
 
       expect(toClient()).toHaveLength(1);
+      assertConsistent(db, owner);
+    },
+    60_000,
+  );
+});
+
+// An import says nothing about what the client was told, so nothing may follow from it (R-19).
+// Recurring plans only ever issue documents of their own and have no imported row to act on.
+function armedImported(key: AutomationKey): string {
+  const owner = seedOwner(db, T0);
+  ownSmtp(db, owner, smtp.port);
+  setAutomation(webActor(owner), key, true, ENABLED);
+  if (key === "reminders") {
+    current = new Date(T0.getTime() - 60 * DAY);
+    saveReminderRule(webActor(owner), { offsetDays: 7, texts: null });
+    current = T0;
+    externalInvoice(db, owner, { issueDate: "2026-02-01", dueDate: "2026-03-05" });
+    return owner;
+  }
+  if (key === "advanceInvoice") savePreferences(webActor(owner), { advanceFinalMode: "issue" });
+  seedBankAccount(db, owner, T0);
+  const id = externalInvoice(db, owner, {
+    type: key === "advanceInvoice" ? "advance" : "invoice",
+    transfer: true,
+    variableSymbol: VS,
+  });
+  const result = ingestNotice(owner, {
+    bank: "fio",
+    notice: {
+      variant: "en",
+      targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
+      amountMinor: db.select().from(invoice).where(eq(invoice.id, id)).get()!.totalMinor,
+      currency: "CZK",
+      occurredAt: { date: "2026-03-01", time: "09:00" },
+      variableSymbol: VS,
+      constantSymbol: null,
+      counterpartyAccount: null,
+      counterpartyName: null,
+      message: null,
+      instructionId: `silence-${nextInstruction++}`,
+    },
+    text: "avizo",
+    authResult: "pass",
+    requireConfirmation: false,
+    receivedAt: current,
+  });
+  if (result.status !== "pending") throw new Error(`spárováno: ${result.status}`);
+  assignNotice(webActor(owner), result.id, { invoiceId: id });
+  return owner;
+}
+
+const IMPORTED_KEYS = available.filter((key) => key !== "recurringSend");
+const IMPORTED_PASSES = [
+  ["každý den", everyDay],
+  ["doběh po výpadku", afterOutage],
+] as const;
+
+describe("[TST-016] matice ticha importovaného dokladu", () => {
+  test.each(IMPORTED_PASSES)(
+    "[TST-016] importovaný doklad po splatnosti nedostane upomínku ani po doběhu (%s)",
+    async (_name, pass) => {
+      const owner = armedImported("reminders");
+
+      await pass();
+
+      expect(toClient()).toEqual([]);
+      expect(smtp.connections()).toBe(0);
+      assertConsistent(db, owner);
+    },
+    60_000,
+  );
+
+  test.each(
+    IMPORTED_KEYS.flatMap((key) =>
+      IMPORTED_PASSES.map(([name, pass]) => [key, name, pass] as const),
+    ),
+  )(
+    "automatika %s u importovaného dokladu při %s nepošle klientovi nic",
+    async (key, _name, pass) => {
+      const owner = armedImported(key);
+
+      await pass();
+
+      expect(toClient()).toEqual([]);
+      expect(smtp.connections()).toBe(0);
+      const finals = db.select().from(invoice).where(eq(invoice.userId, owner)).all();
+      expect(finals.filter((row) => !row.external)).toEqual([]);
       assertConsistent(db, owner);
     },
     60_000,

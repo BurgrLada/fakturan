@@ -8,8 +8,22 @@ export const JOB_KINDS = [
   "user.digest",
   "bank.poll",
   "fx.fetch",
+  "import.parse",
+  "import.commit",
+  "export.run",
+  "backup.run",
+  "restore.run",
 ] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
+
+// Run in a lane of their own, one at a time, so a long file never holds back the mail (R-8).
+export const HEAVY_JOB_KINDS = [
+  "import.parse",
+  "import.commit",
+  "export.run",
+  "backup.run",
+  "restore.run",
+] as const satisfies readonly JobKind[];
 
 export const JOB_STATUSES = ["pending", "running", "done", "dead", "cancelled"] as const;
 

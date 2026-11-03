@@ -65,6 +65,7 @@ const REMINDER_COLUMNS = {
   remindersPartial: invoice.remindersPartial,
   remindersSnoozeUntil: invoice.remindersSnoozeUntil,
   sentAt: invoice.sentAt,
+  external: invoice.external,
   remindersEnabled: customer.remindersEnabled,
 };
 

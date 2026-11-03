@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { clock } from "../clock";
 import { db } from "../db";
 import { schedulerState } from "../db/schema";
-import { drainQueue, recoverInterrupted } from "../jobs/worker";
+import { drainQueue, recoverInterrupted, startHeavy } from "../jobs/worker";
 import { acquireLease } from "./lease";
 import { reportFailure } from "./report";
 
@@ -50,6 +50,8 @@ export async function tick(holder: string): Promise<{ ran: boolean }> {
       reportFailure(error, { task: task.name });
     }
   }
+  // Not awaited: a long import or backup must not hold back the tick or the mail.
+  startHeavy(holder);
   const queue = await drainQueue(holder, DRAIN_BUDGET_MS);
   if (ok && queue.ok) stamp({ lastOkAt: clock.now() });
   return { ran: true };

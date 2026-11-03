@@ -1,12 +1,26 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, like, lt, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { job, user, type Job, type JobKind, type JobPayload } from "../db/schema";
+import { HEAVY_JOB_KINDS, job, user, type Job, type JobKind, type JobPayload } from "../db/schema";
 import { scoped } from "../db/scoped";
 
-export { JOB_KINDS, type Job, type JobKind, type JobPayload } from "../db/schema";
+export { HEAVY_JOB_KINDS, JOB_KINDS, type Job, type JobKind, type JobPayload } from "../db/schema";
+
+export type JobLane = "light" | "heavy" | "any";
+
+const HEAVY: readonly JobKind[] = HEAVY_JOB_KINDS;
+
+export function isHeavy(kind: JobKind): boolean {
+  return HEAVY.includes(kind);
+}
+
+function laneCondition(lane: JobLane): SQL | undefined {
+  if (lane === "heavy") return inArray(job.kind, [...HEAVY_JOB_KINDS]);
+  if (lane === "light") return notInArray(job.kind, [...HEAVY_JOB_KINDS]);
+  return undefined;
+}
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const RETENTION_MS = 90 * 86_400_000;
@@ -32,7 +46,8 @@ export function enqueue(tx: Tx, input: EnqueueInput): { id: string; created: boo
       key: input.key,
       payload: input.payload,
       runAt: input.runAt ?? now,
-      maxAttempts: input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
+      // A heavy run that broke off is never repeated by itself: the user starts it again (R-8).
+      maxAttempts: isHeavy(input.kind) ? 1 : (input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS),
       createdAt: now,
       updatedAt: now,
     })
@@ -49,7 +64,7 @@ export function enqueueStandalone(input: EnqueueInput): { created: boolean } {
   return db.transaction((tx) => enqueue(tx, input), { behavior: "immediate" });
 }
 
-export function claimNext(worker: string): Job | null {
+export function claimNext(worker: string, lane: JobLane = "any"): Job | null {
   const now = clock.now();
   const claimed = db.transaction(
     (tx) => {
@@ -62,6 +77,7 @@ export function claimNext(worker: string): Job | null {
             eq(job.status, "pending"),
             sql`${job.runAt} <= ${now.getTime()}`,
             sql`coalesce(${user.banned}, 0) = 0`,
+            laneCondition(lane),
           ),
         )
         .orderBy(job.runAt, job.createdAt)

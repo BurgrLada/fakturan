@@ -1,6 +1,7 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { CURRENCIES } from "@/lib/currency";
 import { user } from "./auth";
+import { importBatch } from "./import";
 
 export const catalogItem = sqliteTable(
   "catalog_item",
@@ -19,6 +20,7 @@ export const catalogItem = sqliteTable(
     searchText: text("search_text").notNull().default(""),
     useCount: integer("use_count").notNull().default(0),
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    importBatchId: text("import_batch_id").references(() => importBatch.id),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },

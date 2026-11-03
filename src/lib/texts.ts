@@ -885,6 +885,7 @@ export const TEXTS = {
         last_knownNoDate: "Poslední známý kurz ČNB",
         fixed: "Pevný kurz z nastavení",
         manual: "Ručně zadaný kurz",
+        import: "Kurz z importovaného dokladu",
       },
       clause: "Doložka na faktuře",
       clauseHint: "Předvyplněné znění je návrh. Před ostrým použitím ho ověřte s daňovým poradcem.",
@@ -1201,6 +1202,12 @@ export const TEXTS = {
       number: "Vyplňte platné číslo dokladu",
       numberTaken: "Toto číslo už má jiný doklad",
       versionNotFound: "Verze dokladu neexistuje",
+      external:
+        "Doklad byl vytvořen jinde a importován, jde jen číst. Uhradit nebo smazat ho můžete.",
+      notImported: "Takto jde smazat jen importovaný doklad",
+      importedLinked:
+        "Na doklad navazuje jiný doklad, nejdřív smažte nebo stornujte navázaný doklad",
+      importedNotice: "Na doklad je přiřazené avízo, nejdřív vraťte jeho spárování v avízech",
     },
     issue: {
       alreadyIssued: "Doklad už je vystavený",
@@ -2155,6 +2162,7 @@ export const TEXTS = {
       manual_duplicate:
         "U dokladu už je ruční platba se stejnou částkou a podobným datem, může jít o tytéž peníze.",
       future_date: "Avízo má datum v budoucnosti.",
+      external: "Doklad byl vytvořen jinde a importován, platby se k němu přiřazují ručně.",
     },
     statuses: {
       matched: "Spárováno",
@@ -2811,5 +2819,8 @@ export const TEXTS = {
       stale: "neodpovídá",
     },
     backupFailed: "poslední pokus o zálohu selhal",
+  },
+  importing: {
+    interrupted: "Zpracování importu se přerušilo. Spusťte import znovu.",
   },
 } as const;

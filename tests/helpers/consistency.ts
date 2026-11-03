@@ -91,6 +91,9 @@ function rateProblems(row: typeof schema.invoice.$inferSelect, label: string): s
   if (source !== null && !EXCHANGE_RATE_SOURCES.includes(source)) {
     problems.push(`${label}: neznámý zdroj kurzu ${source}`);
   }
+  if ((source === "import") !== (row.external && currency !== "CZK")) {
+    problems.push(`${label}: zdroj kurzu import neodpovídá importovanému dokladu v cizí měně`);
+  }
   if (currency === "CZK") {
     if (micros !== null || source !== null || listDate !== null) {
       problems.push(`${label}: doklad v CZK drží kurz`);
@@ -98,12 +101,66 @@ function rateProblems(row: typeof schema.invoice.$inferSelect, label: string): s
     return problems;
   }
   if (status === "draft") return problems;
+  // R-13: a file without a usable rate still becomes a document, counted as unconverted.
+  if (source === "import") {
+    if ((micros === null) !== (listDate === null)) {
+      problems.push(`${label}: importovaný kurz a jeho datum nejdou spolu`);
+    }
+    return problems;
+  }
   if (micros === null) problems.push(`${label}: vystavený doklad v cizí měně nemá kurz`);
   if (source === null) problems.push(`${label}: vystavený doklad v cizí měně nemá zdroj kurzu`);
   // Only a list has a date: a fixed or typed rate never came from one.
   if ((source === "cnb" || source === "last_known") && listDate === null) {
     problems.push(`${label}: kurz z lístku nemá datum`);
   }
+  return problems;
+}
+
+function ownTotalsProblems(
+  row: typeof schema.invoice.$inferSelect,
+  lines: (typeof schema.invoiceLine.$inferSelect)[],
+  label: string,
+): string[] {
+  try {
+    const totals = computeTotals(
+      lines.map((line) => ({
+        quantityMilli: line.quantityMilli,
+        unitPriceMinor: line.unitPriceMinor,
+        discount: toDiscount(line.discountKind, line.discountValue),
+      })),
+      toDiscount(row.discountKind, row.discountValue),
+      row.rounding,
+    );
+    const matches =
+      row.subtotalMinor === totals.subtotalMinor &&
+      row.discountMinor === totals.discountMinor &&
+      row.roundingMinor === totals.roundingMinor &&
+      row.totalMinor === totals.totalMinor &&
+      lines.every((line, i) => line.netMinor === totals.lines[i]!.netMinor);
+    return matches ? [] : [`${label}: uložené součty neodpovídají položkám`];
+  } catch {
+    return [`${label}: součty nejde spočítat`];
+  }
+}
+
+// R-12: an imported document keeps its file's amounts, so only the arithmetic between them holds.
+function externalProblems(
+  row: typeof schema.invoice.$inferSelect,
+  lines: (typeof schema.invoiceLine.$inferSelect)[],
+  label: string,
+): string[] {
+  const problems: string[] = [];
+  if (row.subtotalMinor - row.discountMinor + row.roundingMinor !== row.totalMinor) {
+    problems.push(`${label}: součty importovaného dokladu nesedí`);
+  }
+  const net = lines.reduce((sum, line) => sum + line.netMinor, 0);
+  if (net !== row.subtotalMinor) problems.push(`${label}: položky importu nedávají mezisoučet`);
+  if (row.status === "draft" || row.status === "cancelled") {
+    problems.push(`${label}: importovaný doklad ve stavu ${row.status}`);
+  }
+  if (row.sentAt !== null) problems.push(`${label}: importovaný doklad má datum odeslání`);
+  if (row.importBatchId === null) problems.push(`${label}: importovaný doklad bez dávky`);
   return problems;
 }
 
@@ -120,28 +177,16 @@ function invoiceProblems(db: Db, ownerId: string): string[] {
       .where(eq(invoiceLine.invoiceId, row.id))
       .orderBy(asc(invoiceLine.position))
       .all();
-    try {
-      const totals = computeTotals(
-        lines.map((line) => ({
-          quantityMilli: line.quantityMilli,
-          unitPriceMinor: line.unitPriceMinor,
-          discount: toDiscount(line.discountKind, line.discountValue),
-        })),
-        toDiscount(row.discountKind, row.discountValue),
-        row.rounding,
-      );
-      const matches =
-        row.subtotalMinor === totals.subtotalMinor &&
-        row.discountMinor === totals.discountMinor &&
-        row.roundingMinor === totals.roundingMinor &&
-        row.totalMinor === totals.totalMinor &&
-        lines.every((line, i) => line.netMinor === totals.lines[i]!.netMinor);
-      if (!matches) problems.push(`${label}: uložené součty neodpovídají položkám`);
-    } catch {
-      problems.push(`${label}: součty nejde spočítat`);
-    }
+    problems.push(
+      ...(row.external
+        ? externalProblems(row, lines, label)
+        : ownTotalsProblems(row, lines, label)),
+    );
 
     problems.push(...rateProblems(row, label));
+    if (!row.external && (row.importBatchId || row.importUuid || row.sourceSystem)) {
+      problems.push(`${label}: vlastní doklad nese údaje importu`);
+    }
     if (row.type === "invoice" && row.relatedInvoiceId) {
       problems.push(...finalProblems(row, rows, label));
     }
@@ -230,6 +275,15 @@ function paymentProblems(db: Db, ownerId: string): string[] {
         AND p.credited_minor <> p.amount_minor`,
   );
   if (miscredited > 0) problems.push(`payment: ${miscredited} plateb s jinou připsanou částkou`);
+
+  const estimated = count(
+    db,
+    sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
+      WHERE p.user_id = ${ownerId}
+        AND ((p.date_estimated = 1 AND p.source <> 'import')
+          OR (p.source = 'import' AND i.external = 0))`,
+  );
+  if (estimated > 0) problems.push(`payment: ${estimated} plateb s odhadem mimo import`);
 
   const noteRefunds = count(
     db,

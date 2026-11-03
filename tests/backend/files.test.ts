@@ -236,6 +236,15 @@ describe("route souborů", () => {
     expect(response.headers.get("content-security-policy")).toBe("sandbox");
     expect(Buffer.from(await response.arrayBuffer())).toEqual(PNG);
   });
+
+  test("[SEC-005] soubor importu ani archiv vlastník přes obrázkovou cestu nedostane", async () => {
+    const { id } = storeFile(actor("u1"), "logo", PNG, "a.png");
+    session.userId = "u1";
+    for (const kind of ["import_upload", "export", "audit_archive", "sent_pdf"] as const) {
+      db.update(file).set({ kind }).where(eq(file.id, id)).run();
+      expect((await get(id)).status).toBe(404);
+    }
+  });
 });
 
 describe("smazání účtu", () => {

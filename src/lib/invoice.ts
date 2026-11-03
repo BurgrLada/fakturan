@@ -71,14 +71,16 @@ export const ACTIVE_CREDIT_STATUSES = ["issued", "sent"] as const;
 
 const CREDITABLE_STATUSES: readonly InvoiceStatus[] = ["issued", "sent", "partially_paid", "paid"];
 
-export function isCreditable(row: { type: InvoiceType; status: InvoiceStatus }): boolean {
-  return row.type === "invoice" && CREDITABLE_STATUSES.includes(row.status);
+type Judged = { type: InvoiceType; status: InvoiceStatus; external: boolean };
+
+export function isCreditable(row: Judged): boolean {
+  return !row.external && row.type === "invoice" && CREDITABLE_STATUSES.includes(row.status);
 }
 
 export const ADVANCE_FORM_PARAM = "zalohova";
 
-export function isConvertibleAdvance(row: { type: InvoiceType; status: InvoiceStatus }): boolean {
-  return row.type === "advance" && CREDITABLE_STATUSES.includes(row.status);
+export function isConvertibleAdvance(row: Judged): boolean {
+  return !row.external && row.type === "advance" && CREDITABLE_STATUSES.includes(row.status);
 }
 
 export function isFinalInvoice(row: {

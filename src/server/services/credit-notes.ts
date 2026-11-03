@@ -13,6 +13,7 @@ import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import { creditsOf } from "./invoice-balance";
 import {
+  assertNotExternal,
   auditSnapshot,
   findOwned,
   insertLines,
@@ -69,6 +70,7 @@ export function createCreditNote(actor: Actor, invoiceId: string): { id: string 
   const userId = ownerOf(actor);
   return mutate(actor, "invoice.credit_note", (tx, audit) => {
     const source = findOwned(tx, userId, invoiceId);
+    assertNotExternal(source);
     const exhausted = creditableMinor(tx, userId, invoiceId) <= 0;
     if (!isCreditable(source) || exhausted) throw new ServiceError(V.notCreditable);
     // 0 - price, not -price: a free line would become -0. The catalog link stays behind, because

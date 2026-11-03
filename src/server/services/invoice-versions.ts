@@ -33,6 +33,7 @@ import {
 import {
   assertReferencesOwned,
   auditSnapshot,
+  assertNotExternal,
   findOwned,
   insertLines,
   issuedInputSchema,
@@ -84,6 +85,7 @@ type Change = {
 };
 
 function assertEditable(row: Invoice): void {
+  assertNotExternal(row);
   if (!EDITABLE_STATUSES.has(row.status)) throw new ServiceError(V.notEditable);
 }
 

@@ -3,6 +3,7 @@ import { CURRENCIES } from "@/lib/currency";
 import { DOMESTIC_COUNTRY } from "@/lib/customers";
 import { LANGUAGES } from "@/lib/preferences";
 import { user } from "./auth";
+import { importBatch } from "./import";
 
 // A null override column means "use the account default" (CUS-003, SET-030).
 export const customer = sqliteTable(
@@ -32,6 +33,7 @@ export const customer = sqliteTable(
     vatVerifiedAt: integer("vat_verified_at", { mode: "timestamp_ms" }),
     vatValid: integer("vat_valid", { mode: "boolean" }),
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    importBatchId: text("import_batch_id").references(() => importBatch.id),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },

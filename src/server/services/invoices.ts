@@ -265,6 +265,11 @@ export function findOwned(q: Reader, ownerId: string, id: string): Invoice {
   return row;
 }
 
+// An imported document is read-only: the server refuses every change the UI would hide (R-18).
+export function assertNotExternal(row: Pick<Invoice, "external">): void {
+  if (row.external) throw new ServiceError(V.external);
+}
+
 export function linesOf(q: Reader, ownerId: string, invoiceId: string): InvoiceLine[] {
   return q
     .select()
@@ -814,6 +819,8 @@ export type InvoiceRow = {
   creditsMinor: number;
   advanceMinor: number;
   supersededAt: Date | null;
+  external: boolean;
+  sourceSystem: string | null;
   overdue: boolean;
 };
 
@@ -1020,6 +1027,8 @@ function invoiceRows(where: SQL, filter: InvoiceFilter): Page<InvoiceRow> {
       creditsMinor: invoice.creditsMinor,
       advanceMinor: invoice.advanceMinor,
       supersededAt: invoice.supersededAt,
+      external: invoice.external,
+      sourceSystem: invoice.sourceSystem,
     })
     .from(invoice)
     .where(where)

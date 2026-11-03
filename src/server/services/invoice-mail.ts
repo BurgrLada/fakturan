@@ -24,7 +24,7 @@ import { enforceRateLimit, InvoicePdfNotFoundError, ServiceError, type Reader } 
 import { getAutomation } from "./automation";
 import { composeMail, getEmailTemplate, statesRest, type MailDraft } from "./email-templates";
 import { FileNotFoundError, readOwnedFile } from "./files";
-import { findOwned, getInvoice, type Invoice } from "./invoices";
+import { assertNotExternal, findOwned, getInvoice, type Invoice } from "./invoices";
 import { mailNoticeKey } from "./mail-hold";
 import { mailAvailability } from "./mail-settings";
 import { mutate } from "./mutation";
@@ -105,6 +105,8 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
     return null;
   }
   const row = findOwned(tx, userId, invoiceId);
+  // The last guard: no message, manual or automatic, ever leaves about an imported document.
+  assertNotExternal(row);
   const logId = randomUUID();
   const now = clock.now();
   const inserted = tx
@@ -268,6 +270,7 @@ function queueClicked(
   const key = requestKey(userId, requestId);
   const logged = loggedRequest(userId, key);
   if (logged) return { logId: logged };
+  assertNotExternal(findOwned(db, userId, invoiceId));
   if (!mailAvailability(userId).available) throw new ServiceError(E.unavailable);
 
   const queued = mutate(actor, "invoice.send", (tx, audit) => {
@@ -582,6 +585,7 @@ export function sendPrefill(
 ): SendPrefill {
   const row = getInvoice(ownerId, invoiceId);
   if (!row) throw new ServiceError(E.notFound);
+  assertNotExternal(row);
   if (!isSendable(row.status)) throw new ServiceError(E.notSendable);
   const log = logId ? readLog(ownerId, logId) : undefined;
   if (logId && log?.invoiceId !== invoiceId) throw new ServiceError(E.logNotFound);
@@ -639,6 +643,7 @@ function judgeBulk(ownerId: string, invoiceId: string): BulkVerdict {
   const row = getInvoice(ownerId, invoiceId);
   if (!row) return { number: "", reason: B.notFound };
   const number = row.number ?? TEXTS.invoices.statuses.draft;
+  if (row.external) return { number, reason: TEXTS.invoices.validation.external };
   if (row.status !== "issued") return { number, reason: B.status };
   const kind = kindForInvoice(row.type);
   if (hasUnresolvedUnknown(ownerId, invoiceId, kind)) return { number, reason: B.unknown };
