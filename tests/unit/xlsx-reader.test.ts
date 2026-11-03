@@ -1,8 +1,13 @@
+import { unzipSync } from "fflate";
 import { describe, expect, test } from "vitest";
 import { InputRejected, TABULAR_LIMITS } from "@/lib/safe-input/limits";
 import { readXlsx } from "@/lib/safe-input/xlsx-reader";
 import { toXlsx } from "@/lib/xlsx-writer";
 import { hostile, rawZip, xlsxOf, xlsxWithFormula } from "../helpers/hostile-files";
+
+function unzipped(bytes: Uint8Array) {
+  return Object.entries(unzipSync(bytes)).map(([name, data]) => ({ name, data }));
+}
 
 async function rejected(promise: Promise<unknown>): Promise<string> {
   const error = await promise.then(
@@ -70,9 +75,23 @@ describe("čtení XLSX", () => {
         readXlsx(xlsxOf('<row r="50001"><c r="A50001"><v>1</v></c></row>'), TABULAR_LIMITS),
       ),
     ).toBe("tabular_too_many_rows");
-    expect(await rejected(readXlsx(hostile.trueHeaderBomb(), TABULAR_LIMITS))).toBe(
-      "zip_entry_too_large",
+    expect(await rejected(readXlsx(hostile.trueHeaderBomb(), TABULAR_LIMITS))).toMatch(
+      /^zip_(ratio|entry_too_large)$/,
     );
+  });
+
+  test("[SEC-005] list mimo první se do paměti nenačte", async () => {
+    // Stored, so it costs no inflate time; read whole it would break the 50 MiB limit of a sheet.
+    const big = rawZip([
+      ...unzipped(xlsxWithFormula()),
+      {
+        name: "xl/worksheets/obrovsky.xml",
+        data: new Uint8Array(51 * 1024 * 1024).fill(0x20),
+        method: 0,
+      },
+    ]);
+    const sheet = await readXlsx(big, TABULAR_LIMITS);
+    expect(sheet.rows[1]).toEqual(["klik", "1234.5"]);
   });
 
   test("soubor bez listu je chyba", async () => {

@@ -15,6 +15,7 @@ const FLAG_ENCRYPTED = 0x1;
 const FLAG_DESCRIPTOR = 0x8;
 const FLAG_UTF8 = 0x800;
 const SUPPORTED_METHODS = new Set([0, 8]);
+const SNIFF_BYTES = 1024;
 const NESTED_NAME = /\.(zip|isdocx)$/i;
 // fflate needs the whole local header in one buffer: 30 bytes plus a name and extra field of up to 64 KiB each.
 const HEADER_WINDOW = 30 + 2 * 65_535;
@@ -127,7 +128,7 @@ export async function readZipEntries<T>(
   let inputBytes = 0;
   let fileCount = 0;
   let open = 0;
-  let first = true;
+  let prefix: number[] = [];
 
   const fail = (error: InputRejected) => {
     failure ??= error;
@@ -154,26 +155,44 @@ export async function readZipEntries<T>(
     if (flags & FLAG_ENCRYPTED) return fail(new InputRejected("zip_encrypted", name));
     if (!SUPPORTED_METHODS.has(file.compression))
       return fail(new InputRejected("zip_compression", name));
+    // A stored entry with a data descriptor has no length: fflate ends it at the first local
+    // header inside, so a stored archive would spill its entries into this one.
+    if (file.compression === 0 && flags & FLAG_DESCRIPTOR) {
+      return fail(new InputRejected("zip_corrupt", name, "uložená položka bez délky"));
+    }
+
+    const skip =
+      name.endsWith("/") || NESTED_NAME.test(name) || (limits.select && !limits.select(name));
+    // Skipped entries are never buffered; the archive total and ratio still bound them.
     if (
+      !skip &&
       file.originalSize !== undefined &&
       file.originalSize > Math.max(limits.maxEntryBytes, limits.maxPdfEntryBytes)
     ) {
       return fail(new InputRejected("zip_entry_too_large", name));
     }
-
-    const skip =
-      name.endsWith("/") || NESTED_NAME.test(name) || (limits.select && !limits.select(name));
     if (skip && NESTED_NAME.test(name))
       summary.warnings.push({ code: "nested_archive", entry: name });
     const parts: Uint8Array[] = [];
     let size = 0;
-    let limit = limits.maxEntryBytes;
+    // Until the first KiB says whether this is a PDF, the larger limit applies.
+    let limit = Math.max(limits.maxEntryBytes, limits.maxPdfEntryBytes);
+    let decided = skip;
     open++;
     file.ondata = (error, chunk, final) => {
       if (failure) return;
       if (error) return fail(new InputRejected("zip_corrupt", name, error.message));
-      if (!skip && size === 0 && chunk.length > 0 && sniffContent(chunk) === "pdf") {
-        limit = limits.maxPdfEntryBytes;
+      if (!decided && (size + chunk.length >= SNIFF_BYTES || final)) {
+        decided = true;
+        const head = new Uint8Array(Math.min(SNIFF_BYTES, size + chunk.length));
+        let offset = 0;
+        for (const part of [...parts, chunk]) {
+          if (offset >= head.length) break;
+          const piece = part.subarray(0, head.length - offset);
+          head.set(piece, offset);
+          offset += piece.length;
+        }
+        limit = sniffContent(head) === "pdf" ? limits.maxPdfEntryBytes : limits.maxEntryBytes;
       }
       size += chunk.length;
       summary.totalBytes += chunk.length;
@@ -213,9 +232,11 @@ export async function readZipEntries<T>(
   let finished = false;
   try {
     for await (const chunk of chunked(source, limits.chunkBytes)) {
-      if (first) {
-        first = false;
-        if (sniffContent(chunk) !== "zip") throw new InputRejected("zip_corrupt");
+      if (prefix.length < 4) {
+        prefix = [...prefix, ...chunk.subarray(0, 4 - prefix.length)];
+        if (prefix.length === 4 && sniffContent(new Uint8Array(prefix)) !== "zip") {
+          throw new InputRejected("zip_corrupt");
+        }
       }
       inputBytes += chunk.length;
       tracker.append(chunk);
@@ -225,7 +246,7 @@ export async function readZipEntries<T>(
       if (failure) throw failure;
       await yieldToLoop();
     }
-    if (first) throw new InputRejected("zip_corrupt");
+    if (prefix.length < 4) throw new InputRejected("zip_corrupt");
     unzip.push(new Uint8Array(0), true);
     finished = true;
   } catch (error) {

@@ -163,27 +163,27 @@ function cellValue(type: string, value: string, inline: string, shared: string[]
   }
 }
 
-// Only the first sheet of the workbook is read.
-export async function readXlsx(bytes: Uint8Array, limits: TabularLimits): Promise<SheetData> {
+async function readParts(bytes: Uint8Array, names: Set<string>): Promise<Map<string, Uint8Array>> {
   const parts = new Map<string, Uint8Array>();
   await readZipEntries(
     bytes,
-    {
-      ...XLSX_ZIP_LIMITS,
-      select: (name) =>
-        name === WORKBOOK ||
-        name === WORKBOOK_RELS ||
-        name === SHARED_STRINGS ||
-        WORKSHEET.test(name),
-    },
+    { ...XLSX_ZIP_LIMITS, select: (name) => names.has(name) },
     (entry) => {
       parts.set(entry.name, entry.bytes);
     },
   );
+  return parts;
+}
+
+// Only the first sheet of the workbook is read. Two passes keep the other sheets out of memory:
+// which part is the first sheet is known only after the workbook and its relations.
+export async function readXlsx(bytes: Uint8Array, limits: TabularLimits): Promise<SheetData> {
   const xml = xmlLimits(limits);
-  const sheet = firstSheet(parts, xml);
-  const sheetBytes = sheet && parts.get(sheet.path);
-  if (!sheet || !sheetBytes) throw new InputRejected("xlsx_no_sheet");
+  const sheet = firstSheet(await readParts(bytes, new Set([WORKBOOK, WORKBOOK_RELS])), xml);
+  if (!sheet || !WORKSHEET.test(sheet.path)) throw new InputRejected("xlsx_no_sheet");
+  const parts = await readParts(bytes, new Set([sheet.path, SHARED_STRINGS]));
+  const sheetBytes = parts.get(sheet.path);
+  if (!sheetBytes) throw new InputRejected("xlsx_no_sheet");
   const shared = sharedStrings(parts.get(SHARED_STRINGS), xml, limits);
   return { name: sheet.name, rows: readSheet(sheetBytes, shared, xml, limits) };
 }

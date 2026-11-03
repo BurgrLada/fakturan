@@ -98,10 +98,16 @@ function streamBody(
   return bytes.subarray(start, stop);
 }
 
+// Another XML attachment that the safe parser refuses is skipped, not fatal for the whole PDF.
 function isIsdoc(content: Uint8Array): boolean {
   if (sniffContent(content) !== "xml") return false;
-  const root = xmlRoot(content, XML_LIMITS);
-  return root.name === "Invoice" && root.ns === ISDOC_NAMESPACE;
+  try {
+    const root = xmlRoot(content, XML_LIMITS);
+    return root.name === "Invoice" && root.ns === ISDOC_NAMESPACE;
+  } catch (error) {
+    if (error instanceof InputRejected) return false;
+    throw error;
+  }
 }
 
 // The stream of an embedded file cannot live inside an object stream, so its dictionary is plain

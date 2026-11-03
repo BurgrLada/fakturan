@@ -145,6 +145,17 @@ export const hostile = {
       { name: "prevlek.xml", data: rawZip([{ name: "c.isdoc", data: isdocXml() }]), method: 0 },
       { name: "faktura.isdoc", data: isdocXml() },
     ]),
+  // fflate ends a stored entry with a descriptor at the first local header inside it.
+  nestedStoredDescriptor: () =>
+    rawZip([
+      {
+        name: "vnitrni.zip",
+        data: rawZip([{ name: "skryta.isdoc", data: isdocXml() }]),
+        method: 0,
+        descriptor: true,
+      },
+      { name: "faktura.isdoc", data: isdocXml() },
+    ]),
   encryptedFlag: () => rawZip([{ name: "tajna.isdoc", data: isdocXml(), method: 0, flags: 0x1 }]),
   unknownCompression: () => rawZip([{ name: "lzma.isdoc", data: isdocXml(), method: 14 }]),
 };

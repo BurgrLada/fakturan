@@ -106,6 +106,22 @@ describe("bezpečné čtení ZIP", () => {
     ]);
   });
 
+  test("[SEC-005] uložený vnořený ZIP s datovým popisovačem neprojde do kořene", async () => {
+    const error = await rejection(collect(hostile.nestedStoredDescriptor()));
+    expect(error.code).toBe("zip_corrupt");
+    expect(error.entry).toBe("vnitrni.zip");
+  });
+
+  test("[SEC-005] limit PDF se pozná i z obsahu rozděleného do drobných bloků", async () => {
+    const pdf = new Uint8Array(500).fill(0x20);
+    pdf.set(new TextEncoder().encode("%PDF-1.7\n"));
+    // 30 B header + 7 B name: with 3 B blocks the first data block carries only "%P".
+    const zip = rawZip([{ name: "a12.pdf", data: pdf, method: 0 }]);
+    const limits = { ...ZIP_LIMITS, chunkBytes: 3, maxEntryBytes: 100, maxPdfEntryBytes: 10_000 };
+    const { seen } = await collect(zip, limits);
+    expect(seen.map((e) => [e.name, e.kind, e.bytes.length])).toEqual([["a12.pdf", "pdf", 500]]);
+  });
+
   test("[SEC-005] 6 000 položek je odmítnuto, 5 000 projde", async () => {
     const error = await rejection(collect(hostile.manyEntries(6000)));
     expect(error.code).toBe("zip_too_many_entries");

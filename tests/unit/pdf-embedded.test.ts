@@ -48,6 +48,17 @@ describe("ISDOC vložený v PDF", () => {
     expect(extractEmbeddedXml(pdfWithoutAttachment(), PDF_LIMITS)).toBeNull();
   });
 
+  test("[SEC-005] jiná XML příloha s DOCTYPE se přeskočí a ISDOC se přečte", () => {
+    const xml = isdocXml();
+    const hostileXml = encoder.encode(
+      '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "b">]><x>&a;</x>',
+    );
+    expect(extractEmbeddedXml(pdfWithEmbedded(xml, { extraFile: hostileXml }), PDF_LIMITS)).toEqual(
+      xml,
+    );
+    expect(extractEmbeddedXml(pdfWithEmbedded(hostileXml), PDF_LIMITS)).toBeNull();
+  });
+
   test("[SEC-005] šifrované PDF, jiný filtr, ne-PDF a příliš velký soubor jsou chyba", () => {
     const xml = isdocXml();
     expect(
