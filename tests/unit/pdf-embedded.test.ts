@@ -56,7 +56,9 @@ describe("ISDOC vložený v PDF", () => {
     expect(extractEmbeddedXml(pdfWithEmbedded(xml, { extraFile: hostileXml }), PDF_LIMITS)).toEqual(
       xml,
     );
-    expect(extractEmbeddedXml(pdfWithEmbedded(hostileXml), PDF_LIMITS)).toBeNull();
+    expect(() => extractEmbeddedXml(pdfWithEmbedded(hostileXml), PDF_LIMITS)).toThrow(
+      expect.objectContaining({ code: "pdf_unreadable" }),
+    );
   });
 
   test("[SEC-005] šifrované PDF, jiný filtr, ne-PDF a příliš velký soubor jsou chyba", () => {

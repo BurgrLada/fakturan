@@ -98,14 +98,15 @@ function streamBody(
   return bytes.subarray(start, stop);
 }
 
-// Another XML attachment that the safe parser refuses is skipped, not fatal for the whole PDF.
-function isIsdoc(content: Uint8Array): boolean {
-  if (sniffContent(content) !== "xml") return false;
+// An XML attachment that the safe parser refuses is skipped, so a valid ISDOC elsewhere still wins;
+// without one the PDF is unreadable rather than a PDF without ISDOC.
+function attachmentKind(content: Uint8Array): "isdoc" | "other" | "refused" {
+  if (sniffContent(content) !== "xml") return "other";
   try {
     const root = xmlRoot(content, XML_LIMITS);
-    return root.name === "Invoice" && root.ns === ISDOC_NAMESPACE;
+    return root.name === "Invoice" && root.ns === ISDOC_NAMESPACE ? "isdoc" : "other";
   } catch (error) {
-    if (error instanceof InputRejected) return false;
+    if (error instanceof InputRejected) return "refused";
     throw error;
   }
 }
@@ -154,7 +155,11 @@ export function extractEmbeddedXml(bytes: Uint8Array, limits: PdfLimits): Uint8A
           : new InputRejected("pdf_unreadable", undefined, error.code);
       continue;
     }
-    if (isIsdoc(content)) return content;
+    const kind = attachmentKind(content);
+    if (kind === "isdoc") return content;
+    if (kind === "refused") {
+      problem ??= new InputRejected("pdf_unreadable", undefined, "příloha není čitelné XML");
+    }
   }
   if (problem) throw problem;
   return null;

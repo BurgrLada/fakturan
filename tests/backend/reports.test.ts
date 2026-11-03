@@ -37,6 +37,7 @@ import {
   seedReportScenario,
   type ReportScenario,
 } from "../fixtures/report-scenario";
+import { externalInvoice } from "../fixtures/external-invoice";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { webActor } from "../helpers/fixtures-mail";
@@ -291,6 +292,28 @@ describe("scénář 2026", () => {
 });
 
 describe("účty mimo scénář", () => {
+  test("[REP-008] doklady bez zákazníka se v žebříčku nesloučí do jednoho řádku", () => {
+    const owner = reportOwner(db);
+    const own = namedCustomer(owner, "Alfa s.r.o.");
+    issuedDocument(owner, own, { issueDate: "2026-02-02", totalMinor: 10_000 });
+    for (const [customerName, totalMinor] of [
+      ["Import A s.r.o.", 30_000],
+      ["Import B s.r.o.", 20_000],
+      ["Import A s.r.o.", 5_000],
+    ] as const) {
+      externalInvoice(db, owner, { customerName, totalMinor, issueDate: "2026-03-01" });
+    }
+
+    const rows = topCustomers(db, owner, filter()).rows;
+    expect(rows.map((row) => [row.name, row.amountMinor])).toEqual([
+      ["Import A s.r.o.", 35_000],
+      ["Import B s.r.o.", 20_000],
+      ["Alfa s.r.o.", 10_000],
+    ]);
+    expect(rows[2]!.key).toBe(own);
+    assertConsistent(db, owner);
+  });
+
   test("[ADV-005] uhrazená záloha bez konečné faktury je příjem a není fakturováno", () => {
     const owner = reportOwner(db);
     const customerId = namedCustomer(owner, "Epsilon s.r.o.");

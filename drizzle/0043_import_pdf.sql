@@ -1,0 +1,1 @@
+ALTER TABLE `invoice` ADD `import_pdf_file_id` text REFERENCES file(id) ON DELETE SET NULL;

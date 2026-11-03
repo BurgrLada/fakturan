@@ -394,6 +394,9 @@ function ranked(rows: Omit<RankedRow, "kind">[], limit: number): RankedRow[] {
   return [...top, { kind: "others", key: "others", name: "", amountMinor }];
 }
 
+// Imported documents may have no customer record; each name is then a customer of its own.
+export const customerKey = sql<string>`coalesce(${invoice.customerId}, 'name:' || ${invoice.customerName})`;
+
 export function topCustomers(
   q: Reader,
   ownerId: string,
@@ -405,10 +408,10 @@ export function topCustomers(
   const amountMinor = total(value);
   const name = sql<string>`max(${invoice.customerName})`;
   const rows = q
-    .select({ key: sql<string>`coalesce(${invoice.customerId}, '')`, name, amountMinor })
+    .select({ key: customerKey, name, amountMinor })
     .from(invoice)
     .where(where)
-    .groupBy(invoice.customerId)
+    .groupBy(customerKey)
     .having(sql`count(${value}) > 0`)
     .orderBy(desc(amountMinor), asc(name))
     .all();

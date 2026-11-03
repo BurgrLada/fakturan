@@ -34,6 +34,7 @@ import {
   previewIssue,
   restoreInvoice,
   type IssueProblem,
+  deleteImported,
 } from "@/server/services/invoice-lifecycle";
 import {
   acknowledgeUnknown,
@@ -353,6 +354,14 @@ export async function convertAdvanceAction(raw: unknown) {
     const final = convertAdvance(actor, invoiceId);
     changedInvoices();
     return final;
+  });
+}
+
+export async function deleteImportedAction(raw: unknown) {
+  return run(idInput, raw, ({ id: invoiceId }, actor) => {
+    deleteImported(actor, invoiceId);
+    changedInvoices();
+    return {};
   });
 }
 

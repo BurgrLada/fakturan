@@ -28,6 +28,14 @@ import {
 } from "@/app/(app)/nastaveni/posta/sablony/actions";
 import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
 import {
+  confirmBatchAction,
+  createImportBatchAction,
+  editPreviewAction,
+  importStateAction,
+  startParseAction,
+  undoBatchAction,
+} from "@/app/(app)/nastaveni/import/actions";
+import {
   deleteRecurringAction,
   pauseRecurringAction,
   previewRecurringAction,
@@ -100,6 +108,7 @@ import { getMailSettings } from "@/server/services/mail-settings";
 import { listSeries, saveSeries } from "@/server/services/number-series";
 import { getPreferences } from "@/server/services/preferences";
 import { nextOccurrences } from "@/lib/recurrence";
+import { TEXTS } from "@/lib/texts";
 import { getRecurring } from "@/server/services/recurring";
 import { listPayments, markPaid } from "@/server/services/payments";
 import { listReminderRules, saveReminderRule } from "@/server/services/reminders";
@@ -909,6 +918,38 @@ describe("dashboardy", () => {
     expect(await importDashboardAction({ text: 1 })).toEqual({
       ok: false,
       error: "Neplatná data",
+    });
+  });
+});
+
+describe("akce importu", () => {
+  test("[SEC-002] akce importu odmítnou cizí dávku", async () => {
+    const mine = seedOwner(db, new Date());
+    const stranger = seedOwner(db, new Date());
+    session.userId = mine;
+    const created = await createImportBatchAction();
+    if (!created.ok) throw new Error(created.error);
+    const batchId = created.id;
+    const notFound = { ok: false, error: TEXTS.importing.errors.notFound };
+
+    session.userId = stranger;
+    expect(await importStateAction({ batchId })).toEqual(notFound);
+    expect(await startParseAction({ batchId })).toEqual(notFound);
+    expect(
+      await editPreviewAction({
+        batchId,
+        revision: 0,
+        change: { kind: "skip", keys: ["r1"], skip: true },
+      }),
+    ).toEqual(notFound);
+    expect(await confirmBatchAction({ batchId, revision: 0 })).toEqual(notFound);
+    expect(await undoBatchAction({ batchId })).toEqual(notFound);
+    expect(await importStateAction({ batchId, extra: 1 })).toMatchObject({ ok: false });
+
+    session.userId = mine;
+    expect(await importStateAction({ batchId })).toMatchObject({
+      ok: true,
+      batch: { id: batchId, status: "uploading" },
     });
   });
 });

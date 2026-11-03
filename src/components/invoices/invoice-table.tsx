@@ -335,6 +335,13 @@ export function InvoiceTable({
                     {row.supersededAt && ` · ${TEXTS.invoices.detail.superseded}`}
                   </span>
                 )}
+                {row.external && (
+                  <span className="block text-xs text-muted-foreground">
+                    {row.sourceSystem
+                      ? TEXTS.importing.source(row.sourceSystem)
+                      : TEXTS.importing.sourceUnknown}
+                  </span>
+                )}
               </TableCell>
               <TableCell className="whitespace-normal">{row.customerName || "–"}</TableCell>
               <TableCell className={NARROW_HIDDEN}>{shortDate(row.issueDate)}</TableCell>

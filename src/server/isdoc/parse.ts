@@ -132,7 +132,9 @@ function rateMicros(root: XmlNode): number | null {
   }
   if (quoted <= BigInt(0) || unit <= BigInt(0)) return null;
   const micros = (TWO * quoted * RATE_UNIT + unit) / (TWO * unit);
-  if (micros > MAX_RATE) throw new IsdocInvalid("Kurz v CurrRate a RefCurrRate je mimo rozsah");
+  if (micros > MAX_RATE || micros <= BigInt(0)) {
+    throw new IsdocInvalid("Kurz v CurrRate a RefCurrRate je mimo rozsah");
+  }
   return micros === RATE_UNIT ? null : Number(micros);
 }
 

@@ -99,6 +99,7 @@ export const invoice = sqliteTable(
     importBatchId: text("import_batch_id").references(() => importBatch.id),
     importUuid: text("import_uuid"),
     sourceSystem: text("source_system"),
+    importPdfFileId: text("import_pdf_file_id").references(() => file.id, { onDelete: "set null" }),
     recurringId: text("recurring_id").references((): AnySQLiteColumn => recurringInvoice.id, {
       onDelete: "set null",
     }),

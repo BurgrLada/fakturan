@@ -8,7 +8,5 @@ INV-024	Chybí export (plán 8)	plán 8
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 ADV-005	Chybí daňový přehled	plán 8
-IMP-000	Čte se ISDOC 6.0.1 a 6.0.2 ze souboru; nahrání, ZIP a PDF s vloženým ISDOC v importu chybí	plán 8 (Task 4)
-IMP-003	Parser převezme všechny údaje, chybí uložení dokladu a kontrola duplicit podle UUID	plán 8 (Task 4)
-IMP-004	Štítek „vytvořeno jinde“ se zdrojem v rozhraní	plán 8 (Task 4)
-IMP-005	Přiložení původního PDF k importovanému dokladu	plán 8 (Task 4)
+IMP-000	Fakturoid, iDoklad, SuperFaktura, Vyfakturuj a ABRA Flexi jsou ověřené jen z dokumentace	kap. 24
+IMP-005	Ruční přiložení PDF k importovanému dokladu po importu, přiloží se jen PDF z importu	plán 9

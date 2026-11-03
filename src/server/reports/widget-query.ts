@@ -95,7 +95,7 @@ type Plan = {
 };
 
 const customerDim: Dimension = {
-  key: sql<string>`coalesce(${invoice.customerId}, '')`,
+  key: core.customerKey,
   name: sql<string>`max(${invoice.customerName})`,
 };
 const statusDim: Dimension = { key: sql<string>`${invoice.status}` };

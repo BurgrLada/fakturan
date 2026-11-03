@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { EntityHistory } from "@/components/audit/entity-history";
 import { EmailHistory } from "@/components/invoices/email-history";
 import { InvoiceActions } from "@/components/invoices/invoice-actions";
+import { ImportedActions } from "@/components/invoices/imported-actions";
 import { InvoiceStatusBadge } from "@/components/invoices/invoice-status";
 import { ReminderPanel } from "@/components/invoices/reminder-panel";
 import { VersionList } from "@/components/invoices/version-list";
@@ -126,7 +127,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
   if (row.status === "draft") redirect(`/faktury/${id}/upravit`);
 
   const today = calendarDateInPrague(clock.now());
-  const editable = EDITABLE_STATUSES.has(row.status);
+  const editable = EDITABLE_STATUSES.has(row.status) && !row.external;
   const qr = qrStateOf(invoiceDocument(row));
   const emails = listEmailLog(user.id, id);
   const { sending, retrying, problem } = mailStateOf(emails);
@@ -143,7 +144,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
     takesPayment || (canAmendPayment(row.status) && !isNote && payments.length > 0);
   const related = relatedDocuments(user.id, id);
   const plan = row.recurringId ? getRecurring(user.id, row.recurringId) : null;
-  const sendable = isSendable(row.status);
+  const sendable = isSendable(row.status) && !row.external;
   const { available } = mailAvailability(user.id);
   return (
     <>
@@ -153,7 +154,15 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         </h1>
         <InvoiceStatusBadge status={row.status} overdue={isOverdue(row, today)} />
         {row.supersededAt && <Badge variant="outline">{T.superseded}</Badge>}
+        {row.external && (
+          <Badge variant="outline" data-testid="invoice-source">
+            {row.sourceSystem
+              ? TEXTS.importing.source(row.sourceSystem)
+              : TEXTS.importing.sourceUnknown}
+          </Badge>
+        )}
       </div>
+      {row.external && <ImportedActions id={id} pdfFileId={row.importPdfFileId} />}
       <p className="text-sm">
         <span className="text-muted-foreground">{T.customer}: </span>
         {row.customerId ? (
@@ -195,7 +204,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
       <InvoiceActions
         id={id}
         editable={editable}
-        cancellable={isCancellable(row)}
+        cancellable={isCancellable(row) && !row.external}
         covered={
           isCancellable(row) &&
           row.status !== "issued" &&
@@ -210,11 +219,12 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         copyable={!isNote}
         restorable={row.status === "cancelled" && row.cancelledFrom !== null}
         markable={
-          row.status === "issued" ||
-          ((row.status === "partially_paid" ||
-            row.status === "paid" ||
-            row.status === "credited") &&
-            row.sentAt === null)
+          !row.external &&
+          (row.status === "issued" ||
+            ((row.status === "partially_paid" ||
+              row.status === "paid" ||
+              row.status === "credited") &&
+              row.sentAt === null))
         }
         refreshable={editable && row.customerId !== null}
         mail={{ sendable, available, sending, problem, offer: sendOffer(query, available) }}

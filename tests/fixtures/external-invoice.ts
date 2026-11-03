@@ -67,6 +67,7 @@ export type ExternalOptions = {
   batchId?: string;
   importUuid?: string | null;
   transfer?: boolean;
+  customerName?: string;
   // Paid as an import records it: an estimated day, nothing that could start an automation.
   paid?: "none" | "full" | "partial";
 };
@@ -118,7 +119,7 @@ export function externalInvoice(db: Db, owner: string, opts: ExternalOptions = {
             : (opts.variableSymbol ?? `9${id.replace(/\D/g, "").slice(0, 8)}`),
         variableSymbolManual: true,
         customerId: opts.customerId ?? null,
-        customerName: EXTERNAL_CUSTOMER.name,
+        customerName: opts.customerName ?? EXTERNAL_CUSTOMER.name,
         issueDate,
         dueDate,
         language: "cs",
@@ -132,7 +133,10 @@ export function externalInvoice(db: Db, owner: string, opts: ExternalOptions = {
         totalMinor,
         appearance: appearanceFrom(getPreferences(owner)),
         supplierSnapshot: EXTERNAL_SUPPLIER,
-        customerSnapshot: EXTERNAL_CUSTOMER,
+        customerSnapshot: {
+          ...EXTERNAL_CUSTOMER,
+          name: opts.customerName ?? EXTERNAL_CUSTOMER.name,
+        },
         dateFormat: "d. M. yyyy",
         relatedInvoiceId: related?.id ?? null,
         relatedSnapshot: related

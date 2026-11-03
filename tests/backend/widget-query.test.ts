@@ -30,6 +30,7 @@ import {
   seedReportScenario,
   type ReportScenario,
 } from "../fixtures/report-scenario";
+import { externalInvoice } from "../fixtures/external-invoice";
 import { createTestDb } from "../helpers/db";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
@@ -301,6 +302,22 @@ describe("filtry a období", () => {
     expect(
       run({ display: "heatmap", groupBy: "day", period: "last_12_months" }).series[0]!.points,
     ).toHaveLength(365);
+  });
+
+  test("[REP-008] doklady bez zákazníka se seskupí podle jména", () => {
+    const owner = reportOwner(db);
+    for (const [customerName, totalMinor] of [
+      ["Import A s.r.o.", 30_000],
+      ["Import B s.r.o.", 20_000],
+    ] as const) {
+      externalInvoice(db, owner, { customerName, totalMinor, issueDate: "2026-03-01" });
+    }
+    setClockForTests(null);
+    const rows = run({ display: "table", groupBy: "customer" }, owner).rows;
+    expect(rows.map((row) => [row.name, row.value])).toEqual([
+      ["Import A s.r.o.", 30_000],
+      ["Import B s.r.o.", 20_000],
+    ]);
   });
 
   test("topN 3 má řádek Ostatní a součet se nezmění", () => {

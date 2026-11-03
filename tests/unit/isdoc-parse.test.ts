@@ -154,6 +154,15 @@ describe("čtení ISDOC", () => {
     expect(() => parseIsdoc(huge)).toThrow("Kurz");
   });
 
+  test("[IMP-003] kurz, který se zaokrouhlí na nulu, je chyba", () => {
+    const tiny = edited(
+      "faktura-eur.isdoc",
+      "<RefCurrRate>1</RefCurrRate>",
+      "<RefCurrRate>100000000</RefCurrRate>",
+    );
+    expect(() => parseIsdoc(tiny)).toThrow(IsdocInvalid);
+  });
+
   test("[IMP-003] záloha, konečná faktura, úhrady, 6.0.1 a vrubopis", () => {
     expect(parseIsdoc(fixture("zalohova.isdoc")).type).toBe("advance");
     const final = parseIsdoc(fixture("konecna-se-zalohou.isdoc"));

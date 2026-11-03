@@ -15,6 +15,7 @@ const TABS = [
   { href: "/nastaveni/posta", label: TEXTS.settings.mail },
   { href: "/nastaveni/aviza", label: TEXTS.settings.bankMailbox },
   { href: "/nastaveni/automatizace", label: TEXTS.settings.automation },
+  { href: "/nastaveni/import", label: TEXTS.importing.nav },
   { href: "/nastaveni/historie", label: TEXTS.settings.history },
 ];
 

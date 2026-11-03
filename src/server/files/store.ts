@@ -1,5 +1,14 @@
 import "server-only";
-import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  createWriteStream,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+  type WriteStream,
+} from "node:fs";
 import { join } from "node:path";
 import { env } from "../env";
 
@@ -21,6 +30,19 @@ function filePath(userId: string, id: string): string {
 export function writeBlob(userId: string, id: string, data: Buffer): void {
   mkdirSync(userDir(userId), { recursive: true });
   writeFileSync(filePath(userId, id), data, { flag: "wx" });
+}
+
+// For a file rewritten in place: readers see the old or the new content, never half of it.
+export function replaceBlob(userId: string, id: string, data: Buffer): void {
+  mkdirSync(userDir(userId), { recursive: true });
+  const temporary = filePath(userId, `${id}-tmp`);
+  writeFileSync(temporary, data);
+  renameSync(temporary, filePath(userId, id));
+}
+
+export function blobWriter(userId: string, id: string): WriteStream {
+  mkdirSync(userDir(userId), { recursive: true });
+  return createWriteStream(filePath(userId, id), { flags: "wx" });
 }
 
 export function readBlob(userId: string, id: string): Buffer {

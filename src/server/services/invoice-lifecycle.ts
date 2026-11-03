@@ -20,12 +20,14 @@ import { db, type Tx } from "../db";
 import {
   bankAccount,
   catalogItem,
+  file,
   invoice,
   invoiceLine,
   numberSeries,
   payment,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { removeBlob } from "../files/store";
 import { ServiceError, type Reader } from "./access";
 import { recordCatalogUse } from "./catalog";
 import { creditNoteProblem } from "./credit-notes";
@@ -696,7 +698,7 @@ export function markSentMany(actor: Actor, ids: string[]): { done: number; skipp
 // nothing, so those must be undone first (R-18).
 export function deleteImported(actor: Actor, id: string): void {
   const userId = ownerOf(actor);
-  mutate(actor, "invoice.delete_imported", (tx, audit) => {
+  const pdf = mutate(actor, "invoice.delete_imported", (tx, audit) => {
     const row = findOwned(tx, userId, id);
     if (!row.external) throw new ServiceError(V.notImported);
     const linked = tx
@@ -720,6 +722,11 @@ export function deleteImported(actor: Actor, id: string): void {
     tx.delete(invoice)
       .where(and(eq(invoice.id, id), eq(invoice.userId, userId)))
       .run();
+    if (row.importPdfFileId) {
+      tx.delete(file)
+        .where(scoped(userId).where(file, (t, { eq }) => eq(t.id, row.importPdfFileId!)))
+        .run();
+    }
     audit({
       entity: "invoice",
       entityId: id,
@@ -738,5 +745,7 @@ export function deleteImported(actor: Actor, id: string): void {
       syncAdvance(tx, audit, userId, row.relatedInvoiceId!, id);
       resolveEntityNotifications(tx, userId, "advance_final_review", id);
     }
+    return row.importPdfFileId;
   });
+  if (pdf) removeBlob(userId, pdf);
 }
