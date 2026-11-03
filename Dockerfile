@@ -33,6 +33,9 @@ COPY --from=build /app/public ./public
 COPY --from=deps /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 COPY --from=deps /sharp/ ./node_modules/
 COPY --from=build /smoke/pdf-smoke-bundle.mjs /app/scripts/pdf-smoke.mjs ./scripts/
+COPY scripts/isdoc-smoke.mjs ./scripts/
+# Fails the build when tracing dropped the XSD, the xmllint worker or its wasm.
+RUN node scripts/isdoc-smoke.mjs
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /data && chown node:node /data
 USER node

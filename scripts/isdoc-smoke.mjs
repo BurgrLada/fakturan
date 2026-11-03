@@ -1,0 +1,39 @@
+// Runs in the runner image: proves that output tracing kept xmllint-wasm with its worker and wasm,
+// and the XSD next to server.js. The invoice is tests/fixtures/isdoc/faktura-czk.isdoc (fictional).
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+
+const require = createRequire(join(process.cwd(), "server.js"));
+const { validateXML } = require("xmllint-wasm");
+const schema = readFileSync(
+  join(process.cwd(), "src/server/isdoc/schema/isdoc-invoice-6.0.2.xsd"),
+  "utf8",
+);
+
+const INVOICE = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.2">
+<DocumentType>1</DocumentType><ID>2026-0001</ID><UUID>00000000-0000-4000-8000-000000000001</UUID><IssuingSystem>Zkušební systém 1.0</IssuingSystem><IssueDate>2026-02-02</IssueDate><TaxPointDate>2026-02-02</TaxPointDate><VATApplicable>false</VATApplicable><ElectronicPossibilityAgreementReference></ElectronicPossibilityAgreementReference><Note>Smyšlený doklad pro testy</Note><LocalCurrencyCode>CZK</LocalCurrencyCode><CurrRate>1</CurrRate><RefCurrRate>1</RefCurrRate>
+<AccountingSupplierParty><Party><PartyIdentification><ID>99900017</ID></PartyIdentification><PartyName><Name>Zkušební s. r. o.</Name></PartyName><PostalAddress><StreetName>Zkušební</StreetName><BuildingNumber>1</BuildingNumber><CityName>Testov</CityName><PostalZone>123 45</PostalZone><Country><IdentificationCode>CZ</IdentificationCode><Name>Česká republika</Name></Country></PostalAddress><Contact><Name>Petr Zkušební</Name><ElectronicMail>fakturace@zkusebni.example</ElectronicMail></Contact></Party></AccountingSupplierParty>
+<AccountingCustomerParty><Party><PartyIdentification><ID>99900025</ID></PartyIdentification><PartyName><Name>Vzorová a. s.</Name></PartyName><PostalAddress><StreetName>Vzorová</StreetName><BuildingNumber>22</BuildingNumber><CityName>Ukázkov</CityName><PostalZone>543 21</PostalZone><Country><IdentificationCode>CZ</IdentificationCode><Name>Česká republika</Name></Country></PostalAddress><PartyTaxScheme><CompanyID>CZ99900025</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme></Party></AccountingCustomerParty>
+<InvoiceLines><InvoiceLine><ID>1</ID><InvoicedQuantity unitCode="hod">2.000</InvoicedQuantity><LineExtensionAmount>3000.00</LineExtensionAmount><LineExtensionAmountTaxInclusive>3000.00</LineExtensionAmountTaxInclusive><LineExtensionTaxAmount>0.00</LineExtensionTaxAmount><UnitPrice>1500.00</UnitPrice><UnitPriceTaxInclusive>1500.00</UnitPriceTaxInclusive><ClassifiedTaxCategory><Percent>0</Percent><VATCalculationMethod>0</VATCalculationMethod><VATApplicable>false</VATApplicable></ClassifiedTaxCategory><Item><Description>Konzultace</Description></Item></InvoiceLine><InvoiceLine><ID>2</ID><InvoicedQuantity unitCode="ks">1.000</InvoicedQuantity><LineExtensionAmount>350.50</LineExtensionAmount><LineExtensionAmountTaxInclusive>350.50</LineExtensionAmountTaxInclusive><LineExtensionTaxAmount>0.00</LineExtensionTaxAmount><UnitPrice>350.50</UnitPrice><UnitPriceTaxInclusive>350.50</UnitPriceTaxInclusive><ClassifiedTaxCategory><Percent>0</Percent><VATCalculationMethod>0</VATCalculationMethod><VATApplicable>false</VATApplicable></ClassifiedTaxCategory><Item><Description>Cestovné</Description></Item></InvoiceLine></InvoiceLines>
+<TaxTotal><TaxSubTotal><TaxableAmount>3350.50</TaxableAmount><TaxAmount>0.00</TaxAmount><TaxInclusiveAmount>3350.50</TaxInclusiveAmount><AlreadyClaimedTaxableAmount>0.00</AlreadyClaimedTaxableAmount><AlreadyClaimedTaxAmount>0.00</AlreadyClaimedTaxAmount><AlreadyClaimedTaxInclusiveAmount>0.00</AlreadyClaimedTaxInclusiveAmount><DifferenceTaxableAmount>3350.50</DifferenceTaxableAmount><DifferenceTaxAmount>0.00</DifferenceTaxAmount><DifferenceTaxInclusiveAmount>3350.50</DifferenceTaxInclusiveAmount><TaxCategory><Percent>0</Percent><VATApplicable>false</VATApplicable></TaxCategory></TaxSubTotal><TaxAmount>0.00</TaxAmount></TaxTotal>
+<LegalMonetaryTotal><TaxExclusiveAmount>3350.50</TaxExclusiveAmount><TaxInclusiveAmount>3350.50</TaxInclusiveAmount><AlreadyClaimedTaxExclusiveAmount>0.00</AlreadyClaimedTaxExclusiveAmount><AlreadyClaimedTaxInclusiveAmount>0.00</AlreadyClaimedTaxInclusiveAmount><DifferenceTaxExclusiveAmount>3350.50</DifferenceTaxExclusiveAmount><DifferenceTaxInclusiveAmount>3350.50</DifferenceTaxInclusiveAmount><PaidDepositsAmount>0.00</PaidDepositsAmount><PayableAmount>3350.50</PayableAmount></LegalMonetaryTotal>
+<PaymentMeans><Payment><PaidAmount>3350.50</PaidAmount><PaymentMeansCode>42</PaymentMeansCode><Details><PaymentDueDate>2026-02-16</PaymentDueDate><ID>123456789</ID><BankCode>0100</BankCode><Name>Zkušební banka</Name><IBAN>CZ0001000000000123456789</IBAN><BIC>ZKUSCZPP</BIC><VariableSymbol>20260001</VariableSymbol><ConstantSymbol></ConstantSymbol><SpecificSymbol></SpecificSymbol></Details></Payment></PaymentMeans>
+</Invoice>
+`;
+
+async function check(xml) {
+  return validateXML({
+    xml: [{ fileName: "smoke.xml", contents: xml }],
+    schema: { fileName: "isdoc.xsd", contents: schema },
+  });
+}
+
+const valid = await check(INVOICE);
+if (!valid.valid) throw new Error(`Platná faktura neprošla XSD: ${valid.rawOutput}`);
+const broken = await check(INVOICE.replace(/<IssueDate>[^<]*<\/IssueDate>/, ""));
+if (broken.valid || !broken.rawOutput.includes("IssueDate")) {
+  throw new Error("Rozbitá faktura prošla XSD, validace neběží");
+}
+console.log("ISDOC v pořádku, XSD 6.0.2 validuje");

@@ -89,6 +89,10 @@ describe("bezpečné čtení XML", () => {
     ]);
     expect(firstChild(root, "Ext")).toBeUndefined();
     expect(childText(root, "Chybi")).toBeUndefined();
-    expect(xmlRoot(bytes(xml), XML_LIMITS)).toEqual({ name: "Invoice", ns: ISDOC_NS });
+    expect(xmlRoot(bytes(xml), XML_LIMITS)).toEqual({
+      name: "Invoice",
+      ns: ISDOC_NS,
+      attributes: { version: "6.0.2" },
+    });
   });
 });

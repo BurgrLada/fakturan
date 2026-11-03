@@ -37,13 +37,17 @@ const nextConfig: NextConfig = {
   output: "standalone",
   // Above MAX_FILE_BYTES (src/lib/file-limits.ts) plus multipart overhead; Next defaults to 1 MB.
   experimental: { serverActions: { bodySizeLimit: "3mb" } },
-  serverExternalPackages: ["better-sqlite3", "@react-pdf/renderer"],
+  // xmllint-wasm starts its worker and loads its wasm from __dirname, which a bundle would break.
+  serverExternalPackages: ["better-sqlite3", "@react-pdf/renderer", "xmllint-wasm"],
   // All are read from process.cwd() at runtime, which tracing cannot see.
   outputFileTracingIncludes: {
     "/*": [
       "./drizzle/**/*",
       "./src/server/auth/common-passwords.txt",
       "./src/server/pdf/fonts/**/*",
+      "./src/server/isdoc/schema/**/*",
+      // Listed until a route imports it, so scripts/isdoc-smoke.mjs can prove the runner image.
+      "./node_modules/xmllint-wasm/**/*",
     ],
   },
   async headers() {

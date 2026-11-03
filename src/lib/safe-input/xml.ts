@@ -127,12 +127,15 @@ export function parseXml(bytes: Uint8Array, limits: XmlLimits): XmlNode {
   return root;
 }
 
-// Only the root element is needed to tell an ISDOC from other XML.
-export function xmlRoot(bytes: Uint8Array, limits: XmlLimits): { name: string; ns: string } {
-  let root: { name: string; ns: string } | undefined;
+export type XmlRoot = { name: string; ns: string; attributes: Record<string, string> };
+
+// Only the root element is needed to tell an ISDOC from other XML, but the whole input is still
+// decoded and screened for DOCTYPE first.
+export function xmlRoot(bytes: Uint8Array, limits: XmlLimits): XmlRoot {
+  let root: XmlRoot | undefined;
   walkXml(bytes, limits, {
-    open(name, ns) {
-      root = { name, ns };
+    open(name, ns, attributes) {
+      root = { name, ns, attributes };
       throw new StopWalk();
     },
   });
