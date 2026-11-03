@@ -60,12 +60,14 @@ function compared(
 
 function shares(
   ariaLabel: string,
+  corner: string,
   currency: Currency,
   slices: { key: string; label: string; amountMinor: number }[],
 ): ChartSpec {
   return {
     kind: "donut",
     ariaLabel,
+    corner,
     format: { kind: "money", currency },
     series: slices.map((slice, index) => ({
       key: slice.key,
@@ -116,6 +118,7 @@ export function reportCharts(tab: ReportTab, bundle: ReportBundle): ChartSpec[] 
         {
           kind: "bar",
           ariaLabel: T.charts.aging,
+          corner: T.chart.corners.band,
           format: { kind: "money", currency: bundle.currency },
           series: [{ key: "amount", label: T.columns.amount, token: "chart-3" }],
           rows: AGING_BANDS.map((band) => ({
@@ -126,11 +129,19 @@ export function reportCharts(tab: ReportTab, bundle: ReportBundle): ChartSpec[] 
         },
       ];
     case "zakaznici":
-      return [shares(T.charts.customers, bundle.currency, rankedSlices(bundle.customers.rows))];
+      return [
+        shares(
+          T.charts.customers,
+          T.chart.corners.customer,
+          bundle.currency,
+          rankedSlices(bundle.customers.rows),
+        ),
+      ];
     case "meny":
       return [
         shares(
           T.charts.currencies,
+          T.chart.corners.currency,
           "CZK",
           bundle.currencies.rows
             .filter((row) => row.czkMinor > 0)

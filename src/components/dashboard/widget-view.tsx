@@ -151,11 +151,14 @@ function chartSpec(
   const format = valueFormat(unit);
   if (result.kind === "rows") {
     const rows = result.rows.filter((row) => row.kind !== "adjustment");
+    const corner =
+      config.groupBy && !isBucketUnit(config.groupBy) ? R.chart.corners[config.groupBy] : undefined;
     if (kind === "donut") {
       const slices = rows.filter((row) => (row.value ?? 0) > 0);
       return {
         kind,
         ariaLabel: title,
+        corner,
         format,
         series: slices.map((row, index) => ({
           key: row.key || "none",
@@ -174,6 +177,7 @@ function chartSpec(
     return {
       kind,
       ariaLabel: title,
+      corner,
       format,
       series: [{ key: "value", label: title, token: config.color }],
       rows: rows.map((row) => ({

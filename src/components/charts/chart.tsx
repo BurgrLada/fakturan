@@ -5,6 +5,7 @@ import {
   barY,
   cell,
   colorLegend,
+  colorLegendItems,
   defineChart,
   group,
   lineY,
@@ -39,15 +40,19 @@ function buildDefinition(spec: ChartSpec) {
   const money = (value: number) => formatChartValue(spec.format, value);
   const labels = new Map(spec.rows.map((row) => [row.x, row.label]));
   const xLabel = (value: unknown) => labels.get(String(value)) ?? String(value);
+  const names = new Map(spec.series.map((series) => [series.key, series.label]));
+  const seriesName = (key: unknown) => names.get(String(key)) ?? String(key);
   const color = {
-    domain: spec.series.map((series) => series.label),
+    domain: spec.series.map((series) => series.key),
     range: spec.series.map((series) => chartColor(series.token)),
-    ...(spec.series.length > 1 || spec.kind === "donut" ? { legend: colorLegend() } : {}),
+    ...(spec.series.length > 1 || spec.kind === "donut"
+      ? { legend: colorLegend({ items: colorLegendItems({ label: { format: seriesName } }) }) }
+      : {}),
   };
   const tip = {
     use: tooltip,
     format: (point: { datum: ChartDatum }) =>
-      `${point.datum.label}\n${point.datum.series}: ${money(point.datum.value)}`,
+      `${point.datum.label}\n${point.datum.seriesLabel}: ${money(point.datum.value)}`,
   };
   const xTicks = { format: xLabel };
   const valueLabels = (single: boolean) =>
@@ -122,7 +127,8 @@ function buildDefinition(spec: ChartSpec) {
       const slices = spec.series.map((series) => ({
         x: series.key,
         label: series.label,
-        series: series.label,
+        series: series.key,
+        seriesLabel: series.label,
         value: spec.rows.reduce((sum, row) => sum + (row.values[series.key] ?? 0), 0),
       }));
       return defineChart({
@@ -153,11 +159,11 @@ function buildDefinition(spec: ChartSpec) {
     }
     case "heatmap": {
       const token = spec.series[0]?.token ?? "chart-1";
-      const peak = Math.max(1, ...data.map((datum) => Math.abs(datum.value)));
+      // A refund month stays at the lowest intensity; its sign is in the value table.
+      const peak = Math.max(1, ...data.map((datum) => datum.value));
       const cells = data.map((datum) => ({
         ...datum,
-        level:
-          datum.value === 0 ? 0 : 1 + Math.min(3, Math.floor((Math.abs(datum.value) / peak) * 4)),
+        level: datum.value <= 0 ? 0 : 1 + Math.min(3, Math.floor((datum.value / peak) * 4)),
       }));
       return defineChart({
         marks: [
@@ -180,8 +186,9 @@ function buildDefinition(spec: ChartSpec) {
           y: {
             scale: () =>
               scaleBand<string>()
-                .domain(spec.series.map((series) => series.label))
+                .domain(spec.series.map((series) => series.key))
                 .padding(0.04),
+            axis: { ticks: { format: seriesName } },
           },
         },
         color: {

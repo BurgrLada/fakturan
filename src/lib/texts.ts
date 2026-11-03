@@ -18,6 +18,14 @@ export const TEXTS = {
     chart: {
       table: "Tabulka hodnot",
       category: "Období",
+      corners: {
+        customer: "Zákazník",
+        item: "Položka",
+        currency: "Měna",
+        status: "Stav dokladu",
+        type: "Typ dokladu",
+        band: "Pásmo",
+      },
     },
     title: "Statistiky",
     intro:

@@ -61,6 +61,8 @@ describe("obal Chart", () => {
     expect(missing.ariaLabel).toBeUndefined();
 
     const model = chartTableModel(spec);
+    expect(model.corner).toBe("Období");
+    expect(chartTableModel({ ...spec, corner: "Zákazník" }).corner).toBe("Zákazník");
     expect(model.head).toEqual(["Uhrazeno", "Neuhrazeno"]);
     expect(model.rows.map((row) => row.label)).toEqual(["leden 2026", "únor 2026"]);
     const text = (value: string) => value.replace(/\s/g, " ");

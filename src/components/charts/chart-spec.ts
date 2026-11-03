@@ -23,6 +23,8 @@ export type ChartSpec = {
   ariaDescription?: string;
   // Values written on the marks (DSH-016); ignored where marks overlap, as in grouped bars.
   labels?: boolean;
+  // Header of the row labels in the value table; the rows are periods unless said otherwise.
+  corner?: string;
 };
 
 const NUMBER = new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 });
@@ -36,7 +38,14 @@ export function chartColor(token: ChartToken): string {
   return `var(--${token})`;
 }
 
-export type ChartDatum = { x: string; label: string; series: string; value: number };
+// `series` is the key: two series may share a label, such as a catalog item and typed lines.
+export type ChartDatum = {
+  x: string;
+  label: string;
+  series: string;
+  seriesLabel: string;
+  value: number;
+};
 
 // A missing value is drawn as zero so a gap never reads as a different total.
 export function chartData(spec: ChartSpec): ChartDatum[] {
@@ -44,7 +53,8 @@ export function chartData(spec: ChartSpec): ChartDatum[] {
     spec.series.map((series) => ({
       x: row.x,
       label: row.label,
-      series: series.label,
+      series: series.key,
+      seriesLabel: series.label,
       value: row.values[series.key] ?? 0,
     })),
   );
@@ -58,7 +68,7 @@ export type ChartTableModel = {
 
 export function chartTableModel(spec: ChartSpec): ChartTableModel {
   return {
-    corner: TEXTS.reports.chart.category,
+    corner: spec.corner ?? TEXTS.reports.chart.category,
     head: spec.series.map((series) => series.label),
     rows: spec.rows.map((row) => ({
       label: row.label,
