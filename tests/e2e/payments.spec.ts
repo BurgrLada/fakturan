@@ -238,6 +238,14 @@ test("[CUS-006] karta zákazníka ukáže uhrazeno, pohledávky a průměrnou do
   await expect(row("Uhrazeno")).toContainText("1 500,00");
   await expect(row("Pohledávky")).toContainText("0,00");
   await expect(page.getByTestId("customer-average-days")).toContainText("7 dní");
+
+  // (10 + 4 + 0) / 3 days, shown to one decimal place as on the Statistics page.
+  const third = await issuedOn(page, baseURL, "200", 0);
+  await page.goto(third);
+  await page.getByRole("button", { name: "Označit jako uhrazené" }).click();
+  await expect(badge(page, "Uhrazená")).toBeVisible();
+  await page.goto(card);
+  await expect(page.getByTestId("customer-average-days")).toContainText("4,7 dne");
 });
 
 test("[UI-007] označení úhrady funguje na šířce 390 px s dostatečnými cíli", async ({
