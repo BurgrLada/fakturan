@@ -1,6 +1,8 @@
 import "server-only";
 import { closeSync, existsSync, fstatSync, openSync, readSync, writeSync } from "node:fs";
 import { join } from "node:path";
+import { jsonNodesOfBytes } from "@/lib/backup-format";
+import { lineCost } from "./memory-guard";
 import type { ArchiveRow } from "./restore-read";
 
 const BLOCK = 1024 * 1024;
@@ -54,11 +56,15 @@ export function spoolWriter(dir: string, table: string): SpoolWriter {
   };
 }
 
-// Synchronous on purpose: the commit is one better-sqlite3 transaction and cannot await.
+// What a writer holds at most: a block of pending text and one line of 2 MiB, two bytes a char.
+export const SPOOL_HELD = 2 * (BLOCK + 2 * BLOCK);
+
+// Synchronous on purpose: the commit is one better-sqlite3 transaction and cannot await. `cost`
+// is what the parsed row holds by the memory guard's measure.
 export function eachSpooled(
   dir: string,
   table: string,
-  take: (row: ArchiveRow, bytes: number) => void,
+  take: (row: ArchiveRow, bytes: number, cost: number) => void,
 ): number {
   const path = spoolPath(dir, table);
   if (!existsSync(path)) return 0;
@@ -83,7 +89,8 @@ export function eachSpooled(
         const piece = view.subarray(start, end);
         const line = carry.length > 0 ? Buffer.concat([...carry, piece]) : piece;
         carry = [];
-        take(JSON.parse(line.toString("utf8")) as ArchiveRow, line.length);
+        const cost = lineCost(line.length, jsonNodesOfBytes(line, 0, line.length));
+        take(JSON.parse(line.toString("utf8")) as ArchiveRow, line.length, cost);
         count += 1;
         start = end + 1;
       }

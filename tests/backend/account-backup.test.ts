@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import v8 from "node:v8";
 import { and, eq } from "drizzle-orm";
 import { strFromU8, unzipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
@@ -24,7 +25,7 @@ import {
   RESTORE_LIMITS,
 } from "@/lib/backup-format";
 import { TEXTS } from "@/lib/texts";
-import { MEMORY_LIMITS } from "@/server/backup/memory-guard";
+import { createMemoryGuard, MEMORY_LIMITS } from "@/server/backup/memory-guard";
 import { BACKUP_TABLES } from "@/server/backup/tables";
 import { snapshot, SnapshotTooLarge } from "@/server/backup/snapshot";
 import { setClockForTests } from "@/server/clock";
@@ -526,15 +527,35 @@ describe("záloha účtu", () => {
       .run();
     // Enough lines for the guard to look at least once.
     writeBlob(owner, archived, Buffer.from('{"a":1}\n'.repeat(MEMORY_LIMITS.everyLines + 1)));
-    const real = process.memoryUsage.bind(process);
-    let calls = 0;
-    vi.spyOn(process, "memoryUsage").mockImplementation(() => ({
-      ...real(),
-      heapUsed: 100 * 1024 * 1024 + 641 * 1024 * 1024 * calls++,
-      arrayBuffers: 0,
-    }));
+    const stats = v8.getHeapStatistics();
+    const spy = vi.spyOn(v8, "getHeapStatistics").mockReturnValue({
+      ...stats,
+      used_heap_size: 751 * 1024 * 1024,
+      heap_size_limit: 1000 * 1024 * 1024,
+    });
     expect(await backedUp(owner)).toMatchObject({ status: "failed", reason: E.notRestorable });
-    expect(calls).toBeGreaterThan(1);
+    expect(spy).toHaveBeenCalled();
+  });
+
+  test("[SEC-005] evidence zálohy počítá složený audit", () => {
+    const owner = seedOwner(db, NOW);
+    const archived = randomUUID();
+    db.insert(file)
+      .values({
+        id: archived,
+        userId: owner,
+        kind: "audit_archive",
+        mimeType: "application/x-ndjson",
+        name: "a.jsonl",
+        size: 1,
+        createdAt: NOW,
+      })
+      .run();
+    writeBlob(owner, archived, Buffer.from('{"a":1}\n'.repeat(2_000)));
+    const tight = createMemoryGuard(undefined, { heldBytes: 10_000, heapShare: 0.75 });
+    expect(() =>
+      snapshot(owner, join(DATA_DIR, "snimek", randomUUID()), RESTORE_LIMITS, tight),
+    ).toThrow(SnapshotTooLarge);
   });
 
   test("[EXP-006] limity obnovy drží paměť a záloha je zrcadlí", () => {

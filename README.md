@@ -91,8 +91,9 @@ stažení v Nastavení, Záloha a SMTP i schránku s avízy je nutné zadat znov
 historie změn dohromady) a 28 000 položek archivu (tedy zhruba tolik souborů). Obnova nedrží
 řádky v paměti: každý ověřený řádek s novými ID zapíše do mezisouboru své tabulky ve složce
 obnovy a zápis je čte zpět po řádcích; v paměti zůstává jen mapa ID a právě čtená položka archivu
-(do 200 MiB). Mez paměti drží hlídač: když obnova naroste o víc než 640 MiB nebo halda přesáhne
-60 % svého limitu, archiv se odmítne a účet zůstane beze změny. Stejný hlídač běží při vytváření
+(do 200 MiB). Mez paměti drží hlídač: obnova průběžně počítá, co drží (čtenou položku, mapu ID,
+rozpracovaný řádek a dávku zápisu). Když by to bylo víc než 640 MiB, nebo když halda přesáhne
+75 % svého limitu, archiv se odmítne a účet zůstane beze změny. Stejný hlídač běží při vytváření
 zálohy. Počty objektů a hodnot JSON v datech (1 milion a 25 milionů) jsou jen levná předběžná
 kontrola. Účet o 300 000 řádcích (faktury, položky a platby) se do limitů vejde; záloha, která by
 limity překročila, vůbec nevznikne a řekne to. Mezisoubory potřebují na svazku volné místo zhruba

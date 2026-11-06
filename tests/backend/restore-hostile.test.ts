@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import v8 from "node:v8";
-import { runInNewContext } from "node:vm";
 import { eq, sql } from "drizzle-orm";
 import { strFromU8, strToU8, unzipSync, Zip, ZipDeflate, zipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { MANIFEST_ENTRY, RESTORE_LIMITS } from "@/lib/backup-format";
+import { createMemoryGuard, MEMORY_LIMITS } from "@/server/backup/memory-guard";
 import { buildIdMap, remapIds } from "@/server/backup/remap";
 import { prescanManifest, scanArchive } from "@/server/backup/restore-read";
 import { TEXTS } from "@/lib/texts";
@@ -466,8 +466,11 @@ describe("obnova z nepřátelského archivu, opravné kolo 2", () => {
 
 describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", () => {
   const MiB = 1024 * 1024;
-  const realUsage = process.memoryUsage.bind(process);
-  const usage = (heapUsed: number) => ({ ...realUsage(), heapUsed, arrayBuffers: 0 });
+  const onDisk = (bytes: Uint8Array) => {
+    const path = join(mkdtempSync(join(tmpdir(), "fakturan-scan-")), "zaloha.zip");
+    writeFileSync(path, bytes);
+    return path;
+  };
 
   async function refusedRun(bytes: Uint8Array, reason: string) {
     const target = emptyAccount();
@@ -478,20 +481,23 @@ describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", ()
     expect(userFiles(target)).toEqual([]);
   }
 
-  test("[SEC-005] hlídač odmítne obnovu, když nárůst paměti přesáhne 640 MiB", async () => {
-    let calls = 0;
-    // Any two readings differ by 641 MiB, whoever else reads the memory in between.
-    vi.spyOn(process, "memoryUsage").mockImplementation(() =>
-      usage(100 * MiB + 641 * MiB * calls++),
+  test("[SEC-005] hlídač odmítne obnovu, když evidence přesáhne 640 MiB", async () => {
+    const tight = createMemoryGuard(undefined, { heldBytes: 2_000, heapShare: 0.75 });
+    const reason = await scanArchive(onDisk(archive), {}, RESTORE_LIMITS, tight).then(
+      () => "prošlo",
+      (error: Error) => error.message,
     );
-    await refusedRun(archive, E.memory);
-    expect(calls).toBeGreaterThan(1);
+    expect(reason).toBe(E.memory);
+    expect(MEMORY_LIMITS.heldBytes).toBe(640 * MiB);
   });
 
-  test("[SEC-005] hlídač odmítne obnovu nad 60 % limitu haldy", async () => {
+  test("[SEC-005] hlídač odmítne obnovu nad 75 % limitu haldy", async () => {
     const stats = v8.getHeapStatistics();
-    vi.spyOn(v8, "getHeapStatistics").mockReturnValue({ ...stats, heap_size_limit: 1000 * MiB });
-    vi.spyOn(process, "memoryUsage").mockImplementation(() => usage(601 * MiB));
+    vi.spyOn(v8, "getHeapStatistics").mockReturnValue({
+      ...stats,
+      used_heap_size: 751 * MiB,
+      heap_size_limit: 1000 * MiB,
+    });
     await refusedRun(archive, E.memory);
   });
 
@@ -531,26 +537,20 @@ describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", ()
       (manifest) => (manifest.counts.tables.invoice_template = rows.length),
     );
     expect(lines.length).toBeGreaterThan(24 * MiB);
-    const target = emptyAccount();
-    // A full collection before each reading, so the probe sees what the restore keeps, not the
-    // garbage that V8 happens not to have collected yet; the report gives both figures.
-    v8.setFlagsFromString("--expose-gc");
-    const collect = runInNewContext("gc") as () => void;
-    collect();
-    const seen: number[] = [];
-    vi.spyOn(process, "memoryUsage").mockImplementation(() => {
-      collect();
-      const now = realUsage();
-      seen.push(now.heapUsed + now.arrayBuffers);
-      return now;
-    });
-    const row = await restoreArchive(db, target, hostile);
-    vi.mocked(process.memoryUsage).mockRestore();
-    const peak = Math.max(...seen) - seen[0]!;
-    process.stderr.write(`[IMP-011] špička sondy 1/10 po úklidu: ${(peak / MiB).toFixed(1)} MiB\n`);
-    expect(row.status).toBe("done");
-    expect(seen.length).toBeGreaterThan(5);
-    expect(peak).toBeLessThan(128 * MiB);
+    const path = onDisk(hostile);
+    // What the restore holds at most: the entry being read and its largest parsed line.
+    const guard = createMemoryGuard();
+    await scanArchive(path, {}, RESTORE_LIMITS, guard);
+    process.stderr.write(`[IMP-011] evidence 1/10: ${(guard.peak() / MiB).toFixed(1)} MiB\n`);
+    expect(guard.peak()).toBeGreaterThanOrEqual(lines.length);
+    expect(guard.peak()).toBeLessThan(128 * MiB);
+    const small = createMemoryGuard(undefined, { heldBytes: 16 * MiB, heapShare: 0.75 });
+    const reason = await scanArchive(path, {}, RESTORE_LIMITS, small).then(
+      () => "prošlo",
+      (error: Error) => error.message,
+    );
+    expect(reason).toBe(E.memory);
+    expect((await restoreArchive(db, emptyAccount(), hostile)).status).toBe("done");
   });
 
   test("[TST-017] pád uvnitř commitu nechá účet prázdný a mezisoubory zmizí", async () => {

@@ -24,6 +24,7 @@ import { TEXTS } from "@/lib/texts";
 import { PAYMENT_MEANS_CODES } from "../isdoc/parse";
 import {
   createMemoryGuard,
+  lineCost,
   MEMORY_LIMITS,
   RestoreRejected,
   type MemoryGuard,
@@ -252,7 +253,8 @@ function eachLine(
     // The writer never leaves a blank line; skipping them would let a few bytes of upload carry
     // hundreds of MiB of newlines into the next backup.
     if (end === start || end - start > budget.limits.maxLineBytes) throw onError();
-    const { containers, nodes, depth } = jsonNodesOfBytes(bytes, start, end);
+    const shape = jsonNodesOfBytes(bytes, start, end);
+    const { containers, nodes, depth } = shape;
     if (containers > budget.limits.maxLineContainers || depth > budget.limits.maxLineDepth) {
       throw onError();
     }
@@ -273,6 +275,7 @@ function eachLine(
     if (count > cap || budget.total > budget.limits.maxLines) {
       throw new RestoreRejected(E.tooManyLines);
     }
+    budget.guard.hold("line", lineCost(end - start, shape));
     let value: unknown;
     try {
       value = JSON.parse(decoder.decode(bytes.subarray(start, end)));
@@ -280,6 +283,7 @@ function eachLine(
       throw onError();
     }
     take(value);
+    budget.guard.hold("line", 0);
     watchMemory(budget, end - start + 1);
     start = end + 1;
   }
@@ -467,6 +471,12 @@ export async function scanArchive(
 
   async function onEntry(name: string, bytes: Uint8Array): Promise<void> {
     guard.check();
+    guard.hold("entry", bytes.length);
+    await readEntry(name, bytes);
+    guard.hold("entry", 0);
+  }
+
+  async function readEntry(name: string, bytes: Uint8Array): Promise<void> {
     if (!manifest) {
       if (name !== MANIFEST_ENTRY) throw new RestoreRejected(E.manifest);
       manifest = checkManifest(bytes, limits);

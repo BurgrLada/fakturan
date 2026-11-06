@@ -19,10 +19,10 @@ import { InputRejected } from "@/lib/safe-input/limits";
 import { TEXTS } from "@/lib/texts";
 import pkg from "../../../package.json";
 import type { Actor } from "../audit/context";
-import { createMemoryGuard, type MemoryGuard } from "../backup/memory-guard";
+import { createMemoryGuard, HELD_COSTS, type MemoryGuard } from "../backup/memory-guard";
 import { buildIdMap, remapIds } from "../backup/remap";
 import { RestoreRejected, scanArchive, type ArchiveRow } from "../backup/restore-read";
-import { eachSpooled, spoolWriter, type SpoolWriter } from "../backup/spool";
+import { eachSpooled, SPOOL_HELD, spoolWriter, type SpoolWriter } from "../backup/spool";
 import { BACKUP_TABLES, type BackupTable } from "../backup/tables";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
@@ -287,11 +287,14 @@ async function prepare(run: Run): Promise<Prepared> {
   const path = blobPath(run.ownerId, run.id);
   // First pass: limits, manifest, hashes and every row, and nothing is written yet.
   const ids = new Map<string, string[]>();
+  let idCount = 0;
   await scanArchive(
     path,
     {
       row: (entry, row) => {
         if (entry.columns.id !== "id") return;
+        // The lists, then the id map built from them, are what grows with the archive.
+        run.guard.hold("ids", (idCount += 1) * HELD_COSTS.id);
         const list = ids.get(entry.name);
         if (list) list.push(row.id as string);
         else ids.set(entry.name, [row.id as string]);
@@ -331,12 +334,16 @@ async function prepare(run: Run): Promise<Prepared> {
       path,
       {
         row: (entry, row) => {
-          spool.writer ??= spoolWriter(rowsDir, entry.name);
+          if (!spool.writer) {
+            spool.writer = spoolWriter(rowsDir, entry.name);
+            run.guard.hold("spool", SPOOL_HELD);
+          }
           spool.writer.append(silenced(entry.name, remapIds(row, entry, idMap)));
         },
         tableDone: async (entry) => {
           prepared.rows[entry.name] = spool.writer?.close() ?? 0;
           spool.writer = null;
+          run.guard.hold("spool", 0);
           moveExport(run.ownerId, run.id, ["running"], { progress: (done += 1) });
           await yieldHeavy(run.job);
         },
@@ -364,6 +371,7 @@ async function prepare(run: Run): Promise<Prepared> {
 function insertSpooled(tx: Tx, entry: BackupTable, ownerId: string, run: Run, from: Prepared) {
   let chunk: Record<string, unknown>[] = [];
   let bytes = 0;
+  let cost = 0;
   const flush = () => {
     if (chunk.length === 0) return;
     tx.insert(entry.table)
@@ -371,11 +379,15 @@ function insertSpooled(tx: Tx, entry: BackupTable, ownerId: string, run: Run, fr
       .run();
     chunk = [];
     bytes = 0;
+    cost = 0;
+    run.guard.hold("insert", 0);
     run.guard.check();
   };
-  const count = eachSpooled(from.rowsDir, entry.name, (row, size) => {
+  const count = eachSpooled(from.rowsDir, entry.name, (row, size, rowCost) => {
     chunk.push(insertValues(entry, row, ownerId));
     bytes += size;
+    // The values drizzle builds for the insert hold the same text again.
+    run.guard.hold("insert", (cost += 2 * rowCost));
     if (chunk.length >= INSERT_CHUNK || bytes >= INSERT_BYTES) flush();
   });
   flush();

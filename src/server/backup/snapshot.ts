@@ -19,6 +19,7 @@ import { blobPath } from "../files/store";
 import { isForeignActor } from "../services/audit-read";
 import {
   createMemoryGuard,
+  lineCost,
   MEMORY_LIMITS,
   RestoreRejected,
   type MemoryGuard,
@@ -72,8 +73,8 @@ function lineFile(path: string, stats: LineStats, watch: Watch, retained = true)
   const addLine = (line: string) => {
     const bytes = Buffer.byteLength(line);
     stats.longest = Math.max(stats.longest, bytes);
-    watch(bytes);
     const shape = jsonNodes(line);
+    watch(bytes, lineCost(bytes, shape));
     stats.lineContainers = Math.max(stats.lineContainers, shape.containers);
     stats.lineDepth = Math.max(stats.lineDepth, shape.depth);
     if (retained) {
@@ -158,25 +159,30 @@ function keepBlob(ownerId: string, id: string, target: string): void {
   }
 }
 
-type Watch = (bytes: number) => void;
+type Watch = (bytes: number, cost: number) => void;
 
 // The restore's memory guard over the backup as well (R-3): a backup that grows past it stops with
 // the same answer as one over the limits.
+function asTooLarge(guarded: () => void): void {
+  try {
+    guarded();
+  } catch (error) {
+    if (error instanceof RestoreRejected) throw new SnapshotTooLarge();
+    throw error;
+  }
+}
+
 function memoryWatch(guard: MemoryGuard): Watch {
   let lines = 0;
   let bytes = 0;
-  return (size) => {
+  return (size, cost) => {
+    asTooLarge(() => guard.hold("line", cost));
     lines += 1;
     bytes += size;
     if (lines < MEMORY_LIMITS.everyLines && bytes < MEMORY_LIMITS.everyBytes) return;
     lines = 0;
     bytes = 0;
-    try {
-      guard.check();
-    } catch (error) {
-      if (error instanceof RestoreRejected) throw new SnapshotTooLarge();
-      throw error;
-    }
+    asTooLarge(() => guard.check());
   };
 }
 
@@ -238,6 +244,7 @@ export function snapshot(
           if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new MissingBlob(id);
           throw error;
         }
+        asTooLarge(() => guard.hold("audit", blob.length));
         // Walked by newline like the restore reads it: an archived audit never becomes one
         // string or one array, and the caps stop it as early as the restore would.
         for (let start = 0; start < blob.length;) {
@@ -251,6 +258,7 @@ export function snapshot(
           }
           start = end + 1;
         }
+        guard.hold("audit", 0);
       }
       // Rows were redacted when written; only the account's own rows leave (R-31), and another
       // person's address and browser are masked as in the audit view.

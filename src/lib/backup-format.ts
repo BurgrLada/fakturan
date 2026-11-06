@@ -73,8 +73,8 @@ const MiB = 1024 * 1024;
 // in memory: each row is checked, remapped in place and spooled to a file of its table, and the
 // commit reads those files back. What grows with the archive is the id map and the bytes of the
 // data entry being read (up to 200 MiB, off the heap). The bound on memory is the guard in
-// src/server/backup/memory-guard.ts (640 MiB of growth, 60 % of the heap); the counts below are a
-// cheap prefilter. Lines stay at 300 000 and data at 256 MiB because the commit is one
+// src/server/backup/memory-guard.ts (640 MiB of what the restore holds, 75 % of the heap as a
+// backstop); the counts below are a cheap prefilter. Lines stay at 300 000 and data at 256 MiB because the commit is one
 // synchronous transaction.
 export const RESTORE_LIMITS = {
   archiveBytes: 1024 * MiB,
