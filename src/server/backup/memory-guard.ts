@@ -26,10 +26,11 @@ export const MEMORY_LIMITS = {
   everyBytes: 4 * MiB,
 };
 
-// Bytes of heap per item, measured on Node 24 (plan 8 re-review and task 1 of plan 9): an id in
-// the id map with its old key, a JSON value with a unique key, an object, and a byte of two-byte
-// text at its peak while a copy is made.
-export const HELD_COSTS = { id: 210, node: 85, container: 453, textByte: 4 };
+// Bytes of heap per item, measured on Node 24 (plan 8 re-review and tasks 1 and 2 of plan 9): an
+// id in the id map with its old key, a blob listed in files.jsonl with what a pass keeps of it, a
+// JSON value with a unique key, an object, and a byte of two-byte text at its peak while a copy is
+// made.
+export const HELD_COSTS = { id: 210, file: 400, node: 85, container: 453, textByte: 4 };
 
 export function lineCost(bytes: number, shape: JsonShape): number {
   return (

@@ -3,10 +3,13 @@ import type { CalendarDate } from "./number-format";
 
 export const BACKUP_FORMAT = "fakturan.account-backup";
 // Raised together with a new tests/fixtures/backup/columns-v<n>.json and a BACKUP_UPGRADES step.
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 
 export const MANIFEST_ENTRY = "manifest.json";
 export const AUDIT_ENTRY = "audit.jsonl";
+// Version 2: right after the manifest, one line per blob, so the manifest no longer grows with the
+// files (R-5).
+export const FILES_INDEX_ENTRY = "files.jsonl";
 
 export function dataEntry(table: string): string {
   return `data/${table}.jsonl`;
@@ -33,7 +36,8 @@ export function isColumnRule(value: string): value is ColumnRule {
   return value.startsWith("ref:") && TABLE_NAME.test(value.slice(4));
 }
 
-const ENTRY_NAME = /^(?:data\/[a-z][a-z_]{0,63}\.jsonl|files\/[A-Za-z0-9_-]{1,128}|audit\.jsonl)$/;
+const ENTRY_NAME =
+  /^(?:data\/[a-z][a-z_]{0,63}\.jsonl|files\/[A-Za-z0-9_-]{1,128}|audit\.jsonl|files\.jsonl)$/;
 const MAX_ENTRIES = 1_000_000;
 const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
@@ -61,11 +65,20 @@ export const backupManifestSchema = z
 
 export type BackupManifest = z.output<typeof backupManifestSchema>;
 
+export const fileIndexLineSchema = z.strictObject({
+  id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  size: count,
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
 export type BackupRow = Record<string, unknown>;
 
 // Steps from version n to n + 1, applied to each row of an older archive before it is validated.
-// No version before 1 exists, so the list starts empty (R-31).
-export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => BackupRow> = {};
+// Version 2 only moved the file hashes into files.jsonl; a task of plan 9 that adds a column fills
+// its default in step 1 (R-6).
+export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => BackupRow> = {
+  1: (_table, row) => row,
+};
 
 const MiB = 1024 * 1024;
 
@@ -74,13 +87,16 @@ const MiB = 1024 * 1024;
 // commit reads those files back. What grows with the archive is the id map and the bytes of the
 // data entry being read (up to 200 MiB, off the heap). The bound on memory is the guard in
 // src/server/backup/memory-guard.ts (640 MiB of what the restore holds, 75 % of the heap as a
-// backstop); the counts below are a cheap prefilter. Lines stay at 300 000 and data at 256 MiB because the commit is one
-// synchronous transaction.
+// backstop); the counts below are a cheap prefilter. Lines stay at 300 000 and data at 256 MiB
+// because the commit is one synchronous transaction.
 export const RESTORE_LIMITS = {
   archiveBytes: 1024 * MiB,
-  // A compact manifest costs at most about 140 bytes per entry, so 28 000 entries fit in 4 MiB.
-  manifestBytes: 4 * MiB,
-  entries: 28_000,
+  // The manifest names the data entries, the audit and files.jsonl; blobs are listed in the index.
+  manifestBytes: 1 * MiB,
+  // A version 1 manifest named every blob, about 140 bytes each for up to 28 000 of them.
+  legacyManifestBytes: 4 * MiB,
+  // Entries of the ZIP, so about as many blobs. More than 65 535 need the ZIP64 end record.
+  entries: 200_000,
   dataEntryBytes: 200 * MiB,
   // All data/* entries together, uncompressed; the audit and the files are not held as rows.
   dataTotalBytes: 256 * MiB,

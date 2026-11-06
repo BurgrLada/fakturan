@@ -8,6 +8,8 @@ import {
   BACKUP_UPGRADES,
   BACKUP_VERSION,
   backupManifestSchema,
+  FILES_INDEX_ENTRY,
+  fileIndexLineSchema,
   jsonNodesOfBytes,
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
@@ -24,6 +26,7 @@ import { TEXTS } from "@/lib/texts";
 import { PAYMENT_MEANS_CODES } from "../isdoc/parse";
 import {
   createMemoryGuard,
+  HELD_COSTS,
   lineCost,
   MEMORY_LIMITS,
   RestoreRejected,
@@ -233,6 +236,10 @@ function watchMemory(budget: LineBudget, bytes: number): void {
   }
 }
 
+// Rows count for the archive's nodes and lines, the audit for its lines only, and files.jsonl for
+// neither: it has its own cap, the entry count.
+type LineKind = "rows" | "audit" | "index";
+
 // Walks the entry by newline and decodes one line at a time: an entry of millions of tiny lines
 // never becomes one string or one array (C-1). `take` sees each line as it is found and may stop;
 // nothing holds the line after it returns.
@@ -242,7 +249,7 @@ function eachLine(
   cap: number,
   onError: () => RestoreRejected,
   take: (value: unknown) => void,
-  retained = true,
+  kind: LineKind = "rows",
 ): number {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let start = 0;
@@ -260,7 +267,7 @@ function eachLine(
     }
     // A cheap prefilter on the bytes before the parser runs (R-4); the memory guard is the bound.
     // The audit is only read through and counts per line alone.
-    if (retained) {
+    if (kind === "rows") {
       budget.containers += containers;
       budget.nodes += nodes;
       if (
@@ -271,9 +278,9 @@ function eachLine(
       }
     }
     count += 1;
-    budget.total += 1;
+    if (kind !== "index") budget.total += 1;
     if (count > cap || budget.total > budget.limits.maxLines) {
-      throw new RestoreRejected(E.tooManyLines);
+      throw new RestoreRejected(kind === "index" ? E.filesIndex : E.tooManyLines);
     }
     budget.guard.hold("line", lineCost(end - start, shape));
     let value: unknown;
@@ -339,8 +346,31 @@ function auditLines(bytes: Uint8Array, manifest: BackupManifest, budget: LineBud
     (line) => {
       if (!auditLine.safeParse(line).success) throw invalid();
     },
-    false,
+    "audit",
   );
+}
+
+export type FileIndex = Map<string, { size: number; sha256: string }>;
+
+// One line per blob of a version 2 archive. Each id may appear once; whether every one arrives,
+// and only those, is checked against the entries that follow.
+function readFileIndex(bytes: Uint8Array, budget: LineBudget): FileIndex {
+  const index: FileIndex = new Map();
+  const invalid = () => new RestoreRejected(E.filesIndex);
+  eachLine(
+    bytes,
+    budget,
+    budget.limits.entries,
+    invalid,
+    (line) => {
+      const parsed = fileIndexLineSchema.safeParse(line);
+      if (!parsed.success || index.has(parsed.data.id)) throw invalid();
+      index.set(parsed.data.id, { size: parsed.data.size, sha256: parsed.data.sha256 });
+      budget.guard.hold("files", index.size * HELD_COSTS.file);
+    },
+    "index",
+  );
+  return index;
 }
 
 const OPEN_BRACE = 0x7b;
@@ -387,11 +417,21 @@ function checkManifest(bytes: Uint8Array, limits: RestoreLimits): BackupManifest
   const manifest = backupManifestSchema.safeParse(parsed);
   if (!manifest.success) throw new RestoreRejected(E.manifest);
   const { v, columns } = manifest.data;
+  if (v >= 2 && bytes.length > limits.manifestBytes) throw new RestoreRejected(E.manifest);
   for (let step = v; step < BACKUP_VERSION; step++) {
     if (!BACKUP_UPGRADES[step]) throw new RestoreRejected(E.version);
   }
   if (v === BACKUP_VERSION && columns !== backupColumnsHash()) {
     throw new RestoreRejected(E.version);
+  }
+  // Version 1 named every blob in the manifest; version 2 names files.jsonl instead.
+  const names = Object.keys(manifest.data.entries);
+  const indexed = v >= 2;
+  if (
+    names.includes(FILES_INDEX_ENTRY) !== indexed ||
+    (indexed && names.some((name) => name.startsWith("files/")))
+  ) {
+    throw new RestoreRejected(E.manifest);
   }
   return manifest.data;
 }
@@ -399,7 +439,7 @@ function checkManifest(bytes: Uint8Array, limits: RestoreLimits): BackupManifest
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 export function entryLimit(name: string, limits: RestoreLimits = RESTORE_LIMITS): number {
-  if (name === MANIFEST_ENTRY) return limits.manifestBytes;
+  if (name === MANIFEST_ENTRY) return Math.max(limits.manifestBytes, limits.legacyManifestBytes);
   if (name.startsWith("files/")) return limits.fileEntryBytes;
   return limits.dataEntryBytes;
 }
@@ -439,6 +479,7 @@ export async function scanArchive(
   const fileRows: string[] = [];
   let rejection: unknown = null;
   let dataBytes = 0;
+  let fileIndex: FileIndex | null = null;
 
   try {
     await readZipEntries(
@@ -452,6 +493,7 @@ export async function scanArchive(
         ratioGraceBytes: 1024 * KiB,
         chunkBytes: 16 * KiB,
         maxBytesFor: (name) => entryLimit(name, limits),
+        keepAll: true,
       },
       async ({ name, bytes }) => {
         try {
@@ -484,13 +526,27 @@ export async function scanArchive(
     }
     if (seen.has(name) || name === MANIFEST_ENTRY) throw new RestoreRejected(E.duplicate);
     seen.add(name);
-    const expected = Object.hasOwn(manifest.entries, name) ? manifest.entries[name] : undefined;
+    const blob = name.startsWith("files/");
+    if (manifest.v >= 2) {
+      // Version 2 order: files.jsonl, then the data and the audit, then the blobs (R-5).
+      if ((name === FILES_INDEX_ENTRY) !== (seen.size === 1)) throw new RestoreRejected(E.entry);
+      if (!blob && files.length > 0) throw new RestoreRejected(E.entry);
+    }
+    const listed = blob && fileIndex ? fileIndex : null;
+    const id = name.slice("files/".length);
+    const expected = listed
+      ? listed.get(id)
+      : Object.hasOwn(manifest.entries, name)
+        ? manifest.entries[name]
+        : undefined;
     if (!expected) throw new RestoreRejected(E.entry);
     if (expected.size !== bytes.length || expected.sha256 !== sha256(bytes)) {
       throw new RestoreRejected(E.hash);
     }
     const table = byName.get(name);
-    if (table) {
+    if (name === FILES_INDEX_ENTRY) {
+      fileIndex = readFileIndex(bytes, budget);
+    } else if (table) {
       dataBytes += bytes.length;
       if (dataBytes > limits.dataTotalBytes) throw new RestoreRejected(E.dataTooLarge);
       counted[table.name] = eachRow(table, bytes, manifest, budget, (row) => {
@@ -517,10 +573,12 @@ export async function scanArchive(
     BACKUP_TABLES.some((entry) => found.counts.tables[entry.name] !== counted[entry.name]) ||
     Object.keys(found.counts.tables).length !== BACKUP_TABLES.length ||
     found.counts.files !== files.length ||
+    (fileIndex !== null && (fileIndex as FileIndex).size !== files.length) ||
     found.counts.audit !== auditCount ||
     !seen.has(AUDIT_ENTRY);
   const rowIds = new Set(fileRows);
   const blobsDiffer = rowIds.size !== files.length || files.some((id) => !rowIds.has(id));
   if (missing || tablesMissing || countsDiffer || blobsDiffer) throw new RestoreRejected(E.counts);
+  guard.hold("files", 0);
   return { manifest: found, sha256: archiveHash.digest("hex"), files };
 }

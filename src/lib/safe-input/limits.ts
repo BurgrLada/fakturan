@@ -55,6 +55,9 @@ export type ZipLimits = {
   select?: (name: string) => boolean;
   // A limit by entry name; it replaces the PDF sniffing for archives whose layout is known.
   maxBytesFor?: (name: string) => number;
+  // Hands every entry over, folders and nested archives included, for a reader that refuses any
+  // entry it does not expect instead of skipping it.
+  keepAll?: boolean;
 };
 
 export const ZIP_LIMITS: ZipLimits = {

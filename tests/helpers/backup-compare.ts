@@ -2,7 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import { MANIFEST_ENTRY, type BackupManifest } from "@/lib/backup-format";
+import {
+  AUDIT_ENTRY,
+  FILES_INDEX_ENTRY,
+  MANIFEST_ENTRY,
+  type BackupManifest,
+} from "@/lib/backup-format";
+import v1Columns from "../fixtures/backup/columns-v1.json";
 import { BACKUP_TABLES } from "@/server/backup/tables";
 import type { Db } from "@/server/db";
 import { exportJob } from "@/server/db/schema";
@@ -47,8 +53,11 @@ export async function restoreArchive(db: Db, owner: string, bytes: Uint8Array) {
   return db.select().from(exportJob).where(eq(exportJob.id, id)).get()!;
 }
 
-// Rewrites an archive the way a hostile editor would, then signs the manifest again so only the
-// check under test can stop it. `manifest` edits the manifest after the hashes are recomputed.
+const FILE_ENTRY = /^files\/[A-Za-z0-9_-]{1,128}$/;
+
+// Rewrites an archive the way a hostile editor would, then signs it again so only the check under
+// test can stop it: a well-named files/<id> goes into files.jsonl, every other entry into the
+// manifest. `manifest` edits the manifest after the hashes are recomputed.
 export function editArchive(
   bytes: Uint8Array,
   edit: (entries: Record<string, Uint8Array>) => void,
@@ -60,15 +69,53 @@ export function editArchive(
   delete entries[MANIFEST_ENTRY];
   edit(entries);
   if (rehash) {
+    const names = Object.keys(entries).filter((name) => name !== FILES_INDEX_ENTRY);
+    const files = names.filter((name) => FILE_ENTRY.test(name));
+    if (FILES_INDEX_ENTRY in entries) {
+      entries[FILES_INDEX_ENTRY] = new Uint8Array(
+        jsonl(
+          files.map((name) => ({
+            id: name.slice("files/".length),
+            size: entries[name]!.length,
+            sha256: sha256(entries[name]!),
+          })),
+        ),
+      );
+    }
     parsed.entries = Object.fromEntries(
-      Object.entries(entries).map(([name, data]) => [
-        name,
-        { sha256: sha256(data), size: data.length },
-      ]),
+      Object.keys(entries)
+        .filter((name) => !files.includes(name))
+        .map((name) => [name, { sha256: sha256(entries[name]!), size: entries[name]!.length }]),
     );
   }
   manifest(parsed);
   return zipSync({ [MANIFEST_ENTRY]: strToU8(JSON.stringify(parsed)), ...entries });
+}
+
+// What version 1 wrote: no file index, every blob named in the manifest, files before the audit.
+export function asVersion1(bytes: Uint8Array): Uint8Array {
+  const entries = unzipSync(bytes);
+  const manifest = JSON.parse(strFromU8(entries[MANIFEST_ENTRY]!)) as BackupManifest;
+  const index = readJsonl(entries[FILES_INDEX_ENTRY]!);
+  delete entries[FILES_INDEX_ENTRY];
+  delete manifest.entries[FILES_INDEX_ENTRY];
+  for (const line of index) {
+    manifest.entries[`files/${line.id as string}`] = {
+      size: line.size as number,
+      sha256: line.sha256 as string,
+    };
+  }
+  manifest.v = 1;
+  manifest.columns = sha256(strToU8(JSON.stringify(v1Columns)));
+  const ordered: Record<string, Uint8Array> = {
+    [MANIFEST_ENTRY]: strToU8(JSON.stringify(manifest)),
+  };
+  const names = Object.keys(entries);
+  for (const name of names.filter((key) => key.startsWith("data/"))) ordered[name] = entries[name]!;
+  for (const name of names.filter((key) => key.startsWith("files/")))
+    ordered[name] = entries[name]!;
+  ordered[AUDIT_ENTRY] = entries[AUDIT_ENTRY]!;
+  return zipSync(ordered);
 }
 
 export function jsonl(rows: Record<string, unknown>[]): Uint8Array {

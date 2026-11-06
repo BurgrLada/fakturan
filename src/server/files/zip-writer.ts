@@ -81,6 +81,41 @@ function assertEntryPath(path: string): string {
   return path;
 }
 
+const END_RECORD = 22;
+const MAX_PLAIN_ENTRIES = 0xffff;
+
+// fflate writes the entry count into 16-bit fields of the end record, so past 65 535 entries the
+// count would silently wrap. Sizes and offsets stay below 4 GiB (MAX_EXPORT_BYTES), so only the
+// ZIP64 end record and its locator are added, as APPNOTE 4.3.14 to 4.3.16 lay them out.
+export function withZip64End(tail: Uint8Array, entries: number): Uint8Array {
+  if (entries <= MAX_PLAIN_ENTRIES) return tail;
+  const at = tail.length - END_RECORD;
+  const end = new DataView(tail.buffer, tail.byteOffset + at, END_RECORD);
+  if (end.getUint32(0, true) !== 0x06054b50) throw new Error("Konec archivu nemá záznam EOCD");
+  const directorySize = end.getUint32(12, true);
+  const directoryOffset = end.getUint32(16, true);
+  const out = new Uint8Array(tail.length + 56 + 20);
+  out.set(tail.subarray(0, at));
+  const view = new DataView(out.buffer);
+  view.setUint32(at, 0x06064b50, true);
+  view.setBigUint64(at + 4, BigInt(44), true);
+  view.setUint16(at + 12, 45, true);
+  view.setUint16(at + 14, 45, true);
+  view.setBigUint64(at + 24, BigInt(entries), true);
+  view.setBigUint64(at + 32, BigInt(entries), true);
+  view.setBigUint64(at + 40, BigInt(directorySize), true);
+  view.setBigUint64(at + 48, BigInt(directoryOffset), true);
+  const locator = at + 56;
+  view.setUint32(locator, 0x07064b50, true);
+  view.setBigUint64(locator + 8, BigInt(directoryOffset + directorySize), true);
+  view.setUint32(locator + 16, 1, true);
+  const record = locator + 20;
+  out.set(tail.subarray(at), record);
+  view.setUint16(record + 8, MAX_PLAIN_ENTRIES, true);
+  view.setUint16(record + 10, MAX_PLAIN_ENTRIES, true);
+  return out;
+}
+
 export type EntryStream = { push(chunk: Uint8Array | string): void; end(): void };
 
 export type ZipFileWriter = {
@@ -101,12 +136,13 @@ export function zipFileWriter(
 ): ZipFileWriter {
   const file = atomicFileWriter(path, options.limit);
   let failure: unknown = null;
-  const zip = new Zip((error, chunk) => {
+  let entries = 0;
+  const zip = new Zip((error, chunk, final) => {
     if (error) {
       failure = error;
       return;
     }
-    file.write(chunk);
+    file.write(final ? withZip64End(chunk, entries) : chunk);
   });
   const check = () => {
     if (failure) throw failure;
@@ -118,6 +154,7 @@ export function zipFileWriter(
   const deflatedEntry = (name: string, level: 0 | 6 = 6): EntryStream => {
     const entry = stamp(new ZipDeflate(assertEntryPath(name), { level }));
     zip.add(entry);
+    entries += 1;
     return {
       push(chunk) {
         entry.push(typeof chunk === "string" ? strToU8(chunk) : chunk, false);
@@ -133,6 +170,7 @@ export function zipFileWriter(
     addStored(name, data) {
       const entry = stamp(new ZipPassThrough(assertEntryPath(name)));
       zip.add(entry);
+      entries += 1;
       entry.push(data, true);
       check();
     },

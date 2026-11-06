@@ -161,8 +161,9 @@ export async function readZipEntries<T>(
       return fail(new InputRejected("zip_corrupt", name, "uložená položka bez délky"));
     }
 
-    const skip =
-      name.endsWith("/") || NESTED_NAME.test(name) || (limits.select && !limits.select(name));
+    const skip = limits.keepAll
+      ? false
+      : name.endsWith("/") || NESTED_NAME.test(name) || (limits.select && !limits.select(name));
     const named = limits.maxBytesFor?.(name);
     const ceiling = named ?? Math.max(limits.maxEntryBytes, limits.maxPdfEntryBytes);
     // Skipped entries are never buffered; the archive total and ratio still bound them.
@@ -218,7 +219,7 @@ export async function readZipEntries<T>(
     while (ready.length > 0 && !failure) {
       const { name, bytes } = ready.shift()!;
       const kind = sniffContent(bytes);
-      if (kind === "zip") {
+      if (kind === "zip" && !limits.keepAll) {
         summary.warnings.push({ code: "nested_archive", entry: name });
         continue;
       }

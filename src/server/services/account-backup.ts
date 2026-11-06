@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import {
   AUDIT_ENTRY,
@@ -8,6 +8,7 @@ import {
   BACKUP_VERSION,
   dataEntry,
   fileEntry,
+  FILES_INDEX_ENTRY,
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
   type BackupManifest,
@@ -144,25 +145,57 @@ async function copyEntry(run: Run, stream: EntryStream, source: string): Promise
 
 type Planned = { name: string; source: string; level: 0 | 6 };
 
-// The manifest goes first, so a restore can check every entry against it as the entry arrives;
-// the hashes therefore come from the snapshot files before the archive is written.
+const INDEX_FILE = "files.jsonl";
+
+// One hash per blob into files.jsonl, written line by line, so neither the manifest nor memory
+// grows with the number of files (R-5). Returns the digests for the size checks.
+async function writeFileIndex(
+  run: Run,
+  dir: string,
+  ids: string[],
+): Promise<Record<string, Digest>> {
+  const digests: Record<string, Digest> = {};
+  const fd = openSync(join(dir, INDEX_FILE), "wx");
+  try {
+    let pending = "";
+    for (const id of ids) {
+      const found = await digest(run, join(dir, FILES_DIR, id));
+      digests[fileEntry(id)] = found;
+      pending += `${JSON.stringify({ id, size: found.size, sha256: found.sha256 })}\n`;
+      if (pending.length >= CHUNK) {
+        writeSync(fd, pending);
+        pending = "";
+      }
+    }
+    if (pending) writeSync(fd, pending);
+  } finally {
+    closeSync(fd);
+  }
+  return digests;
+}
+
+// Version 2 order: the manifest, files.jsonl, the data, the audit, then the blobs. The manifest
+// goes first, so a restore can check every entry against it as the entry arrives; the hashes
+// therefore come from the snapshot files before the archive is written.
 async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string): Promise<number> {
   const createdAt = clock.now();
-  const planned: Planned[] = [
+  const blobs: Planned[] = snap.files.map((id) => ({
+    name: fileEntry(id),
+    source: join(dir, FILES_DIR, id),
+    level: 0 as const,
+  }));
+  const listed: Planned[] = [
+    { name: FILES_INDEX_ENTRY, source: join(dir, INDEX_FILE), level: 6 },
     ...BACKUP_TABLES.map((entry) => ({
       name: dataEntry(entry.name),
       source: join(dir, `${entry.name}.jsonl`),
       level: 6 as const,
     })),
-    ...snap.files.map((id) => ({
-      name: fileEntry(id),
-      source: join(dir, FILES_DIR, id),
-      level: 0 as const,
-    })),
     { name: AUDIT_ENTRY, source: join(dir, AUDIT_FILE), level: 6 },
   ];
+  const blobDigests = await writeFileIndex(run, dir, snap.files);
   const entries: BackupManifest["entries"] = {};
-  for (const item of planned) entries[item.name] = await digest(run, item.source);
+  for (const item of listed) entries[item.name] = await digest(run, item.source);
   const manifest: BackupManifest = {
     format: BACKUP_FORMAT,
     v: BACKUP_VERSION,
@@ -173,10 +206,9 @@ async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string)
     counts: { tables: snap.tables, files: snap.files.length, audit: snap.audit },
     entries,
   };
-  // Compact, so 4 MiB of manifest carries the entry cap of RESTORE_LIMITS.
   const text = JSON.stringify(manifest);
   const problem = restorableProblem(
-    entries,
+    { ...entries, ...blobDigests },
     manifest.counts,
     RESTORE_LIMITS,
     snap.longestLine,
@@ -187,7 +219,7 @@ async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string)
   const zip = zipFileWriter(path, { mtime: createdAt });
   try {
     zip.addDeflated(MANIFEST_ENTRY, text);
-    for (const item of planned) {
+    for (const item of [...listed, ...blobs]) {
       await copyEntry(run, zip.deflatedEntry(item.name, item.level), item.source);
     }
     return zip.close();
@@ -211,13 +243,16 @@ export function restorableProblem(
   nodes: NodeStats = { nodes: 0, containers: 0, lineContainers: 0, lineDepth: 0 },
 ): string | null {
   const names = Object.keys(entries);
+  // The manifest is one more entry of the ZIP.
+  if (names.length + 1 > limits.entries) {
+    return E.tooManyFiles(limits.entries.toLocaleString("cs-CZ"));
+  }
   const sizes = names.map((name) => entries[name]!.size);
   const tableLines = Object.values(counts.tables);
   const dataBytes = names
     .filter((name) => name.startsWith("data/"))
     .reduce((sum, name) => sum + entries[name]!.size, 0);
   const tooLarge =
-    names.length + 1 > limits.entries ||
     dataBytes > limits.dataTotalBytes ||
     names.some((name) => entries[name]!.size > entryLimit(name, limits)) ||
     sizes.reduce((sum, size) => sum + size, 0) + manifestBytes > limits.archiveBytes ||
@@ -233,10 +268,17 @@ export function restorableProblem(
   return tooLarge || tooManyLines ? E.notRestorable : null;
 }
 
-class NotRestorable extends Error {}
+class NotRestorable extends Error {
+  reason: string;
+  constructor(reason: string) {
+    super(reason);
+    this.reason = reason;
+  }
+}
 
 function reasonOf(error: unknown): string | null {
-  if (error instanceof NotRestorable || error instanceof SnapshotTooLarge) return E.notRestorable;
+  if (error instanceof NotRestorable) return error.reason;
+  if (error instanceof SnapshotTooLarge) return E.notRestorable;
   if (error instanceof MissingBlob) return E.missingFile;
   if (error instanceof ServiceError) return error.message;
   if (error instanceof ExportTooLarge) return E.tooLarge;
@@ -266,7 +308,8 @@ export async function runBackup(job: Job): Promise<void> {
       ms: Math.round(performance.now() - started),
       files: snap.files.length,
     });
-    const total = BACKUP_TABLES.length + snap.files.length + 1;
+    // Data entries, the index, the audit and every blob.
+    const total = BACKUP_TABLES.length + snap.files.length + 2;
     moveExport(ownerId, exportId, ["running"], { progressTotal: total });
     size = await writeArchive(run, dir, snap, path);
   } catch (error) {

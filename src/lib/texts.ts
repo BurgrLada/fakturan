@@ -3359,6 +3359,8 @@ export const TEXTS = {
       tooLarge: "Záloha by byla větší než 1 GB, to tento formát neumí.",
       notRestorable:
         "Záloha by překročila limity, se kterými jde obnovit, a proto nevznikla. Kontaktujte správce instance.",
+      tooManyFiles: (limit: string) =>
+        `Účet má víc než ${limit} souborů, tolik jich záloha neunese, a proto nevznikla. Kontaktujte správce instance.`,
       unexpected: "Záloha se nepodařila kvůli neočekávané chybě. Zkuste ji znovu.",
     },
   },
@@ -3391,6 +3393,7 @@ export const TEXTS = {
       tooManyLines: "Archiv má víc řádků, než obnova dovolí.",
       dataTooLarge: "Data v archivu jsou po rozbalení větší, než obnova dovolí.",
       tooManyNodes: "Data v archivu mají víc položek, než obnova dovolí.",
+      filesIndex: "Seznam souborů v archivu není platný.",
       memory: "Obnova archivu by zabrala víc paměti, než instance dovolí. Účet zůstal beze změny.",
       uploadExpired: "Nahrávání trvalo příliš dlouho a bylo zrušeno. Nahrajte zálohu znovu.",
       audit: "Historie změn v archivu není platná.",

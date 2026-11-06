@@ -21,6 +21,7 @@ import {
   BACKUP_VERSION,
   backupManifestSchema,
   dataEntry,
+  FILES_INDEX_ENTRY,
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
 } from "@/lib/backup-format";
@@ -232,13 +233,24 @@ describe("záloha účtu", () => {
     });
 
     const names = Object.keys(entries).filter((name) => name !== MANIFEST_ENTRY);
-    expect(names.sort()).toEqual(Object.keys(manifest.entries).sort());
+    const listed = names.filter((name) => !name.startsWith("files/"));
+    expect(listed.sort()).toEqual(Object.keys(manifest.entries).sort());
+    const index = new Map(
+      strFromU8(entries[FILES_INDEX_ENTRY]!)
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .map((line) => [`files/${line.id as string}`, line]),
+    );
     for (const name of names) {
       const bytes = entries[name]!;
-      expect(manifest.entries[name], name).toEqual({
+      const digest = {
         sha256: createHash("sha256").update(bytes).digest("hex"),
         size: bytes.length,
-      });
+      };
+      if (name.startsWith("files/"))
+        expect(index.get(name), name).toEqual({ id: name.slice(6), ...digest });
+      else expect(manifest.entries[name], name).toEqual(digest);
     }
     for (const entry of BACKUP_TABLES) expect(names).toContain(dataEntry(entry.name));
     expect(names).toEqual(
@@ -562,9 +574,18 @@ describe("záloha účtu", () => {
     expect(RESTORE_LIMITS).toMatchObject({
       maxLines: 300_000,
       dataTotalBytes: 256 * 1024 * 1024,
-      manifestBytes: 4 * 1024 * 1024,
-      entries: 28_000,
+      manifestBytes: 1024 * 1024,
+      entries: 200_000,
     });
+    const many = { "files/a": { size: 1 }, "files/b": { size: 1 } };
+    expect(
+      restorableProblem(
+        many,
+        { tables: {}, files: 2, audit: 0 },
+        { ...RESTORE_LIMITS, entries: 2 },
+      ),
+    ).toBe(E.tooManyFiles("2"));
+    expect(E.tooManyFiles(RESTORE_LIMITS.entries.toLocaleString("cs-CZ"))).toMatch(/200\s000/);
     const counts = { tables: { unit: 1 }, files: 0, audit: 0 };
     const entries = {
       "data/unit.jsonl": { size: 60 },

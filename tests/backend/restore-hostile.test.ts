@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +6,12 @@ import v8 from "node:v8";
 import { eq, sql } from "drizzle-orm";
 import { strFromU8, strToU8, unzipSync, Zip, ZipDeflate, zipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { MANIFEST_ENTRY, RESTORE_LIMITS } from "@/lib/backup-format";
+import {
+  BACKUP_VERSION,
+  FILES_INDEX_ENTRY,
+  MANIFEST_ENTRY,
+  RESTORE_LIMITS,
+} from "@/lib/backup-format";
 import { createMemoryGuard, MEMORY_LIMITS } from "@/server/backup/memory-guard";
 import { buildIdMap, remapIds } from "@/server/backup/remap";
 import { prescanManifest, scanArchive } from "@/server/backup/restore-read";
@@ -250,12 +255,12 @@ describe("obnova z nepřátelského archivu", () => {
     expect(db.select().from(job).where(eq(job.id, running.id)).get()!.status).toBe("dead");
   });
 
-  test("[EXP-006] verze v2 archivu je odmítnutá", async () => {
+  test("[EXP-006] verze novější než BACKUP_VERSION je odmítnutá", async () => {
     await refused(
       editArchive(
         archive,
         () => {},
-        (manifest) => (manifest.v = 2),
+        (manifest) => (manifest.v = BACKUP_VERSION + 1),
       ),
       E.version,
     );
@@ -618,4 +623,111 @@ describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", ()
     expect(doc.x).toBe(newItem);
     expect(({} as Record<string, unknown>).customerId).toBeUndefined();
   });
+});
+
+describe("obnova z nepřátelského archivu, seznam souborů v2", () => {
+  const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+  test("[SEC-005] soubor mimo files.jsonl, duplicitní id i chybějící soubor jsou odmítnuté", async () => {
+    await refused(
+      editArchive(
+        archive,
+        (entries) => {
+          entries[`files/${randomUUID()}`] = strToU8("navíc");
+        },
+        () => {},
+        { rehash: false },
+      ),
+      E.entry,
+    );
+    await refused(
+      signedIndex((lines) => [...lines, lines[0]!]),
+      E.filesIndex,
+    );
+    await refused(
+      signedIndex((lines) => [...lines, { id: randomUUID(), size: 3, sha256: "0".repeat(64) }]),
+      E.counts,
+    );
+    await refused(
+      signedIndex((lines) => lines.map((line) => ({ ...line, extra: 1 }))),
+      E.filesIndex,
+    );
+    // A blob before the data breaks the order of version 2.
+    const entries = unzipSync(archive);
+    const blob = Object.keys(entries).find((name) => name.startsWith("files/"))!;
+    const {
+      [MANIFEST_ENTRY]: manifest,
+      [FILES_INDEX_ENTRY]: index,
+      [blob]: first,
+      ...rest
+    } = entries;
+    await refused(
+      zipSync({
+        [MANIFEST_ENTRY]: manifest!,
+        [FILES_INDEX_ENTRY]: index!,
+        [blob]: first!,
+        ...rest,
+      }),
+      E.entry,
+    );
+  });
+
+  test("[SEC-005] manifest v2 bez files.jsonl nebo se jménem blobu je chyba", async () => {
+    await refused(
+      editArchive(
+        archive,
+        () => {},
+        (manifest) => delete manifest.entries[FILES_INDEX_ENTRY],
+      ),
+      E.manifest,
+    );
+    const blob = Object.keys(unzipSync(archive)).find((name) => name.startsWith("files/"))!;
+    await refused(
+      editArchive(
+        archive,
+        () => {},
+        (manifest) => (manifest.entries[blob] = { sha256: "0".repeat(64), size: 1 }),
+      ),
+      E.manifest,
+    );
+  });
+
+  test("[SEC-005] prázdný adresář v ZIPu je položka mimo manifest", async () => {
+    await refused(
+      editArchive(
+        archive,
+        (entries) => {
+          entries["data/"] = new Uint8Array(0);
+        },
+        () => {},
+        { rehash: false },
+      ),
+      E.entry,
+    );
+    await refused(
+      editArchive(
+        archive,
+        (entries) => {
+          entries["vnoreny.zip"] = zipSync({ "a.txt": strToU8("a") });
+        },
+        () => {},
+        { rehash: false },
+      ),
+      E.entry,
+    );
+  });
+
+  function signedIndex(change: (lines: Record<string, unknown>[]) => Record<string, unknown>[]) {
+    const entries = unzipSync(archive);
+    const index = jsonl(change(readJsonl(entries[FILES_INDEX_ENTRY]!)));
+    return editArchive(
+      archive,
+      (edited) => {
+        edited[FILES_INDEX_ENTRY] = index;
+      },
+      (manifest) => {
+        manifest.entries[FILES_INDEX_ENTRY] = { sha256: sha(index), size: index.length };
+      },
+      { rehash: false },
+    );
+  }
 });

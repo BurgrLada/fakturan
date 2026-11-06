@@ -21,7 +21,7 @@ describe("hlídač paměti obnovy", () => {
       everyLines: 1000,
       everyBytes: 4 * MiB,
     });
-    expect(HELD_COSTS).toEqual({ id: 210, node: 85, container: 453, textByte: 4 });
+    expect(HELD_COSTS).toEqual({ id: 210, file: 400, node: 85, container: 453, textByte: 4 });
     expect(lineCost(1000, { containers: 2, nodes: 10, depth: 1 })).toBe(4000 + 906 + 850);
   });
 

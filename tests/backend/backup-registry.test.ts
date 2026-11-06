@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { describe, expect, test } from "vitest";
-import { BACKUP_VERSION, isColumnRule } from "@/lib/backup-format";
+import { BACKUP_UPGRADES, BACKUP_VERSION, isColumnRule } from "@/lib/backup-format";
 import * as schema from "@/server/db/schema";
 import {
   BACKUP_SKIPPED_TABLES,
@@ -137,6 +137,22 @@ describe("registr zálohy", () => {
     expect(backupColumnsFingerprint(changed)).not.toEqual(fixture(BACKUP_VERSION));
     const fewer = BACKUP_TABLES.filter((entry) => entry.name !== "mapping_preset");
     expect(backupColumnsFingerprint(fewer)).not.toEqual(fixture(BACKUP_VERSION));
+  });
+
+  test("[EXP-006] otisk sloupců v2 sedí s registrem a změna bez nové verze spadne", () => {
+    expect(BACKUP_VERSION).toBe(2);
+    const current = backupColumnsFingerprint();
+    expect(current).toEqual(fixture(2));
+    // Version 1 is kept for the upgrade path; until a column is added the registry is the same.
+    expect(fixture(1)).toEqual({ ...current, v: 1 });
+    const row = { id: "a", name: "b" };
+    expect(BACKUP_UPGRADES[1]!("customer", row)).toEqual(row);
+    const changed = BACKUP_TABLES.map((entry) =>
+      entry.name === "customer"
+        ? { ...entry, columns: { ...entry.columns, note: "omit" as const } }
+        : entry,
+    );
+    expect(backupColumnsFingerprint(changed)).not.toEqual(fixture(2));
   });
 
   test("[EXP-006] pořadí tabulek drží rodiče před dětmi", () => {

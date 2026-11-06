@@ -2,18 +2,30 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { strFromU8, unzipSync } from "fflate";
+import {
+  AUDIT_ENTRY,
+  BACKUP_VERSION,
+  backupManifestSchema,
+  FILES_INDEX_ENTRY,
+  MANIFEST_ENTRY,
+} from "@/lib/backup-format";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { eachSpooled, spoolWriter } from "@/server/backup/spool";
 import { setClockForTests } from "@/server/clock";
-import { customer, job, schedulerState, user } from "@/server/db/schema";
+import { customer, file, job, schedulerState, user } from "@/server/db/schema";
+import { writeBlob } from "@/server/files/store";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
 import {
+  asVersion1,
   asRestored,
   backupArchive,
   canonicalAccount,
+  readJsonl,
   restoreArchive,
   seedRichAccount,
 } from "../helpers/backup-compare";
@@ -106,5 +118,84 @@ describe("obnova přes mezisoubory", () => {
     expect(canonicalAccount(db, target)).toEqual(expected);
     expect(db.select().from(customer).where(eq(customer.userId, target)).get()!.note).toBe(note);
     assertConsistent(db, target);
+  });
+});
+
+describe("archiv v2 se seznamem souborů", () => {
+  const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+  test("[EXP-006] záloha v2 má files.jsonl hned za manifestem a manifest nese jeho hash", async () => {
+    const source = seedOwner(db, NOW);
+    const seeded = seedRichAccount(db, source, NOW);
+    const entries = unzipSync(await backupArchive(db, source));
+    const names = Object.keys(entries);
+    expect(names.slice(0, 2)).toEqual([MANIFEST_ENTRY, FILES_INDEX_ENTRY]);
+    const firstFile = names.findIndex((name) => name.startsWith("files/"));
+    expect(names.indexOf(AUDIT_ENTRY)).toBe(firstFile - 1);
+    expect(names.slice(2, firstFile - 1).every((name) => name.startsWith("data/"))).toBe(true);
+    expect(names.slice(firstFile).every((name) => name.startsWith("files/"))).toBe(true);
+
+    const manifest = backupManifestSchema.parse(JSON.parse(strFromU8(entries[MANIFEST_ENTRY]!)));
+    expect(manifest.v).toBe(BACKUP_VERSION);
+    expect(Object.keys(manifest.entries).some((name) => name.startsWith("files/"))).toBe(false);
+    for (const name of names.slice(1, firstFile)) {
+      expect(manifest.entries[name], name).toEqual({
+        sha256: sha(entries[name]!),
+        size: entries[name]!.length,
+      });
+    }
+    const index = readJsonl(entries[FILES_INDEX_ENTRY]!);
+    expect(index).toHaveLength(manifest.counts.files);
+    expect(index.map((line) => `files/${line.id as string}`)).toEqual(names.slice(firstFile));
+    for (const line of index) {
+      const bytes = entries[`files/${line.id as string}`]!;
+      expect(line).toEqual({ id: line.id, size: bytes.length, sha256: sha(bytes) });
+    }
+    expect(index.map((line) => line.id)).toContain(seeded.logoId);
+  });
+
+  test("[TST-019] archiv v1 se obnoví do účtu přes BACKUP_UPGRADES[1]", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const expected = asRestored(canonicalAccount(db, source));
+    const v1 = asVersion1(await backupArchive(db, source));
+    expect(Object.keys(unzipSync(v1))).not.toContain(FILES_INDEX_ENTRY);
+    const target = emptyAccount();
+    expect((await restoreArchive(db, target, v1)).status).toBe("done");
+    expect(canonicalAccount(db, target)).toEqual(expected);
+    assertConsistent(db, target);
+  });
+
+  test("[IMP-010] účet s 30 000 soubory se zálohuje i obnoví", { timeout: 160_000 }, async () => {
+    const source = seedOwner(db, NOW);
+    const ids: string[] = [];
+    for (let batch = 0; batch < 30; batch++) {
+      const rows = Array.from({ length: 1_000 }, (_, index) => ({
+        id: randomUUID(),
+        userId: source,
+        kind: "logo" as const,
+        mimeType: "image/png",
+        name: `logo-${batch}-${index}.png`,
+        size: 16,
+        createdAt: NOW,
+      }));
+      db.insert(file).values(rows).run();
+      for (const row of rows) {
+        writeBlob(source, row.id, Buffer.from(row.id.slice(0, 16)));
+        ids.push(row.id);
+      }
+    }
+    const archive = await backupArchive(db, source);
+    const target = emptyAccount();
+    expect((await restoreArchive(db, target, archive)).status).toBe("done");
+    const old = new Set(ids);
+    const restored = db
+      .select({ id: file.id })
+      .from(file)
+      .where(eq(file.userId, target))
+      .all()
+      .filter(({ id }) => !old.has(id));
+    // Every blob plus the audit archive the restore adds.
+    expect(restored).toHaveLength(ids.length + 1);
   });
 });
