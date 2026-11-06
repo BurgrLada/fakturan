@@ -19,11 +19,11 @@ export type DecimalSeparator = (typeof DECIMAL_SEPARATORS)[number];
 export type FieldKind = "text" | "date" | "money" | "quantity" | "rate" | "integer";
 // `document`: a value of the whole invoice, read from its first line only; further lines of the
 // same number may leave it empty.
-type FieldSpec = { kind: FieldKind; required?: true; document?: true };
+export type FieldSpec = { kind: FieldKind; required?: true; document?: true };
 
 const text: FieldSpec = { kind: "text" };
-const date: FieldSpec = { kind: "date" };
 const money: FieldSpec = { kind: "money" };
+const head = (kind: FieldKind): FieldSpec => ({ kind, document: true });
 
 export const MAPPING_FIELDS = {
   customers: {
@@ -51,22 +51,22 @@ export const MAPPING_FIELDS = {
   invoices: {
     number: { kind: "text", required: true },
     issueDate: { kind: "date", required: true, document: true },
-    dueDate: date,
-    taxableDate: date,
-    paidOn: date,
-    variableSymbol: text,
-    customerName: text,
-    customerStreet: text,
-    customerCity: text,
-    customerZip: text,
-    customerCountry: text,
-    customerIco: text,
-    customerDic: text,
-    customerEmail: text,
-    currency: text,
-    exchangeRate: { kind: "rate" },
-    total: money,
-    note: text,
+    dueDate: head("date"),
+    taxableDate: head("date"),
+    paidOn: head("date"),
+    variableSymbol: head("text"),
+    customerName: head("text"),
+    customerStreet: head("text"),
+    customerCity: head("text"),
+    customerZip: head("text"),
+    customerCountry: head("text"),
+    customerIco: head("text"),
+    customerDic: head("text"),
+    customerEmail: head("text"),
+    currency: head("text"),
+    exchangeRate: head("rate"),
+    total: head("money"),
+    note: head("text"),
     lineName: { kind: "text", required: true },
     lineDescription: text,
     lineQuantity: { kind: "quantity" },

@@ -180,11 +180,20 @@ async function readUpload(reader: Reader, upload: { id: string; name: string }, 
   // onEntry stays free of side effects and never throws: the archive may still be refused after
   // it, and readZipEntries would report any other error as a corrupt archive.
   let fatal: unknown = null;
+  // The second pass finds a PDF by its name, so a repeated name would hand one document the PDF
+  // of another: only the first entry of a name is read.
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
   const summary = await readZipEntries(
     bytes,
     { ...ZIP_LIMITS, select: (name) => DOCUMENT_NAME.test(name) || PDF_NAME.test(name) },
     async (entry) => {
       if (fatal) return;
+      if (seen.has(entry.name)) {
+        repeated.add(entry.name);
+        return;
+      }
+      seen.add(entry.name);
       try {
         if (entry.kind === "xml") await reader.document(entry.name, upload.id, entry.bytes, null);
         else if (entry.kind === "pdf")
@@ -196,6 +205,7 @@ async function readUpload(reader: Reader, upload: { id: string; name: string }, 
   );
   if (fatal) throw fatal;
   for (const warning of summary.warnings) reader.warnings.push(T.rows.nestedArchive(warning.entry));
+  for (const name of repeated) reader.warnings.push(T.rows.duplicateEntry(name));
 }
 
 type Wanted = { upload: string; entry: string | null; size: number; sources: Source[] };

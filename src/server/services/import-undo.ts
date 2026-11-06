@@ -11,6 +11,7 @@ import {
   importBatch,
   invoice,
   invoiceLine,
+  invoiceTemplate,
   payment,
   recurringInvoice,
 } from "../db/schema";
@@ -152,14 +153,28 @@ export function undoBatch(actor: Actor, batchId: string): void {
       .from(catalogItem)
       .where(scoped(userId).where(catalogItem, (t, { eq }) => eq(t.importBatchId, batchId)))
       .all();
-    const usedItems = new Set(
-      tx
+    // Templates and plans keep their lines as JSON, so their references have no foreign key.
+    const drafts = [
+      ...tx
+        .select({ document: invoiceTemplate.document })
+        .from(invoiceTemplate)
+        .where(scoped(userId).where(invoiceTemplate))
+        .all(),
+      ...tx
+        .select({ document: recurringInvoice.document })
+        .from(recurringInvoice)
+        .where(scoped(userId).where(recurringInvoice))
+        .all(),
+    ];
+    const usedItems = new Set([
+      ...tx
         .select({ id: invoiceLine.catalogItemId })
         .from(invoiceLine)
         .where(scoped(userId).where(invoiceLine, (t) => isNotNull(t.catalogItemId)))
         .all()
         .map((row) => row.id),
-    );
+      ...drafts.flatMap((row) => (row.document.lines ?? []).map((line) => line.catalogItemId)),
+    ]);
     const spareItems = items.filter((row) => !usedItems.has(row.id)).map((row) => row.id);
     if (spareItems.length > 0) {
       tx.delete(catalogItem)

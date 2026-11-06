@@ -147,6 +147,8 @@ import {
 } from "@/server/services/dashboards";
 import { addWidget, removeWidget, updateWidget } from "@/server/services/widgets";
 import { assertIsolated } from "../helpers/isolation";
+import { writePreview } from "@/server/services/import-batch";
+import { importBatch } from "@/server/db/schema";
 import { createTestDb } from "../helpers/db";
 import { planInput, savePlan } from "../helpers/fixtures-recurring";
 
@@ -157,7 +159,13 @@ vi.mock("@/server/auth/session", () => ({
   getCurrentSession: async () => (session.userId ? { user: { id: session.userId } } : null),
   actorFromRequest: async () => ({ userId: session.userId, source: "web" }),
 }));
-vi.mock("next/cache", () => ({ revalidatePath: () => {}, updateTag: () => {} }));
+const cache = vi.hoisted(() => ({ revalidated: 0 }));
+vi.mock("next/cache", () => ({
+  revalidatePath: () => {
+    cache.revalidated += 1;
+  },
+  updateTag: () => {},
+}));
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
 vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
@@ -997,5 +1005,24 @@ describe("akce importu", () => {
       batch: { id: batchId, kind: "tabular", status: "uploading" },
     });
     expect(await deletePresetAction({ id: saved.id })).toMatchObject({ ok: true });
+  });
+  test("stav běžící dávky se dotazuje bez náhledu a bez revalidace", async () => {
+    const mine = seedOwner(db, new Date());
+    session.userId = mine;
+    const created = await createImportBatchAction();
+    if (!created.ok) throw new Error(created.error);
+    const batchId = created.id;
+    const row = { key: "r1", source: "a.isdoc" } as never;
+    writePreview(mine, batchId, { rows: [row] });
+    db.update(importBatch).set({ status: "committing" }).where(eq(importBatch.id, batchId)).run();
+    const before = cache.revalidated;
+    expect(await importStateAction({ batchId })).toMatchObject({
+      ok: true,
+      batch: { status: "committing" },
+      rows: [],
+    });
+    expect(cache.revalidated).toBe(before);
+    db.update(importBatch).set({ status: "ready" }).where(eq(importBatch.id, batchId)).run();
+    expect(await importStateAction({ batchId })).toMatchObject({ ok: true, rows: [row] });
   });
 });

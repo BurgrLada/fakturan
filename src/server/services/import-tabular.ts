@@ -6,6 +6,9 @@ import type { ImportDocument, ImportLine, ImportParty } from "@/lib/import-docum
 import {
   applyMapping,
   dateOf,
+  type FieldSpec,
+  MAPPING_FIELDS,
+  type MappedValue,
   type MappedRow,
   type Mapping,
   mappingSchema,
@@ -272,6 +275,39 @@ function supplierParty(q: Reader, ownerId: string): { party: ImportParty; vat: b
 
 class LineInvalid extends Error {}
 
+// Half away from zero on the magnitude, in integers: total × 1000 / quantity exceeds 2^53 early.
+function unitPriceOf(totalMinor: number, quantityMilli: number): number {
+  const magnitude = BigInt(Math.abs(totalMinor)) * BigInt(1000);
+  const quantity = BigInt(quantityMilli);
+  const rounded = Number((BigInt(2) * magnitude + quantity) / (BigInt(2) * quantity));
+  return totalMinor < 0 ? -rounded : rounded;
+}
+
+// A value of the whole document may repeat on further lines of its number, but never differ:
+// two documents that share a number must not merge into one.
+function headerConflicts(rows: MappedRow[], mapping: Mapping): string[] {
+  const [first, ...rest] = rows;
+  const fields = MAPPING_FIELDS.invoices as Record<string, FieldSpec>;
+  const same = (field: string, value: MappedValue | undefined) =>
+    typeof value === "string" && field === "currency" ? value.toUpperCase() : value;
+  const conflicts: string[] = [];
+  for (const row of rest) {
+    for (const [field, spec] of Object.entries(fields)) {
+      const column = mapping.columns[field];
+      const value = row.values[field];
+      if (!spec.document || !column || value === null || value === "" || value === undefined) {
+        continue;
+      }
+      if (same(field, value) !== same(field, first!.values[field])) {
+        conflicts.push(
+          M.errors.headerMismatch(row.line, textOf(first!, "number"), column, first!.line),
+        );
+      }
+    }
+  }
+  return conflicts;
+}
+
 function lineOf(row: MappedRow, mapping: Mapping): ImportLine {
   const quantityMilli = numberOf(row, "lineQuantity") ?? 1000;
   const price = numberOf(row, "lineUnitPrice");
@@ -281,11 +317,7 @@ function lineOf(row: MappedRow, mapping: Mapping): ImportLine {
   let unitPriceMinor: number;
   if (total !== null) {
     netMinor = total;
-    unitPriceMinor =
-      price ??
-      (quantityMilli > 0
-        ? Math.sign(total) * Math.round((Math.abs(total) * 1000) / quantityMilli)
-        : total);
+    unitPriceMinor = price ?? (quantityMilli > 0 ? unitPriceOf(total, quantityMilli) : total);
   } else if (price !== null) {
     try {
       netMinor = computeTotals(
@@ -407,6 +439,7 @@ export function invoiceInputs(
       errors: rows.flatMap((row) => row.errors),
       pdfFileId: null,
     };
+    if (input.errors.length === 0) input.errors.push(...headerConflicts(rows, mapping));
     if (input.errors.length > 0) return input;
     try {
       input.document = documentOf(rows, mapping, own, today);

@@ -47,6 +47,12 @@ const TEMPORARY_KINDS: FileKind[] = ["import_upload"];
 const RUNNING: ImportBatchStatus[] = ["uploading", "mapping", "parsing", "ready", "committing"];
 // Never purged by age: a commit holds documents, a parse still owns its files.
 const PURGEABLE: ImportBatchStatus[] = ["uploading", "mapping", "ready", "failed"];
+const OPEN: ImportBatchStatus[] = ["uploading", "mapping", "parsing", "ready"];
+const MAX_OPEN_BATCHES = 5;
+// A job that never runs (a banned account is skipped by claimNext) must not keep its batch
+// with personal data forever; no real parse or commit runs this long.
+const STUCK: ImportBatchStatus[] = ["parsing", "committing"];
+const STUCK_MS = 48 * 3_600_000;
 
 const ACCEPTED: Record<ImportKind, ContentKind[]> = {
   isdoc: ["zip", "pdf", "xml"],
@@ -121,6 +127,14 @@ export function getPreview(
 export function createBatch(actor: Actor, kind: ImportKind): { id: string } {
   const userId = ownerOf(actor);
   return mutate(actor, "import.create", (tx, audit) => {
+    // Each open batch may hold 25 MiB on disk for a day; the cap keeps one account from filling it.
+    const open = tx
+      .select({ id: importBatch.id })
+      .from(importBatch)
+      .where(scoped(userId).where(importBatch, (t) => inArray(t.status, OPEN)))
+      .limit(MAX_OPEN_BATCHES)
+      .all();
+    if (open.length >= MAX_OPEN_BATCHES) throw new ServiceError(E.tooManyOpen(MAX_OPEN_BATCHES));
     const id = randomUUID();
     const now = clock.now();
     tx.insert(importBatch).values({ id, userId, kind, createdAt: now, updatedAt: now }).run();
@@ -438,6 +452,17 @@ export function recoverImportJob(row: Job): void {
 
 // R-9: an unconfirmed batch carries personal data, so it does not outlive a day.
 export function purgeStaleBatches(now: Date): number {
+  const stuck = db
+    .select({ id: importBatch.id, userId: importBatch.userId })
+    .from(importBatch)
+    .where(
+      and(
+        inArray(importBatch.status, STUCK),
+        lt(importBatch.updatedAt, new Date(now.getTime() - STUCK_MS)),
+      ),
+    )
+    .all();
+  for (const { id, userId } of stuck) failBatch(userId, id, E.stuck);
   const stale = db
     .select({ id: importBatch.id, userId: importBatch.userId })
     .from(importBatch)
@@ -467,5 +492,5 @@ export function purgeStaleBatches(now: Date): number {
     });
     removeBlobs(userId, [...removed, previewBlobId(id)]);
   }
-  return stale.length;
+  return stale.length + stuck.length;
 }

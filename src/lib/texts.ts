@@ -2940,6 +2940,8 @@ export const TEXTS = {
         futurePaid: (line: number, column: string) =>
           `Řádek ${line}, sloupec „${column}“: datum úhrady je v budoucnosti`,
         lineAmount: (line: number) => `Řádek ${line}: částka položky je mimo povolený rozsah`,
+        headerMismatch: (line: number, number: string, column: string, first: number) =>
+          `Řádek ${line}: doklad ${number} má ve sloupci „${column}“ jinou hodnotu než řádek ${first}`,
         currency: (line: number, column: string, value: string) =>
           `Řádek ${line}, sloupec „${column}“: měnu „${value}“ Fakturan nepodporuje`,
         noHeader: "Soubor nemá řádek se záhlavím",
@@ -3038,6 +3040,9 @@ export const TEXTS = {
         `Import nejde vrátit, na doklady ${numbers} navazuje doklad mimo import`,
       invalidChange: "Neplatná změna náhledu",
       unexpected: "Zpracování se nepovedlo, zkuste import znovu",
+      tooManyOpen: (limit: number) =>
+        `Rozpracovaných importů je už ${limit}. Dokončete nebo vraťte některý z nich, nebo počkejte, až se nepotvrzené smažou.`,
+      stuck: "Zpracování importu se nedokončilo do 48 hodin. Spusťte import znovu.",
     },
     rows: {
       unreadable: "Soubor nejde přečíst jako ISDOC",
@@ -3064,6 +3069,8 @@ export const TEXTS = {
       nestedArchive: (name: string) => `Vnořený archiv ${name} se přeskočil`,
       duplicateCustomer: "Zákazník se stejným IČO nebo názvem už je ve Fakturanu nebo v importu",
       duplicateItem: "Položka se stejným názvem a měnou už je v ceníku nebo v importu",
+      duplicateEntry: (name: string) =>
+        `Archiv má víc souborů se jménem ${name}, použije se jen první`,
     },
     rejected: {
       zip_corrupt:

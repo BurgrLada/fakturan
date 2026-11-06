@@ -16,8 +16,10 @@ import {
   importBatch,
   invoice,
   invoiceLine,
+  invoiceTemplate,
   job,
   payment,
+  recurringInvoice,
   schedulerState,
 } from "@/server/db/schema";
 import { ServiceError } from "@/server/services/access";
@@ -469,5 +471,119 @@ describe("import CSV a Excelu", () => {
     expect(db.select().from(customer).where(eq(customer.id, meanwhile)).get()!.name).toBe(
       "Alfa ručně",
     );
+  });
+  test("[IMP-009] jiná hlavička v dalším řádku téhož čísla je chyba, ne sloučení", async () => {
+    const owner = importOwner(db, NOW);
+    const csv = [
+      "Číslo;Vystaveno;Zákazník;Měna;Položka;Cena položky",
+      "1;1.2.2026;Alfa;CZK;Práce;100,00",
+      "1;;;;Další práce;50,00",
+      "2;2.2.2026;Beta;CZK;Práce;100,00",
+      "2;2.2.2026;Gama;EUR;Licence;10,00",
+      "3;3.2.2026;Beta;CZK;Práce;100,00",
+      "3;4.2.2026;;;Licence;10,00",
+    ].join("\n");
+    const id = await tabularUploaded(owner, "f.csv", new TextEncoder().encode(csv));
+    const { rows } = await tabularMapped(owner, id, {
+      ...base,
+      target: "invoices",
+      source: "Tabulka",
+      columns: {
+        number: "Číslo",
+        issueDate: "Vystaveno",
+        customerName: "Zákazník",
+        currency: "Měna",
+        lineName: "Položka",
+        lineTotal: "Cena položky",
+      },
+    });
+    expect(rows.map((row) => [row.source, row.status])).toEqual([
+      ["Řádky 2, 3", "ok"],
+      ["Řádky 4, 5", "error"],
+      ["Řádky 6, 7", "error"],
+    ]);
+    expect(rows[0]!.document!.totalMinor).toBe(15_000);
+    expect(rows[1]!.messages).toEqual([
+      M.errors.headerMismatch(5, "2", "Zákazník", 4),
+      M.errors.headerMismatch(5, "2", "Měna", 4),
+    ]);
+    expect(rows[2]!.messages).toEqual([M.errors.headerMismatch(7, "3", "Vystaveno", 6)]);
+  });
+
+  test("dopočet ceny za jednotku je celočíselný a zaokrouhlí od nuly", async () => {
+    const owner = importOwner(db, NOW);
+    const csv = [
+      "Číslo;Vystaveno;Položka;Množství;Cena položky",
+      "1;1.2.2026;Velká;3;90071992547409,91",
+      "1;;Malá;2;-0,05",
+    ].join("\n");
+    const id = await tabularUploaded(owner, "f.csv", new TextEncoder().encode(csv));
+    const { rows } = await tabularMapped(owner, id, {
+      ...base,
+      target: "invoices",
+      source: "Tabulka",
+      columns: {
+        number: "Číslo",
+        issueDate: "Vystaveno",
+        lineName: "Položka",
+        lineQuantity: "Množství",
+        lineTotal: "Cena položky",
+      },
+    });
+    expect(rows[0]!.document!.lines.map((line) => line.unitPriceMinor)).toEqual([
+      3_002_399_751_580_330, -3,
+    ]);
+  });
+
+  test("vrácení importu ponechá položku ceníku, na kterou odkazuje šablona nebo plán", async () => {
+    const owner = importOwner(db, NOW);
+    const xlsx = toXlsx({
+      name: "Ceník",
+      columns: ["Název", "Cena"],
+      rows: [
+        [text("V šabloně"), money(100, "CZK")],
+        [text("V plánu"), money(200, "CZK")],
+        [text("Volná"), money(300, "CZK")],
+      ],
+    });
+    const id = await tabularUploaded(owner, "cenik.xlsx", xlsx);
+    await tabularMapped(owner, id, {
+      ...base,
+      target: "catalog",
+      columns: { name: "Název", price: "Cena" },
+    });
+    await committed(db, owner, id);
+    const items = db.select().from(catalogItem).where(eq(catalogItem.importBatchId, id)).all();
+    const itemId = (name: string) => items.find((item) => item.name === name)!.id;
+    const documentWith = (catalogItemId: string) =>
+      ({ lines: [{ catalogItemId }] }) as unknown as typeof invoiceTemplate.$inferInsert.document;
+    db.insert(invoiceTemplate)
+      .values({
+        id: "t-1",
+        userId: owner,
+        name: "Šablona",
+        document: documentWith(itemId("V šabloně")),
+        createdAt: NOW,
+        updatedAt: NOW,
+      })
+      .run();
+    db.insert(recurringInvoice)
+      .values({
+        id: "p-1",
+        userId: owner,
+        name: "Plán",
+        document: documentWith(itemId("V plánu")),
+        frequency: "monthly",
+        issueRule: "day",
+        issueDay: 1,
+        startsOn: "2026-04-01",
+        cursorDate: "2026-03-31",
+        createdAt: NOW,
+        updatedAt: NOW,
+      })
+      .run();
+    undoBatch(webActor(owner), id);
+    const left = db.select().from(catalogItem).where(eq(catalogItem.importBatchId, id)).all();
+    expect(left.map((item) => item.name).sort()).toEqual(["V plánu", "V šabloně"]);
   });
 });

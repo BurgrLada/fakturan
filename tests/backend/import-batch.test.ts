@@ -6,9 +6,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { file, importBatch, invoice, job, schedulerState } from "@/server/db/schema";
-import { userDir } from "@/server/files/store";
+import { readBlob, userDir } from "@/server/files/store";
 import {
   confirmBatch,
+  createBatch,
   editPreview,
   getPreview,
   previewBlobId,
@@ -17,7 +18,7 @@ import {
 } from "@/server/services/import-batch";
 import { undoBatch } from "@/server/services/import-undo";
 import { createTestDb } from "../helpers/db";
-import { hostile, rawZip } from "../helpers/hostile-files";
+import { hostile, pdfWithEmbedded, rawZip } from "../helpers/hostile-files";
 import { webActor } from "../helpers/fixtures-mail";
 import {
   committed,
@@ -135,5 +136,41 @@ describe("dávka importu", () => {
     const bomb = await parsed(owner, [{ name: "b.zip", bytes: hostile.lyingHeaderBomb() }]);
     expect(bomb.batch.status).toBe("failed");
     expect(db.select().from(invoice).where(eq(invoice.userId, owner)).all()).toEqual([]);
+  });
+  test("účet nemá víc než 5 rozpracovaných dávek", async () => {
+    const owner = importOwner(db, NOW);
+    const done = await parsed(owner, [{ name: "a.isdoc", bytes: isdoc("faktura-czk.isdoc") }]);
+    await committed(db, owner, done.id);
+    for (let i = 0; i < 5; i++) createBatch(webActor(owner), i % 2 ? "tabular" : "isdoc");
+    expect(() => createBatch(webActor(owner), "isdoc")).toThrow(E.tooManyOpen(5));
+    const other = importOwner(db, NOW);
+    expect(createBatch(webActor(other), "isdoc").id).toBeTruthy();
+  });
+
+  test("dávka zaseknutá ve zpracování se po 48 hodinách označí jako selhaná", async () => {
+    const owner = importOwner(db, NOW);
+    const id = await uploadBatch(owner, [{ name: "a.isdoc", bytes: isdoc("faktura-czk.isdoc") }]);
+    startParse(webActor(owner), id);
+    current = new Date(NOW.getTime() + 47 * 3_600_000);
+    purgeStaleBatches(current);
+    expect(batchOf(id).status).toBe("parsing");
+    current = new Date(NOW.getTime() + 49 * 3_600_000);
+    purgeStaleBatches(current);
+    expect(batchOf(id)).toMatchObject({ status: "failed", error: E.stuck });
+    expect(db.select().from(file).where(eq(file.importBatchId, id)).all()).toEqual([]);
+  });
+
+  test("ZIP se dvěma položkami stejného jména nepřiloží cizí PDF", async () => {
+    const owner = importOwner(db, NOW);
+    const first = pdfWithEmbedded(isdoc("faktura-czk.isdoc"));
+    const second = pdfWithEmbedded(isdoc("faktura-eur.isdoc"));
+    const zip = rawZip([
+      { name: "doklad.pdf", data: first },
+      { name: "doklad.pdf", data: second },
+    ]);
+    const { rows, batch } = await parsed(owner, [{ name: "a.zip", bytes: zip }]);
+    expect(rows.map((row) => row.document?.number)).toEqual(["2026-0001"]);
+    expect(batch.error).toContain(TEXTS.importing.rows.duplicateEntry("doklad.pdf"));
+    expect(new Uint8Array(readBlob(owner, rows[0]!.pdfFileId!))).toEqual(first);
   });
 });

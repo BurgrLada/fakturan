@@ -9,7 +9,7 @@ import { ImportPreview } from "./import-preview";
 
 const T = TEXTS.importing;
 const POLL_MS = 1000;
-const RUNNING = new Set(["uploading", "parsing", "committing"]);
+const RUNNING = new Set(["parsing", "committing"]);
 
 export function ImportProgress({ initial }: { initial: ImportState }) {
   const router = useRouter();

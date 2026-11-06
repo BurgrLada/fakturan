@@ -12,7 +12,8 @@ import {
   confirmBatch,
   createBatch,
   editPreview,
-  getPreview,
+  getBatch,
+  readPreview,
   startParse,
 } from "@/server/services/import-batch";
 import { remapBatch, submitMapping } from "@/server/services/import-tabular";
@@ -28,13 +29,17 @@ type Failure = { ok: false; error: string };
 type Outcome<T = object> = ({ ok: true } & T) | Failure;
 
 const id = z.string().min(1).max(64);
+const RUNNING = new Set<ImportBatch["status"]>(["uploading", "parsing", "committing"]);
 const revision = z.number().int().min(0);
 
 // Only known refusals become messages: requireSession's redirect must keep propagating.
-async function guarded<T extends object>(work: () => T | Promise<T>): Promise<Outcome<T>> {
+async function guarded<T extends object>(
+  work: () => T | Promise<T>,
+  revalidate = true,
+): Promise<Outcome<T>> {
   try {
     const result = await work();
-    revalidatePath("/nastaveni/import");
+    if (revalidate) revalidatePath("/nastaveni/import");
     return { ok: true, ...result };
   } catch (error) {
     if (error instanceof ServiceError) return { ok: false, error: error.message };
@@ -82,13 +87,12 @@ export async function importStateAction(raw: unknown): Promise<Outcome<ImportSta
   const { user } = await requireSession();
   return guarded(() => {
     const input = parse(z.strictObject({ batchId: id }), raw);
-    const found = getPreview(user.id, input.batchId);
-    if (!found) throw new ServiceError(TEXTS.importing.errors.notFound);
-    return {
-      batch: stateOf(found.batch),
-      rows: found.rows,
-    };
-  });
+    const batch = getBatch(user.id, input.batchId);
+    if (!batch) throw new ServiceError(TEXTS.importing.errors.notFound);
+    // Polled every second while the batch runs: the state alone, the preview only once it stops.
+    const rows = RUNNING.has(batch.status) ? [] : (readPreview(user.id, batch.id)?.rows ?? []);
+    return { batch: stateOf(batch), rows };
+  }, false);
 }
 
 export async function editPreviewAction(raw: unknown): Promise<Outcome<{ revision: number }>> {
