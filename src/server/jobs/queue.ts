@@ -64,9 +64,11 @@ export function enqueueStandalone(input: EnqueueInput): { created: boolean } {
   return db.transaction((tx) => enqueue(tx, input), { behavior: "immediate" });
 }
 
-// m-1: the heavy lane serves the account whose last heavy job started longest ago first, one with
-// none before all others, so three exports of one account do not keep another waiting. The
-// updated_at of a claimed job is when it started, and later steps only move it on.
+// m-1: the heavy lane serves first the account whose heavy jobs moved longest ago, one with none
+// (or whose history retention removed) before all others, so three exports of one account do not
+// keep another waiting. updated_at is set when a job is claimed and again when it ends, so this is
+// the account's last heavy activity rather than its last start; the account that just ran is
+// always the most recent, which is what makes the lane take turns.
 function heavyTurn(): SQL {
   return sql`(select max(j2.updated_at) from ${job} j2 where j2.user_id = ${job.userId}
     and j2.kind in (${sql.join(

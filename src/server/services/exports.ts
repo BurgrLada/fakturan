@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, openSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, rmSync, statSync } from "node:fs";
 import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import { backupFileName } from "@/lib/backup-format";
 import {
@@ -206,10 +206,7 @@ export type OpenedExport = { fd: number; size: number; fileName: string; mimeTyp
 // Opened before the audit is written and read by the caller as a stream from this descriptor, so
 // export-cleanup removing the file meanwhile no longer cuts a download short (m-7). The caller
 // closes `fd`.
-export function openExport(actor: Actor, id: string): OpenedExport {
-  const userId = ownerOf(actor);
-  // Every download sends the whole file and writes an audit row, so a loop must not repeat it freely.
-  enforceRateLimit(actor, RATE_RULES.exportDownloadUser);
+function downloadable(userId: string, id: string) {
   const row = findExport(db, userId, id);
   const now = clock.now();
   if (row?.status !== "done" || !row.fileId || !row.expiresAt || row.expiresAt <= now) {
@@ -222,6 +219,29 @@ export function openExport(actor: Actor, id: string): OpenedExport {
     .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, fileId)))
     .get();
   if (!stored) throw new ExportNotFoundError();
+  return { row, stored };
+}
+
+// For HEAD: the headers only, without a descriptor, a limit or an audit, since nothing is sent.
+export function statExport(actor: Actor, id: string): Omit<OpenedExport, "fd"> {
+  const userId = ownerOf(actor);
+  const { row, stored } = downloadable(userId, id);
+  let size: number;
+  try {
+    size = statSync(blobPath(userId, stored.id)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new ExportNotFoundError();
+    throw error;
+  }
+  const result = resultFile(row);
+  return { size, fileName: result.name, mimeType: result.mimeType };
+}
+
+export function openExport(actor: Actor, id: string): OpenedExport {
+  const userId = ownerOf(actor);
+  // Every download sends the whole file and writes an audit row, so a loop must not repeat it freely.
+  enforceRateLimit(actor, RATE_RULES.exportDownloadUser);
+  const { row, stored } = downloadable(userId, id);
   let fd: number;
   try {
     fd = openSync(blobPath(userId, stored.id), "r");

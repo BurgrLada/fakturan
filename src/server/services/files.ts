@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, openSync } from "node:fs";
+import { closeSync, fstatSync, openSync, statSync } from "node:fs";
 import { isNull } from "drizzle-orm";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -191,9 +191,7 @@ export type OpenedFile = {
   kind: FileKind;
 };
 
-// The descriptor is opened before the audit is written, so the bytes sent are those of the file
-// that was audited even if it is removed meanwhile (N-1, m-7). The caller closes `fd`.
-export function openOwnedFile(actor: Actor, id: string): OpenedFile {
+function servedRow(actor: Actor, id: string) {
   const userId = ownerOf(actor);
   const row = db
     .select()
@@ -202,8 +200,29 @@ export function openOwnedFile(actor: Actor, id: string): OpenedFile {
     .get();
   const disposition = row ? FILE_DISPOSITION[row.kind] : undefined;
   if (!row || !disposition) throw new FileNotFoundError();
-  const download = disposition === "attachment";
-  if (download) enforceRateLimit(actor, RATE_RULES.fileDownloadUser);
+  return { userId, row, download: disposition === "attachment" };
+}
+
+export type FileHead = Omit<OpenedFile, "fd">;
+
+// For HEAD: the headers only, without a descriptor, a limit or an audit, since nothing is sent.
+export function statOwnedFile(actor: Actor, id: string): FileHead {
+  const { userId, row } = servedRow(actor, id);
+  let size: number;
+  try {
+    size = statSync(blobPath(userId, id)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new FileNotFoundError();
+    throw error;
+  }
+  return { size, mimeType: row.mimeType, name: row.name, kind: row.kind };
+}
+
+// The descriptor is opened first: a missing blob costs no limit, and the bytes sent are those of
+// the file that was audited even if it is removed meanwhile (N-1, m-7). Then the limit, then the
+// audit. The caller closes `fd`.
+export function openOwnedFile(actor: Actor, id: string): OpenedFile {
+  const { userId, row, download } = servedRow(actor, id);
   let fd: number;
   try {
     fd = openSync(blobPath(userId, id), "r");
@@ -212,6 +231,7 @@ export function openOwnedFile(actor: Actor, id: string): OpenedFile {
     throw error;
   }
   try {
+    if (download) enforceRateLimit(actor, RATE_RULES.fileDownloadUser);
     const size = fstatSync(fd).size;
     if (download) {
       mutate(actor, "file.download", (_tx, audit) =>

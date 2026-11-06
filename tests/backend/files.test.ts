@@ -369,6 +369,82 @@ describe("stažení souborů proudem", () => {
   });
 });
 
+describe("HEAD a chybějící soubor", () => {
+  const openFds = () => readdirSync("/proc/self/fd").length;
+  async function head(id: string) {
+    const { HEAD } = await import("@/app/(app)/soubory/[id]/route");
+    return HEAD(new Request(`http://localhost/soubory/${id}`, { method: "HEAD" }), {
+      params: Promise.resolve({ id }),
+    });
+  }
+
+  test("[SEC-005] HEAD nenechá otevřený popisovač, nespotřebuje limit ani nezapíše audit", async () => {
+    const owner = `h-${randomUUID()}`;
+    seedUser(owner);
+    session.userId = owner;
+    const logo = storeFile(actor(owner), "logo", PNG, "logo.png").id;
+    const history = randomUUID();
+    db.insert(file)
+      .values({
+        id: history,
+        userId: owner,
+        kind: "audit_archive",
+        mimeType: "application/x-ndjson",
+        name: "historie.jsonl",
+        size: 2,
+        createdAt: new Date(),
+      })
+      .run();
+    writeBlob(owner, history, Buffer.from("{}\n"));
+    const before = openFds();
+    for (let round = 0; round < 50; round++) {
+      for (const id of [logo, history]) {
+        const response = await head(id);
+        expect(response.status).toBe(200);
+        expect(response.body).toBeNull();
+      }
+    }
+    expect((await head(history)).headers.get("content-length")).toBe("3");
+    expect(openFds()).toBeLessThanOrEqual(before);
+    const key = `${RATE_RULES.fileDownloadUser.name}:${owner}`;
+    expect(db.select().from(rateLimit).where(eq(rateLimit.key, key)).get()).toBeUndefined();
+    expect(
+      db
+        .select()
+        .from(auditLog)
+        .all()
+        .filter((row) => row.action === "file.download" && row.ownerId === owner),
+    ).toEqual([]);
+    session.userId = `cizi-${randomUUID()}`;
+    expect((await head(logo)).status).toBe(404);
+  });
+
+  test("[SEC-001] chybějící blob je 404 a limit nespotřebuje", async () => {
+    const owner = `h-${randomUUID()}`;
+    seedUser(owner);
+    session.userId = owner;
+    const id = randomUUID();
+    db.insert(file)
+      .values({
+        id,
+        userId: owner,
+        kind: "import_pdf",
+        mimeType: "application/pdf",
+        name: "a.pdf",
+        size: 1,
+        createdAt: new Date(),
+      })
+      .run();
+    const { GET } = await import("@/app/(app)/soubory/[id]/route");
+    const response = await GET(new Request(`http://localhost/soubory/${id}`), {
+      params: Promise.resolve({ id }),
+    });
+    expect(response.status).toBe(404);
+    const key = `${RATE_RULES.fileDownloadUser.name}:${owner}`;
+    expect(db.select().from(rateLimit).where(eq(rateLimit.key, key)).get()).toBeUndefined();
+  });
+});
+
 describe("smazání účtu", () => {
   test("[ADM-006] smazání účtu odstraní soubory z disku", () => {
     storeFile(actor("u1"), "logo", PNG, "a.png");

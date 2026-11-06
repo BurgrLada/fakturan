@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdtempSync, readFileSync, readSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, readdirSync, readFileSync, readSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
@@ -54,6 +54,10 @@ import {
 } from "../helpers/fixtures-mail";
 import { pdfText } from "../helpers/pdf";
 
+const sessionUser = vi.hoisted(() => ({ id: null as string | null }));
+vi.mock("@/server/auth/session", () => ({
+  actorFromRequest: async () => ({ userId: sessionUser.id, source: "web" }),
+}));
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
 vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
@@ -561,5 +565,32 @@ describe("stažení a stropy exportu", () => {
     }
     expect(used(RATE_RULES.exportUser, owner)).toBe(before);
     expect(exportsOf(owner)).toHaveLength(3);
+  });
+});
+
+describe("HEAD exportu", () => {
+  test("[EXP-007] HEAD nenechá otevřený popisovač, nespotřebuje limit ani nezapíše audit", async () => {
+    const owner = seedOwner(db, NOW);
+    issuedOn(owner, seedCustomer(owner), "2026-03-01");
+    const row = await exported(owner, { kind: "invoices", format: "csv" });
+    sessionUser.id = owner;
+    const { HEAD } = await import("@/app/(app)/nastaveni/export/[id]/route");
+    const openFds = () => readdirSync("/proc/self/fd").length;
+    const downloads = () =>
+      db.select().from(auditLog).where(eq(auditLog.action, "export.download")).all().length;
+    const before = openFds();
+    const audited = downloads();
+    for (let round = 0; round < 50; round++) {
+      const response = await HEAD(
+        new Request(`http://localhost/nastaveni/export/${row.id}`, { method: "HEAD" }),
+        { params: Promise.resolve({ id: row.id }) },
+      );
+      expect(response.status).toBe(200);
+      expect(response.body).toBeNull();
+    }
+    expect(openFds()).toBeLessThanOrEqual(before);
+    expect(downloads()).toBe(audited);
+    const key = `${RATE_RULES.exportDownloadUser.name}:${owner}`;
+    expect(db.select().from(rateLimit).where(eq(rateLimit.key, key)).get()).toBeUndefined();
   });
 });
