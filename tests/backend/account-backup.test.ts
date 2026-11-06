@@ -24,6 +24,7 @@ import {
 } from "@/lib/backup-format";
 import { TEXTS } from "@/lib/texts";
 import { BACKUP_TABLES } from "@/server/backup/tables";
+import { snapshot, SnapshotTooLarge } from "@/server/backup/snapshot";
 import { setClockForTests } from "@/server/clock";
 import {
   auditLog,
@@ -480,5 +481,50 @@ describe("záloha účtu", () => {
       .run();
     writeBlob(owner, big, Buffer.alloc(RESTORE_LIMITS.fileEntryBytes + 1));
     expect(await backedUp(owner)).toMatchObject({ status: "failed", reason: E.notRestorable });
+  });
+
+  test("[SEC-005] složený audit se čte po řádcích a se stropy obnovy", () => {
+    const owner = seedOwner(db, NOW);
+    const archived = randomUUID();
+    db.insert(file)
+      .values({
+        id: archived,
+        userId: owner,
+        kind: "audit_archive",
+        mimeType: "application/x-ndjson",
+        name: "a.jsonl",
+        size: 1,
+        createdAt: NOW,
+      })
+      .run();
+    writeBlob(owner, archived, Buffer.from(`${"\n".repeat(50_000)}{"a":1}\n\n{"a":2}\n`));
+    const own = db.select().from(auditLog).where(eq(auditLog.ownerId, owner)).all().length;
+    const dir = join(DATA_DIR, "snimek", randomUUID());
+    expect(snapshot(owner, dir, RESTORE_LIMITS).audit).toBe(own + 2);
+    const small = { ...RESTORE_LIMITS, maxLines: 1 };
+    expect(() => snapshot(owner, join(DATA_DIR, "snimek", randomUUID()), small)).toThrow(
+      SnapshotTooLarge,
+    );
+  });
+
+  test("[EXP-006] limity obnovy drží paměť a záloha je zrcadlí", () => {
+    expect(RESTORE_LIMITS).toMatchObject({
+      maxLines: 300_000,
+      dataTotalBytes: 256 * 1024 * 1024,
+      manifestBytes: 4 * 1024 * 1024,
+      entries: 28_000,
+    });
+    const counts = { tables: { unit: 1 }, files: 0, audit: 0 };
+    const entries = {
+      "data/unit.jsonl": { size: 60 },
+      "data/customer.jsonl": { size: 60 },
+      "audit.jsonl": { size: 500 },
+    };
+    expect(restorableProblem(entries, counts, { ...RESTORE_LIMITS, dataTotalBytes: 100 })).toBe(
+      E.notRestorable,
+    );
+    expect(
+      restorableProblem(entries, counts, { ...RESTORE_LIMITS, dataTotalBytes: 120 }),
+    ).toBeNull();
   });
 });

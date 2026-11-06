@@ -645,7 +645,7 @@ Kontroly plánu: všechna ID z rozsahu v `tests/spec-pending.txt` mají úkol, E
 **Přenos do plánu 9**
 - **IMP-005:** ruční přiložení PDF k importovanému dokladu po importu. Dnes se přiloží jen PDF z dávky importu (partial).
 - **TST-013:** mutační skóre nových modulů je pod prahem 90 (`tests/spec-partial.txt`). Doplnit testy hlavně pro `pdf-embedded`, `isdoc/parse` (spolu s backendovými testy ISDOC) a `safe-input/csv`.
-- **Paměť obnovy:** řádky celého archivu leží v paměti až do jediné transakce, nejvýš kolem 2 milionů řádků podle `RESTORE_LIMITS`. Nečtená položka ZIPu se drží celá jako bajty (do 200 MiB) a řetězce ani pole z ní nevznikají. Delší výhled je mezisoubor a vkládání po tabulkách ve stejné transakci.
+- **Paměť obnovy:** řádky celého archivu leží v paměti až do jediné transakce, nejvýš 300 000 řádků a 256 MiB dat podle `RESTORE_LIMITS`, vložené tabulky se uvolňují průběžně. Nečtená položka ZIPu se drží celá jako bajty (do 200 MiB) a řetězce ani pole z ní nevznikají. Delší výhled je mezisoubor a vkládání po tabulkách ve stejné transakci.
 - **Interní texty** `worker.ts` („Úloha přišla o zámek plánovače“), `import-parse.ts` a `pdf-embedded.ts` přesunout do `texts.ts` (m-12 bloku B).
 - **Testovací háček** `setTaxPdfRowLimitForTests` v produkčním kódu nahradit parametrem (N-4 bloku C).
 
@@ -670,3 +670,4 @@ Kontroly plánu: všechna ID z rozsahu v `tests/spec-pending.txt` mají úkol, E
     - commit obnovy je jedna synchronní dávka.
 - **Obnova** kontroluje tvar jen u JSON sloupců, které čtou stránky, PDF a odeslání (vzhled, snapshoty, pevné kurzy, adresy, data). U ostatních JSON hlídá jen hloubku.
 - **Upload k obnově**, který nespustil obnovu, se smaže po hodině úlohou `export-cleanup`.
+- **Velmi velký účet nejde zálohovat ani obnovit:** obnova drží přemapované řádky do jediného commitu (po tabulkách je uvolňuje), proto platí nejvýš 300 000 řádků v archivu (tabulky i historie změn), 256 MiB dat všech tabulek po rozbalení, 28 000 položek (soubory) a manifest do 4 MiB. Záloha tytéž limity hlídá předem a nad nimi skončí hláškou. Trvalé řešení je mezisoubor po tabulkách (přenos do plánu 9).

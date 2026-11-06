@@ -69,17 +69,20 @@ export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => 
 
 const MiB = 1024 * 1024;
 
-// R-35: a backup has its own limits, far above those of a document import.
+// R-35: a backup has its own limits, far above those of a document import. A restore holds the
+// remapped rows of the whole archive until its single commit, so rows and data bytes are capped
+// to keep that under about half a GiB of heap.
 export const RESTORE_LIMITS = {
   archiveBytes: 1024 * MiB,
-  // Each entry costs about 110 bytes of manifest, so 200 000 entries need some 22 MiB.
-  manifestBytes: 32 * MiB,
+  // A compact manifest costs at most about 140 bytes per entry, so 28 000 entries fit in 4 MiB.
+  manifestBytes: 4 * MiB,
+  entries: 28_000,
   dataEntryBytes: 200 * MiB,
+  // All data/* entries together, uncompressed; the audit and the files are not held as rows.
+  dataTotalBytes: 256 * MiB,
   fileEntryBytes: 25 * MiB,
-  entries: 200_000,
-  // Rows are read line by line against these, so a huge entry of tiny lines stops early.
-  maxLinesPerTable: 500_000,
-  maxLines: 4 * 500_000,
+  maxLinesPerTable: 300_000,
+  maxLines: 300_000,
   maxLineBytes: 2 * MiB,
 };
 

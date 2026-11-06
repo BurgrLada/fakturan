@@ -6,7 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { strFromU8, strToU8, unzipSync, Zip, ZipDeflate, zipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { MANIFEST_ENTRY, RESTORE_LIMITS } from "@/lib/backup-format";
-import { scanArchive } from "@/server/backup/restore-read";
+import { prescanManifest, scanArchive } from "@/server/backup/restore-read";
 import { TEXTS } from "@/lib/texts";
 import { BACKUP_TABLES } from "@/server/backup/tables";
 import { setClockForTests } from "@/server/clock";
@@ -371,5 +371,45 @@ describe("obnova z nepřátelského archivu, opravy bloku D", () => {
     expect(stranger).toBeTruthy();
     const target = emptyAccount();
     expect((await restoreArchive(db, target, archive)).status).toBe("done");
+  });
+});
+
+describe("obnova z nepřátelského archivu, opravné kolo 2", () => {
+  test("[SEC-005] prázdný řádek v auditu i v datech je chyba", async () => {
+    await refused(
+      editArchive(archive, (entries) => {
+        entries["audit.jsonl"] = strToU8(`${strFromU8(entries["audit.jsonl"]!)}\n\n\n`);
+      }),
+      E.audit,
+    );
+    await refused(
+      editArchive(archive, (entries) => {
+        entries["data/customer.jsonl"] = strToU8(`\n${strFromU8(entries["data/customer.jsonl"]!)}`);
+      }),
+      E.row("customer"),
+    );
+  });
+
+  test("[SEC-005] součet dat nad strop archivu je odmítnutý", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "fakturan-scan-")), "zaloha.zip");
+    writeFileSync(path, archive);
+    const reason = await scanArchive(path, {}, { ...RESTORE_LIMITS, dataTotalBytes: 100 }).then(
+      () => "prošlo",
+      (error: Error) => error.message,
+    );
+    expect(reason).toBe(E.dataTooLarge);
+  });
+
+  test("[SEC-005] manifest projde levnou kontrolou závorek dřív než JSON.parse", () => {
+    const manifest = unzipSync(archive)[MANIFEST_ENTRY]!;
+    expect(() => prescanManifest(manifest, RESTORE_LIMITS)).not.toThrow();
+    expect(() => prescanManifest(strToU8('{"a":[[[[[1]]]]]}'), RESTORE_LIMITS)).toThrow(E.manifest);
+    expect(() =>
+      prescanManifest(strToU8(`[${"{},".repeat(40)}{}]`), { ...RESTORE_LIMITS, entries: 10 }),
+    ).toThrow(E.manifest);
+    // Brackets inside strings are text, not structure.
+    expect(() =>
+      prescanManifest(strToU8('{"a":"[[[[[[[[[[\\"]]]]"}'), RESTORE_LIMITS),
+    ).not.toThrow();
   });
 });

@@ -3385,6 +3385,8 @@ export const TEXTS = {
       hash: "Obsah archivu neodpovídá kontrolním součtům, soubor je poškozený nebo upravený.",
       counts: "Počty v archivu nesedí s jeho popisem.",
       tooManyLines: "Archiv má víc řádků, než obnova dovolí.",
+      dataTooLarge: "Data v archivu jsou po rozbalení větší, než obnova dovolí.",
+      uploadExpired: "Nahrávání trvalo příliš dlouho a bylo zrušeno. Nahrajte zálohu znovu.",
       audit: "Historie změn v archivu není platná.",
       references: "Data v archivu odkazují na něco, co v něm není.",
       row: (table: string) => `Archiv obsahuje neplatný řádek v tabulce ${table}.`,

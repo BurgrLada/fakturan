@@ -124,9 +124,9 @@ export function startRestore(actor: Actor, uploadId: string): { id: string } {
   mutate(actor, "account.restore_start", (tx, audit) => {
     if (!isAccountEmpty(tx, userId)) throw new ServiceError(E.notEmpty);
     const begun = findExport(tx, userId, uploadId);
-    if (begun && (begun.kind !== "restore" || begun.status !== "queued")) {
-      throw new ServiceError(E.notFound);
-    }
+    if (begun && begun.kind !== "restore") throw new ServiceError(E.notFound);
+    // Failed by purgeStaleRestores because the upload went silent for an hour.
+    if (begun && begun.status !== "queued") throw new ServiceError(E.uploadExpired);
     if (!begun) {
       assertExportSlot(tx, userId);
       insertRestore(tx, userId, uploadId);
@@ -151,8 +151,13 @@ export function startRestore(actor: Actor, uploadId: string): { id: string } {
 
 const STALE_UPLOAD_MS = 3_600_000;
 
-// An upload whose request died before startRestore has a queued row and no job; after an hour it
-// is failed, which also removes whatever part of the file reached the disk.
+// Called while bytes arrive, so a slow upload of a large backup is not taken for an abandoned one.
+export function touchRestoreUpload(ownerId: string, id: string): void {
+  moveExport(ownerId, id, ["queued"], {});
+}
+
+// An upload whose request died before startRestore has a queued row and no job; an hour after its
+// last written chunk it is failed, which also removes whatever part of the file reached the disk.
 export function purgeStaleRestores(now: Date): number {
   const stale = db
     .select({ id: exportJob.id, userId: exportJob.userId })
@@ -161,7 +166,7 @@ export function purgeStaleRestores(now: Date): number {
       and(
         eq(exportJob.kind, "restore"),
         eq(exportJob.status, "queued"),
-        lt(exportJob.createdAt, new Date(now.getTime() - STALE_UPLOAD_MS)),
+        lt(exportJob.updatedAt, new Date(now.getTime() - STALE_UPLOAD_MS)),
         notExists(
           db
             .select({ one: sql`1` })
@@ -317,6 +322,8 @@ function commit(ownerId: string, id: string, prepared: Prepared): void {
           .values(chunk.map((row) => insertValues(entry, row, ownerId)) as never)
           .run();
       }
+      // Inserted rows are no longer needed; the heap shrinks table by table during the commit.
+      prepared.rows.delete(entry.name);
     }
     const now = clock.now();
     tx.insert(file)

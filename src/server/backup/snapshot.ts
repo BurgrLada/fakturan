@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { and, asc, getTableColumns, gt, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+import { RESTORE_LIMITS, type RestoreLimits } from "@/lib/backup-format";
 import { db, type Tx } from "../db";
 import { auditLog, file } from "../db/schema";
 import { scoped } from "../db/scoped";
@@ -25,6 +26,9 @@ export const FILES_DIR = "files";
 
 // A file row of the account without its blob: the archive would silently miss it.
 export class MissingBlob extends Error {}
+
+// More than a restore accepts; stopped while reading instead of after the archive is written.
+export class SnapshotTooLarge extends Error {}
 
 type Owned = SQLiteTable & { userId: AnyColumn };
 
@@ -130,7 +134,11 @@ function keepBlob(ownerId: string, id: string, target: string): void {
 
 // better-sqlite3 cannot hold a read transaction across an await, so everything the archive needs
 // is written out here in one synchronous transaction; the event loop waits for its length.
-export function snapshot(ownerId: string, dir: string): Snapshot {
+export function snapshot(
+  ownerId: string,
+  dir: string,
+  limits: RestoreLimits = RESTORE_LIMITS,
+): Snapshot {
   mkdirSync(join(dir, FILES_DIR), { recursive: true });
   const stats = { longest: 0 };
   return db.transaction((tx) => {
@@ -155,6 +163,7 @@ export function snapshot(ownerId: string, dir: string): Snapshot {
       }
     }
     for (const id of files) keepBlob(ownerId, id, join(dir, FILES_DIR, id));
+    const rowsSoFar = Object.values(tables).reduce((sum, n) => sum + n, 0);
     const auditLines = lineFile(join(dir, AUDIT_FILE), stats);
     let audit = 0;
     try {
@@ -166,17 +175,25 @@ export function snapshot(ownerId: string, dir: string): Snapshot {
         .orderBy(asc(file.createdAt), asc(file.id))
         .all();
       for (const { id } of archived) {
-        let text: string;
+        let blob: Buffer;
         try {
-          text = readFileSync(blobPath(ownerId, id), "utf8");
+          blob = readFileSync(blobPath(ownerId, id));
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new MissingBlob(id);
           throw error;
         }
-        for (const line of text.split("\n")) {
-          if (!line) continue;
-          auditLines.addLine(line);
-          audit += 1;
+        // Walked by newline like the restore reads it: an archived audit never becomes one
+        // string or one array, and the caps stop it as early as the restore would.
+        for (let start = 0; start < blob.length;) {
+          let end = blob.indexOf(0x0a, start);
+          if (end < 0) end = blob.length;
+          if (end - start > limits.maxLineBytes) throw new SnapshotTooLarge();
+          if (end > start) {
+            audit += 1;
+            if (rowsSoFar + audit > limits.maxLines) throw new SnapshotTooLarge();
+            auditLines.addLine(blob.toString("utf8", start, end));
+          }
+          start = end + 1;
         }
       }
       // Rows were redacted when written; only the account's own rows leave (R-31), and another

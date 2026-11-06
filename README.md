@@ -86,8 +86,10 @@ nahrajte ZIP a stiskněte Obnovit ze zálohy. Archiv se dvakrát celý ověří 
 každý řádek), všechna ID dostanou nové hodnoty a data se zapíšou v jedné transakci, takže při chybě
 zůstane účet beze změny. Po obnově jsou všechny automatiky vypnuté, plán s odesíláním čeká na nové
 potvrzení a SMTP i schránku s avízy je nutné zadat znovu. Limity: archiv 1 GiB, soubor v něm
-25 MiB, tabulka 200 MiB po rozbalení, 200 000 položek; záloha, která by limity překročila, vůbec
-nevznikne. Smazání účtu nabídne zálohu, ale nečeká na ni a archiv zmizí s účtem, proto ho stáhněte
+25 MiB, data všech tabulek dohromady 256 MiB po rozbalení, nejvýš 300 000 řádků (tabulky i
+historie změn dohromady) a 28 000 položek archivu (tedy zhruba tolik souborů). Obnova drží řádky
+celého účtu v paměti až do zápisu, proto velmi velký účet nad těmito limity zálohovat a obnovit
+nejde; záloha, která by limity překročila, vůbec nevznikne a řekne to. Smazání účtu nabídne zálohu, ale nečeká na ni a archiv zmizí s účtem, proto ho stáhněte
 předem.
 
 ## Automatizace a pošta

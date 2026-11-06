@@ -18,7 +18,14 @@ import pkg from "../../../package.json";
 import journal from "../../../drizzle/meta/_journal.json";
 import type { Actor } from "../audit/context";
 import { entryLimit } from "../backup/restore-read";
-import { AUDIT_FILE, FILES_DIR, MissingBlob, snapshot, type Snapshot } from "../backup/snapshot";
+import {
+  AUDIT_FILE,
+  FILES_DIR,
+  MissingBlob,
+  snapshot,
+  SnapshotTooLarge,
+  type Snapshot,
+} from "../backup/snapshot";
 import { BACKUP_TABLES, backupColumnsHash } from "../backup/tables";
 import { clock } from "../clock";
 import { db } from "../db";
@@ -165,7 +172,8 @@ async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string)
     counts: { tables: snap.tables, files: snap.files.length, audit: snap.audit },
     entries,
   };
-  const text = JSON.stringify(manifest, null, 2);
+  // Compact, so 4 MiB of manifest carries the entry cap of RESTORE_LIMITS.
+  const text = JSON.stringify(manifest);
   const problem = restorableProblem(
     entries,
     manifest.counts,
@@ -202,8 +210,12 @@ export function restorableProblem(
   const names = Object.keys(entries);
   const sizes = names.map((name) => entries[name]!.size);
   const tableLines = Object.values(counts.tables);
+  const dataBytes = names
+    .filter((name) => name.startsWith("data/"))
+    .reduce((sum, name) => sum + entries[name]!.size, 0);
   const tooLarge =
     names.length + 1 > limits.entries ||
+    dataBytes > limits.dataTotalBytes ||
     names.some((name) => entries[name]!.size > entryLimit(name, limits)) ||
     sizes.reduce((sum, size) => sum + size, 0) + manifestBytes > limits.archiveBytes ||
     manifestBytes > limits.manifestBytes;
@@ -217,7 +229,7 @@ export function restorableProblem(
 class NotRestorable extends Error {}
 
 function reasonOf(error: unknown): string | null {
-  if (error instanceof NotRestorable) return E.notRestorable;
+  if (error instanceof NotRestorable || error instanceof SnapshotTooLarge) return E.notRestorable;
   if (error instanceof MissingBlob) return E.missingFile;
   if (error instanceof ServiceError) return error.message;
   if (error instanceof ExportTooLarge) return E.tooLarge;

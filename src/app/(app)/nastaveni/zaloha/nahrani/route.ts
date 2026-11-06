@@ -8,10 +8,13 @@ import {
   assertRestoreAllowed,
   beginRestoreUpload,
   startRestore,
+  touchRestoreUpload,
 } from "@/server/services/account-restore";
+import { clock } from "@/server/clock";
 import { failExport } from "@/server/services/exports";
 
 const E = TEXTS.restore.errors;
+const TOUCH_MS = 60_000;
 
 const reply = (status: number, body: Record<string, unknown> = {}) =>
   Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -32,7 +35,14 @@ export async function POST(request: Request): Promise<Response> {
       throw new UploadTooLarge();
     }
     id = beginRestoreUpload(actor).id;
-    await writeCapped(userId, id, request.body, RESTORE_LIMITS.archiveBytes);
+    const upload = id;
+    let touchedAt = clock.now().getTime();
+    await writeCapped(userId, upload, request.body, RESTORE_LIMITS.archiveBytes, () => {
+      const now = clock.now().getTime();
+      if (now - touchedAt < TOUCH_MS) return;
+      touchedAt = now;
+      touchRestoreUpload(userId, upload);
+    });
     return reply(200, startRestore(actor, id));
   } catch (error) {
     if (id) failExport(userId, id, TEXTS.restore.failed);

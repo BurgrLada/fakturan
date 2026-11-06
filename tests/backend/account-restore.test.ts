@@ -41,6 +41,7 @@ import {
   beginRestoreUpload,
   purgeStaleRestores,
   recoverRestore,
+  touchRestoreUpload,
   runRestore,
   startRestore,
 } from "@/server/services/account-restore";
@@ -590,5 +591,22 @@ describe("obnova účtu", () => {
     expect(problems.some((problem) => problem.includes("cizím dokladem"))).toBe(true);
     expect(problems.some((problem) => problem.includes("jinou připsanou částkou"))).toBe(false);
     db.delete(payment).where(eq(payment.userId, owner)).run();
+  });
+
+  test("[IMP-010] dlouhé nahrání úklid nesmaže a propadlé řekne proč", () => {
+    const target = emptyAccount();
+    const { id } = beginRestoreUpload(webActor(target));
+    writeBlob(target, id, Buffer.from("PK"));
+    current = new Date(NOW.getTime() + 50 * 60_000);
+    touchRestoreUpload(target, id);
+    current = new Date(NOW.getTime() + 100 * 60_000);
+    purgeStaleRestores(current);
+    expect(db.select().from(exportJob).where(eq(exportJob.id, id)).get()).toMatchObject({
+      status: "queued",
+    });
+    current = new Date(NOW.getTime() + 200 * 60_000);
+    purgeStaleRestores(current);
+    writeBlob(target, id, Buffer.from("PK"));
+    expect(() => startRestore(webActor(target), id)).toThrow(E.uploadExpired);
   });
 });

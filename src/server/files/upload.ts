@@ -20,6 +20,7 @@ export async function writeCapped(
   id: string,
   body: ReadableStream<Uint8Array> | null,
   max: number,
+  onChunk?: (size: number) => void,
 ): Promise<StoredUpload> {
   const out = blobWriter(userId, id);
   const head = new Uint8Array(HEAD_BYTES);
@@ -42,6 +43,7 @@ export async function writeCapped(
         headLength += piece.length;
       }
       if (!out.write(value)) await once(out, "drain");
+      onChunk?.(size);
     }
     out.end();
     await once(out, "finish");

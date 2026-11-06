@@ -209,21 +209,21 @@ function eachLine(
   while (start < bytes.length) {
     let end = bytes.indexOf(0x0a, start);
     if (end < 0) end = bytes.length;
-    if (end > start) {
-      if (end - start > budget.limits.maxLineBytes) throw onError();
-      count += 1;
-      budget.total += 1;
-      if (count > cap || budget.total > budget.limits.maxLines) {
-        throw new RestoreRejected(E.tooManyLines);
-      }
-      let value: unknown;
-      try {
-        value = JSON.parse(decoder.decode(bytes.subarray(start, end)));
-      } catch {
-        throw onError();
-      }
-      take(value);
+    // The writer never leaves a blank line; skipping them would let a few bytes of upload carry
+    // hundreds of MiB of newlines into the next backup.
+    if (end === start || end - start > budget.limits.maxLineBytes) throw onError();
+    count += 1;
+    budget.total += 1;
+    if (count > cap || budget.total > budget.limits.maxLines) {
+      throw new RestoreRejected(E.tooManyLines);
     }
+    let value: unknown;
+    try {
+      value = JSON.parse(decoder.decode(bytes.subarray(start, end)));
+    } catch {
+      throw onError();
+    }
+    take(value);
     start = end + 1;
   }
   return count;
@@ -273,7 +273,39 @@ function auditLines(bytes: Uint8Array, manifest: BackupManifest, budget: LineBud
   });
 }
 
-function checkManifest(bytes: Uint8Array): BackupManifest {
+const OPEN_BRACE = 0x7b;
+const OPEN_BRACKET = 0x5b;
+const QUOTE = 0x22;
+const BACKSLASH = 0x5c;
+const MAX_MANIFEST_DEPTH = 4;
+
+// One pass over the bytes before JSON.parse: a valid manifest nests at most four levels and has
+// about one object per entry, so a deep or bloated one never reaches the parser's heap.
+export function prescanManifest(bytes: Uint8Array, limits: RestoreLimits): void {
+  const maxContainers = limits.entries + 16;
+  let depth = 0;
+  let containers = 0;
+  let inString = false;
+  for (let i = 0; i < bytes.length; i++) {
+    const byte = bytes[i]!;
+    if (inString) {
+      if (byte === BACKSLASH) i += 1;
+      else if (byte === QUOTE) inString = false;
+      continue;
+    }
+    if (byte === QUOTE) inString = true;
+    else if (byte === OPEN_BRACE || byte === OPEN_BRACKET) {
+      depth += 1;
+      containers += 1;
+      if (depth > MAX_MANIFEST_DEPTH || containers > maxContainers) {
+        throw new RestoreRejected(E.manifest);
+      }
+    } else if (byte === 0x7d || byte === 0x5d) depth -= 1;
+  }
+}
+
+function checkManifest(bytes: Uint8Array, limits: RestoreLimits): BackupManifest {
+  prescanManifest(bytes, limits);
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -327,6 +359,7 @@ export async function scanArchive(
   let auditCount = 0;
   let fileRows: string[] = [];
   let rejection: unknown = null;
+  let dataBytes = 0;
 
   try {
     await readZipEntries(
@@ -360,7 +393,7 @@ export async function scanArchive(
   async function onEntry(name: string, bytes: Uint8Array): Promise<void> {
     if (!manifest) {
       if (name !== MANIFEST_ENTRY) throw new RestoreRejected(E.manifest);
-      manifest = checkManifest(bytes);
+      manifest = checkManifest(bytes, limits);
       return;
     }
     if (seen.has(name) || name === MANIFEST_ENTRY) throw new RestoreRejected(E.duplicate);
@@ -372,6 +405,8 @@ export async function scanArchive(
     }
     const table = byName.get(name);
     if (table) {
+      dataBytes += bytes.length;
+      if (dataBytes > limits.dataTotalBytes) throw new RestoreRejected(E.dataTooLarge);
       const rows = validRows(table, bytes, manifest, budget);
       counted[table.name] = rows.length;
       if (table.name === "file") fileRows = rows.map((row) => row.id as string);
