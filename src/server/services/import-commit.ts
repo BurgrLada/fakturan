@@ -150,6 +150,7 @@ function insertDocument(ctx: Context, row: PreviewRow): string {
       exchangeRateDate: foreignCurrency && doc.exchangeRateMicros !== null ? doc.issueDate : null,
       foreign: party ? !isDomesticCountry(party.country) : false,
       paymentMethod: doc.account ? "transfer" : "cash",
+      importPaymentCode: doc.paymentMeansCode ?? null,
       note: doc.note.slice(0, 2000),
       subtotalMinor,
       roundingMinor: doc.totalMinor - subtotalMinor,

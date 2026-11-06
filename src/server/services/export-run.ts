@@ -1,6 +1,6 @@
 import "server-only";
 import { and, asc, count, eq, gte, inArray, lte, ne, sql, type SQL } from "drizzle-orm";
-import type { ExportFilter } from "@/lib/export-filter";
+import type { ExportFilter, ExportFormat } from "@/lib/export-filter";
 import { amountDue } from "@/lib/qr-payload";
 import {
   CSV_BOM,
@@ -59,13 +59,17 @@ async function progress(run: Run, step = 1): Promise<void> {
   await yieldHeavy(run.job);
 }
 
-function invoiceWhere(ownerId: string, filter: ExportFilter): SQL {
+function invoiceWhere(ownerId: string, filter: ExportFilter, format: ExportFormat): SQL {
+  // ISDOC has no way to mark a cancellation, so an accountant would book it as a live invoice.
+  // Picked by status or by hand from the list, a cancelled document is what the person asked for.
+  const withoutCancelled = format === "isdoc_zip" && !filter.statuses?.length && !filter.ids;
   const wantsCustomer = filter.customerId !== undefined;
   const customerId = ownedCustomerId(ownerId, filter.customerId);
   return scoped(ownerId).where(invoice, (t, { and: all, eq: is }) =>
     all(
       // A draft has no number and no final content, so no export ever carries one (R-24).
       ne(t.status, "draft"),
+      withoutCancelled ? ne(t.status, "cancelled") : undefined,
       filter.from ? gte(t.issueDate, filter.from) : undefined,
       filter.to ? lte(t.issueDate, filter.to) : undefined,
       filter.types?.length ? inArray(t.type, filter.types) : undefined,
@@ -84,20 +88,38 @@ function assertOwnIds(filter: ExportFilter, where: SQL): void {
   if (found !== new Set(filter.ids).size) throw new ExportStopped(E.foreignIds);
 }
 
-async function* invoicePages(where: SQL): AsyncGenerator<Invoice[]> {
-  for (let offset = 0; ; offset += PAGE) {
-    const page = db
+// The IDs are taken once at the start, in the order of the export: pages then load them by ID, so
+// a document issued meanwhile neither shifts a page nor appears twice, and the two sheets of the
+// Excel workbook list the same documents.
+function invoiceIds(where: SQL): string[] {
+  return db
+    .select({ id: invoice.id })
+    .from(invoice)
+    .where(where)
+    .orderBy(asc(invoice.issueDate), asc(invoice.number), asc(invoice.id))
+    .all()
+    .map((row) => row.id);
+}
+
+async function* idPages<T extends { id: string }>(
+  ids: string[],
+  load: (chunk: string[]) => T[],
+): AsyncGenerator<T[]> {
+  for (let start = 0; start < ids.length; start += PAGE) {
+    const chunk = ids.slice(start, start + PAGE);
+    const byId = new Map(load(chunk).map((row) => [row.id, row]));
+    yield chunk.flatMap((id) => byId.get(id) ?? []);
+  }
+}
+
+function invoicePages(ownerId: string, ids: string[]): AsyncGenerator<Invoice[]> {
+  return idPages(ids, (chunk) =>
+    db
       .select()
       .from(invoice)
-      .where(where)
-      .orderBy(asc(invoice.issueDate), asc(invoice.number), asc(invoice.id))
-      .limit(PAGE)
-      .offset(offset)
-      .all();
-    if (page.length === 0) return;
-    yield page;
-    if (page.length < PAGE) return;
-  }
+      .where(scoped(ownerId).where(invoice, (t) => inArray(t.id, chunk)))
+      .all(),
+  );
 }
 
 function lineCounts(ownerId: string, ids: string[]): Map<string, number> {
@@ -150,8 +172,8 @@ function invoiceCells(row: Invoice, lines: number): Cell[] {
   ];
 }
 
-async function* invoiceRows(run: Run, where: SQL): AsyncGenerator<Cell[]> {
-  for await (const page of invoicePages(where)) {
+async function* invoiceRows(run: Run, ids: string[]): AsyncGenerator<Cell[]> {
+  for await (const page of invoicePages(run.ownerId, ids)) {
     const counts = lineCounts(
       run.ownerId,
       page.map((row) => row.id),
@@ -172,8 +194,8 @@ const LINE_COLUMNS = [
   C.currency,
 ];
 
-async function* lineRows(run: Run, where: SQL): AsyncGenerator<Cell[]> {
-  for await (const page of invoicePages(where)) {
+async function* lineRows(run: Run, ids: string[]): AsyncGenerator<Cell[]> {
+  for await (const page of invoicePages(run.ownerId, ids)) {
     const ids = page.map((row) => row.id);
     const byInvoice = new Map(page.map((row) => [row.id, row]));
     const lines = db
@@ -216,9 +238,9 @@ async function writeCsv(file: AtomicFile, columns: string[], rows: AsyncIterable
   file.write(chunk);
 }
 
-async function pdfZip(run: Run, zip: ZipFileWriter, where: SQL): Promise<void> {
+async function pdfZip(run: Run, zip: ZipFileWriter, ids: string[]): Promise<void> {
   const take = fileNameTaker();
-  for await (const page of invoicePages(where)) {
+  for await (const page of invoicePages(run.ownerId, ids)) {
     for (const row of page) {
       const doc = loadInvoiceDocument(run.ownerId, row.id);
       if (!doc) throw new ExportStopped(E.foreignIds);
@@ -231,9 +253,9 @@ async function pdfZip(run: Run, zip: ZipFileWriter, where: SQL): Promise<void> {
 }
 
 // Every file of a page is validated before any is added: an invalid one stops the whole export.
-async function isdocZip(run: Run, zip: ZipFileWriter, where: SQL): Promise<void> {
+async function isdocZip(run: Run, zip: ZipFileWriter, ids: string[]): Promise<void> {
   const take = fileNameTaker();
-  for await (const page of invoicePages(where)) {
+  for await (const page of invoicePages(run.ownerId, ids)) {
     const files = page.map((row) => isdocFileFor(run.ownerId, row.id));
     await assertValidIsdoc(files);
     for (const item of files) zip.addDeflated(assertEntryName(take(item.fileName)), item.xml);
@@ -246,15 +268,20 @@ type Evidence = { columns: string[]; rows: (run: Run) => AsyncGenerator<Cell[]> 
 const yesNo = (value: boolean) => text(value ? TEXTS.exporting.yes : TEXTS.exporting.no);
 
 async function* customerRows(run: Run): AsyncGenerator<Cell[]> {
-  for (let offset = 0; ; offset += PAGE) {
-    const page = db
+  const ids = db
+    .select({ id: customer.id })
+    .from(customer)
+    .where(scoped(run.ownerId).where(customer))
+    .orderBy(asc(customer.name), asc(customer.id))
+    .all()
+    .map((row) => row.id);
+  const load = (chunk: string[]) =>
+    db
       .select()
       .from(customer)
-      .where(scoped(run.ownerId).where(customer))
-      .orderBy(asc(customer.name), asc(customer.id))
-      .limit(PAGE)
-      .offset(offset)
+      .where(scoped(run.ownerId).where(customer, (t) => inArray(t.id, chunk)))
       .all();
+  for await (const page of idPages(ids, load)) {
     for (const row of page) {
       yield [
         text(row.name),
@@ -275,20 +302,24 @@ async function* customerRows(run: Run): AsyncGenerator<Cell[]> {
       ];
     }
     await progress(run, page.length);
-    if (page.length < PAGE) return;
   }
 }
 
 async function* catalogRows(run: Run): AsyncGenerator<Cell[]> {
-  for (let offset = 0; ; offset += PAGE) {
-    const page = db
+  const ids = db
+    .select({ id: catalogItem.id })
+    .from(catalogItem)
+    .where(scoped(run.ownerId).where(catalogItem))
+    .orderBy(asc(catalogItem.name), asc(catalogItem.id))
+    .all()
+    .map((row) => row.id);
+  const load = (chunk: string[]) =>
+    db
       .select()
       .from(catalogItem)
-      .where(scoped(run.ownerId).where(catalogItem))
-      .orderBy(asc(catalogItem.name), asc(catalogItem.id))
-      .limit(PAGE)
-      .offset(offset)
+      .where(scoped(run.ownerId).where(catalogItem, (t) => inArray(t.id, chunk)))
       .all();
+  for await (const page of idPages(ids, load)) {
     for (const row of page) {
       yield [
         text(row.name),
@@ -302,7 +333,6 @@ async function* catalogRows(run: Run): AsyncGenerator<Cell[]> {
       ];
     }
     await progress(run, page.length);
-    if (page.length < PAGE) return;
   }
 }
 
@@ -317,19 +347,23 @@ function paymentWhere(ownerId: string, filter: ExportFilter): SQL {
 
 async function* paymentRows(run: Run): AsyncGenerator<Cell[]> {
   const where = paymentWhere(run.ownerId, run.row.filter);
-  for (let offset = 0; ; offset += PAGE) {
-    const page = db
-      .select({ payment, number: invoice.number })
+  const joined = and(eq(invoice.id, payment.invoiceId), scoped(run.ownerId).where(invoice));
+  const ids = db
+    .select({ id: payment.id })
+    .from(payment)
+    .innerJoin(invoice, joined)
+    .where(where)
+    .orderBy(asc(payment.paidOn), asc(payment.id))
+    .all()
+    .map((row) => row.id);
+  const load = (chunk: string[]) =>
+    db
+      .select({ id: payment.id, payment, number: invoice.number })
       .from(payment)
-      .innerJoin(
-        invoice,
-        and(eq(invoice.id, payment.invoiceId), scoped(run.ownerId).where(invoice)),
-      )
-      .where(where)
-      .orderBy(asc(payment.paidOn), asc(payment.id))
-      .limit(PAGE)
-      .offset(offset)
+      .innerJoin(invoice, joined)
+      .where(and(where, inArray(payment.id, chunk)))
       .all();
+  for await (const page of idPages(ids, load)) {
     for (const { payment: row, number } of page) {
       yield [
         date(row.paidOn),
@@ -345,7 +379,6 @@ async function* paymentRows(run: Run): AsyncGenerator<Cell[]> {
       ];
     }
     await progress(run, page.length);
-    if (page.length < PAGE) return;
   }
 }
 
@@ -440,21 +473,22 @@ async function produce(run: Run, path: string): Promise<number> {
   const plain = zipped ? null : atomicFileWriter(path);
   try {
     if (kind === "invoices") {
-      const where = invoiceWhere(run.ownerId, filter);
+      const where = invoiceWhere(run.ownerId, filter, format);
       assertOwnIds(filter, where);
-      run.total = db.select({ n: count() }).from(invoice).where(where).get()?.n ?? 0;
+      const ids = invoiceIds(where);
+      run.total = ids.length;
       moveExport(run.ownerId, run.row.id, ["running"], { progressTotal: run.total });
-      if (format === "pdf_zip") await pdfZip(run, zip!, where);
-      else if (format === "isdoc_zip") await isdocZip(run, zip!, where);
-      else if (format === "csv") await writeCsv(plain!, INVOICE_COLUMNS, invoiceRows(run, where));
+      if (format === "pdf_zip") await pdfZip(run, zip!, ids);
+      else if (format === "isdoc_zip") await isdocZip(run, zip!, ids);
+      else if (format === "csv") await writeCsv(plain!, INVOICE_COLUMNS, invoiceRows(run, ids));
       else {
         const sheets: SheetStream[] = [
           {
             name: TEXTS.exporting.sheets.documents,
             columns: INVOICE_COLUMNS,
-            rows: invoiceRows(run, where),
+            rows: invoiceRows(run, ids),
           },
-          { name: TEXTS.exporting.sheets.lines, columns: LINE_COLUMNS, rows: lineRows(run, where) },
+          { name: TEXTS.exporting.sheets.lines, columns: LINE_COLUMNS, rows: lineRows(run, ids) },
         ];
         await buildSheets(zip!, sheets);
       }
@@ -513,5 +547,13 @@ export async function runExport(job: Job): Promise<void> {
     if (reason === null) throw error;
     return;
   }
-  if (!finishExport(row, size, run.total)) removeResult(ownerId, row.id);
+  let finished: boolean;
+  try {
+    finished = finishExport(row, size, run.total);
+  } catch (error) {
+    // Left running, the list would poll forever and the file would have no row.
+    failExport(ownerId, row.id, E.unexpected);
+    throw error;
+  }
+  if (!finished) removeResult(ownerId, row.id);
 }

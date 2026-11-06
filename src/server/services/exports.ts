@@ -30,6 +30,7 @@ const E = TEXTS.exporting.errors;
 export const EXPORT_TTL_MS = 7 * 86_400_000;
 const LIST_LIMIT = 20;
 const RUNNING: ExportStatus[] = ["queued", "running"];
+const MAX_RUNNING_EXPORTS = 3;
 
 // Same message for a foreign, missing, unfinished or expired export: none may reveal the others.
 export class ExportNotFoundError extends Error {
@@ -62,6 +63,16 @@ export function createExport(actor: Actor, raw: ExportInput): { id: string } {
   const { kind, format, filter } = parsed.data;
   const id = randomUUID();
   mutate(actor, "export.create", (tx, audit) => {
+    // One heavy lane serves the whole instance; the cap keeps one account from filling it.
+    const running = tx
+      .select({ id: exportJob.id })
+      .from(exportJob)
+      .where(scoped(userId).where(exportJob, (t) => inArray(t.status, RUNNING)))
+      .limit(MAX_RUNNING_EXPORTS)
+      .all();
+    if (running.length >= MAX_RUNNING_EXPORTS) {
+      throw new ServiceError(E.tooManyRunning(MAX_RUNNING_EXPORTS));
+    }
     const now = clock.now();
     tx.insert(exportJob)
       .values({ id, userId, kind, format, filter, createdAt: now, updatedAt: now })
@@ -128,6 +139,8 @@ export type OpenedExport = { path: string; size: number; fileName: string; mimeT
 // Read from disk by the caller as a stream; only the path and the metadata pass through here.
 export function openExport(actor: Actor, id: string): OpenedExport {
   const userId = ownerOf(actor);
+  // Every download sends the whole file and writes an audit row, so a loop must not repeat it freely.
+  enforceRateLimit(actor, RATE_RULES.exportDownloadUser);
   const row = findExport(db, userId, id);
   const now = clock.now();
   if (row?.status !== "done" || !row.fileId || !row.expiresAt || row.expiresAt <= now) {

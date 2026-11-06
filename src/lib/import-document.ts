@@ -55,6 +55,8 @@ export type ImportDocument = {
   paidDepositsMinor: number;
   variableSymbol: string | null;
   account: ImportAccount | null;
+  // ISDOC PaymentMeansCode as written in the file, only a code the schema knows.
+  paymentMeansCode?: string | null;
   originalDocuments: ImportReference[];
   deposits: ImportDeposit[];
   vatApplicable: boolean;

@@ -19,8 +19,11 @@ import {
   job,
   mailSettings,
   notification,
+  rateLimit,
   schedulerState,
 } from "@/server/db/schema";
+import { RATE_RULES } from "@/server/rate-limit";
+import { RateLimitError } from "@/server/services/access";
 import { registerJob } from "@/server/jobs/registry";
 import { drainHeavy } from "@/server/jobs/worker";
 import { saveCatalogItem } from "@/server/services/catalog";
@@ -438,6 +441,34 @@ describe("hromadný export", () => {
     expect(mixed).toMatchObject({ status: "failed", reason: E.foreignIds, fileId: null });
     expect(() => openExport(webActor(b), mixed.id)).toThrow(ExportNotFoundError);
     expect(db.select().from(file).where(eq(file.userId, b)).all()).toEqual([]);
+  });
+
+  test("[EXP-007] účet má nejvýš 3 rozpracované exporty", async () => {
+    const owner = seedOwner(db, NOW);
+    issuedOn(owner, seedCustomer(owner), "2026-03-01");
+    const start = () => createExport(webActor(owner), { kind: "invoices", format: "csv" });
+    start();
+    start();
+    start();
+    expect(start).toThrow(E.tooManyRunning(3));
+    expect(db.select().from(exportJob).where(eq(exportJob.userId, owner)).all()).toHaveLength(3);
+    const other = seedOwner(db, NOW);
+    expect(() => createExport(webActor(other), { kind: "customers", format: "csv" })).not.toThrow();
+    await drainHeavy("w");
+    expect(() => start()).not.toThrow();
+  });
+
+  test("[SEC-001] stažení exportu má vlastní limit", async () => {
+    const owner = seedOwner(db, NOW);
+    issuedOn(owner, seedCustomer(owner), "2026-03-01");
+    const row = await exported(owner, { kind: "invoices", format: "csv" });
+    const rule = RATE_RULES.exportDownloadUser;
+    expect(rule.limit).toBe(30);
+    expect(rule.windowSeconds).toBe(3600);
+    db.insert(rateLimit)
+      .values({ key: `${rule.name}:${owner}`, windowStart: current, count: rule.limit })
+      .run();
+    expect(() => openExport(webActor(owner), row.id)).toThrow(RateLimitError);
   });
 
   test("přerušený export skončí selháním a rozepsaný soubor zmizí", async () => {

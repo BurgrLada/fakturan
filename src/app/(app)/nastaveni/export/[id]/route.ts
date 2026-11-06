@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import { contentDisposition } from "@/lib/content-disposition";
 import { actorFromRequest } from "@/server/auth/session";
+import { RateLimitError } from "@/server/services/access";
 import { ExportNotFoundError, openExport } from "@/server/services/exports";
 import { emptyResponse } from "@/server/services/pdf-http";
 
@@ -15,6 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     opened = openExport(actor, id);
   } catch (error) {
     if (error instanceof ExportNotFoundError) return emptyResponse(404);
+    if (error instanceof RateLimitError) return emptyResponse(429);
     throw error;
   }
   const body = Readable.toWeb(createReadStream(opened.path)) as ReadableStream<Uint8Array>;

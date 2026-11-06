@@ -98,6 +98,8 @@ export const invoice = sqliteTable(
     // Not cascading: only undoBatch removes the documents of a batch (R-20).
     importBatchId: text("import_batch_id").references(() => importBatch.id),
     importUuid: text("import_uuid"),
+    // PaymentMeansCode of the source ISDOC; a document without bank details exports it back.
+    importPaymentCode: text("import_payment_code"),
     sourceSystem: text("source_system"),
     importPdfFileId: text("import_pdf_file_id").references(() => file.id, { onDelete: "set null" }),
     recurringId: text("recurring_id").references((): AnySQLiteColumn => recurringInvoice.id, {

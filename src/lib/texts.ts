@@ -3157,7 +3157,8 @@ export const TEXTS = {
     contents: {
       invoices: {
         pdf_zip: "ZIP s PDF každého dokladu.",
-        isdoc_zip: "ZIP se souborem ISDOC 6.0.2 každého dokladu. Koncepty se nevyvážejí.",
+        isdoc_zip:
+          "ZIP se souborem ISDOC 6.0.2 každého dokladu. Koncepty se nevyvážejí, stornované jen při výslovném výběru stavu Stornovaná.",
         csv: "Jeden řádek za doklad s počtem položek. Položky samotné obsahuje Excel.",
         xlsx: "Sešit se dvěma listy: Doklady a Položky.",
       },
@@ -3254,7 +3255,9 @@ export const TEXTS = {
       filter: "Tento filtr pro zvolená data nejde",
       tooMany: (limit: number) => `Najednou jde vyvézt nejvýš ${limit} vybraných dokladů.`,
       notFound: "Export neexistuje",
-      foreignIds: "Některý vybraný doklad neexistuje nebo je koncept. Export se nespustil.",
+      foreignIds: "Některý vybraný doklad už neexistuje nebo nepatří k účtu. Export se nespustil.",
+      tooManyRunning: (limit: number) =>
+        `Rozpracované jsou už ${limit} exporty. Počkejte, až některý doběhne.`,
       tooLarge: "Export by byl větší než 1 GB. Zužte výběr.",
       isdocInvalid: (number: string, problem: string) =>
         `Doklad ${number} neprošel kontrolou ISDOC (${problem}). Export se zastavil, nic se nestáhne.`,
@@ -3311,6 +3314,12 @@ export const TEXTS = {
     exportCsv: "Stáhnout CSV",
     exportLabel: "Export daňového podkladu",
     page: (page: number, total: number) => `Strana ${page} z ${total}`,
-    errors: { signedOut: "Přihlaste se znovu", year: "Neplatný rok" },
+    errors: {
+      signedOut: "Přihlaste se znovu",
+      year: "Neplatný rok",
+      invalid: "Neplatné zadání exportu",
+      pdfTooLong: (limit: number) =>
+        `Přehled má víc než ${limit} řádků, to je na PDF příliš. Stáhněte ho jako Excel nebo CSV.`,
+    },
   },
 } as const;

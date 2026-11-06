@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { unzipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import type { ExportInput } from "@/lib/export-filter";
+import { exportContents, type ExportInput } from "@/lib/export-filter";
 import { setClockForTests } from "@/server/clock";
 import { exportJob, file, invoice, job, schedulerState } from "@/server/db/schema";
 import { buildIsdoc } from "@/server/isdoc/build";
@@ -21,7 +21,7 @@ import {
 } from "@/server/services/exports";
 import { invoicePdf } from "@/server/services/invoice-pdf";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
-import { issueInvoice } from "@/server/services/invoice-lifecycle";
+import { cancelInvoice, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { getInvoice } from "@/server/services/invoices";
 import { createTestDb } from "../helpers/db";
 import { draftFor, seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
@@ -133,6 +133,46 @@ describe("export ISDOC", () => {
       }
       expect(new Set(names.map((name) => name.toLowerCase())).size).toBe(2);
     }
+  });
+
+  test("[TST-015] kód platby ze zdroje se vrátí do exportu i se splatností a VS", async () => {
+    const owner = importOwner(db, NOW);
+    const bytes = editedIsdoc(
+      "faktura-czk.isdoc",
+      /<PaymentMeans>[\s\S]*<\/PaymentMeans>/,
+      "<PaymentMeans><Payment><PaidAmount>3350.50</PaidAmount><PaymentMeansCode>10</PaymentMeansCode>" +
+        "<Details><PaymentDueDate>2026-02-16</PaymentDueDate><ID></ID><BankCode></BankCode>" +
+        "<Name></Name><IBAN></IBAN><BIC></BIC><VariableSymbol>20260001</VariableSymbol>" +
+        "</Details></Payment></PaymentMeans>",
+    );
+    const batch = await parsed(owner, [{ name: "hotove.isdoc", bytes }]);
+    await committed(db, owner, batch.id);
+    const imported = db.select().from(invoice).where(eq(invoice.userId, owner)).get()!;
+    expect(imported).toMatchObject({ accountSnapshot: null, importPaymentCode: "10" });
+
+    const row = await exported(owner, { kind: "invoices", format: "isdoc_zip" });
+    expect(row.status).toBe("done");
+    const [xml] = Object.values(entries(owner, row.id));
+    const text = new TextDecoder().decode(xml);
+    expect(text).toContain("<PaymentMeansCode>10</PaymentMeansCode>");
+    expect(parseIsdoc(xml!)).toMatchObject({ dueDate: "2026-02-16", variableSymbol: "20260001" });
+    const pdf = (await pdfText((await invoicePdf(owner, imported.id)).data)).join(" ");
+    expect(pdf).not.toContain("Převodem");
+  });
+
+  test("[EXP-001] ISDOC ZIP bez výběru stavu vynechá storna", async () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    const kept = issued(owner, customerId);
+    const cancelled = issued(owner, customerId);
+    cancelInvoice(webActor(owner), cancelled);
+    const names = async (filter: ExportInput["filter"]) => {
+      const row = await exported(owner, { kind: "invoices", format: "isdoc_zip", filter });
+      return Object.values(entries(owner, row.id)).map((xml) => parseIsdoc(xml).uuid);
+    };
+    expect(await names({})).toEqual([kept]);
+    expect(await names({ statuses: ["cancelled"] })).toEqual([cancelled]);
+    expect(exportContents("invoices", "isdoc_zip")).toMatch(/[Ss]tornované/);
   });
 
   test("importovaný doklad bez účtu netvrdí v ISDOC ani v PDF platbu hotově", async () => {

@@ -37,6 +37,7 @@ export const RATE_RULES = {
   bankCheckUser: rule("bankCheckUser", 10, 60),
   importUser: rule("importUser", 60, 60),
   exportUser: rule("exportUser", 60, 60),
+  exportDownloadUser: rule("exportDownloadUser", 30, 3600),
   aresLookup: rule("aresLookup", 30, 60),
   viesLookup: rule("viesLookup", 30, 60),
   fxLookupUser: rule("fxLookupUser", 60, 60),

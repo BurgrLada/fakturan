@@ -243,8 +243,12 @@ async function archivedIsdoc(log: EmailLog) {
 type Prepared = { transport: MailTransport; message: MailMessage };
 
 async function prepare(log: EmailLog): Promise<Prepared | null> {
-  const attachment = await withDeadline(() => archivedAttachment(log), limits.pdfMs);
-  const isdoc = log.attachIsdoc ? await archivedIsdoc(log) : null;
+  // One deadline for both files, so the sum of the limits stays under the lease.
+  const [attachment, isdoc] = await withDeadline(
+    async () =>
+      [await archivedAttachment(log), log.attachIsdoc ? await archivedIsdoc(log) : null] as const,
+    limits.pdfMs,
+  );
   const transport = await resolveTransport(log.userId);
   if (!transport) return null;
   const { to, cc, bcc, subject, body } = log;

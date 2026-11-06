@@ -273,15 +273,17 @@ export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string 
           doc.variableSymbol ? el("VariableSymbol", doc.variableSymbol) : "",
         )
       : "";
-  // PaymentMeans is optional, and no code of the schema means "unknown".
-  const payment = doc.paymentUnknown
+  // PaymentMeans is optional, and no code of the schema means "unknown": an imported document
+  // without bank details carries only the code its source file stated, or none at all.
+  const code = doc.paymentUnknown ? doc.sourcePaymentCode : PAYMENT_CODES[doc.paymentMethod];
+  const payment = !code
     ? ""
     : nest(
         "PaymentMeans",
         nest(
           "Payment",
           el("PaidAmount", amount(payableCurr)),
-          el("PaymentMeansCode", PAYMENT_CODES[doc.paymentMethod]),
+          el("PaymentMeansCode", code),
           details,
         ),
       );

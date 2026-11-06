@@ -1,0 +1,1 @@
+ALTER TABLE `invoice` ADD `import_payment_code` text;

@@ -134,12 +134,15 @@ export type InvoiceDocument = DocumentHeader & {
   // An imported document without bank details was stored as cash only to pass the consistency
   // check; no output may claim that payment means.
   paymentUnknown?: true;
+  // With paymentUnknown, the PaymentMeansCode the source file stated, if it stated one.
+  sourcePaymentCode?: string;
 };
 
 type DocumentRow = DocumentHeader &
   DocumentImages &
   DocumentTotals & {
     external?: boolean;
+    importPaymentCode?: string | null;
     appearance: Appearance;
     supplierSnapshot: SupplierSnapshot | null;
     customerSnapshot: CustomerSnapshot | null;
@@ -215,6 +218,10 @@ export function invoiceDocument(row: DocumentRow): InvoiceDocument {
       supersededAt: row.supersededAt,
     },
     relatedDocument: row.relatedSnapshot,
-    ...(row.external && !row.accountSnapshot && { paymentUnknown: true as const }),
+    ...(row.external &&
+      !row.accountSnapshot && {
+        paymentUnknown: true as const,
+        ...(row.importPaymentCode && { sourcePaymentCode: row.importPaymentCode }),
+      }),
   };
 }

@@ -14,6 +14,9 @@ import { InputRejected, XML_LIMITS } from "@/lib/safe-input/limits";
 import { ISDOC_NAMESPACE } from "@/lib/safe-input/pdf-embedded";
 import { children, firstChild, parseXml, type XmlNode } from "@/lib/safe-input/xml";
 
+// The enumeration of PaymentMeansCodeType in the 6.0.x schemas.
+const PAYMENT_MEANS_CODES = new Set(["10", "20", "31", "42", "48", "49", "50", "97"]);
+
 export const SUPPORTED_VERSIONS = ["6.0.1", "6.0.2"] as const;
 
 export class IsdocInvalid extends Error {
@@ -215,6 +218,8 @@ export function isdocFromXml(root: XmlNode): ImportDocument {
     at(p, "Details"),
   );
   const details = payments.find((d) => d && text(d, "PaymentDueDate")) ?? payments.find(Boolean);
+  const paymentMeansCode = text(root, "PaymentMeans", "Payment", "PaymentMeansCode");
+
   const account: ImportAccount = {
     number: text(details, "ID"),
     bankCode: text(details, "BankCode"),
@@ -264,6 +269,7 @@ export function isdocFromXml(root: XmlNode): ImportDocument {
     paidDepositsMinor: money(totals, "PaidDepositsAmount"),
     variableSymbol: text(details, "VariableSymbol") || null,
     account: Object.values(account).some(Boolean) ? account : null,
+    paymentMeansCode: PAYMENT_MEANS_CODES.has(paymentMeansCode) ? paymentMeansCode : null,
     originalDocuments,
     deposits,
     vatApplicable: text(root, "VATApplicable") === "true",

@@ -153,6 +153,8 @@ import { registerJob } from "@/server/jobs/registry";
 import { drainHeavy } from "@/server/jobs/worker";
 import { runExport } from "@/server/services/export-run";
 import { recoverExportJob } from "@/server/services/exports";
+import { RATE_RULES } from "@/server/rate-limit";
+import { rateLimit } from "@/server/db/schema";
 import { writePreview } from "@/server/services/import-batch";
 import { importBatch } from "@/server/db/schema";
 import { createTestDb } from "../helpers/db";
@@ -1078,5 +1080,13 @@ describe("akce exportu", () => {
       { id: foreign.id, status: "failed", reason: TEXTS.exporting.errors.foreignIds },
     ]);
     expect((await download(foreign.id)).status).toBe(404);
+
+    session.userId = mine;
+    const rule = RATE_RULES.exportDownloadUser;
+    db.insert(rateLimit)
+      .values({ key: `${rule.name}:${mine}`, windowStart: new Date(), count: rule.limit })
+      .onConflictDoUpdate({ target: rateLimit.key, set: { count: rule.limit } })
+      .run();
+    expect((await download(created.id)).status).toBe(429);
   });
 });
