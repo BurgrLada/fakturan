@@ -176,3 +176,54 @@ export function bucketLabel(key: string, unit: BucketUnit): string {
       return key;
   }
 }
+
+export const TAX_BASES = ["paid", "issued"] as const;
+export type TaxBasis = (typeof TAX_BASES)[number];
+export const TAX_BASIS_PARAM: Record<TaxBasis, string> = { paid: "uhrada", issued: "vystaveni" };
+export type TaxFilter = { year: number; basis: TaxBasis };
+
+// Until 1 April the return for the past year is the one being prepared (TAX-001).
+export function defaultTaxYear(today: CalendarDate): number {
+  const year = Number(today.slice(0, 4));
+  return today.slice(5) <= "03-31" ? year - 1 : year;
+}
+
+const FIRST_TAX_YEAR = 2000;
+
+function taxYear(value: string | undefined, today: CalendarDate): number | undefined {
+  if (!value || !/^\d{4}$/.test(value)) return undefined;
+  const year = Number(value);
+  return year >= FIRST_TAX_YEAR && year <= Number(today.slice(0, 4)) ? year : undefined;
+}
+
+export function parseTaxFilter(params: RawParams, today: CalendarDate): TaxFilter {
+  const one = (key: string) => {
+    const value = params[key];
+    return Array.isArray(value) ? value[0] : value;
+  };
+  return {
+    year: taxYear(one("rok"), today) ?? defaultTaxYear(today),
+    basis: keyOf(TAX_BASIS_PARAM, one("zaklad")) ?? "paid",
+  };
+}
+
+export function taxParams(filter: TaxFilter): Record<string, string> {
+  return { rok: String(filter.year), zaklad: TAX_BASIS_PARAM[filter.basis] };
+}
+
+export function taxYears(today: CalendarDate): number[] {
+  const current = Number(today.slice(0, 4));
+  return Array.from({ length: 10 }, (_, i) => current - i).filter((y) => y >= FIRST_TAX_YEAR);
+}
+
+const taxQuerySchema = z
+  .object({ year: z.number().int().min(FIRST_TAX_YEAR).max(9999), basis: z.enum(TAX_BASES) })
+  .strict();
+
+export function taxQuery(filter: TaxFilter): string {
+  return JSON.stringify({ year: filter.year, basis: filter.basis });
+}
+
+export function taxFromQuery(query: string): TaxFilter {
+  return taxQuerySchema.parse(JSON.parse(query));
+}

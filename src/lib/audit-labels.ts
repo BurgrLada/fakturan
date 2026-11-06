@@ -67,6 +67,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "invoice_template.from_invoice": "Uložení faktury jako šablony",
   "invoice_template.save": "Uložení šablony faktury",
   "export.create": "Spuštění exportu",
+  "tax.export": "Export daňového podkladu",
   "export.download": "Stažení exportu",
   "export.fail": "Neúspěšný export",
   "export.finish": "Dokončení exportu",

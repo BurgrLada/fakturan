@@ -18,7 +18,17 @@ import { seedCreditNote } from "../fixtures/invoices";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 
-const shifted = vi.hoisted(() => ({ by: 0, unconverted: 0 }));
+const shifted = vi.hoisted(() => ({ by: 0, unconverted: 0, tax: 0, unpaid: 0 }));
+vi.mock("@/server/reports/tax", async (original) => {
+  const real = await original<typeof import("@/server/reports/tax")>();
+  const taxOverview: typeof real.taxOverview = (...args) => {
+    const overview = real.taxOverview(...args);
+    return { ...overview, totalCzkMinor: overview.totalCzkMinor + shifted.tax };
+  };
+  const unpaidAsOf: typeof real.unpaidAsOf = (...args) =>
+    real.unpaidAsOf(...args).map((row) => ({ ...row, dueMinor: row.dueMinor + shifted.unpaid }));
+  return { ...real, taxOverview, unpaidAsOf };
+});
 vi.mock("@/server/reports/queries", async (original) => {
   const real = await original<typeof import("@/server/reports/queries")>();
   const reportSummary: typeof real.reportSummary = (...args) => {
@@ -454,6 +464,33 @@ describe("assertConsistent", () => {
         expect(() => assertConsistent(db, owner)).toThrow(/přehled 2026: příjmy bez kurzu/);
       } finally {
         shifted.unconverted = 0;
+      }
+    });
+
+    test("[TST-018] posunutý daňový přehled ani neuhrazené k dnešku kontrolou neprojdou", () => {
+      const owner = createUser();
+      paidInvoice(owner);
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+      shifted.tax = 1;
+      try {
+        expect(() => assertConsistent(db, owner)).toThrow(/daňový přehled \d{4} \(paid\): řádky/);
+      } finally {
+        shifted.tax = 0;
+      }
+      db.update(payment)
+        .set({ creditedMinor: 4_000, amountMinor: 4_000 })
+        .where(eq(payment.userId, owner))
+        .run();
+      db.update(invoice)
+        .set({ paidMinor: 4_000, status: "partially_paid", issueDate: "2026-03-01" })
+        .where(eq(invoice.userId, owner))
+        .run();
+      expect(() => assertConsistent(db, owner)).not.toThrow();
+      shifted.unpaid = 1;
+      try {
+        expect(() => assertConsistent(db, owner)).toThrow(/neuhrazeno k dnešku/);
+      } finally {
+        shifted.unpaid = 0;
       }
     });
 

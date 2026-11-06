@@ -1,10 +1,12 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { parseWidgetQuery } from "@/lib/dashboard-filter";
-import { filterFromQuery } from "@/lib/report-filter";
+import { filterFromQuery, taxFromQuery } from "@/lib/report-filter";
 import { accountTag } from "./account-cache";
+import type { TaxOverview } from "./reports/tax";
 import type { WidgetResult } from "./reports/widget-query";
 import { reportBundle, type ReportBundle } from "./services/reports";
+import { taxOverview } from "./services/tax-report";
 import { checkedConfig, widgetResult } from "./services/widgets";
 
 // The only module with "use cache" and next/cache: the report core stays free of Next (ARC-001).
@@ -35,4 +37,17 @@ export async function cachedWidget(
   void stamp;
   const { config, filter } = parseWidgetQuery(query);
   return widgetResult(userId, checkedConfig(config), { today, globalFilter: filter });
+}
+
+export async function cachedTax(
+  userId: string,
+  stamp: string,
+  today: string,
+  query: string,
+): Promise<TaxOverview> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(accountTag(userId));
+  void stamp;
+  return taxOverview(userId, taxFromQuery(query), today);
 }

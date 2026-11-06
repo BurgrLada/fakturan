@@ -10,6 +10,7 @@ import { clock } from "@/server/clock";
 import type { Db } from "@/server/db";
 import * as schema from "@/server/db/schema";
 import { reportSummary } from "@/server/reports/queries";
+import { taxOverview, unpaidAsOf } from "@/server/reports/tax";
 
 const OWNER_COLUMNS = ["userId", "ownerId"] as const;
 
@@ -521,6 +522,85 @@ function reportProblems(db: Db, ownerId: string): string[] {
   return problems;
 }
 
+// The tax overview against the rows, year by year and in JS (R-26 to R-28), plus today's unpaid
+// list against the stored balances: history rebuilt to today must land on amountDue.
+function taxProblems(db: Db, ownerId: string): string[] {
+  const { invoice, payment, exchangeRate } = schema;
+  const today = calendarDateInPrague(clock.now());
+  const documents = db.select().from(invoice).where(eq(invoice.userId, ownerId)).all();
+  const byId = new Map(documents.map((row) => [row.id, row]));
+  const payments = db.select().from(payment).where(eq(payment.userId, ownerId)).all();
+  const lists = db.select().from(exchangeRate).all();
+  const listedRate = (currency: string, paidOn: string): number | null =>
+    lists
+      .filter(
+        (row) =>
+          row.currency === currency &&
+          row.listDate <= paidOn &&
+          row.listDate >= addDays(paidOn, -7),
+      )
+      .sort((a, b) => (a.listDate < b.listDate ? 1 : -1))[0]?.rateMicros ?? null;
+  const counted = documents.filter((row) => row.status !== "draft" && row.status !== "cancelled");
+  const years = new Set([
+    ...counted.flatMap((row) => (row.issueDate ? [row.issueDate.slice(0, 4)] : [])),
+    ...payments.map((row) => row.paidOn.slice(0, 4)),
+  ]);
+  const problems: string[] = [];
+  for (const year of [...years].sort()) {
+    let paidSum = 0;
+    let paidMissing = 0;
+    for (const row of payments) {
+      const document = byId.get(row.invoiceId);
+      if (row.kind !== "payment" || row.paidOn.slice(0, 4) !== year || !document) continue;
+      if (document.status === "draft" || document.status === "cancelled") continue;
+      const rateMicros = row.rateMicros ?? listedRate(row.currency, row.paidOn);
+      const czk = czkOrNull(() => paymentCzkMinor({ ...row, rateMicros }));
+      if (czk === null) paidMissing += 1;
+      else paidSum += czk;
+    }
+    let issuedSum = 0;
+    let issuedMissing = 0;
+    for (const row of counted) {
+      if (row.type === "advance" || row.issueDate?.slice(0, 4) !== year) continue;
+      const czk = czkOrNull(() => documentCzkMinor(row));
+      if (czk === null) issuedMissing += 1;
+      else issuedSum += czk;
+    }
+    const expected = {
+      paid: { sum: paidSum, missing: paidMissing },
+      issued: { sum: issuedSum, missing: issuedMissing },
+    };
+    for (const basis of ["paid", "issued"] as const) {
+      const overview = taxOverview(db, ownerId, { year: Number(year), basis }, today);
+      const label = `daňový přehled ${year} (${basis})`;
+      const lines = overview.lines.reduce((sum, line) => sum + (line.czkMinor ?? 0), 0);
+      if (lines !== overview.totalCzkMinor) {
+        problems.push(`${label}: řádky ${lines}, součet ${overview.totalCzkMinor}`);
+      }
+      if (overview.totalCzkMinor !== expected[basis].sum) {
+        problems.push(`${label}: ${overview.totalCzkMinor}, z dokladů ${expected[basis].sum}`);
+      }
+      if (overview.unconverted.count !== expected[basis].missing) {
+        problems.push(
+          `${label}: bez kurzu ${overview.unconverted.count}, z dokladů ${expected[basis].missing}`,
+        );
+      }
+    }
+  }
+  const reported = new Map(unpaidAsOf(db, ownerId, today).map((row) => [row.invoiceId, row]));
+  for (const row of counted) {
+    if (row.type === "advance" || !row.issueDate || row.issueDate > today) continue;
+    const due = amountDue(row);
+    const open = (AWAITING_PAYMENT as readonly string[]).includes(row.status) && due > 0;
+    const listed = reported.get(row.id);
+    if (open && listed?.dueMinor !== due) {
+      problems.push(`${row.id}: neuhrazeno k dnešku ${listed?.dueMinor ?? 0}, zůstatek ${due}`);
+    }
+    if (!open && listed) problems.push(`${row.id}: neuhrazený k dnešku, ale doklad není otevřený`);
+  }
+  return problems;
+}
+
 // Throws on the first broken invariant. Plans extend it as new entities arrive.
 export function assertConsistent(db: Db, ownerId: string): void {
   const problems: string[] = [];
@@ -558,6 +638,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
   problems.push(...noticeProblems(db, ownerId));
   problems.push(...rateListProblems(db));
   problems.push(...reportProblems(db, ownerId));
+  problems.push(...taxProblems(db, ownerId));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

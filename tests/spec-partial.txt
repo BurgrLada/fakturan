@@ -5,7 +5,6 @@ TST-009	Matice nemá roli administrátora ani entity plánu 8	plán 8
 TST-013	Změřeno jen s unit testy po souborech: payments 91,43 (6 přeživších ekvivalentních, 1 chyba), fx 99,17, cnb-rates 97,06, invoice-totals 96,55, qr-payload 95,15, payment-matching 99,16, fio 97,81, auth 98,02, mask 100, bank-notices/index 94,74, czech-holidays 100, money 91,53 %; number-format 84,92 % bez backendových testů, recurrence neměřená, celý běh se nevejde do limitu; fronta úloh, lease a tick nejsou ve stryker.config.json	plán 9
 BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
 TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
-ADV-005	Chybí daňový přehled	plán 8
 IMP-000	Fakturoid, iDoklad, SuperFaktura, Vyfakturuj a ABRA Flexi jsou ověřené jen z dokumentace	kap. 24
 IMP-005	Ruční přiložení PDF k importovanému dokladu po importu, přiloží se jen PDF z importu	plán 9
 IMP-002	Vestavěné předlohy čekají na reálné soubory Fakturoidu a iDokladu	kap. 24
