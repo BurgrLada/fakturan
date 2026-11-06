@@ -19,6 +19,7 @@ import { getPreferences, savePreferences } from "@/server/services/preferences";
 import {
   at,
   creditNote,
+  draftDocument,
   issuedDocument,
   namedCustomer,
   pay,
@@ -104,8 +105,10 @@ describe("obrat", () => {
       totalMinor: 5_000,
     });
     cancelInvoice(webActor(owner), cancelled);
+    const draft = draftDocument(owner, customer, { issueDate: "2026-03-03", totalMinor: 9_000 });
     issuedDocument(owner, customer, { issueDate: "2026-03-02", totalMinor: 1_000 });
 
+    expect(db.select().from(invoice).where(eq(invoice.id, draft)).get()!.status).toBe("draft");
     expect(turnover(db, owner, 2026, "taxable").minor).toBe(1_000);
   });
 

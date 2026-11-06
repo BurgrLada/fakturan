@@ -73,12 +73,50 @@ function fromGrid(layout: Layout): LayoutItem[] {
   return layout.map(({ i, x, y, w, h }) => ({ id: i, x, y, w, h }));
 }
 
+// Back reaches the router before popstate: the editor's effects are already cleaned up (the route
+// goes hidden) when the event fires. So the Back guard lives at module level and remembers the
+// editor for a moment after its cleanup; a cancelled Back steps forward again, and that return trip
+// is swallowed so the router never sees either.
+const BACK_GRACE_MS = 1_000;
+type BackWatch = { dirty: () => boolean; cleanedAt: number | null };
+let backWatch: BackWatch | null = null;
+let returning = false;
+let backGuardInstalled = false;
+
+function guardBack(event: PopStateEvent) {
+  if (returning) {
+    returning = false;
+    event.stopImmediatePropagation();
+    return;
+  }
+  const watch = backWatch;
+  if (!watch || !watch.dirty()) return;
+  if (watch.cleanedAt !== null && Date.now() - watch.cleanedAt > BACK_GRACE_MS) return;
+  if (window.confirm(T.leaveConfirm)) {
+    backWatch = null;
+    return;
+  }
+  event.stopImmediatePropagation();
+  returning = true;
+  history.go(1);
+}
+
 function useLeaveWarning(dirty: boolean) {
   const dirtyRef = useRef(dirty);
   useEffect(() => {
     dirtyRef.current = dirty;
   });
   useEffect(() => {
+    const watch: BackWatch = { dirty: () => dirtyRef.current, cleanedAt: null };
+    backWatch = watch;
+    if (!backGuardInstalled) {
+      // Capturing on window runs before the router's own popstate listener.
+      window.addEventListener("popstate", guardBack, true);
+      backGuardInstalled = true;
+    }
+    const leave = () => {
+      if (backWatch === watch) backWatch = null;
+    };
     const warn = (event: BeforeUnloadEvent) => {
       if (dirtyRef.current) event.preventDefault();
     };
@@ -90,16 +128,21 @@ function useLeaveWarning(dirty: boolean) {
       if (!link || link.target || link.hasAttribute("download")) return;
       const url = new URL(link.href);
       if (url.origin !== location.origin || url.pathname === location.pathname) return;
-      if (window.confirm(T.leaveConfirm)) return;
+      if (window.confirm(T.leaveConfirm)) return leave();
       event.preventDefault();
       event.stopPropagation();
     };
-    const dropGuard = setLeaveGuard(
-      async () => !dirtyRef.current || window.confirm(T.leaveConfirm),
-    );
+    const dropGuard = setLeaveGuard(async () => {
+      if (!dirtyRef.current || window.confirm(T.leaveConfirm)) {
+        leave();
+        return true;
+      }
+      return false;
+    });
     window.addEventListener("beforeunload", warn);
     document.addEventListener("click", guardLink, true);
     return () => {
+      watch.cleanedAt = Date.now();
       dropGuard();
       window.removeEventListener("beforeunload", warn);
       document.removeEventListener("click", guardLink, true);

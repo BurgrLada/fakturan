@@ -53,9 +53,7 @@ export function LimitsCard({ limits }: { limits: ReportBundle["limits"] }) {
         })}
       </div>
       {limits.states[0] && <UnconvertedNote unconverted={limits.states[0].unconverted} />}
-      <p className="text-sm">
-        {T.basis}: {TEXTS.preferences.turnoverBases[limits.basis]}
-      </p>
+      <p className="text-sm">{T.basisLine(TEXTS.preferences.turnoverBases[limits.basis])}</p>
       <p className="text-sm text-muted-foreground">{T.note}</p>
       <Link href="/nastaveni/vychozi" className="text-sm underline underline-offset-4">
         {T.settings}

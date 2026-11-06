@@ -13,14 +13,12 @@ import {
   register,
   settled,
 } from "./invoice-helpers";
+import { calendarDateInPrague } from "@/lib/number-format";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
 import { expect, test } from "./fixtures";
 
 const prague = (offsetMonths = 0) => {
-  const [year, month] = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Prague" })
-    .format(new Date())
-    .split("-")
-    .map(Number);
+  const [year, month] = calendarDateInPrague(new Date()).split("-").map(Number);
   const index = year! * 12 + month! - 1 + offsetMonths;
   return { year: Math.floor(index / 12), month: (index % 12) + 1 };
 };
@@ -399,8 +397,7 @@ smtpTest("vypnutá automatika nepošle pravidelnou fakturu", async ({ page, fres
   expect(smtp.messages).toHaveLength(0);
 });
 
-const pragueDate = () =>
-  new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Prague" }).format(new Date());
+const pragueDate = () => calendarDateInPrague(new Date());
 
 test("plán bez názvu se neuloží, pole je označené a dostane fokus", async ({ page, freshApp }) => {
   await register(page, freshApp.baseURL);

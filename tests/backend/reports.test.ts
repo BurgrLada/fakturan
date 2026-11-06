@@ -164,7 +164,7 @@ describe("scénář 2026", () => {
     });
   });
 
-  test("[ADV-007] neuhrazená záloha 2 000,00 má vlastní řádek a není v pohledávkách ani po splatnosti", () => {
+  test("[ADV-007] záloha 2 000,00 je jen v advanceOpenMinor, pohledávky a po splatnosti 2 000,00 tvoří zbytek faktury e", () => {
     const october = summary(s.owner, { range: { from: "2026-10-01", to: "2026-10-31" } });
     expect(october).toMatchObject({
       invoicedMinor: 0,

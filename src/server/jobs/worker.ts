@@ -1,5 +1,6 @@
 import "server-only";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
 import { db } from "../db";
 import { job, type Job } from "../db/schema";
@@ -8,6 +9,8 @@ import { acquireLease } from "../scheduler/lease";
 import { reportFailure } from "../scheduler/report";
 import { claimNext, completeJob, failJob, retryJob } from "./queue";
 import { jobDefinition, RetryLater } from "./registry";
+
+const J = TEXTS.jobs;
 
 const RETRY_DELAY_MS = 5 * 60_000;
 // Well inside the 120 s lease, so a long run never lets it lapse between two renewals (R-8).
@@ -57,7 +60,7 @@ function settleFailure(row: Job, worker: string, error: unknown): void {
 async function runJob(row: Job, worker: string): Promise<void> {
   try {
     const definition = jobDefinition(row.kind);
-    if (!definition) throw new Error(`Neznámý druh úlohy: ${row.kind}`);
+    if (!definition) throw new Error(J.unknownKind(row.kind));
     await definition.run(row);
   } catch (error) {
     settleFailure(row, worker, error);
@@ -83,12 +86,12 @@ function adoptOrphans(holder: string): Job[] {
 
 export function recoverInterrupted(holder: string): void {
   for (const row of adoptOrphans(holder)) {
-    const interrupted = "přerušený běh";
+    const interrupted = J.interrupted;
     try {
       const recover = jobDefinition(row.kind)?.recover;
       if (recover) recover(row);
       else if (exhausted(row)) {
-        reportFailure(new Error("Úloha vyčerpala pokusy přerušeným během"), failureContext(row));
+        reportFailure(new Error(J.exhaustedByInterruption), failureContext(row));
         failJob(row.id, holder, interrupted);
       } else retryJob(row.id, holder, { runAt: clock.now(), reason: interrupted });
     } catch (error) {
@@ -172,7 +175,7 @@ export async function yieldHeavy(row: Job): Promise<void> {
   const now = clock.now().getTime();
   if (now - heavyRenewedAt < HEAVY_RENEW_MS) return;
   if (!row.lockedBy || acquireLease(row.lockedBy) !== "held") {
-    throw new Error("Úloha přišla o zámek plánovače");
+    throw new Error(J.lostLease);
   }
   heavyRenewedAt = now;
 }
@@ -181,7 +184,7 @@ export async function yieldHeavy(row: Job): Promise<void> {
 // 120 s lease is left for it instead of what remains of the last renewal (I-2 of plan 9).
 export function renewHeavy(row: Job): void {
   if (!row.lockedBy || acquireLease(row.lockedBy) !== "held") {
-    throw new Error("Úloha přišla o zámek plánovače");
+    throw new Error(J.lostLease);
   }
   heavyRenewedAt = clock.now().getTime();
 }

@@ -1,6 +1,9 @@
 import { boundedInflate } from "./inflate";
 import { InputRejected, type PdfLimits, sniffContent, XML_LIMITS } from "./limits";
 import { xmlRoot } from "./xml";
+import { TEXTS } from "../texts";
+
+const P = TEXTS.importing.pdf;
 
 export const ISDOC_NAMESPACE = "http://isdoc.cz/namespace/2013";
 
@@ -118,7 +121,7 @@ export function extractEmbeddedXml(bytes: Uint8Array, limits: PdfLimits): Uint8A
   if (sniffContent(bytes) !== "pdf") throw new InputRejected("pdf_not_pdf");
   const text = new TextDecoder("latin1").decode(bytes);
   if (/\/Encrypt(?![A-Za-z0-9])/.test(text))
-    throw new InputRejected("pdf_unreadable", undefined, "šifrované PDF");
+    throw new InputRejected("pdf_unreadable", undefined, P.encrypted);
 
   let problem: InputRejected | null = null;
   let candidates = 0;
@@ -135,12 +138,12 @@ export function extractEmbeddedXml(bytes: Uint8Array, limits: PdfLimits): Uint8A
       chain.length > 1 ||
       /\/DecodeParms/.test(dict)
     ) {
-      problem ??= new InputRejected("pdf_unreadable", undefined, "nepodporovaný filtr");
+      problem ??= new InputRejected("pdf_unreadable", undefined, P.unsupportedFilter);
       continue;
     }
     const body = streamBody(text, bytes, end, resolveLength(text, dict));
     if (!body) {
-      problem ??= new InputRejected("pdf_unreadable", undefined, "poškozený proud");
+      problem ??= new InputRejected("pdf_unreadable", undefined, P.brokenStream);
       continue;
     }
     let content: Uint8Array;
@@ -158,7 +161,7 @@ export function extractEmbeddedXml(bytes: Uint8Array, limits: PdfLimits): Uint8A
     const kind = attachmentKind(content);
     if (kind === "isdoc") return content;
     if (kind === "refused") {
-      problem ??= new InputRejected("pdf_unreadable", undefined, "příloha není čitelné XML");
+      problem ??= new InputRejected("pdf_unreadable", undefined, P.attachmentNotXml);
     }
   }
   if (problem) throw problem;

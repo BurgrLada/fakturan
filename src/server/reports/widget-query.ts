@@ -449,7 +449,10 @@ function isBalance(config: QueryWidgetConfig): boolean {
 // A balance is the state as of today: neither its own nor the dashboard period narrows it.
 function queryRange(config: QueryWidgetConfig, context: WidgetContext): DateRange {
   if (isBalance(config)) return { from: context.today, to: context.today };
-  return resolvePeriod(context.globalFilter?.period ?? config.period!, context.today);
+  const period = context.globalFilter?.period ?? config.period;
+  // parseWidgetConfig already refuses a measure over time without a period.
+  if (period === undefined) throw new ServiceError(C.periodMissing);
+  return resolvePeriod(period, context.today);
 }
 
 // The reason runWidget would refuse the period, checked before the cache so the card can say it.

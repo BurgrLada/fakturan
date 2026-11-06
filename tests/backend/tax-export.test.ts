@@ -14,12 +14,7 @@ import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, invoice } from "@/server/db/schema";
 import { TAX_PAGE_ROWS, taxPage } from "@/server/reports/tax";
-import {
-  exportTaxOverview,
-  setTaxPdfRowLimitForTests,
-  setTaxPdfTextBudgetForTests,
-  taxOverview,
-} from "@/server/services/tax-report";
+import { exportTaxOverview, taxOverview } from "@/server/services/tax-report";
 import {
   issuedDocument,
   namedCustomer,
@@ -163,6 +158,33 @@ describe("výstupy daňového přehledu", () => {
     }
   });
 
+  test("[TAX-003] souborové pole v daňovém exportu vrátí 400", async () => {
+    const { POST } = await import("@/app/(app)/prehledy/dane/export/route");
+    session.userId = s.owner;
+    const send = (form: FormData) =>
+      POST(
+        new Request("http://localhost:3000/prehledy/dane/export", {
+          method: "POST",
+          headers: { origin: "http://localhost:3000" },
+          body: form,
+        }) as never,
+      );
+    const form = () => {
+      const data = new FormData();
+      data.set("rok", "2026");
+      data.set("zaklad", "uhrada");
+      data.set("format", "csv");
+      return data;
+    };
+    expect((await send(form())).status).toBe(200);
+    const extra = form();
+    extra.set("priloha", new Blob(["x"]), "x.txt");
+    expect((await send(extra)).status).toBe(400);
+    const asFile = form();
+    asFile.set("format", new Blob(["csv"]), "format.txt");
+    expect((await send(asFile)).status).toBe(400);
+  });
+
   test("[TAX-003] PDF nad strop řádků odkáže na Excel a audit nevznikne", async () => {
     const owner = reportOwner(db, "2026-01-02");
     const client = namedCustomer(owner, "Strop s.r.o.");
@@ -175,14 +197,9 @@ describe("výstupy daňového přehledu", () => {
         10_000,
       );
     }
-    setTaxPdfRowLimitForTests(3);
-    try {
-      await expect(exportTaxOverview(webActor(owner), FILTER, "pdf")).rejects.toThrow(
-        T.errors.pdfTooLong(3),
-      );
-    } finally {
-      setTaxPdfRowLimitForTests(null);
-    }
+    await expect(
+      exportTaxOverview(webActor(owner), FILTER, "pdf", { rowLimit: 3 }),
+    ).rejects.toThrow(T.errors.pdfTooLong(3));
     const audited = db
       .select()
       .from(auditLog)
@@ -201,14 +218,9 @@ describe("výstupy daňového přehledu", () => {
       "2026-01-02",
       10_000,
     );
-    setTaxPdfTextBudgetForTests(20);
-    try {
-      await expect(exportTaxOverview(webActor(owner), FILTER, "pdf")).rejects.toThrow(
-        T.errors.pdfTooMuchText,
-      );
-    } finally {
-      setTaxPdfTextBudgetForTests(null);
-    }
+    await expect(
+      exportTaxOverview(webActor(owner), FILTER, "pdf", { textBudget: 20 }),
+    ).rejects.toThrow(T.errors.pdfTooMuchText);
     const audited = db
       .select()
       .from(auditLog)

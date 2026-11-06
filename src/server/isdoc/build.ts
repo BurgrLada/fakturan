@@ -1,3 +1,4 @@
+import { importedCountry } from "@/lib/import-document";
 import { splitVatId } from "@/lib/clauses";
 import { isDomesticCountry, DOMESTIC_COUNTRY } from "@/lib/customers";
 import { RATE_UNIT, toCzkMinor } from "@/lib/fx";
@@ -93,7 +94,7 @@ const COUNTRY_CODES: Record<string, string> = {
 
 function countryCode(p: Party): string {
   const country = p.country.trim();
-  if (/^[A-Za-z]{2}$/.test(country)) return country.toUpperCase();
+  if (/^[A-Za-z]{2}$/.test(country)) return importedCountry(country).toUpperCase();
   const known = COUNTRY_CODES[country.toLowerCase()];
   if (known) return known;
   const prefix = splitVatId(p.dic)?.country;

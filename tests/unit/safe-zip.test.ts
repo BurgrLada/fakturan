@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { TEXTS } from "@/lib/texts";
 import { describe, expect, test } from "vitest";
 import { boundedInflate } from "@/lib/safe-input/inflate";
 import { InputRejected, ZIP_LIMITS, type ZipLimits } from "@/lib/safe-input/limits";
@@ -108,8 +109,17 @@ describe("bezpečné čtení ZIP", () => {
 
   test("[SEC-005] uložený vnořený ZIP s datovým popisovačem neprojde do kořene", async () => {
     const error = await rejection(collect(hostile.nestedStoredDescriptor()));
-    expect(error.code).toBe("zip_corrupt");
+    expect(error.code).toBe("zip_stored_descriptor");
     expect(error.entry).toBe("vnitrni.zip");
+  });
+
+  test("[SEC-005] uložená položka s descriptorem radí uložit archiv s kompresí", async () => {
+    const zip = rawZip([{ name: "a.isdoc", data: isdocXml(100), method: 0, descriptor: true }]);
+    const error = await rejection(collect(zip));
+    expect(error.code).toBe("zip_stored_descriptor");
+    expect(error.entry).toBe("a.isdoc");
+    expect(TEXTS.importing.rejected.zip_stored_descriptor).toMatch(/s kompresí/);
+    expect(TEXTS.importing.rejected.zip_corrupt).not.toMatch(/kompres/);
   });
 
   test("[SEC-005] limit PDF se pozná i z obsahu rozděleného do drobných bloků", async () => {

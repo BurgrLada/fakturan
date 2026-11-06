@@ -102,6 +102,14 @@ describe("checkRateLimit", () => {
     expect(checkRateLimit("k", rule).allowed).toBe(true);
   });
 
+  test("[SEC-001] cost 0 a cost nad limit vyhodí RangeError", () => {
+    for (const cost of [0, -1, 3, 1.5, Number.NaN]) {
+      expect(() => checkRateLimit("cost", rule, cost), String(cost)).toThrow(RangeError);
+    }
+    expect(db.select().from(rateLimit).where(like(rateLimit.key, "test:cost")).all()).toEqual([]);
+    expect(checkRateLimit("cost", rule, 2).allowed).toBe(true);
+  });
+
   test("[SEC-001] limit přežije restart procesu", () => {
     checkRateLimit("k", rule);
     checkRateLimit("k", rule);

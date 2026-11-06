@@ -33,6 +33,8 @@ const UTILITY =
 const PALETTE_CLASS = new RegExp(
   `(?<![\\w-])(?:[\\w-]+:)*(?:${UTILITY})-(?:(?:${PALETTE})-\\d{2,3}|white|black)(?:\\/\\d+)?(?![\\w-])`,
 );
+// A quoted string with a Czech letter: user-facing text belongs in src/lib/texts.ts (UI-006).
+const CZECH_LITERAL = /["'`][^"'`\n]*[áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][^"'`\n]*["'`]/;
 const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb)\(/;
 // Invoice designs carry their own tokens (UI-004), so the picker previews them as they print.
 const DESIGN_TOKENS = [join("src", "components", "settings", "design-picker.tsx")];
@@ -74,5 +76,19 @@ describe("strukturní pravidla", () => {
     expect(offenders(dirs, PALETTE_CLASS)).toEqual([]);
     expect(offenders(dirs, COLOR_LITERAL, DESIGN_TOKENS)).toEqual([]);
     expect(offenders(DESIGN_TOKENS, COLOR_LITERAL).length).toBeGreaterThan(0);
+  });
+
+  test("[UI-006] worker, import-parse a pdf-embedded nemají české řetězce mimo texts.ts", () => {
+    expect(CZECH_LITERAL.test('throw new Error("Úloha přišla o zámek");')).toBe(true);
+    expect(CZECH_LITERAL.test("const x = `Neznámý ${kind}`;")).toBe(true);
+    expect(CZECH_LITERAL.test("throw new Error(TEXTS.jobs.lostLease);")).toBe(false);
+    expect(CZECH_LITERAL.test('const name = "plain ascii";')).toBe(false);
+
+    const files = [
+      join("src", "server", "jobs", "worker.ts"),
+      join("src", "server", "services", "import-parse.ts"),
+      join("src", "lib", "safe-input", "pdf-embedded.ts"),
+    ];
+    expect(offenders(files, CZECH_LITERAL)).toEqual([]);
   });
 });

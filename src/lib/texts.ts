@@ -197,6 +197,7 @@ export const TEXTS = {
       usage: (turnover: string, limit: string, percent: number) =>
         `${turnover} z ${limit} (${percent} %)`,
       basis: "Základ obratu",
+      basisLine: (basis: string) => `Základ obratu: ${basis}`,
       levels: {
         ok: "V pořádku",
         warn: "Nad 80 %",
@@ -2870,7 +2871,22 @@ export const TEXTS = {
     },
     backupFailed: "poslední pokus o zálohu selhal",
   },
+  jobs: {
+    unknownKind: (kind: string) => `Neznámý druh úlohy: ${kind}`,
+    interrupted: "přerušený běh",
+    exhaustedByInterruption: "Úloha vyčerpala pokusy přerušeným během",
+    lostLease: "Úloha přišla o zámek plánovače",
+  },
   importing: {
+    internal: {
+      noBatch: "Úloha importu nemá dávku",
+    },
+    pdf: {
+      encrypted: "šifrované PDF",
+      unsupportedFilter: "nepodporovaný filtr",
+      brokenStream: "poškozený proud",
+      attachmentNotXml: "příloha není čitelné XML",
+    },
     title: "Import dokladů",
     intro:
       "Nahrajte vydané faktury ve formátu ISDOC, ZIP s nimi nebo PDF s vloženým ISDOC, nebo tabulku CSV či Excel se zákazníky, ceníkem nebo fakturami. Před uložením uvidíte náhled.",
@@ -3136,6 +3152,8 @@ export const TEXTS = {
       lines: "Doklad má víc položek, než Fakturan dovolí",
       textTooLong:
         "Číslo, variabilní symbol, identifikátor nebo jméno odběratele je v souboru delší, než Fakturan dovolí",
+      countryXi:
+        "Země odběratele je XI (Severní Irsko): kód zůstal, jak je v souboru, zkontrolujte adresu a režim DPH",
       lineNameShortened:
         "Název některé položky byl delší než 200 znaků: zkrátil se a celý je v popisu položky",
       ignoredPdf: (name: string) => `PDF ${name} nepatří k žádnému dokladu a nepoužije se`,
@@ -3146,8 +3164,9 @@ export const TEXTS = {
         `Archiv má víc souborů se jménem ${name}, použije se jen první`,
     },
     rejected: {
-      zip_corrupt:
-        "Archiv je poškozený nebo uložený bez délek položek. Uložte ho znovu s kompresí (běžné „Komprimovat do ZIP“).",
+      zip_corrupt: "Archiv je poškozený, nejde ho přečíst",
+      zip_stored_descriptor:
+        "Archiv je uložený bez komprese a bez délek souborů, takže ho nejde bezpečně přečíst. Uložte ho znovu s kompresí (běžné „Komprimovat do ZIP“).",
       zip_too_many_entries: "Archiv má příliš mnoho souborů",
       zip_entry_too_large: "Soubor v archivu je příliš velký",
       zip_total_too_large: "Archiv je po rozbalení příliš velký",

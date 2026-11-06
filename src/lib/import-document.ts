@@ -1,5 +1,20 @@
 import type { CalendarDate, DocumentType } from "./number-format";
 
+// ISO 3166 has no UK, yet systems write it for the United Kingdom. XI, Northern Ireland in EU VAT,
+// is no ISO country either, but the code is what the tax office knows, so it stays and warns.
+const COUNTRY_CODE_ALIASES: Record<string, string> = { UK: "GB" };
+export const NORTHERN_IRELAND = "XI";
+
+export function importedCountry(value: string): string {
+  const trimmed = value.trim();
+  if (!/^[A-Za-z]{2}$/.test(trimmed)) return trimmed;
+  return COUNTRY_CODE_ALIASES[trimmed.toUpperCase()] ?? trimmed;
+}
+
+export function isNorthernIreland(country: string): boolean {
+  return country.trim().toUpperCase() === NORTHERN_IRELAND;
+}
+
 export type ImportParty = {
   name: string;
   street: string;

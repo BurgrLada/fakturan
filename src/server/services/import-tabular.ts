@@ -2,7 +2,12 @@ import "server-only";
 import type { Currency } from "@/lib/currency";
 import { canonicalCountry } from "@/lib/customers";
 import { foldText } from "@/lib/fold-text";
-import type { ImportDocument, ImportLine, ImportParty } from "@/lib/import-document";
+import {
+  importedCountry,
+  type ImportDocument,
+  type ImportLine,
+  type ImportParty,
+} from "@/lib/import-document";
 import {
   applyColumns,
   type ColumnarSheet,
@@ -418,7 +423,7 @@ function documentOf(
           street: textOf(first, "customerStreet"),
           city: textOf(first, "customerCity"),
           zip: textOf(first, "customerZip"),
-          country: canonicalCountry(textOf(first, "customerCountry")),
+          country: canonicalCountry(importedCountry(textOf(first, "customerCountry"))),
           ico: digits(textOf(first, "customerIco")),
           dic: digits(textOf(first, "customerDic")).toUpperCase(),
           email: textOf(first, "customerEmail"),

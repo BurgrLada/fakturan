@@ -320,11 +320,14 @@ const { document: _document, ...columnsWithoutDocument } = getTableColumns(recur
 export const planHeadColumns = columnsWithoutDocument;
 export type PlanHead = Omit<RecurringInvoice, "document">;
 
-export function listRecurring(ownerId: string): RecurringRow[] {
-  return db
+export function listRecurring(ownerId: string, q: Reader = db): RecurringRow[] {
+  return q
     .select({ plan: planHeadColumns, customerName: customer.name })
     .from(recurringInvoice)
-    .leftJoin(customer, eq(customer.id, recurringInvoice.customerId))
+    .leftJoin(
+      customer,
+      and(eq(customer.id, recurringInvoice.customerId), scoped(ownerId).where(customer)),
+    )
     .where(scoped(ownerId).where(recurringInvoice))
     .orderBy(asc(czech(recurringInvoice.name)), asc(recurringInvoice.id))
     .all()
@@ -334,7 +337,7 @@ export function listRecurring(ownerId: string): RecurringRow[] {
       nextIssueDate:
         plan.status === "finished"
           ? null
-          : (nextOccurrences(ruleOf(db, plan), plan.cursorDate, 1)[0]?.issueDate ?? null),
+          : (nextOccurrences(ruleOf(q, plan), plan.cursorDate, 1)[0]?.issueDate ?? null),
     }));
 }
 

@@ -190,7 +190,7 @@ test("[DSH-014] všech devět zobrazení se vykreslí z jednoho výsledku", asyn
   }
 });
 
-test("[DSH-004] [UI-007] na šířce 390 px jsou widgety pod sebou a RGL se nenačte", async ({
+test("[DSH-004] [UI-007] úzká obrazovka skládá widgety pod sebe podle souřadnic, ne podle URL", async ({
   page,
   freshApp,
 }) => {
@@ -206,7 +206,16 @@ test("[DSH-004] [UI-007] na šířce 390 px jsou widgety pod sebou a RGL se nena
   const boxes = await cards.evaluateAll((nodes) =>
     nodes.map((node) => {
       const rect = node.getBoundingClientRect();
-      return { left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width };
+      const style = (node as HTMLElement).style;
+      return {
+        id: node.getAttribute("data-widget-id")!,
+        x: Number(style.getPropertyValue("--x")),
+        y: Number(style.getPropertyValue("--y")),
+        left: rect.left,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+      };
     }),
   );
   for (const [index, box] of boxes.entries()) {
@@ -214,12 +223,25 @@ test("[DSH-004] [UI-007] na šířce 390 px jsou widgety pod sebou a RGL se nena
     expect(box.width).toBe(boxes[0]!.width);
     if (index > 0) expect(box.top).toBeGreaterThanOrEqual(boxes[index - 1]!.bottom);
   }
+  // Top to bottom on screen is the grid order: row first, then column.
+  const onScreen = [...boxes].sort((a, b) => a.top - b.top).map((box) => box.id);
+  const byGrid = [...boxes].sort((a, b) => a.y - b.y || a.x - b.x).map((box) => box.id);
+  expect(new Set(boxes.map((box) => `${box.x},${box.y}`)).size).toBe(boxes.length);
+  expect(onScreen).toEqual(byGrid);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
   await expect(page.locator(".react-grid-layout")).toHaveCount(0);
   // dashboard-edit.spec.ts shows the same watchers find both once the editor opens.
-  expect(gridScript()).toBe(false);
-  expect(gridStyles()).toBe(false);
+  expect(await gridScript()).toBe(false);
+  expect(await gridStyles()).toBe(false);
+
+  // The same watchers find the library once a wide editor loads it, so "not loaded" means something.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const href = await page.locator('a[href$="/upravit"]').getAttribute("href");
+  await page.goto(`${baseURL}${href}`);
+  await expect(page.locator(".react-grid-layout")).toBeVisible();
+  await expect.poll(gridScript).toBe(true);
+  await expect.poll(gridStyles).toBe(true);
 });
 
 test("[REM-009] výchozí Přehled ukazuje po splatnosti a blížící se splatnost", async ({

@@ -36,9 +36,12 @@ export async function POST(request: NextRequest) {
   if (origin !== new URL(env.BETTER_AUTH_URL).origin) return new Response(null, { status: 403 });
   if (!(await getCurrentSession())) return new Response(null, { status: 401 });
   const form = await request.formData().catch(() => new FormData());
-  const fields = Object.fromEntries(
-    [...form.entries()].filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  );
+  const entries = [...form.entries()];
+  // A file in any field is a request the page never sends, not one to read around.
+  if (entries.some(([, value]) => typeof value !== "string")) {
+    return new Response(TEXTS.tax.errors.invalid, { status: 400 });
+  }
+  const fields = Object.fromEntries(entries as [string, string][]);
   const today = calendarDateInPrague(clock.now());
   const parsed = taxExportInput(today).safeParse(fields);
   if (!parsed.success) return new Response(TEXTS.tax.errors.invalid, { status: 400 });

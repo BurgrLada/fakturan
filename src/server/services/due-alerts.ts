@@ -8,6 +8,7 @@ import { amountDue } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { db } from "../db";
+import type { Reader } from "./access";
 import { automationSettings, invoice, job, user, type Job } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { enqueue } from "../jobs/queue";
@@ -37,8 +38,9 @@ export type AlertRow = {
 export function dueAlerts(
   ownerId: string,
   today: CalendarDate,
+  q: Reader = db,
 ): { overdue: AlertRow[]; dueSoon: AlertRow[] } {
-  const rows = db
+  const rows = q
     .select({
       id: invoice.id,
       status: invoice.status,

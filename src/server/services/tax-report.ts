@@ -94,11 +94,6 @@ export type TaxFile = { filename: string; contentType: string; body: string | Ui
 
 // Beyond this a render would hold the shared PDF queue for long; the sheets have no such cost.
 export const TAX_PDF_MAX_ROWS = 2_000;
-let pdfRowLimit = TAX_PDF_MAX_ROWS;
-
-export function setTaxPdfRowLimitForTests(limit: number | null): void {
-  pdfRowLimit = limit ?? TAX_PDF_MAX_ROWS;
-}
 
 // The rows are counted above, but their text (customer names, numbers) is what react-pdf pays for,
 // so the overview has the same text budget as a document PDF. Only what is printed counts: ids,
@@ -124,22 +119,22 @@ export function taxPrintedLength(overview: TaxOverview): number {
   );
 }
 
-let pdfTextBudget = PDF_TEXT_BUDGET;
+export type TaxPdfLimits = { rowLimit?: number; textBudget?: number };
 
-export function setTaxPdfTextBudgetForTests(budget: number | null): void {
-  pdfTextBudget = budget ?? PDF_TEXT_BUDGET;
+export async function renderTaxPdf(
+  overview: TaxOverview,
+  { rowLimit = TAX_PDF_MAX_ROWS, textBudget = PDF_TEXT_BUDGET }: TaxPdfLimits = {},
+): Promise<Uint8Array> {
+  if (overview.lines.length + overview.unpaid.length > rowLimit) {
+    throw new ServiceError(T.errors.pdfTooLong(rowLimit));
+  }
+  if (taxPrintedLength(overview) > textBudget) throw new ServiceError(T.errors.pdfTooMuchText);
+  return new Uint8Array(await renderTaxOverviewPdf(overview));
 }
 
-async function render(overview: TaxOverview, format: TaxExportFormat) {
+async function render(overview: TaxOverview, format: TaxExportFormat, limits: TaxPdfLimits) {
   if (format === "pdf") {
-    if (overview.lines.length + overview.unpaid.length > pdfRowLimit) {
-      throw new ServiceError(T.errors.pdfTooLong(pdfRowLimit));
-    }
-    if (taxPrintedLength(overview) > pdfTextBudget) throw new ServiceError(T.errors.pdfTooMuchText);
-    return {
-      contentType: "application/pdf",
-      body: new Uint8Array(await renderTaxOverviewPdf(overview)),
-    };
+    return { contentType: "application/pdf", body: await renderTaxPdf(overview, limits) };
   }
   const sheet = taxSheet(overview);
   return format === "csv"
@@ -156,12 +151,13 @@ export async function exportTaxOverview(
   actor: Actor,
   input: TaxFilter & { today: CalendarDate },
   format: TaxExportFormat,
+  limits: TaxPdfLimits = {},
 ): Promise<TaxFile> {
   const ownerId = actor.userId;
   if (!ownerId) throw new ServiceError(T.errors.signedOut);
   enforceRateLimit(actor, RATE_RULES.exportUser);
   const overview = overviewOf(db, ownerId, input, input.today);
-  const file = await render(overview, format);
+  const file = await render(overview, format, limits);
   mutate(actor, "tax.export", (_tx, audit) =>
     audit({
       entity: "tax_overview",

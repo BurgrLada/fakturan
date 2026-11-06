@@ -416,7 +416,7 @@ async function parseIsdoc(job: Job, ownerId: string, batch: ImportBatch): Promis
 export async function runImportParse(job: Job): Promise<void> {
   const ownerId = job.userId;
   const batchId = job.payload.batchId;
-  if (!ownerId || typeof batchId !== "string") throw new Error("Úloha importu nemá dávku");
+  if (!ownerId || typeof batchId !== "string") throw new Error(T.internal.noBatch);
   const batch = findBatch(db, ownerId, batchId);
   if (batch.status !== "parsing") return;
   try {

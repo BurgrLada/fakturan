@@ -317,6 +317,19 @@ describe("import ISDOC", () => {
     assertConsistent(db, owner);
   });
 
+  test("[IMP-003] odběratel se zemí XI se naimportuje s varováním", async () => {
+    const owner = importOwner(db, NOW);
+    const bytes = editedIsdoc(
+      "faktura-czk.isdoc",
+      "<Country><IdentificationCode>CZ</IdentificationCode><Name>Česká republika</Name></Country></PostalAddress><PartyTaxScheme>",
+      "<Country><IdentificationCode>XI</IdentificationCode><Name></Name></Country></PostalAddress><PartyTaxScheme>",
+    );
+    const { rows } = await parsed(owner, [{ name: "x.isdoc", bytes }]);
+    expect(rows[0]).toMatchObject({ status: "warning" });
+    expect(rows[0]!.messages).toContain(R.countryXi);
+    expect(rows[0]!.document!.customer!.country).toBe("XI");
+  });
+
   test("doklad jiného dodavatele je chyba řádku", async () => {
     const owner = importOwner(db, NOW);
     const { rows } = await parsed(owner, [

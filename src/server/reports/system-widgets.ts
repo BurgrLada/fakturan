@@ -9,6 +9,7 @@ import type { SystemWidgetId } from "@/lib/widget-config";
 import { dueSql, openCondition } from "../db/invoice-sql";
 import { invoice, preferences } from "../db/schema";
 import { scoped } from "../db/scoped";
+import type { Reader } from "../services/access";
 import { getAutomation } from "../services/automation";
 import { listNotices, noticeCounts } from "../services/bank-notices";
 import { dueAlerts, type AlertRow } from "../services/due-alerts";
@@ -147,8 +148,8 @@ const aging: SystemWidgetRunner = (q, ownerId, _config, context) => {
   });
 };
 
-const alerts: SystemWidgetRunner = (_q, ownerId, _config, context) => {
-  const { overdue, dueSoon } = dueAlerts(ownerId, context.today);
+const alerts: SystemWidgetRunner = (q, ownerId, _config, context) => {
+  const { overdue, dueSoon } = dueAlerts(ownerId, context.today, q);
   return result(today(context), {
     rows: [
       { kind: "row", key: "overdue", name: TEXTS.reminders.alerts.overdue, value: overdue.length },
@@ -158,8 +159,8 @@ const alerts: SystemWidgetRunner = (_q, ownerId, _config, context) => {
   });
 };
 
-function activePlans(ownerId: string) {
-  return listRecurring(ownerId)
+function activePlans(q: Reader, ownerId: string) {
+  return listRecurring(ownerId, q)
     .filter((plan) => plan.status === "active" && plan.nextIssueDate !== null)
     .sort(
       (a, b) =>
@@ -167,8 +168,8 @@ function activePlans(ownerId: string) {
     );
 }
 
-const upcomingRecurring: SystemWidgetRunner = (_q, ownerId, config, context) => {
-  const plans = activePlans(ownerId);
+const upcomingRecurring: SystemWidgetRunner = (q, ownerId, config, context) => {
+  const plans = activePlans(q, ownerId);
   return result(today(context), {
     total: plans.length,
     detail: {
@@ -210,12 +211,13 @@ const forecastWidget: SystemWidgetRunner = (q, ownerId, _config, context) => {
   );
 };
 
-const unmatchedPayments: SystemWidgetRunner = (_q, ownerId, config, context) => {
-  const counts = noticeCounts(ownerId);
-  const notices = listNotices(ownerId, {
-    statuses: ["pending", "unrecognized"],
-    limit: config.rows ?? DEFAULT_ROWS,
-  });
+const unmatchedPayments: SystemWidgetRunner = (q, ownerId, config, context) => {
+  const counts = noticeCounts(ownerId, q);
+  const notices = listNotices(
+    ownerId,
+    { statuses: ["pending", "unrecognized"], limit: config.rows ?? DEFAULT_ROWS },
+    q,
+  );
   return result(today(context), {
     total: counts.pending + counts.unrecognized,
     detail: {
@@ -284,9 +286,9 @@ const openAdvances: SystemWidgetRunner = (q, ownerId, config, context) => {
   });
 };
 
-const automationStatus: SystemWidgetRunner = (_q, ownerId, config, context) => {
-  const settings = getAutomation(ownerId);
-  const next = activePlans(ownerId)
+const automationStatus: SystemWidgetRunner = (q, ownerId, config, context) => {
+  const settings = getAutomation(ownerId, q);
+  const next = activePlans(q, ownerId)
     .filter((plan) => plan.mode === "send")
     .slice(0, config.rows ?? AUTOMATION_RUNS)
     .map((plan) => ({ id: plan.id, name: plan.name, date: plan.nextIssueDate! }));

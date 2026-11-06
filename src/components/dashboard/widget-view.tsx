@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Chart } from "@/components/charts/chart";
 import { CHART_TOKENS, type ChartSpec, type ValueFormat } from "@/components/charts/chart-spec";
 import { UnconvertedNote } from "@/components/reports/unconverted-note";
@@ -321,6 +322,7 @@ export function WidgetView({
   h,
   dateFormat,
   mode,
+  body,
 }: {
   config: WidgetConfig;
   result: WidgetResult;
@@ -329,6 +331,8 @@ export function WidgetView({
   h: number;
   dateFormat: DateFormat;
   mode?: CompareMode;
+  // A system body the server already rendered, so it could catch what it throws.
+  body?: ReactNode;
 }) {
   return (
     <div
@@ -337,7 +341,9 @@ export function WidgetView({
       className="flex min-w-0 flex-1 flex-col gap-2"
     >
       <Subtitle config={config} result={result} dateFormat={dateFormat} />
-      {config.kind === "system" ? (
+      {config.kind === "system" && body !== undefined ? (
+        body
+      ) : config.kind === "system" ? (
         <SystemBody
           config={config}
           result={result}

@@ -1,11 +1,12 @@
 import { canonicalCountry, DOMESTIC_COUNTRY } from "@/lib/customers";
-import type {
-  ImportAccount,
-  ImportDeposit,
-  ImportDocument,
-  ImportLine,
-  ImportParty,
-  ImportReference,
+import {
+  importedCountry,
+  type ImportAccount,
+  type ImportDeposit,
+  type ImportDocument,
+  type ImportLine,
+  type ImportParty,
+  type ImportReference,
 } from "@/lib/import-document";
 import { MAX_EXCHANGE_RATE_MICROS } from "@/lib/fx";
 import type { CalendarDate, DocumentType } from "@/lib/number-format";
@@ -109,7 +110,7 @@ function party(node: XmlNode): ImportParty {
   const country =
     countryCode.toUpperCase() === "CZ"
       ? DOMESTIC_COUNTRY
-      : canonicalCountry(countryName || countryCode);
+      : canonicalCountry(countryName || importedCountry(countryCode));
   const street = [
     text(p, "PostalAddress", "StreetName"),
     text(p, "PostalAddress", "BuildingNumber"),

@@ -2,7 +2,7 @@ import type { GlobalFilter } from "@/lib/dashboard-filter";
 import type { CalendarDate } from "@/lib/number-format";
 import type { DateFormat } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
-import { reportFailure } from "@/server/scheduler/report";
+import { reportWidgetFailure } from "@/server/reports/widget-failures";
 import type { DashboardView } from "@/server/services/dashboards";
 import { accountStamp } from "@/server/services/reports";
 import { WidgetCard } from "./widget-card";
@@ -30,10 +30,12 @@ export function DashboardGrid({
   };
   for (const widget of dashboard.widgets) {
     if (widget.config) continue;
-    reportFailure(new Error(`Neplatná konfigurace widgetu ${widget.id}`), {
-      task: "dashboard.widget",
+    reportWidgetFailure(
+      widget.id,
+      "dashboard.widget",
+      new Error(`Neplatná konfigurace widgetu ${widget.id}`),
       userId,
-    });
+    );
   }
   return (
     <div

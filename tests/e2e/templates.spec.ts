@@ -11,6 +11,7 @@ import {
   settled,
 } from "./invoice-helpers";
 import type { Page } from "@playwright/test";
+import { calendarDateInPrague } from "@/lib/number-format";
 
 async function saveFormAsTemplate(page: Page, name: string) {
   await page.getByRole("button", { name: "Uložit jako šablonu" }).click();
@@ -106,7 +107,7 @@ test("[TPL-004] šablona z konceptu zachová {{rok}} a vystavení ho dosadí", a
   freshApp,
 }) => {
   const { baseURL } = freshApp;
-  const year = new Date().getFullYear();
+  const year = Number(calendarDateInPrague(new Date()).slice(0, 4));
   await ready(page, baseURL);
   await openForm(page, baseURL);
   await cashInvoice(page);

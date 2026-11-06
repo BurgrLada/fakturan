@@ -3,7 +3,12 @@ import { fitText, textLimit } from "@/lib/text-limits";
 import { and, inArray, ne, or } from "drizzle-orm";
 import { CURRENCIES } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
-import type { ImportDocument, ImportLine, ImportParty } from "@/lib/import-document";
+import {
+  isNorthernIreland,
+  type ImportDocument,
+  type ImportLine,
+  type ImportParty,
+} from "@/lib/import-document";
 import { MAX_DOCUMENT_LINES } from "@/lib/invoice";
 import type { CustomerAction, PreviewLink, PreviewRow, PreviewStatus } from "@/lib/import-preview";
 import type { CalendarDate } from "@/lib/number-format";
@@ -254,6 +259,10 @@ export function analyzeRows(
         status = "error";
         row.messages.push(...problems);
       } else {
+        if (doc.customer && isNorthernIreland(doc.customer.country)) {
+          status = "warning";
+          row.messages.push(R.countryXi);
+        }
         if (doc.lines.some(nameTooLong)) {
           row.document = { ...doc, lines: doc.lines.map(shortenedName) };
           status = "warning";

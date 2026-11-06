@@ -3,6 +3,7 @@ const MiB = 1024 * KiB;
 
 export type InputRejectedCode =
   | "zip_corrupt"
+  | "zip_stored_descriptor"
   | "zip_too_many_entries"
   | "zip_entry_too_large"
   | "zip_total_too_large"

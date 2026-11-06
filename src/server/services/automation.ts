@@ -13,6 +13,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
+import type { Reader } from "./access";
 import {
   automationSettings,
   customer,
@@ -47,9 +48,9 @@ function toSettings(row: typeof automationSettings.$inferSelect | undefined): Au
   };
 }
 
-export function getAutomation(ownerId: string): AutomationSettings {
+export function getAutomation(ownerId: string, q: Reader = db): AutomationSettings {
   return toSettings(
-    db.select().from(automationSettings).where(scoped(ownerId).where(automationSettings)).get(),
+    q.select().from(automationSettings).where(scoped(ownerId).where(automationSettings)).get(),
   );
 }
 

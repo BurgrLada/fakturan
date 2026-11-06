@@ -10,6 +10,7 @@ import { setClockForTests } from "@/server/clock";
 import { bankNotification } from "@/server/db/schema";
 import { reportSummary } from "@/server/reports/queries";
 import { registerSystemWidgets } from "@/server/reports/system-widgets";
+import { reportWidgetFailure } from "@/server/reports/widget-failures";
 import { runWidget, type WidgetContext } from "@/server/reports/widget-query";
 import { setPaused } from "@/server/services/automation";
 import { percentChange } from "@/components/dashboard/widget-number";
@@ -25,6 +26,9 @@ import {
 import { createTestDb } from "../helpers/db";
 import { webActor } from "../helpers/fixtures-mail";
 import { savePlan } from "../helpers/fixtures-recurring";
+
+const failures = vi.hoisted(() => ({ reportFailure: vi.fn() }));
+vi.mock("@/server/scheduler/report", () => failures);
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -121,6 +125,24 @@ describe("galerie", () => {
         expect(item.config.title, item.id).toBe(G[item.config.systemId]);
       }
     }
+  });
+
+  test("[DSH-020] poškozený widget nahlásí chybu jednou za klíč", () => {
+    failures.reportFailure.mockClear();
+    const broken = new Error("Neplatná konfigurace");
+    const [first, second] = [randomUUID(), randomUUID()];
+
+    for (let visit = 0; visit < 3; visit++) {
+      reportWidgetFailure(first, "dashboard.widget", broken, s.owner);
+    }
+    reportWidgetFailure(first, "dashboard.system_body", broken, s.owner);
+    reportWidgetFailure(second, "dashboard.widget", broken, s.owner);
+
+    expect(failures.reportFailure).toHaveBeenCalledTimes(3);
+    expect(failures.reportFailure).toHaveBeenNthCalledWith(1, broken, {
+      task: "dashboard.widget",
+      userId: s.owner,
+    });
   });
 
   test("předpověď, stárnutí a poměr úhrad dávají řádky nebo série", () => {

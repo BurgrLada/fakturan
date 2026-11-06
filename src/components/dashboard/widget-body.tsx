@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { GlobalFilter } from "@/lib/dashboard-filter";
 import { dashboardHref, widgetQuery } from "@/lib/dashboard-filter";
 import type { CalendarDate } from "@/lib/number-format";
@@ -10,13 +11,14 @@ import {
   type WidgetContext,
   type WidgetResult,
 } from "@/server/reports/widget-query";
-import { reportFailure } from "@/server/scheduler/report";
+import { reportWidgetFailure } from "@/server/reports/widget-failures";
 import { ServiceError } from "@/server/services/access";
 import { widgetResult } from "@/server/services/widgets";
 import { WidgetEmpty } from "./widget-empty";
 import { WidgetErrorMessage } from "./widget-error";
 import { widgetUnit } from "./widget-number";
-import { WidgetView } from "./widget-view";
+import { SystemBody } from "./system/system-body";
+import { chartHeight, WidgetView } from "./widget-view";
 
 const T = TEXTS.dashboard;
 const V = T.view;
@@ -50,11 +52,13 @@ async function load(config: WidgetConfig, env: WidgetEnv): Promise<WidgetResult>
 }
 
 export async function WidgetBody({
+  widgetId,
   config,
   title,
   h,
   env,
 }: {
+  widgetId: string;
   config: WidgetConfig;
   title: string;
   h: number;
@@ -84,8 +88,25 @@ export async function WidgetBody({
     if (error instanceof ServiceError) {
       return <WidgetEmpty text={error.message} action={reset} />;
     }
-    reportFailure(error, { task: "dashboard.widget", userId: env.userId });
+    reportWidgetFailure(widgetId, "dashboard.widget", error, env.userId);
     return <WidgetErrorMessage />;
+  }
+
+  // Called here rather than left to React, so an exception in it is caught and reported.
+  let body: ReactNode = undefined;
+  if (config.kind === "system") {
+    try {
+      body = SystemBody({
+        config,
+        result,
+        dateFormat: env.dateFormat,
+        unit,
+        height: chartHeight(h),
+      });
+    } catch (error) {
+      reportWidgetFailure(widgetId, "dashboard.system_body", error, env.userId);
+      return <WidgetErrorMessage />;
+    }
   }
 
   return (
@@ -97,6 +118,7 @@ export async function WidgetBody({
       h={h}
       dateFormat={env.dateFormat}
       mode={filter.compare}
+      body={body}
     />
   );
 }

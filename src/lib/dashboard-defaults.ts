@@ -68,7 +68,6 @@ export const WIDGET_GALLERY: GalleryItem[] = [
       source: "invoices",
       metric: "sum",
       measure: "outstanding",
-
       display: "number",
     }),
   },
@@ -81,7 +80,6 @@ export const WIDGET_GALLERY: GalleryItem[] = [
         source: "invoices",
         metric: "sum",
         measure: "overdue",
-
         display: "number",
       },
       "chart-4",

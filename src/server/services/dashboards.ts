@@ -566,8 +566,9 @@ export function previewImport(actor: Actor, raw: unknown): ImportPreview {
   const ownerId = ownerOf(actor);
   const file = readFile(raw);
   const layout = importLayout(ownWidgets(db, ownerId, file));
-  // Every widget runs a query, so the preview spends one attempt per widget, not per file.
-  enforceRateLimit(actor, RATE_RULES.widgetPreviewUser, layout.length);
+  // Every widget runs a query, so the preview spends one attempt per widget, not per file; a file
+  // without widgets still spends one.
+  enforceRateLimit(actor, RATE_RULES.widgetPreviewUser, Math.max(1, layout.length));
   registerSystemWidgets();
   const today = calendarDateInPrague(clock.now());
   return {

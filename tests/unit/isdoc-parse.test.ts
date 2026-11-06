@@ -82,6 +82,24 @@ describe("čtení ISDOC", () => {
     ]);
   });
 
+  test("[IMP-003] kód země UK se uloží jako GB a XI zůstane XI", () => {
+    const customerCountry =
+      "<Country><IdentificationCode>CZ</IdentificationCode><Name>Česká republika</Name></Country></PostalAddress><PartyTaxScheme><CompanyID>CZ99900025";
+    const withCode = (code: string, name = "") =>
+      parseIsdoc(
+        edited(
+          "faktura-czk.isdoc",
+          customerCountry,
+          `<Country><IdentificationCode>${code}</IdentificationCode><Name>${name}</Name></Country></PostalAddress><PartyTaxScheme><CompanyID>CZ99900025`,
+        ),
+      ).customer!.country;
+
+    expect(withCode("UK")).toBe("GB");
+    expect(withCode("uk")).toBe("GB");
+    expect(withCode("XI")).toBe("XI");
+    expect(withCode("UK", "Spojené království")).toBe("Spojené království");
+  });
+
   test("[IMP-003] dobropis z kladných částek je v modelu záporný", () => {
     const doc = parseIsdoc(fixture("dobropis.isdoc"));
     expect(doc.type).toBe("credit_note");

@@ -536,9 +536,9 @@ export type NoticeRow = {
 const DEFAULT_LIST_LIMIT = 100;
 const OTHER_CANDIDATES = 50;
 
-export function listNotices(ownerId: string, filter: NoticeFilter): NoticeRow[] {
+export function listNotices(ownerId: string, filter: NoticeFilter, q: Reader = db): NoticeRow[] {
   if (filter.statuses.length === 0) return [];
-  const rows = db
+  const rows = q
     .select()
     .from(bankNotification)
     .where(scoped(ownerId).where(bankNotification, (t) => inArray(t.status, [...filter.statuses])))
@@ -547,14 +547,14 @@ export function listNotices(ownerId: string, filter: NoticeFilter): NoticeRow[] 
     .all();
   if (rows.length === 0) return [];
 
-  const linked = db
+  const linked = q
     .select({
       noticeId: payment.notificationId,
       invoiceId: invoice.id,
       number: invoice.number,
     })
     .from(payment)
-    .innerJoin(invoice, eq(invoice.id, payment.invoiceId))
+    .innerJoin(invoice, and(eq(invoice.id, payment.invoiceId), scoped(ownerId).where(invoice)))
     .where(
       scoped(ownerId).where(payment, (t) =>
         inArray(
@@ -595,8 +595,11 @@ export function listNotices(ownerId: string, filter: NoticeFilter): NoticeRow[] 
   });
 }
 
-export function noticeCounts(ownerId: string): { pending: number; unrecognized: number } {
-  const rows = db
+export function noticeCounts(
+  ownerId: string,
+  q: Reader = db,
+): { pending: number; unrecognized: number } {
+  const rows = q
     .select({ status: bankNotification.status, n: sql<number>`count(*)` })
     .from(bankNotification)
     .where(

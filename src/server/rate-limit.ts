@@ -57,6 +57,10 @@ export function checkRateLimit(
   rateRule: RateRule,
   cost = 1,
 ): { allowed: boolean; retryAfterSeconds: number; firstDenial: boolean } {
+  // A cost of 0 would read the limit without spending it, one above it could never pass.
+  if (!Number.isInteger(cost) || cost < 1 || cost > rateRule.limit) {
+    throw new RangeError(`Invalid cost ${cost} for rate limit ${rateRule.name}`);
+  }
   const id = `${rateRule.name}:${key}`;
   const now = clock.now();
   const windowMs = rateRule.windowSeconds * 1000;

@@ -40,6 +40,7 @@ export function WidgetCard({ widget, env }: { widget: DashboardWidgetView; env: 
         <WidgetErrorBoundary>
           <Suspense fallback={<WidgetLoading />}>
             <WidgetBody
+              widgetId={widget.id}
               config={widget.config}
               title={widgetTitle(widget.config)}
               h={widget.h}

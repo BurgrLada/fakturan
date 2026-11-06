@@ -158,7 +158,7 @@ export async function readZipEntries<T>(
     // A stored entry with a data descriptor has no length: fflate ends it at the first local
     // header inside, so a stored archive would spill its entries into this one.
     if (file.compression === 0 && flags & FLAG_DESCRIPTOR) {
-      return fail(new InputRejected("zip_corrupt", name, "uložená položka bez délky"));
+      return fail(new InputRejected("zip_stored_descriptor", name));
     }
 
     const skip = limits.keepAll

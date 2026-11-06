@@ -112,6 +112,37 @@ test("[DSH-001] widget jde přetáhnout, zvětšit a po obnovení zůstane na m�
   await expect(page.getByRole("navigation", { name: "Dashboardy" })).toHaveCount(0);
 });
 
+test("[DSH-001] Zpět v prohlížeči s neuloženými změnami se zeptá a Zrušit nechá editor otevřený", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openEditor(page, baseURL);
+  const card = editCard(page, "Průměrná doba úhrady");
+  const { column } = await gridStep(page);
+  await dragBy(page, card.locator(".widget-drag"), column, 0);
+  await expect(card).toHaveAttribute("data-box", "9,2,3,2");
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+
+  let warning = "";
+  page.once("dialog", (dialog) => {
+    warning = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.evaluate(() => history.back());
+  await expect.poll(() => warning).toBe("Rozložení není uložené. Opravdu odejít bez uložení?");
+  await expect(page).toHaveURL(/\/upravit$/);
+  await expect(page.getByRole("heading", { name: "Úpravy dashboardu", level: 1 })).toBeVisible();
+  await expect(card).toHaveAttribute("data-box", "9,2,3,2");
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.evaluate(() => history.back());
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await expect(page.getByTestId("dashboard-grid")).toBeVisible();
+});
+
 test("[UI-008] rozložení jde změnit jen klávesnicí a změna se oznámí", async ({
   page,
   freshApp,
@@ -403,8 +434,8 @@ test("[UI-007] na telefonu chybí vstup do úprav a Přehled jde číst", async 
   await expect(page.locator(".react-grid-layout")).toHaveCount(0);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
-  expect(gridLoaded()).toBe(false);
-  expect(gridStyles()).toBe(false);
+  expect(await gridLoaded()).toBe(false);
+  expect(await gridStyles()).toBe(false);
 
   // The same check finds the library once the editor is wide enough to load it.
   await page.setViewportSize({ width: 1280, height: 800 });

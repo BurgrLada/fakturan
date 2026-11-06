@@ -133,7 +133,7 @@ describe("dávka importu", () => {
     ]);
     const { id, batch } = await parsed(owner, [{ name: "a.zip", bytes: stored }]);
     expect(batch.status).toBe("failed");
-    expect(batch.error).toContain(TEXTS.importing.rejected.zip_corrupt);
+    expect(batch.error).toContain(TEXTS.importing.rejected.zip_stored_descriptor);
     expect(db.select().from(file).where(eq(file.importBatchId, id)).all()).toEqual([]);
 
     const bomb = await parsed(owner, [{ name: "b.zip", bytes: hostile.lyingHeaderBomb() }]);
