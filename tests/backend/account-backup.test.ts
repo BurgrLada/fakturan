@@ -24,6 +24,7 @@ import {
   RESTORE_LIMITS,
 } from "@/lib/backup-format";
 import { TEXTS } from "@/lib/texts";
+import { MEMORY_LIMITS } from "@/server/backup/memory-guard";
 import { BACKUP_TABLES } from "@/server/backup/tables";
 import { snapshot, SnapshotTooLarge } from "@/server/backup/snapshot";
 import { setClockForTests } from "@/server/clock";
@@ -35,6 +36,7 @@ import {
   exportJob,
   file,
   invoice,
+  invoiceTemplate,
   job,
   mailSettings,
   payment,
@@ -508,6 +510,33 @@ describe("záloha účtu", () => {
     );
   });
 
+  test("[SEC-005] záloha nad hlídačem paměti skončí hláškou předem", async () => {
+    const owner = seedOwner(db, NOW);
+    const archived = randomUUID();
+    db.insert(file)
+      .values({
+        id: archived,
+        userId: owner,
+        kind: "audit_archive",
+        mimeType: "application/x-ndjson",
+        name: "a.jsonl",
+        size: 1,
+        createdAt: NOW,
+      })
+      .run();
+    // Enough lines for the guard to look at least once.
+    writeBlob(owner, archived, Buffer.from('{"a":1}\n'.repeat(MEMORY_LIMITS.everyLines + 1)));
+    const real = process.memoryUsage.bind(process);
+    let calls = 0;
+    vi.spyOn(process, "memoryUsage").mockImplementation(() => ({
+      ...real(),
+      heapUsed: 100 * 1024 * 1024 + 641 * 1024 * 1024 * calls++,
+      arrayBuffers: 0,
+    }));
+    expect(await backedUp(owner)).toMatchObject({ status: "failed", reason: E.notRestorable });
+    expect(calls).toBeGreaterThan(1);
+  });
+
   test("[EXP-006] limity obnovy drží paměť a záloha je zrcadlí", () => {
     expect(RESTORE_LIMITS).toMatchObject({
       maxLines: 300_000,
@@ -543,6 +572,7 @@ describe("záloha účtu", () => {
         nodes: 11,
         containers: 1,
         lineContainers: 1,
+        lineDepth: 1,
       }),
     ).toBe(E.notRestorable);
     expect(
@@ -550,6 +580,7 @@ describe("záloha účtu", () => {
         nodes: 5,
         containers: 4,
         lineContainers: 1,
+        lineDepth: 1,
       }),
     ).toBe(E.notRestorable);
     expect(
@@ -557,6 +588,7 @@ describe("záloha účtu", () => {
         nodes: 5,
         containers: 1,
         lineContainers: 3,
+        lineDepth: 1,
       }),
     ).toBe(E.notRestorable);
     expect(
@@ -564,11 +596,66 @@ describe("záloha účtu", () => {
         nodes: 5,
         containers: 1,
         lineContainers: 1,
+        lineDepth: 1,
       }),
     ).toBeNull();
     const owner = seedOwner(db, NOW);
     const stats = snapshot(owner, join(DATA_DIR, "snimek", randomUUID()), RESTORE_LIMITS).nodes;
     expect(stats.nodes).toBeGreaterThan(stats.containers);
     expect(stats.lineContainers).toBeGreaterThan(0);
+    expect(stats.lineDepth).toBeGreaterThan(0);
+  });
+
+  test("[EXP-006] účet o 300 000 řádcích v poměru 1:3:1 je obnovitelný", () => {
+    const MiB = 1024 * 1024;
+    // Sizes measured on real rows (plan 8 re-review): 2.4 KB an invoice, 0.3 KB a line.
+    const entries = {
+      "data/invoice.jsonl": { size: 140 * MiB },
+      "data/invoice_line.jsonl": { size: 52 * MiB },
+      "data/payment.jsonl": { size: 19 * MiB },
+      "audit.jsonl": { size: 0 },
+    };
+    const counts = {
+      tables: { invoice: 60_000, invoice_line: 180_000, payment: 60_000 },
+      files: 0,
+      audit: 0,
+    };
+    expect(
+      restorableProblem(entries, counts, RESTORE_LIMITS, 2_400, 0, {
+        nodes: 19_300_000,
+        containers: 590_000,
+        lineContainers: 6,
+        lineDepth: 4,
+      }),
+    ).toBeNull();
+    expect(RESTORE_LIMITS.maxNodes).toBe(25_000_000);
+  });
+
+  test("[EXP-006] záloha s řádkem hloubky 41 skončí hláškou předem", async () => {
+    const counts = { tables: { unit: 1 }, files: 0, audit: 0 };
+    const entries = { "data/unit.jsonl": { size: 10 } };
+    const stats = { nodes: 5, containers: 1, lineContainers: 1 };
+    expect(
+      restorableProblem(entries, counts, RESTORE_LIMITS, 0, 0, { ...stats, lineDepth: 41 }),
+    ).toBe(E.notRestorable);
+    expect(
+      restorableProblem(entries, counts, RESTORE_LIMITS, 0, 0, { ...stats, lineDepth: 40 }),
+    ).toBeNull();
+
+    const owner = seedOwner(db, NOW);
+    // The row object is the first level, so 40 levels of document make a line of depth 41.
+    let deep: Record<string, unknown> = {};
+    for (let level = 1; level < 40; level++) deep = { x: deep };
+    db.insert(invoiceTemplate)
+      .values({
+        id: randomUUID(),
+        userId: owner,
+        name: "Hluboká",
+        document: deep as never,
+        createdAt: NOW,
+        updatedAt: NOW,
+      })
+      .run();
+    expect(await backedUp(owner)).toMatchObject({ status: "failed", reason: E.notRestorable });
   });
 });

@@ -19,8 +19,10 @@ import { InputRejected } from "@/lib/safe-input/limits";
 import { TEXTS } from "@/lib/texts";
 import pkg from "../../../package.json";
 import type { Actor } from "../audit/context";
+import { createMemoryGuard, type MemoryGuard } from "../backup/memory-guard";
 import { buildIdMap, remapIds } from "../backup/remap";
 import { RestoreRejected, scanArchive, type ArchiveRow } from "../backup/restore-read";
+import { eachSpooled, spoolWriter, type SpoolWriter } from "../backup/spool";
 import { BACKUP_TABLES, type BackupTable } from "../backup/tables";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
@@ -50,6 +52,9 @@ const E = TEXTS.restore.errors;
 const ID = /^[0-9a-f-]{36}$/;
 const BLOB_LIST = "blobs.txt";
 const INSERT_CHUNK = 50;
+// A chunk of 50 rows near the line cap would be 100 MiB of text before its objects; bytes close it
+// first.
+const INSERT_BYTES = 4 * 1024 * 1024;
 // Created by the app on its own for any account; a restore replaces them (R-32).
 const AUTOMATIC_TABLES = new Set(["preferences", "unit", "dashboard", "dashboard_widget"]);
 const FINISHED_BATCH = new Set(["done", "undone", "failed"]);
@@ -203,10 +208,10 @@ export function purgeStaleRestores(now: Date): number {
 }
 
 // R-34: nothing restored may act by itself; switching automation on again is a person's decision.
+// Changes the row in place, like remapIds.
 function silenced(table: string, row: ArchiveRow): ArchiveRow {
   if (table === "automation_settings") {
-    return {
-      ...row,
+    Object.assign(row, {
       recurring_send: false,
       reminders: false,
       payment_receipt: false,
@@ -214,24 +219,18 @@ function silenced(table: string, row: ArchiveRow): ArchiveRow {
       daily_digest: false,
       paused: false,
       reminders_open_since: null,
-    };
-  }
-  if (table === "preferences") return { ...row, advance_final_mode: "draft" };
+    });
+  } else if (table === "preferences") row.advance_final_mode = "draft";
   // Paused, not only unconfirmed: a plan that issues by itself would hand out numbers the source
   // instance may still be using. Resuming it is the person's call and goes through markMissed.
-  if (table === "recurring_invoice") {
-    return {
-      ...row,
-      send_confirmed_at: null,
-      status: row.status === "active" ? "paused" : row.status,
-    };
-  }
-  if (table === "mail_settings") return { ...row, verified_at: null };
-  if (table === "email_log" && (row.status === "queued" || row.status === "sending")) {
-    return { ...row, status: "cancelled" };
-  }
-  if (table === "import_batch" && !FINISHED_BATCH.has(row.status as string)) {
-    return { ...row, status: "failed" };
+  else if (table === "recurring_invoice") {
+    row.send_confirmed_at = null;
+    if (row.status === "active") row.status = "paused";
+  } else if (table === "mail_settings") row.verified_at = null;
+  else if (table === "email_log" && (row.status === "queued" || row.status === "sending")) {
+    row.status = "cancelled";
+  } else if (table === "import_batch" && !FINISHED_BATCH.has(row.status as string)) {
+    row.status = "failed";
   }
   return row;
 }
@@ -253,8 +252,11 @@ function insertValues(entry: BackupTable, row: ArchiveRow, ownerId: string) {
   return values;
 }
 
+// Only counters and the folder of the spooled rows; the id map is the one structure of a restore
+// that grows with the archive (R-1).
 type Prepared = {
-  rows: Map<string, ArchiveRow[]>;
+  rowsDir: string;
+  rows: Record<string, number>;
   auditFileId: string;
   auditBytes: number;
   files: number;
@@ -279,61 +281,111 @@ function removeNewBlobs(ownerId: string, id: string): void {
   for (const blob of listedBlobs(tempDir(ownerId, id, "restore"))) removeBlob(ownerId, blob);
 }
 
-async function prepare(run: { job: Job; ownerId: string; id: string }): Promise<Prepared> {
+type Run = { job: Job; ownerId: string; id: string; guard: MemoryGuard };
+
+async function prepare(run: Run): Promise<Prepared> {
   const path = blobPath(run.ownerId, run.id);
   // First pass: limits, manifest, hashes and every row, and nothing is written yet.
   const ids = new Map<string, string[]>();
-  await scanArchive(path, {
-    rows: async (entry, rows) => {
-      if (entry.columns.id === "id")
-        ids.set(
-          entry.name,
-          rows.map((row) => row.id as string),
-        );
-      await yieldHeavy(run.job);
+  await scanArchive(
+    path,
+    {
+      row: (entry, row) => {
+        if (entry.columns.id !== "id") return;
+        const list = ids.get(entry.name);
+        if (list) list.push(row.id as string);
+        else ids.set(entry.name, [row.id as string]);
+      },
+      tableDone: (entry) => {
+        if (entry.columns.id === "id" && !ids.has(entry.name)) ids.set(entry.name, []);
+        return yieldHeavy(run.job);
+      },
+      file: () => yieldHeavy(run.job),
     },
-    file: () => yieldHeavy(run.job),
-  });
+    RESTORE_LIMITS,
+    run.guard,
+  );
   const idMap = buildIdMap(ids);
+  const fileCount = ids.get("file")?.length ?? 0;
+  ids.clear();
   moveExport(run.ownerId, run.id, ["running"], {
-    progressTotal: BACKUP_TABLES.length + (ids.get("file")?.length ?? 0),
+    progressTotal: BACKUP_TABLES.length + fileCount,
   });
   const dir = tempDir(run.ownerId, run.id, "restore");
-  mkdirSync(dir, { recursive: true });
+  const rowsDir = join(dir, "rows");
+  mkdirSync(rowsDir, { recursive: true });
   const prepared: Prepared = {
-    rows: new Map(),
+    rowsDir,
+    rows: {},
     auditFileId: randomUUID(),
     auditBytes: 0,
     files: 0,
     sha256: "",
   };
   let done = 0;
-  // Second pass: the same checks again, then new ids and the blobs under them.
-  const summary = await scanArchive(path, {
-    rows: async (entry, rows) => {
-      prepared.rows.set(
-        entry.name,
-        rows.map((row) => silenced(entry.name, remapIds(row, entry, idMap))),
-      );
-      moveExport(run.ownerId, run.id, ["running"], { progress: (done += 1) });
-      await yieldHeavy(run.job);
-    },
-    file: async (oldId, bytes) => {
-      newBlob(run.ownerId, dir, idMap.tables.get("file")!.get(oldId)!, bytes);
-      prepared.files += 1;
-      moveExport(run.ownerId, run.id, ["running"], { progress: (done += 1) });
-      await yieldHeavy(run.job);
-    },
-    audit: (bytes) => {
-      newBlob(run.ownerId, dir, prepared.auditFileId, bytes);
-      prepared.auditBytes = bytes.length;
-    },
-  });
-  prepared.sha256 = summary.sha256;
+  const spool: { writer: SpoolWriter | null } = { writer: null };
+  try {
+    // Second pass: the same checks again, then new ids, each row to the file of its table and
+    // the blobs under their new ids.
+    const summary = await scanArchive(
+      path,
+      {
+        row: (entry, row) => {
+          spool.writer ??= spoolWriter(rowsDir, entry.name);
+          spool.writer.append(silenced(entry.name, remapIds(row, entry, idMap)));
+        },
+        tableDone: async (entry) => {
+          prepared.rows[entry.name] = spool.writer?.close() ?? 0;
+          spool.writer = null;
+          moveExport(run.ownerId, run.id, ["running"], { progress: (done += 1) });
+          await yieldHeavy(run.job);
+        },
+        file: async (oldId, bytes) => {
+          newBlob(run.ownerId, dir, idMap.tables.get("file")!.get(oldId)!, bytes);
+          prepared.files += 1;
+          moveExport(run.ownerId, run.id, ["running"], { progress: (done += 1) });
+          await yieldHeavy(run.job);
+        },
+        audit: (bytes) => {
+          newBlob(run.ownerId, dir, prepared.auditFileId, bytes);
+          prepared.auditBytes = bytes.length;
+        },
+      },
+      RESTORE_LIMITS,
+      run.guard,
+    );
+    prepared.sha256 = summary.sha256;
+  } finally {
+    spool.writer?.close();
+  }
   return prepared;
 }
 
-function commit(ownerId: string, id: string, prepared: Prepared): void {
+function insertSpooled(tx: Tx, entry: BackupTable, ownerId: string, run: Run, from: Prepared) {
+  let chunk: Record<string, unknown>[] = [];
+  let bytes = 0;
+  const flush = () => {
+    if (chunk.length === 0) return;
+    tx.insert(entry.table)
+      .values(chunk as never)
+      .run();
+    chunk = [];
+    bytes = 0;
+    run.guard.check();
+  };
+  const count = eachSpooled(from.rowsDir, entry.name, (row, size) => {
+    chunk.push(insertValues(entry, row, ownerId));
+    bytes += size;
+    if (chunk.length >= INSERT_CHUNK || bytes >= INSERT_BYTES) flush();
+  });
+  flush();
+  // Written by this restore a moment ago; a different count means the folder was touched.
+  if (count !== (from.rows[entry.name] ?? 0)) throw new Error("Mezisoubor obnovy nesedí");
+  return count;
+}
+
+function commit(run: Run, prepared: Prepared): void {
+  const { ownerId, id } = run;
   const actor: Actor = { userId: ownerId, source: "import" };
   mutate(actor, "account.restore", (tx, audit) => {
     // A correction may come before its original; the check waits for the end of the transaction.
@@ -343,18 +395,7 @@ function commit(ownerId: string, id: string, prepared: Prepared): void {
     tx.delete(preferences).where(scoped(ownerId).where(preferences)).run();
     tx.delete(unit).where(scoped(ownerId).where(unit)).run();
     let total = 0;
-    for (const entry of BACKUP_TABLES) {
-      const rows = prepared.rows.get(entry.name) ?? [];
-      total += rows.length;
-      for (let start = 0; start < rows.length; start += INSERT_CHUNK) {
-        const chunk = rows.slice(start, start + INSERT_CHUNK);
-        tx.insert(entry.table)
-          .values(chunk.map((row) => insertValues(entry, row, ownerId)) as never)
-          .run();
-      }
-      // Inserted rows are no longer needed; the heap shrinks table by table during the commit.
-      prepared.rows.delete(entry.name);
-    }
+    for (const entry of BACKUP_TABLES) total += insertSpooled(tx, entry, ownerId, run, prepared);
     const now = clock.now();
     tx.insert(file)
       .values({
@@ -415,9 +456,11 @@ export async function runRestore(job: Job): Promise<void> {
   if (row && row.kind !== "restore") throw new Error("Export nepatří do úlohy obnovy");
   if (!row || !moveExport(ownerId, id, ["queued"], { status: "running", progress: 0 })) return;
   try {
-    const prepared = await prepare({ job, ownerId, id });
+    // Started before the first pass, so the growth it allows covers the whole restore.
+    const run: Run = { job, ownerId, id, guard: createMemoryGuard() };
+    const prepared = await prepare(run);
     try {
-      commit(ownerId, id, prepared);
+      commit(run, prepared);
     } catch (error) {
       // Every ref was matched against the archive already; the deferred check at COMMIT is the
       // net for anything that still points nowhere.

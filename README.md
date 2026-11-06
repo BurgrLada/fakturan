@@ -88,11 +88,16 @@ zůstane účet beze změny. Po obnově jsou všechny automatiky vypnuté, pravi
 spustíte na jejich kartě), plán s odesíláním čeká na nové potvrzení, historie změn ze zálohy je ke
 stažení v Nastavení, Záloha a SMTP i schránku s avízy je nutné zadat znovu. Limity: archiv 1 GiB, soubor v něm
 25 MiB, data všech tabulek dohromady 256 MiB po rozbalení, nejvýš 300 000 řádků (tabulky i
-historie změn dohromady), 1 milion objektů a 10 milionů hodnot JSON v datech a 28 000 položek
-archivu (tedy zhruba tolik souborů). Obnova drží řádky
-celého účtu v paměti až do zápisu, proto velmi velký účet nad těmito limity zálohovat a obnovit
-nejde; záloha, která by limity překročila, vůbec nevznikne a řekne to. Smazání účtu nabídne zálohu, ale nečeká na ni a archiv zmizí s účtem, proto ho stáhněte
-předem.
+historie změn dohromady) a 28 000 položek archivu (tedy zhruba tolik souborů). Obnova nedrží
+řádky v paměti: každý ověřený řádek s novými ID zapíše do mezisouboru své tabulky ve složce
+obnovy a zápis je čte zpět po řádcích; v paměti zůstává jen mapa ID a právě čtená položka archivu
+(do 200 MiB). Mez paměti drží hlídač: když obnova naroste o víc než 640 MiB nebo halda přesáhne
+60 % svého limitu, archiv se odmítne a účet zůstane beze změny. Stejný hlídač běží při vytváření
+zálohy. Počty objektů a hodnot JSON v datech (1 milion a 25 milionů) jsou jen levná předběžná
+kontrola. Účet o 300 000 řádcích (faktury, položky a platby) se do limitů vejde; záloha, která by
+limity překročila, vůbec nevznikne a řekne to. Mezisoubory potřebují na svazku volné místo zhruba
+jako data archivu a po obnově i po chybě zmizí. Smazání účtu nabídne zálohu, ale nečeká na ni a
+archiv zmizí s účtem, proto ho stáhněte předem.
 
 ## Automatizace a pošta
 

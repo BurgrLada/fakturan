@@ -17,6 +17,12 @@ import { auditLog, file } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { blobPath } from "../files/store";
 import { isForeignActor } from "../services/audit-read";
+import {
+  createMemoryGuard,
+  MEMORY_LIMITS,
+  RestoreRejected,
+  type MemoryGuard,
+} from "./memory-guard";
 import { BACKUP_TABLES, FOLDED_FILES, type BackupTable } from "./tables";
 
 const PAGE = 500;
@@ -40,7 +46,12 @@ export type Snapshot = {
   nodes: NodeStats;
 };
 
-export type NodeStats = { nodes: number; containers: number; lineContainers: number };
+export type NodeStats = {
+  nodes: number;
+  containers: number;
+  lineContainers: number;
+  lineDepth: number;
+};
 
 type LineStats = { longest: number } & NodeStats;
 
@@ -50,8 +61,8 @@ type Lines = {
   close(): void;
 };
 
-// Counted as the restore will count them: rows are held until the commit, the audit is not.
-function lineFile(path: string, stats: LineStats, retained = true): Lines {
+// Counted as the restore will count them: the nodes of rows add up, those of the audit do not.
+function lineFile(path: string, stats: LineStats, watch: Watch, retained = true): Lines {
   const fd = openSync(path, "wx");
   let pending = "";
   const flush = () => {
@@ -59,9 +70,12 @@ function lineFile(path: string, stats: LineStats, retained = true): Lines {
     pending = "";
   };
   const addLine = (line: string) => {
-    stats.longest = Math.max(stats.longest, Buffer.byteLength(line));
+    const bytes = Buffer.byteLength(line);
+    stats.longest = Math.max(stats.longest, bytes);
+    watch(bytes);
     const shape = jsonNodes(line);
     stats.lineContainers = Math.max(stats.lineContainers, shape.containers);
+    stats.lineDepth = Math.max(stats.lineDepth, shape.depth);
     if (retained) {
       stats.nodes += shape.nodes;
       stats.containers += shape.containers;
@@ -144,21 +158,51 @@ function keepBlob(ownerId: string, id: string, target: string): void {
   }
 }
 
+type Watch = (bytes: number) => void;
+
+// The restore's memory guard over the backup as well (R-3): a backup that grows past it stops with
+// the same answer as one over the limits.
+function memoryWatch(guard: MemoryGuard): Watch {
+  let lines = 0;
+  let bytes = 0;
+  return (size) => {
+    lines += 1;
+    bytes += size;
+    if (lines < MEMORY_LIMITS.everyLines && bytes < MEMORY_LIMITS.everyBytes) return;
+    lines = 0;
+    bytes = 0;
+    try {
+      guard.check();
+    } catch (error) {
+      if (error instanceof RestoreRejected) throw new SnapshotTooLarge();
+      throw error;
+    }
+  };
+}
+
 // better-sqlite3 cannot hold a read transaction across an await, so everything the archive needs
 // is written out here in one synchronous transaction; the event loop waits for its length.
 export function snapshot(
   ownerId: string,
   dir: string,
   limits: RestoreLimits = RESTORE_LIMITS,
+  guard: MemoryGuard = createMemoryGuard(),
 ): Snapshot {
   mkdirSync(join(dir, FILES_DIR), { recursive: true });
-  const stats: LineStats = { longest: 0, nodes: 0, containers: 0, lineContainers: 0 };
+  const watch = memoryWatch(guard);
+  const stats: LineStats = {
+    longest: 0,
+    nodes: 0,
+    containers: 0,
+    lineContainers: 0,
+    lineDepth: 0,
+  };
   return db.transaction((tx) => {
     const tables: Record<string, number> = {};
     const files: string[] = [];
     for (const entry of BACKUP_TABLES) {
       const table = entry.table as Owned;
-      const lines = lineFile(join(dir, `${entry.name}.jsonl`), stats);
+      const lines = lineFile(join(dir, `${entry.name}.jsonl`), stats, watch);
       try {
         tables[entry.name] = dumpRows(
           tx,
@@ -176,7 +220,7 @@ export function snapshot(
     }
     for (const id of files) keepBlob(ownerId, id, join(dir, FILES_DIR, id));
     const rowsSoFar = Object.values(tables).reduce((sum, n) => sum + n, 0);
-    const auditLines = lineFile(join(dir, AUDIT_FILE), stats, false);
+    const auditLines = lineFile(join(dir, AUDIT_FILE), stats, watch, false);
     let audit = 0;
     try {
       // The history an earlier restore archived comes first, line for line as it was archived.
@@ -223,13 +267,13 @@ export function snapshot(
     } finally {
       auditLines.close();
     }
-    const { nodes, containers, lineContainers } = stats;
+    const { nodes, containers, lineContainers, lineDepth } = stats;
     return {
       tables,
       files,
       audit,
       longestLine: stats.longest,
-      nodes: { nodes, containers, lineContainers },
+      nodes: { nodes, containers, lineContainers, lineDepth },
     };
   });
 }

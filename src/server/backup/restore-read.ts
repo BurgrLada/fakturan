@@ -23,6 +23,12 @@ import { readZipEntries } from "@/lib/safe-input/zip";
 import { TEXTS } from "@/lib/texts";
 import { PAYMENT_MEANS_CODES } from "../isdoc/parse";
 import {
+  createMemoryGuard,
+  MEMORY_LIMITS,
+  RestoreRejected,
+  type MemoryGuard,
+} from "./memory-guard";
+import {
   BACKUP_TABLES,
   backupColumnsHash,
   FOLDED_FILES,
@@ -33,19 +39,15 @@ import {
 const E = TEXTS.restore.errors;
 const KiB = 1024;
 
-// The message is shown to the person; it names at most a table of the registry, never a value or
-// an entry name from the archive.
-export class RestoreRejected extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RestoreRejected";
-  }
-}
+export { RestoreRejected };
 
 export type ArchiveRow = Record<string, unknown>;
 
+// `row` sees each checked row as it is read and must not keep it; `tableDone` follows the last row
+// of a table and may wait.
 export type ArchiveHandlers = {
-  rows?: (entry: BackupTable, rows: ArchiveRow[]) => void | Promise<void>;
+  row?: (entry: BackupTable, row: ArchiveRow) => void;
+  tableDone?: (entry: BackupTable, count: number) => void | Promise<void>;
   file?: (id: string, bytes: Uint8Array) => void | Promise<void>;
   audit?: (bytes: Uint8Array) => void | Promise<void>;
 };
@@ -207,10 +209,32 @@ function rowSchema(entry: BackupTable): z.ZodType<ArchiveRow> {
   return schema;
 }
 
-type LineBudget = { limits: RestoreLimits; total: number; containers: number; nodes: number };
+type LineBudget = {
+  limits: RestoreLimits;
+  total: number;
+  containers: number;
+  nodes: number;
+  guard: MemoryGuard;
+  linesSinceCheck: number;
+  bytesSinceCheck: number;
+};
+
+function watchMemory(budget: LineBudget, bytes: number): void {
+  budget.linesSinceCheck += 1;
+  budget.bytesSinceCheck += bytes;
+  if (
+    budget.linesSinceCheck >= MEMORY_LIMITS.everyLines ||
+    budget.bytesSinceCheck >= MEMORY_LIMITS.everyBytes
+  ) {
+    budget.linesSinceCheck = 0;
+    budget.bytesSinceCheck = 0;
+    budget.guard.check();
+  }
+}
 
 // Walks the entry by newline and decodes one line at a time: an entry of millions of tiny lines
-// never becomes one string or one array (C-1). `take` sees each line as it is found and may stop.
+// never becomes one string or one array (C-1). `take` sees each line as it is found and may stop;
+// nothing holds the line after it returns.
 function eachLine(
   bytes: Uint8Array,
   budget: LineBudget,
@@ -232,8 +256,8 @@ function eachLine(
     if (containers > budget.limits.maxLineContainers || depth > budget.limits.maxLineDepth) {
       throw onError();
     }
-    // Rows stay in memory until the commit, so their objects and values count for the archive;
-    // the audit is only read through.
+    // A cheap prefilter on the bytes before the parser runs (R-4); the memory guard is the bound.
+    // The audit is only read through and counts per line alone.
     if (retained) {
       budget.containers += containers;
       budget.nodes += nodes;
@@ -256,6 +280,7 @@ function eachLine(
       throw onError();
     }
     take(value);
+    watchMemory(budget, end - start + 1);
     start = end + 1;
   }
   return count;
@@ -268,18 +293,19 @@ function upgrade(table: string, row: unknown, v: number): unknown {
   return current;
 }
 
-function validRows(
+function eachRow(
   entry: BackupTable,
   bytes: Uint8Array,
   manifest: BackupManifest,
   budget: LineBudget,
-): ArchiveRow[] {
+  take: (row: ArchiveRow) => void,
+): number {
   const schema = rowSchema(entry);
-  const rows: ArchiveRow[] = [];
   const expected = manifest.counts.tables[entry.name] ?? 0;
   const invalid = () => new RestoreRejected(E.row(entry.name));
+  let count = 0;
   eachLine(bytes, budget, budget.limits.maxLinesPerTable, invalid, (line) => {
-    if (rows.length >= expected) throw new RestoreRejected(E.counts);
+    if (count >= expected) throw new RestoreRejected(E.counts);
     let upgraded: unknown;
     try {
       upgraded = upgrade(entry.name, line, manifest.v);
@@ -288,9 +314,10 @@ function validRows(
     }
     const parsed = schema.safeParse(upgraded);
     if (!parsed.success) throw invalid();
-    rows.push(parsed.data);
+    count += 1;
+    take(parsed.data);
   });
-  return rows;
+  return count;
 }
 
 const auditLine = z.custom<object>(
@@ -382,13 +409,22 @@ async function* hashed(path: string, hash: ReturnType<typeof createHash>) {
 
 // One full pass over the archive: every limit, the manifest first, then each entry against its
 // hash and each row against the registry. Called twice by a restore; the handlers decide what a
-// pass keeps (R-32).
+// pass keeps (R-32). One guard may watch both passes, so growth counts from the first.
 export async function scanArchive(
   path: string,
   handlers: ArchiveHandlers,
   limits: RestoreLimits = RESTORE_LIMITS,
+  guard: MemoryGuard = createMemoryGuard(),
 ): Promise<ArchiveSummary> {
-  const budget: LineBudget = { limits, total: 0, containers: 0, nodes: 0 };
+  const budget: LineBudget = {
+    limits,
+    total: 0,
+    containers: 0,
+    nodes: 0,
+    guard,
+    linesSinceCheck: 0,
+    bytesSinceCheck: 0,
+  };
   const archiveHash = createHash("sha256");
   const byName = new Map(BACKUP_TABLES.map((entry) => [`data/${entry.name}.jsonl`, entry]));
   const seen = new Set<string>();
@@ -396,7 +432,7 @@ export async function scanArchive(
   const files: string[] = [];
   let manifest: BackupManifest | null = null;
   let auditCount = 0;
-  let fileRows: string[] = [];
+  const fileRows: string[] = [];
   let rejection: unknown = null;
   let dataBytes = 0;
 
@@ -430,6 +466,7 @@ export async function scanArchive(
   }
 
   async function onEntry(name: string, bytes: Uint8Array): Promise<void> {
+    guard.check();
     if (!manifest) {
       if (name !== MANIFEST_ENTRY) throw new RestoreRejected(E.manifest);
       manifest = checkManifest(bytes, limits);
@@ -446,10 +483,11 @@ export async function scanArchive(
     if (table) {
       dataBytes += bytes.length;
       if (dataBytes > limits.dataTotalBytes) throw new RestoreRejected(E.dataTooLarge);
-      const rows = validRows(table, bytes, manifest, budget);
-      counted[table.name] = rows.length;
-      if (table.name === "file") fileRows = rows.map((row) => row.id as string);
-      await handlers.rows?.(table, rows);
+      counted[table.name] = eachRow(table, bytes, manifest, budget, (row) => {
+        if (table.name === "file") fileRows.push(row.id as string);
+        handlers.row?.(table, row);
+      });
+      await handlers.tableDone?.(table, counted[table.name]!);
     } else if (name.startsWith("files/")) {
       files.push(name.slice("files/".length));
       await handlers.file?.(name.slice("files/".length), bytes);

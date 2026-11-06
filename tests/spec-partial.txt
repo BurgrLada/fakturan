@@ -8,3 +8,4 @@ IMP-000	Fakturoid, iDoklad, SuperFaktura, Vyfakturuj a ABRA Flexi jsou ověřen�
 IMP-005	Ruční přiložení PDF k importovanému dokladu po importu, přiloží se jen PDF z importu	plán 9
 IMP-002	Vestavěné předlohy čekají na reálné soubory Fakturoidu a iDokladu	kap. 24
 TST-020	Skript a test nad smyšlenou fixturou hotové; čeká na porovnání uživatelem proti zdrojovému systému na skutečných dokladech	zadavatel, kap. 24
+EXP-006	Účet s víc než 28 000 soubory nejde zálohovat, chybí archiv v2 se streamovaným seznamem souborů (R-5)	plán 9

@@ -208,7 +208,7 @@ export function restorableProblem(
   limits: RestoreLimits = RESTORE_LIMITS,
   longestLine = 0,
   manifestBytes = 0,
-  nodes: NodeStats = { nodes: 0, containers: 0, lineContainers: 0 },
+  nodes: NodeStats = { nodes: 0, containers: 0, lineContainers: 0, lineDepth: 0 },
 ): string | null {
   const names = Object.keys(entries);
   const sizes = names.map((name) => entries[name]!.size);
@@ -228,7 +228,8 @@ export function restorableProblem(
     longestLine > limits.maxLineBytes ||
     nodes.nodes > limits.maxNodes ||
     nodes.containers > limits.maxContainers ||
-    nodes.lineContainers > limits.maxLineContainers;
+    nodes.lineContainers > limits.maxLineContainers ||
+    nodes.lineDepth > limits.maxLineDepth;
   return tooLarge || tooManyLines ? E.notRestorable : null;
 }
 

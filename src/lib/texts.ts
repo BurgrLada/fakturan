@@ -3391,6 +3391,7 @@ export const TEXTS = {
       tooManyLines: "Archiv má víc řádků, než obnova dovolí.",
       dataTooLarge: "Data v archivu jsou po rozbalení větší, než obnova dovolí.",
       tooManyNodes: "Data v archivu mají víc položek, než obnova dovolí.",
+      memory: "Obnova archivu by zabrala víc paměti, než instance dovolí. Účet zůstal beze změny.",
       uploadExpired: "Nahrávání trvalo příliš dlouho a bylo zrušeno. Nahrajte zálohu znovu.",
       audit: "Historie změn v archivu není platná.",
       references: "Data v archivu odkazují na něco, co v něm není.",

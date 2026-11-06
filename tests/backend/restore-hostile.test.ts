@@ -2,16 +2,19 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import v8 from "node:v8";
+import { runInNewContext } from "node:vm";
 import { eq, sql } from "drizzle-orm";
 import { strFromU8, strToU8, unzipSync, Zip, ZipDeflate, zipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { MANIFEST_ENTRY, RESTORE_LIMITS } from "@/lib/backup-format";
+import { buildIdMap, remapIds } from "@/server/backup/remap";
 import { prescanManifest, scanArchive } from "@/server/backup/restore-read";
 import { TEXTS } from "@/lib/texts";
 import { BACKUP_TABLES } from "@/server/backup/tables";
 import { setClockForTests } from "@/server/clock";
 import { exportJob, invoice, job, schedulerState, user } from "@/server/db/schema";
-import { blobPath, writeBlob } from "@/server/files/store";
+import { blobPath, tempDir, writeBlob } from "@/server/files/store";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore, startRestore } from "@/server/services/account-restore";
@@ -297,7 +300,7 @@ describe("obnova z nepřátelského archivu, opravy bloku D", () => {
       (manifest) => (manifest.counts.tables.customer = customers.length + 10),
     );
     let seen = 0;
-    expect(await reasonOf(scanArchive(onDisk(many), { rows: () => void (seen += 1) }, small))).toBe(
+    expect(await reasonOf(scanArchive(onDisk(many), { row: () => void (seen += 1) }, small))).toBe(
       E.tooManyLines,
     );
     expect(await reasonOf(scanArchive(onDisk(archive), {}, { ...small, maxLines: 5 }))).toBe(
@@ -458,5 +461,161 @@ describe("obnova z nepřátelského archivu, opravné kolo 2", () => {
     expect(() =>
       prescanManifest(strToU8('{"a":"[[[[[[[[[[\\"]]]]"}'), RESTORE_LIMITS),
     ).not.toThrow();
+  });
+});
+
+describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", () => {
+  const MiB = 1024 * 1024;
+  const realUsage = process.memoryUsage.bind(process);
+  const usage = (heapUsed: number) => ({ ...realUsage(), heapUsed, arrayBuffers: 0 });
+
+  async function refusedRun(bytes: Uint8Array, reason: string) {
+    const target = emptyAccount();
+    const row = await restoreArchive(db, target, bytes);
+    expect(row).toMatchObject({ status: "failed", reason });
+    expect(rowsOf(target)).toBe(0);
+    expect(existsSync(tempDir(target, row.id, "restore"))).toBe(false);
+    expect(userFiles(target)).toEqual([]);
+  }
+
+  test("[SEC-005] hlídač odmítne obnovu, když nárůst paměti přesáhne 640 MiB", async () => {
+    let calls = 0;
+    // Any two readings differ by 641 MiB, whoever else reads the memory in between.
+    vi.spyOn(process, "memoryUsage").mockImplementation(() =>
+      usage(100 * MiB + 641 * MiB * calls++),
+    );
+    await refusedRun(archive, E.memory);
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  test("[SEC-005] hlídač odmítne obnovu nad 60 % limitu haldy", async () => {
+    const stats = v8.getHeapStatistics();
+    vi.spyOn(v8, "getHeapStatistics").mockReturnValue({ ...stats, heap_size_limit: 1000 * MiB });
+    vi.spyOn(process, "memoryUsage").mockImplementation(() => usage(601 * MiB));
+    await refusedRun(archive, E.memory);
+  });
+
+  // The shape of the worst archive within the counts (plan 8 re-review): unique keys, many small
+  // objects with a new key each and two-byte text holding an archive id, scaled to a tenth.
+  function worstDocument(row: number, archiveId: string) {
+    const objects = Array.from({ length: 5_480 }, (_, index) => ({ [`o${row}_${index}`]: 1 }));
+    const keys: Record<string, number> = {};
+    for (let index = 0; index < 19_000; index++) keys[`u${row}_${index}`] = 1.5;
+    return { a: keys, b: objects, c: `${archiveId} ${czechText(560_000, row)}` };
+  }
+
+  // Varied enough that the archive stays under the compression ratio check at any scale.
+  function czechText(length: number, seed: number): string {
+    const letters = "řžčšěýáíéůú";
+    let state = seed + 1;
+    return Array.from({ length }, () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return letters[state % letters.length];
+    }).join("");
+  }
+
+  test("[IMP-011] nejhorší archiv z re-review v měřítku 1/10 drží nárůst pod 128 MiB", async () => {
+    const template = readJsonl(unzipSync(archive)["data/invoice_template.jsonl"]!)[0]!;
+    const customer = template.customer_id as string;
+    const rows = Array.from({ length: 18 }, (_, index) => ({
+      ...template,
+      id: randomUUID(),
+      document: worstDocument(index, customer),
+    }));
+    const lines = jsonl(rows);
+    const hostile = editArchive(
+      archive,
+      (entries) => {
+        entries["data/invoice_template.jsonl"] = lines;
+      },
+      (manifest) => (manifest.counts.tables.invoice_template = rows.length),
+    );
+    expect(lines.length).toBeGreaterThan(24 * MiB);
+    const target = emptyAccount();
+    // A full collection before each reading, so the probe sees what the restore keeps, not the
+    // garbage that V8 happens not to have collected yet; the report gives both figures.
+    v8.setFlagsFromString("--expose-gc");
+    const collect = runInNewContext("gc") as () => void;
+    collect();
+    const seen: number[] = [];
+    vi.spyOn(process, "memoryUsage").mockImplementation(() => {
+      collect();
+      const now = realUsage();
+      seen.push(now.heapUsed + now.arrayBuffers);
+      return now;
+    });
+    const row = await restoreArchive(db, target, hostile);
+    vi.mocked(process.memoryUsage).mockRestore();
+    const peak = Math.max(...seen) - seen[0]!;
+    process.stderr.write(`[IMP-011] špička sondy 1/10 po úklidu: ${(peak / MiB).toFixed(1)} MiB\n`);
+    expect(row.status).toBe("done");
+    expect(seen.length).toBeGreaterThan(5);
+    expect(peak).toBeLessThan(128 * MiB);
+  });
+
+  test("[TST-017] pád uvnitř commitu nechá účet prázdný a mezisoubory zmizí", async () => {
+    // Two issued invoices under one number: the unique index stops the insert mid-commit.
+    const numbered = editRows("invoice", (rows) => {
+      const issued = rows.filter((row) => row.number !== null);
+      return rows.map((row) => (row === issued[1] ? { ...row, number: issued[0]!.number } : row));
+    });
+    const target = emptyAccount();
+    const row = await restoreArchive(db, target, numbered);
+    expect(row).toMatchObject({ status: "failed", reason: E.unexpected });
+    expect(rowsOf(target)).toBe(0);
+    expect(existsSync(tempDir(target, row.id, "restore"))).toBe(false);
+    expect(userFiles(target)).toEqual([]);
+
+    await refusedRun(
+      editRows("invoice", (rows) =>
+        rows.map((item, index) => (index === 0 ? { ...item, total_minor: 1 } : item)),
+      ),
+      E.inconsistent,
+    );
+  });
+
+  test("[IMP-010] remapIds vrací tentýž objekt a json-ids přepíše na místě", () => {
+    const table = BACKUP_TABLES.find((entry) => entry.name === "invoice_template")!;
+    const [templateId, customerId, itemId] = [randomUUID(), randomUUID(), randomUUID()];
+    const map = buildIdMap(
+      new Map([
+        ["invoice_template", [templateId]],
+        ["customer", [customerId]],
+        ["catalog_item", [itemId]],
+      ]),
+    );
+    const lines = [{ catalogItemId: itemId, name: `Položka ${itemId}` }];
+    const document = { customerId, lines };
+    const row: Record<string, unknown> = {
+      id: templateId,
+      user_id: "cizi",
+      name: "Paušál",
+      customer_id: customerId,
+      document,
+    };
+    expect(remapIds(row, table, map)).toBe(row);
+    expect(row.document).toBe(document);
+    expect((row.document as typeof document).lines).toBe(lines);
+    const newItem = map.tables.get("catalog_item")!.get(itemId)!;
+    expect((row.document as typeof document).lines[0]!.catalogItemId).toBe(newItem);
+    expect(lines[0]!.name).toBe(`Položka ${newItem}`);
+    expect(row).toMatchObject({
+      id: map.tables.get("invoice_template")!.get(templateId),
+      customer_id: map.tables.get("customer")!.get(customerId),
+    });
+    expect("user_id" in row).toBe(false);
+
+    // JSON.parse makes `__proto__` an own key; rewriting it in place must not touch the prototype.
+    const parsed = JSON.parse(
+      `{"id":"${templateId}","document":{"__proto__":{"customerId":"${customerId}"},"x":"${itemId}"}}`,
+    ) as Record<string, unknown>;
+    remapIds(parsed, table, map);
+    const doc = parsed.document as Record<string, unknown>;
+    expect(Object.getPrototypeOf(doc)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(doc, "__proto__")!.value).toEqual({
+      customerId: map.tables.get("customer")!.get(customerId),
+    });
+    expect(doc.x).toBe(newItem);
+    expect(({} as Record<string, unknown>).customerId).toBeUndefined();
   });
 });

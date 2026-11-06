@@ -69,9 +69,13 @@ export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => 
 
 const MiB = 1024 * 1024;
 
-// R-35: a backup has its own limits, far above those of a document import. A restore holds the
-// remapped rows of the whole archive until its single commit, so rows, data bytes, JSON objects
-// and JSON values are all capped: at the limits that stays around half a GiB of heap.
+// R-35: a backup has its own limits, far above those of a document import. A restore keeps no rows
+// in memory: each row is checked, remapped in place and spooled to a file of its table, and the
+// commit reads those files back. What grows with the archive is the id map and the bytes of the
+// data entry being read (up to 200 MiB, off the heap). The bound on memory is the guard in
+// src/server/backup/memory-guard.ts (640 MiB of growth, 60 % of the heap); the counts below are a
+// cheap prefilter. Lines stay at 300 000 and data at 256 MiB because the commit is one
+// synchronous transaction.
 export const RESTORE_LIMITS = {
   archiveBytes: 1024 * MiB,
   // A compact manifest costs at most about 140 bytes per entry, so 28 000 entries fit in 4 MiB.
@@ -85,11 +89,12 @@ export const RESTORE_LIMITS = {
   maxLines: 300_000,
   maxLineBytes: 2 * MiB,
   // Bytes do not bound the heap: three bytes of `{},` become a whole object. Counted on the bytes
-  // before a line is parsed, so the budget holds whatever keys the shapes let through (C-1).
+  // before a line is parsed, so the budget holds whatever keys the shapes let through (C-1). A
+  // legitimate account of 300 000 rows has about 19.3 M nodes and 0.59 M objects (N-2).
   maxLineContainers: 20_000,
   maxLineDepth: 40,
   maxContainers: 1_000_000,
-  maxNodes: 10_000_000,
+  maxNodes: 25_000_000,
 };
 
 export type RestoreLimits = typeof RESTORE_LIMITS;
