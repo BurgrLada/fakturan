@@ -4,7 +4,8 @@ import { canonicalCountry } from "@/lib/customers";
 import { foldText } from "@/lib/fold-text";
 import type { ImportDocument, ImportLine, ImportParty } from "@/lib/import-document";
 import {
-  applyMapping,
+  applyColumns,
+  type ColumnarSheet,
   dateOf,
   type FieldSpec,
   MAPPING_FIELDS,
@@ -16,6 +17,7 @@ import {
   numberOf,
   rowsLabel,
   SAMPLE_ROWS,
+  type SheetFormat,
   type TabularSample,
   type TabularSheet,
   textOf,
@@ -24,7 +26,7 @@ import { MAX_BATCH_DOCUMENTS, type PreviewRecord, type PreviewRow } from "@/lib/
 import { computeTotals } from "@/lib/invoice-totals";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague, type CalendarDate } from "@/lib/number-format";
-import { parseCsv } from "@/lib/safe-input/csv";
+import { parseCsv, sampleCsv } from "@/lib/safe-input/csv";
 import { sniffContent, TABULAR_LIMITS } from "@/lib/safe-input/limits";
 import { readXlsx } from "@/lib/safe-input/xlsx-reader";
 import { TEXTS } from "@/lib/texts";
@@ -64,25 +66,62 @@ function ownerOf(actor: Actor): string {
 const digits = (value: string) => value.replace(/\s+/g, "");
 const blank = (cells: string[]) => cells.every((cell) => cell.trim() === "");
 
-// The type comes from the bytes: a workbook is a ZIP, anything else must read as text.
-export async function readTabular(bytes: Uint8Array): Promise<TabularSheet> {
-  const kind = sniffContent(bytes);
-  if (kind === "zip") {
-    const sheet = await readXlsx(bytes, TABULAR_LIMITS);
-    const [headers = [], ...rows] = sheet.rows;
-    return { format: "xlsx", headers: headers.map((h) => h.trim()), rows };
-  }
-  if (kind !== "text") throw new ServiceError(M.errors.unsupported);
-  const csv = await parseCsv(bytes, {});
-  return { format: "csv", headers: csv.headers, rows: csv.rows };
+async function readWorkbook(bytes: Uint8Array): Promise<TabularSheet> {
+  const sheet = await readXlsx(bytes, TABULAR_LIMITS);
+  const [headers = [], ...rows] = sheet.rows;
+  return { format: "xlsx", headers: headers.map((h) => h.trim()), rows };
 }
 
-function sampleOf(sheet: TabularSheet): TabularSample {
+// The type comes from the bytes: a workbook is a ZIP, anything else must read as text.
+function formatOf(bytes: Uint8Array): SheetFormat {
+  const kind = sniffContent(bytes);
+  if (kind === "zip") return "xlsx";
+  if (kind !== "text") throw new ServiceError(M.errors.unsupported);
+  return "csv";
+}
+
+// The mapping step: the header, the first rows and the count, never the sheet as rows.
+async function readSample(bytes: Uint8Array): Promise<TabularSample> {
+  if (formatOf(bytes) === "xlsx") {
+    const sheet = await readWorkbook(bytes);
+    return {
+      format: "xlsx",
+      headers: sheet.headers,
+      rows: sheet.rows.slice(0, SAMPLE_ROWS),
+      total: sheet.rows.filter((cells) => !blank(cells)).length,
+    };
+  }
+  const csv = await sampleCsv(bytes, SAMPLE_ROWS);
+  return { format: "csv", ...csv };
+}
+
+function mappedIndexes(headers: string[], mapping: Mapping): number[] {
+  const wanted = new Set(Object.values(mapping.columns));
+  const seen = new Set<string>();
+  return headers.flatMap((header, at) => {
+    const name = header.trim();
+    if (!wanted.has(name) || seen.has(name)) return [];
+    seen.add(name);
+    return [at];
+  });
+}
+
+// R-14 of plan 9: one pass over the file, keeping only the mapped columns.
+export async function readSheetOnce(
+  bytes: Uint8Array,
+  mapping: Mapping,
+): Promise<ColumnarSheet & { format: SheetFormat }> {
+  if (formatOf(bytes) === "csv") {
+    const csv = await parseCsv(bytes, { pick: (headers) => mappedIndexes(headers, mapping) });
+    return { format: "csv", headers: csv.headers, columns: csv.columns, rows: csv.rows };
+  }
+  const sheet = await readWorkbook(bytes);
+  const picked = mappedIndexes(sheet.headers, mapping);
   return {
-    format: sheet.format,
-    headers: sheet.headers,
-    rows: sheet.rows.slice(0, SAMPLE_ROWS),
-    total: sheet.rows.filter((cells) => !blank(cells)).length,
+    format: "xlsx",
+    headers: picked.map((at) => sheet.headers[at]!),
+    columns: picked.map((at) => sheet.rows.map((cells) => cells[at] ?? "")),
+    rows: sheet.rows.length,
   };
 }
 
@@ -465,18 +504,22 @@ export async function parseTabular(
 ): Promise<TabularResult> {
   const [upload] = uploadsOf(db, ownerId, batch.id);
   if (!upload) throw new ServiceError(E.empty);
-  const sheet = await readTabular(new Uint8Array(readBlob(ownerId, upload.id)));
-  if (sheet.headers.every((header) => !header)) throw new ServiceError(M.errors.noHeader);
-  const sample = sampleOf(sheet);
-  await yieldHeavy(job);
-  if (job.payload.step !== "rows") return { status: "mapping", rows: [], sample };
+  const bytes = new Uint8Array(readBlob(ownerId, upload.id));
+  if (job.payload.step !== "rows") {
+    const sample = await readSample(bytes);
+    if (sample.headers.every((header) => !header)) throw new ServiceError(M.errors.noHeader);
+    await yieldHeavy(job);
+    return { status: "mapping", rows: [], sample };
+  }
 
+  const sample = readPreview(ownerId, batch.id)?.sample;
+  if (!sample) throw new ServiceError(E.notFound);
   const parsed = mappingSchema.safeParse(batch.mapping);
   if (!parsed.success) throw new ServiceError(M.errors.invalid);
   const mapping = parsed.data;
-  const missing = missingColumns(sheet.headers, mapping);
+  const missing = missingColumns(sample.headers, mapping);
   if (missing.length > 0) throw new ServiceError(M.errors.missingColumns(missing.join(", ")));
-  const mapped = applyMapping(sheet, mapping);
+  const mapped = applyColumns(await readSheetOnce(bytes, mapping), mapping);
   if (mapped.length === 0) throw new ServiceError(M.errors.noRows);
   await yieldHeavy(job);
   const today = calendarDateInPrague(clock.now());

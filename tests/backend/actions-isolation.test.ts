@@ -172,6 +172,7 @@ import { writePreview } from "@/server/services/import-batch";
 import { importBatch } from "@/server/db/schema";
 import { createTestDb } from "../helpers/db";
 import { readOpened } from "../helpers/opened";
+import { externalInvoice } from "../fixtures/external-invoice";
 import { planInput, savePlan } from "../helpers/fixtures-recurring";
 
 const session = vi.hoisted(() => ({ userId: "a1" }));
@@ -1238,5 +1239,35 @@ describe("matice izolace plánů 7 a 8", () => {
     ]) {
       expect(entities).not.toContain(entity);
     }
+  });
+});
+
+describe("ruční PDF k cizímu dokladu", () => {
+  test("[SEC-002] cizí doklad je 404 a nic nezapíše", async () => {
+    const { POST } = await import("@/app/(app)/faktury/[id]/priloha/route");
+    const mine = seedOwner(db, new Date());
+    const stranger = seedOwner(db, new Date());
+    const id = externalInvoice(db, mine);
+    const files = () =>
+      db.$client
+        .prepare("SELECT count(*) AS n FROM file WHERE user_id IN (?, ?)")
+        .get(mine, stranger);
+    const before = files();
+    session.userId = stranger;
+    const body = new TextEncoder().encode("%PDF-1.4\n%%EOF");
+
+    for (const target of [id, "11111111-1111-4111-8111-000000000000", "../x"]) {
+      const response = await POST(
+        new Request(`http://localhost:3000/faktury/${target}/priloha`, {
+          method: "POST",
+          body,
+          headers: { origin: "http://localhost:3000", "x-file-name": "x.pdf" },
+        }),
+        { params: Promise.resolve({ id: target }) },
+      );
+      expect(response.status).toBe(404);
+    }
+    expect(files()).toEqual(before);
+    expect(getInvoice(mine, id)!.importPdfFileId).toBeNull();
   });
 });

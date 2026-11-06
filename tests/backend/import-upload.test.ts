@@ -8,7 +8,9 @@ import { auditLog, file, importBatch, rateLimit } from "@/server/db/schema";
 import { userDir } from "@/server/files/store";
 import { createBatch } from "@/server/services/import-batch";
 import { createTestDb } from "../helpers/db";
-import { seedOwner, webActor } from "../helpers/fixtures-mail";
+import { invoice } from "@/server/db/schema";
+import { externalInvoice } from "../fixtures/external-invoice";
+import { issuedInvoice, seedOwner, webActor } from "../helpers/fixtures-mail";
 import { isdoc, streamOf } from "../helpers/import";
 
 const session = vi.hoisted(() => ({ userId: null as string | null }));
@@ -141,5 +143,87 @@ describe("nahrání importu", () => {
     ).toBe(403);
     session.userId = null;
     expect((await post(id, isdoc("faktura-czk.isdoc"))).status).toBe(401);
+  });
+});
+
+describe("ruční PDF k importovanému dokladu", () => {
+  async function attach(
+    id: string,
+    body: Uint8Array,
+    headers: Record<string, string> = {},
+  ): Promise<Response> {
+    const { POST } = await import("@/app/(app)/faktury/[id]/priloha/route");
+    return POST(
+      new Request(`${ORIGIN}/faktury/${id}/priloha`, {
+        method: "POST",
+        body: streamOf(body),
+        headers: { origin: ORIGIN, "x-file-name": "faktura.pdf", ...headers },
+        duplex: "half",
+      } as RequestInit),
+      { params: Promise.resolve({ id }) },
+    );
+  }
+  const pdf = new TextEncoder().encode("%PDF-1.4\nobsah\n%%EOF");
+  const linked = (id: string) =>
+    db.select().from(invoice).where(eq(invoice.id, id)).get()!.importPdfFileId;
+
+  function imported() {
+    const owner = seedOwner(db, new Date());
+    session.userId = owner;
+    return { owner, id: externalInvoice(db, owner) };
+  }
+
+  test("[IMP-005] PDF k importovanému dokladu se uloží a jde stáhnout přes soubory", async () => {
+    const { owner, id } = imported();
+
+    const response = await attach(id, pdf);
+
+    expect(response.status).toBe(200);
+    const { fileId } = (await response.json()) as { fileId: string };
+    expect(linked(id)).toBe(fileId);
+    expect(filesOf(owner).map((row) => row.kind)).toEqual(["import_pdf"]);
+    const { GET } = await import("@/app/(app)/soubory/[id]/route");
+    const download = await GET(new Request(`${ORIGIN}/soubory/${fileId}`), {
+      params: Promise.resolve({ id: fileId }),
+    });
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-type")).toBe("application/pdf");
+    expect(download.headers.get("content-disposition")).toContain("attachment");
+    expect(new Uint8Array(await download.arrayBuffer())).toEqual(pdf);
+  });
+
+  test("[IMP-005] vlastní doklad PDF nepřijme a vrátí 409", async () => {
+    const owner = seedOwner(db, new Date());
+    session.userId = owner;
+    const own = issuedInvoice(owner);
+
+    const response = await attach(own, pdf);
+
+    expect(response.status).toBe(409);
+    expect(filesOf(owner)).toEqual([]);
+    expect(onDisk(owner)).toEqual([]);
+  });
+
+  test("[SEC-005] soubor bez %PDF- je 415 a 25 MiB + 1 B je 413, na disku nic nezůstane", async () => {
+    const { owner, id } = imported();
+    const big = new Uint8Array(MAX_UPLOAD_BYTES + 1).fill(0x20);
+    big.set(pdf);
+
+    expect((await attach(id, new TextEncoder().encode("PK\u0003\u0004"))).status).toBe(415);
+    expect((await attach(id, big, { "content-length": String(big.length) })).status).toBe(413);
+    expect((await attach(id, big)).status).toBe(413);
+    expect((await attach(id, big, { "content-length": "100" })).status).toBe(413);
+    expect(linked(id)).toBeNull();
+    expect(filesOf(owner)).toEqual([]);
+    expect(onDisk(owner)).toEqual([]);
+  });
+
+  test("[SEC-001] bez přihlášení nebo z cizího původu se nic neuloží", async () => {
+    const { owner, id } = imported();
+
+    expect((await attach(id, pdf, { origin: "http://evil.example" })).status).toBe(403);
+    session.userId = null;
+    expect((await attach(id, pdf)).status).toBe(401);
+    expect(filesOf(owner)).toEqual([]);
   });
 });

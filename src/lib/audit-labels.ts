@@ -101,6 +101,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "invoice.credit_note": "Vytvoření opravné faktury",
   "invoice.delete": "Smazání konceptu",
   "invoice.delete_imported": "Smazání importovaného dokladu",
+  "invoice.import_pdf": "Přiložení PDF k importovanému dokladu",
   "invoice.duplicate": "Duplikace faktury",
   "invoice.final_from_advance": "Vytvoření konečné faktury ze zálohy",
   "invoice.issue": "Vystavení faktury",

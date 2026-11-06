@@ -25,7 +25,7 @@ import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { isCalendarDate } from "@/lib/number-format";
 import { DATE_FORMATS, LANGUAGES, LOGO_POSITIONS, PAYMENT_METHODS } from "@/lib/preferences";
 import { accountRowLimit, PER_PARENT_LIMITS } from "@/lib/account-limits";
-import { textLimit } from "@/lib/text-limits";
+import { isGeneratedText, textLimit } from "@/lib/text-limits";
 import { MAX_BODY_CHARS, MAX_SUBJECT_CHARS } from "@/lib/email-template";
 import {
   DATE_FORMATS as IMPORT_DATE_FORMATS,
@@ -331,7 +331,11 @@ function columnSchema(entry: BackupTable, column: AnyColumn): z.ZodType | null {
   // No longer than the app itself writes (TEXT_LIMITS); ids and refs have their own pattern.
   const limit = textLimit(entry.name, column.name);
   if (limit !== undefined && rule !== "id" && !rule.startsWith("ref:")) {
-    schema = schema.refine((value) => typeof value !== "string" || value.length <= limit);
+    schema = isGeneratedText(entry.name, column.name)
+      ? schema.transform((value) =>
+          typeof value === "string" && value.length > limit ? value.slice(0, limit) : value,
+        )
+      : schema.refine((value) => typeof value !== "string" || value.length <= limit);
   }
   return column.notNull ? schema : schema.nullable();
 }

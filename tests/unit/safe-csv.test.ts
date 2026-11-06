@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseCsv, restoreNeutralized } from "@/lib/safe-input/csv";
+import { parseCsv, restoreNeutralized, sampleCsv } from "@/lib/safe-input/csv";
 import { InputRejected, TABULAR_LIMITS } from "@/lib/safe-input/limits";
 
 const encoder = new TextEncoder();
@@ -84,6 +84,50 @@ describe("čtení CSV", () => {
       rows: [],
       encoding: "utf-8",
       delimiter: ";",
+    });
+  });
+});
+
+describe("čtení CSV po blocích", () => {
+  test("[IMP-001] uvozovky, CRLF a dvoubajtové znaky na hranici bloku 1 MiB se přečtou celé", async () => {
+    const MiB = 1024 * 1024;
+    const tail = '"a""b";č\r\n';
+    const row = `${"x".repeat(100)};${tail}`;
+    const rowBytes = encoder.encode(row).length;
+    const tailBytes = encoder.encode(tail).length;
+    const rest = encoder.encode(";druhý;třetí\r\n").length;
+    // The header length puts the block edge right before each byte of the tail in turn.
+    for (let at = 0; at <= tailBytes; at++) {
+      const into = rowBytes - tailBytes + at;
+      const length = (((MiB - into - rest) % rowBytes) + rowBytes) % rowBytes || rowBytes;
+      const header = "h".repeat(length);
+      const count = Math.ceil(MiB / rowBytes) + 2;
+      const csv = await parseCsv(
+        encoder.encode(`${header};druhý;třetí\r\n${row.repeat(count)}`),
+        {},
+      );
+      expect(csv.headers).toEqual([header, "druhý", "třetí"]);
+      expect(csv.rows).toHaveLength(count);
+      expect(csv.rows.every((cells) => cells[1] === 'a"b' && cells[2] === "č")).toBe(true);
+    }
+  });
+
+  test("[IMP-001] výběr sloupců a vzorek dají totéž co celé čtení", async () => {
+    const bytes = encoder.encode('A;B;C\n1;x;"q;"\n\n;;\n2;y;z\n');
+    const whole = await parseCsv(bytes, {});
+    const picked = await parseCsv(bytes, { pick: () => [2, 0] });
+    expect(picked).toMatchObject({
+      headers: ["C", "A"],
+      columns: [
+        ["q;", "", "z"],
+        ["1", "", "2"],
+      ],
+      rows: whole.rows.length,
+    });
+    expect(await sampleCsv(bytes, 2)).toEqual({
+      headers: ["A", "B", "C"],
+      rows: whole.rows.slice(0, 2),
+      total: 2,
     });
   });
 });

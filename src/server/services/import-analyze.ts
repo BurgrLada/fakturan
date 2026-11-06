@@ -1,9 +1,9 @@
 import "server-only";
-import { textLimit } from "@/lib/text-limits";
+import { fitText, textLimit } from "@/lib/text-limits";
 import { and, inArray, ne, or } from "drizzle-orm";
 import { CURRENCIES } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
-import type { ImportDocument, ImportParty } from "@/lib/import-document";
+import type { ImportDocument, ImportLine, ImportParty } from "@/lib/import-document";
 import { MAX_DOCUMENT_LINES } from "@/lib/invoice";
 import type { CustomerAction, PreviewLink, PreviewRow, PreviewStatus } from "@/lib/import-preview";
 import type { CalendarDate } from "@/lib/number-format";
@@ -160,6 +160,21 @@ function customerAction(party: ImportParty | null, customers: CustomerRow[]): Cu
   return { kind: "create", key: customerKeyOf(party), name };
 }
 
+const nameTooLong = (line: ImportLine) =>
+  line.name.length > (textLimit("invoice_line", "name") ?? Number.POSITIVE_INFINITY);
+
+// A real file may name a line at length (ruling of block A): the name keeps what fits and the
+// description carries the whole of it, ahead of the line's own note.
+function shortenedName(line: ImportLine): ImportLine {
+  if (!nameTooLong(line)) return line;
+  const whole = line.description ? `${line.name}\n${line.description}` : line.name;
+  return {
+    ...line,
+    name: fitText("invoice_line", "name", line.name),
+    description: fitText("invoice_line", "description", whole),
+  };
+}
+
 type Working = PreviewRow & { document: ImportDocument };
 
 // One pass for the preview and again right before the commit, so a document or a customer that
@@ -231,8 +246,6 @@ export function analyzeRows(
       ) {
         problems.push(R.textTooLong);
       }
-      const nameLimit = textLimit("invoice_line", "name") ?? Number.POSITIVE_INFINITY;
-      if (doc.lines.some((line) => line.name.length > nameLimit)) problems.push(R.lineNameTooLong);
       const net = doc.lines.reduce((sum, line) => sum + line.netMinor, 0);
       if (Math.abs(doc.totalMinor - net) > MAX_ROUNDING_MINOR) problems.push(R.rounding);
       const fileIco = digits(doc.supplier.ico);
@@ -240,9 +253,16 @@ export function analyzeRows(
       if (problems.length > 0) {
         status = "error";
         row.messages.push(...problems);
-      } else if ((!fileIco || !ownIco) && doc.sourceType !== TABULAR_SOURCE) {
-        row.ownConfirmed = decided?.ownConfirmed ?? false;
-        if (!row.ownConfirmed) row.messages.push(R.confirmOwn);
+      } else {
+        if (doc.lines.some(nameTooLong)) {
+          row.document = { ...doc, lines: doc.lines.map(shortenedName) };
+          status = "warning";
+          row.messages.push(R.lineNameShortened);
+        }
+        if ((!fileIco || !ownIco) && doc.sourceType !== TABULAR_SOURCE) {
+          row.ownConfirmed = decided?.ownConfirmed ?? false;
+          if (!row.ownConfirmed) row.messages.push(R.confirmOwn);
+        }
       }
       const inBatch = (doc.uuid && seenUuid.has(doc.uuid)) || seenNumber.has(doc.number);
       const inAccount = (doc.uuid && taken.uuids.has(doc.uuid)) || taken.numbers.has(doc.number);
@@ -364,7 +384,9 @@ export function analyzeRows(
     }
 
     let depositPart = 0;
-    if (doc.type === "invoice" && doc.paidDepositsMinor > 0) {
+    // Without a NonTaxedDeposit the amount is what was paid on the document itself, as Fakturan's
+    // own export writes it (R-13 of plan 9): a payment, not an advance to look for.
+    if (doc.type === "invoice" && doc.paidDepositsMinor > 0 && doc.deposits.length > 0) {
       const advance = findAdvance(q, ownerId, row, live, accountDocs, advanceUsed);
       if (advance) {
         row.advance = advance;

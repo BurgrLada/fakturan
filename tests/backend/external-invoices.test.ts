@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -19,7 +19,8 @@ import {
   payment,
   user,
 } from "@/server/db/schema";
-import { userDir, writeBlob } from "@/server/files/store";
+import { blobPath, userDir, writeBlob } from "@/server/files/store";
+import { attachImportPdf, ImportPdfRefused } from "@/server/services/files";
 import { convertAdvance } from "@/server/services/advances";
 import { setAutomation } from "@/server/services/automation";
 import { assignNotice, ingestNotice } from "@/server/services/bank-notices";
@@ -353,5 +354,54 @@ describe("smazání účtu s importem", () => {
     expect(db.select().from(file).where(eq(file.userId, owner)).all()).toEqual([]);
     expect(existsSync(userDir(owner))).toBe(false);
     expect(findOwned(db, keep, externalInvoice(db, keep, { batchId: kept })).external).toBe(true);
+  });
+});
+
+describe("ruční PDF k importovanému dokladu", () => {
+  const pdf = (text: string) => Buffer.from(`%PDF-1.4\n${text}\n%%EOF`);
+
+  test("[IMP-005] k importovanému dokladu jde přiložit PDF a nahrazení smaže starý blob", () => {
+    const owner = seedOwner(db, NOW);
+    const batchId = seedImportBatch(db, owner);
+    const id = externalInvoice(db, owner, { batchId });
+
+    const first = attachImportPdf(webActor(owner), id, pdf("první"), "../faktura.pdf");
+    expect(row(id).importPdfFileId).toBe(first.fileId);
+    expect(db.select().from(file).where(eq(file.id, first.fileId)).get()).toMatchObject({
+      userId: owner,
+      kind: "import_pdf",
+      mimeType: "application/pdf",
+      name: "faktura.pdf",
+      importBatchId: batchId,
+    });
+    expect(readFileSync(blobPath(owner, first.fileId)).toString()).toContain("první");
+
+    const second = attachImportPdf(webActor(owner), id, pdf("druhé"), "nove.pdf");
+    expect(row(id).importPdfFileId).toBe(second.fileId);
+    expect(db.select().from(file).where(eq(file.id, first.fileId)).get()).toBeUndefined();
+    expect(existsSync(blobPath(owner, first.fileId))).toBe(false);
+    expect(readFileSync(blobPath(owner, second.fileId)).toString()).toContain("druhé");
+    const audits = db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, "invoice.import_pdf"))
+      .all()
+      .filter((entry) => entry.entityId === id);
+    expect(audits).toHaveLength(2);
+    assertConsistent(db, owner);
+  });
+
+  test("[IMP-005] vlastní doklad PDF nepřijme a nic nezapíše", () => {
+    const owner = seedOwner(db, NOW);
+    const own = issuedInvoice(owner);
+    const before = db.select().from(file).where(eq(file.userId, owner)).all();
+
+    expect(() => attachImportPdf(webActor(owner), own, pdf("x"), "x.pdf")).toThrow(
+      ImportPdfRefused,
+    );
+    expect(() =>
+      attachImportPdf(webActor(owner), externalInvoice(db, owner), Buffer.from("PK.."), "x.pdf"),
+    ).toThrow(TEXTS.importing.imported.notPdf);
+    expect(db.select().from(file).where(eq(file.userId, owner)).all()).toEqual(before);
   });
 });

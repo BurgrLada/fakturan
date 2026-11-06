@@ -9,7 +9,11 @@ type Send = (url: string, init: RequestInit) => Promise<Response>;
 export class TooLarge extends Error {}
 
 // Aborts as soon as the cap is crossed, so an oversize body is never buffered whole.
-export async function readCapped(request: Request, max = MAX_ENVELOPE_BYTES): Promise<Uint8Array> {
+export async function readCapped(
+  request: Request,
+  max = MAX_ENVELOPE_BYTES,
+  timeoutMs = READ_TIMEOUT_MS,
+): Promise<Uint8Array> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > max) throw new TooLarge();
   const reader = request.body?.getReader();
@@ -21,7 +25,7 @@ export async function readCapped(request: Request, max = MAX_ENVELOPE_BYTES): Pr
   const timer = setTimeout(() => {
     timedOut = true;
     void reader.cancel().catch(() => {});
-  }, READ_TIMEOUT_MS);
+  }, timeoutMs);
   try {
     for (;;) {
       const { done, value } = await reader.read();

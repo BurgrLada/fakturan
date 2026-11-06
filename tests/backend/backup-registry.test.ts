@@ -14,6 +14,7 @@ import {
 import { USER_OWNED_TABLES } from "@/server/services/users";
 import { jsonColumnsWithoutShape, textColumnsWithoutLimit } from "@/server/backup/restore-read";
 import { ACCOUNT_ROW_LIMITS } from "@/lib/account-limits";
+import { GENERATED_TEXT, TEXT_LIMITS } from "@/lib/text-limits";
 import { findUnregisteredOwnedTables } from "../helpers/audit-guard";
 
 const registered = BACKUP_TABLES.map((entry) => entry.name);
@@ -165,6 +166,13 @@ describe("registr zálohy", () => {
   test("[SEC-005] každý textový sloupec zálohované tabulky má strop délky", () => {
     // A text column without a limit would let a restore put any amount of text where pages read it.
     expect(textColumnsWithoutLimit()).toEqual([]);
+  });
+
+  test("[SEC-005] sloupce, které skládá aplikace, mají strop a nejsou mezi texty od lidí", () => {
+    expect([...GENERATED_TEXT].filter((name) => !Object.hasOwn(TEXT_LIMITS, name))).toEqual([]);
+    for (const own of ["customer.name", "invoice.note", "invoice_line.description"]) {
+      expect(GENERATED_TEXT.has(own)).toBe(false);
+    }
   });
 
   test("[SEC-005] konfigurační tabulky mají strop řádků na účet", () => {

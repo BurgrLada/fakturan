@@ -6,13 +6,14 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { emailLog, FILE_KINDS, file, type FileKind } from "../db/schema";
+import { emailLog, FILE_KINDS, file, invoice, type FileKind } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { blobPath, readBlob, removeBlob, writeBlob } from "../files/store";
 import { RATE_RULES } from "../rate-limit";
 import { InvalidFileError, validateImage } from "../files/validate";
 import { logger } from "../logger";
 import { enforceRateLimit, ServiceError } from "./access";
+import { findOwned } from "./invoices";
 import { mutate } from "./mutation";
 
 export type { FileKind };
@@ -76,6 +77,83 @@ export function storeFile(
     throw error;
   }
   return { id };
+}
+
+const IMPORTED = TEXTS.importing.imported;
+const PDF_MAGIC = Buffer.from("%PDF-");
+
+// Refused for a reason the route answers with its own status: 409 for a document of the app's own,
+// 415 for anything that is not a PDF.
+export class ImportPdfRefused extends ServiceError {
+  status: 409 | 415;
+
+  constructor(status: 409 | 415) {
+    super(status === 409 ? IMPORTED.notImported : IMPORTED.notPdf);
+    this.status = status;
+  }
+}
+
+// IMP-005: the PDF of an imported document, attached or replaced after the import (R-12 of plan 9).
+// The old blob goes only after the commit, so a failed replacement keeps the PDF it had.
+export function attachImportPdf(
+  actor: Actor,
+  invoiceId: string,
+  data: Buffer,
+  name: string,
+): { fileId: string } {
+  const userId = ownerOf(actor);
+  const id = randomUUID();
+  let replaced = null as string | null;
+  try {
+    mutate(actor, "invoice.import_pdf", (tx, audit) => {
+      const row = findOwned(tx, userId, invoiceId);
+      if (!row.external) throw new ImportPdfRefused(409);
+      if (!data.subarray(0, PDF_MAGIC.length).equals(PDF_MAGIC)) throw new ImportPdfRefused(415);
+      replaced = row.importPdfFileId;
+      tx.insert(file)
+        .values({
+          id,
+          userId,
+          kind: "import_pdf",
+          mimeType: "application/pdf",
+          name: displayName(name),
+          size: data.length,
+          // Undoing the import takes the PDF along with the document.
+          importBatchId: row.importBatchId,
+          createdAt: clock.now(),
+        })
+        .run();
+      writeBlob(userId, id, data);
+      tx.update(invoice)
+        .set({ importPdfFileId: id, updatedAt: clock.now() })
+        .where(scoped(userId).where(invoice, (t, { eq: is }) => is(t.id, invoiceId)))
+        .run();
+      if (replaced) {
+        tx.delete(file)
+          .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, replaced!)))
+          .run();
+      }
+      audit({
+        entity: "invoice",
+        entityId: invoiceId,
+        ownerId: userId,
+        scope: "user",
+        before: { importPdfFileId: replaced },
+        after: { importPdfFileId: id, size: data.length },
+      });
+    });
+  } catch (error) {
+    removeBlob(userId, id);
+    throw error;
+  }
+  if (replaced) {
+    try {
+      removeBlob(userId, replaced);
+    } catch (error) {
+      logger.warn("Soubor se nepodařilo odstranit z disku", { fileId: replaced, error });
+    }
+  }
+  return { fileId: id };
 }
 
 const E = TEXTS.invoiceMail.errors;

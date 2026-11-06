@@ -24,7 +24,8 @@ import {
 } from "@/server/db/schema";
 import { ServiceError } from "@/server/services/access";
 import { confirmBatch, editPreview, getPreview, readPreview } from "@/server/services/import-batch";
-import { remapBatch, submitMapping } from "@/server/services/import-tabular";
+import { readSheetOnce, remapBatch, submitMapping } from "@/server/services/import-tabular";
+import { parseCsv } from "@/lib/safe-input/csv";
 import { undoBatch } from "@/server/services/import-undo";
 import { deletePreset, listPresets, savePreset } from "@/server/services/mapping-presets";
 import { saveCustomer } from "@/server/services/customers";
@@ -40,6 +41,11 @@ import {
   tabularMapped,
   tabularUploaded,
 } from "../helpers/import";
+
+vi.mock("@/lib/safe-input/csv", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/safe-input/csv")>();
+  return { ...actual, parseCsv: vi.fn(actual.parseCsv) };
+});
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -205,6 +211,39 @@ describe("import CSV a Excelu", () => {
     undoBatch(webActor(owner), id);
     expect(imported(owner, id)).toEqual([]);
     expect(batchOf(id).status).toBe("undone");
+  });
+
+  test("[IMP-001] CSV se parsuje jednou pro mapování i řádky", async () => {
+    const owner = importOwner(db, NOW);
+    vi.mocked(parseCsv).mockClear();
+
+    const id = await tabularUploaded(owner, "zakaznici.csv", fixture("zakaznici.csv"));
+    const sample = readPreview(owner, id)!.sample!;
+    expect(sample.total).toBe(5);
+    expect(sample.rows).toHaveLength(5);
+    expect(sample.headers).toHaveLength(9);
+    const { rows } = await tabularMapped(owner, id, customersMapping);
+
+    expect(rows).toHaveLength(5);
+    expect(vi.mocked(parseCsv)).toHaveBeenCalledTimes(1);
+  });
+
+  test("[IMP-001] list se přečte do sloupců jen s mapovanými sloupci", async () => {
+    const bytes = new TextEncoder().encode(
+      "Název;Poznámka;IČO;Navíc\nAlfa;x;123;y\n;;;\nBeta;;;z\n",
+    );
+    const mapping: Mapping = { ...customersMapping, columns: { name: "Název", ico: "IČO" } };
+
+    const sheet = await readSheetOnce(bytes, mapping);
+
+    expect(sheet).toMatchObject({
+      headers: ["Název", "IČO"],
+      columns: [
+        ["Alfa", "", "Beta"],
+        ["123", "", ""],
+      ],
+      rows: 3,
+    });
   });
 
   test("[IMP-001] XLSX ceníku se načte přes stejný průvodce", async () => {

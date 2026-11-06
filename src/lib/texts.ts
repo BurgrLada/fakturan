@@ -3078,6 +3078,14 @@ export const TEXTS = {
       readOnly: "Importovaný doklad jde jen číst.",
       delete: "Smazat importovaný doklad",
       deleteConfirm: "Opravdu smazat tento importovaný doklad i jeho platby?",
+      attachPdf: "Přiložit PDF",
+      replacePdf: "Nahradit PDF",
+      attaching: "Nahrávám PDF…",
+      attached: "PDF je přiložené",
+      notPdf: "Soubor není PDF",
+      notImported: "PDF jde přiložit jen k importovanému dokladu",
+      pdfTooLarge: "PDF je větší než 25 MB",
+      attachFailed: "PDF se nepodařilo nahrát, zkuste to znovu",
     },
     errors: {
       notFound: "Import neexistuje",
@@ -3127,8 +3135,8 @@ export const TEXTS = {
       lines: "Doklad má víc položek, než Fakturan dovolí",
       textTooLong:
         "Číslo, variabilní symbol, identifikátor nebo jméno odběratele je v souboru delší, než Fakturan dovolí",
-      lineNameTooLong:
-        "Název některé položky je v souboru delší než 200 znaků, víc Fakturan nedovolí",
+      lineNameShortened:
+        "Název některé položky byl delší než 200 znaků: zkrátil se a celý je v popisu položky",
       ignoredPdf: (name: string) => `PDF ${name} nepatří k žádnému dokladu a nepoužije se`,
       nestedArchive: (name: string) => `Vnořený archiv ${name} se přeskočil`,
       duplicateCustomer: "Zákazník se stejným IČO nebo názvem už je ve Fakturanu nebo v importu",

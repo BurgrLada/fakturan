@@ -6,10 +6,12 @@ import { deleteImportedAction } from "@/app/(app)/faktury/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { TEXTS } from "@/lib/texts";
+import { ImportPdfUpload } from "./import-pdf-upload";
 
 const T = TEXTS.importing.imported;
 
-// An imported document is read-only (IMP-005): its own PDF and deleting it are all there is.
+// An imported document is read-only (IMP-005): its own PDF, attached at import or later, and
+// deleting it are all there is.
 export function ImportedActions({ id, pdfFileId }: { id: string; pdfFileId: string | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +33,7 @@ export function ImportedActions({ id, pdfFileId }: { id: string; pdfFileId: stri
           {TEXTS.importing.originalPdf}
         </a>
       )}
+      <ImportPdfUpload id={id} hasPdf={pdfFileId !== null} />
       <Button size="sm" variant="outline" disabled={pending} onClick={remove}>
         {T.delete}
       </Button>

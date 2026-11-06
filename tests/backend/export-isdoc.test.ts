@@ -6,7 +6,8 @@ import { unzipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { exportContents, type ExportInput } from "@/lib/export-filter";
 import { setClockForTests } from "@/server/clock";
-import { exportJob, file, invoice, job, schedulerState } from "@/server/db/schema";
+import { exportJob, file, invoice, job, payment, schedulerState } from "@/server/db/schema";
+import { TEXTS } from "@/lib/texts";
 import { buildIsdoc } from "@/server/isdoc/build";
 import { parseIsdoc } from "@/server/isdoc/parse";
 import { registerJob } from "@/server/jobs/registry";
@@ -36,7 +37,14 @@ import {
   seedOwner,
   webActor,
 } from "../helpers/fixtures-mail";
-import { committed, editedIsdoc, importOwner, parsed, registerImportJobs } from "../helpers/import";
+import {
+  committed,
+  editedIsdoc,
+  importOwner,
+  isdoc,
+  parsed,
+  registerImportJobs,
+} from "../helpers/import";
 import { pdfText } from "../helpers/pdf";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
@@ -289,5 +297,52 @@ describe("ISDOC tam a zpět", () => {
         taxOverview(db, owner, { year: 2026, basis }, "2026-03-20");
       expect(overview(target).totalCzkMinor, basis).toBe(overview(source).totalCzkMinor);
     }
+  });
+});
+
+describe("uhrazená část v ISDOC", () => {
+  const R = TEXTS.importing.rows;
+
+  test("[IMP-012] uhrazený doklad po exportu a importu nehlásí „Záloha nenalezena“", async () => {
+    const source = importOwner(db, NOW);
+    const paid = issued(source, seedCustomer(source));
+    const row = getInvoice(source, paid)!;
+    addPayment(webActor(source), paid, {
+      revision: row.revision,
+      paidOn: "2026-03-05",
+      amountMinor: row.totalMinor,
+      currency: "CZK",
+      method: "transfer",
+      note: "",
+    });
+    const exportedRow = await exported(source, { kind: "invoices", format: "isdoc_zip" });
+    const files = Object.entries(entries(source, exportedRow.id)).map(([name, bytes]) => ({
+      name,
+      bytes,
+    }));
+    const target = importOwner(db, NOW);
+
+    const preview = await parsed(target, files);
+    expect(preview.rows).toHaveLength(1);
+    expect(preview.rows[0]!.messages).not.toContain(R.advanceMissing);
+    expect(preview.rows[0]!.paidMinor).toBe(row.totalMinor);
+    await committed(db, target, preview.id);
+
+    const doc = db.select().from(invoice).where(eq(invoice.userId, target)).get()!;
+    expect(doc.status).toBe("paid");
+    const payments = db.select().from(payment).where(eq(payment.invoiceId, doc.id)).all();
+    expect(payments).toHaveLength(1);
+    expect(payments[0]).toMatchObject({ amountMinor: row.totalMinor, dateEstimated: true });
+  });
+
+  test("[IMP-012] NonTaxedDeposit s neznámým ID dál varuje", async () => {
+    const target = importOwner(db, NOW);
+
+    const preview = await parsed(target, [
+      { name: "konecna.isdoc", bytes: isdoc("konecna-se-zalohou.isdoc") },
+    ]);
+
+    expect(preview.rows[0]!.messages).toContain(R.advanceMissing);
+    expect(preview.rows[0]!.status).toBe("warning");
   });
 });

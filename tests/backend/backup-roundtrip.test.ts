@@ -19,6 +19,7 @@ import { eachSpooled, spoolWriter } from "@/server/backup/spool";
 import { setClockForTests } from "@/server/clock";
 import {
   customer,
+  emailLog,
   exportJob,
   file,
   invoice,
@@ -438,5 +439,37 @@ describe("záloha účtu s dokumenty a řádky z dřívějška", () => {
       mend();
     }
     expect((await backedUp()).status).toBe("done");
+  });
+
+  test("[EXP-006] text, který skládá aplikace, záloha zkrátí místo odmítnutí a obnova ho přijme", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const doc = db
+      .select()
+      .from(invoice)
+      .where(eq(invoice.userId, source))
+      .all()
+      .find((row) => row.number)!;
+    db.update(invoice)
+      .set({ searchText: "h".repeat(110_001) })
+      .where(eq(invoice.id, doc.id))
+      .run();
+    db.update(emailLog)
+      .set({ body: "b".repeat(50_001), reason: "r".repeat(4_001) })
+      .where(eq(emailLog.userId, source))
+      .run();
+
+    const archive = await backupArchive(db, source);
+    const target = emptyAccount();
+    expect((await restoreArchive(db, target, archive)).status).toBe("done");
+
+    const restored = db.select().from(invoice).where(eq(invoice.userId, target)).all();
+    expect(restored.find((row) => row.number === doc.number)!.searchText).toBe("h".repeat(110_000));
+    const logs = db.select().from(emailLog).where(eq(emailLog.userId, target)).all();
+    expect(logs.length).toBeGreaterThan(0);
+    for (const log of logs) {
+      expect(log.body).toBe("b".repeat(50_000));
+      expect(log.reason).toBe("r".repeat(4_000));
+    }
   });
 });

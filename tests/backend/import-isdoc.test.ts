@@ -10,6 +10,7 @@ import {
   file,
   importBatch,
   invoice,
+  invoiceLine,
   job,
   payment,
   schedulerState,
@@ -266,16 +267,52 @@ describe("import ISDOC", () => {
     }
   });
 
-  test("[IMP-001] název položky nad strop textu je chyba řádku, ne zkrácený doklad", async () => {
+  test("[IMP-001] název položky nad 200 znaků se zkrátí, celý jde do popisu a řádek varuje", async () => {
+    const owner = importOwner(db, NOW);
+    const long = `Konzultace ${"dlouhá ".repeat(40)}konec`;
+    const bytes = editedIsdoc(
+      "faktura-czk.isdoc",
+      "<Item><Description>Konzultace</Description></Item>",
+      `<Note>Doplněk</Note><Item><Description>${long}</Description></Item>`,
+    );
+    const { id, rows } = await parsed(owner, [{ name: "x.isdoc", bytes }]);
+    expect(rows[0]).toMatchObject({ status: "warning" });
+    expect(rows[0]!.messages).toContain(R.lineNameShortened);
+
+    expect((await committed(db, owner, id)).status).toBe("done");
+    const doc = byNumber(owner, "2026-0001");
+    const [first] = db
+      .select()
+      .from(invoiceLine)
+      .where(eq(invoiceLine.invoiceId, doc.id))
+      .orderBy(invoiceLine.position)
+      .all();
+    expect(first!.name).toBe(long.slice(0, 200));
+    expect(first!.description).toBe(`${long}\nDoplněk`);
+    assertConsistent(db, owner);
+  });
+
+  test("[IMP-001] šedesát položek s názvem 1 850 znaků se naimportuje v mezích textů", async () => {
     const owner = importOwner(db, NOW);
     const zero = (i: number) =>
       `<InvoiceLine><ID>${i}</ID><InvoicedQuantity unitCode="ks">1.000</InvoicedQuantity><LineExtensionAmount>0.00</LineExtensionAmount><LineExtensionAmountTaxInclusive>0.00</LineExtensionAmountTaxInclusive><LineExtensionTaxAmount>0.00</LineExtensionTaxAmount><UnitPrice>0.00</UnitPrice><UnitPriceTaxInclusive>0.00</UnitPriceTaxInclusive><ClassifiedTaxCategory><Percent>0</Percent><VATCalculationMethod>0</VATCalculationMethod><VATApplicable>false</VATApplicable></ClassifiedTaxCategory><Item><Description>${String(i).padEnd(1_850, "p")}</Description></Item></InvoiceLine>`;
     const extra = Array.from({ length: 58 }, (_, i) => zero(i + 3)).join("");
     const bytes = editedIsdoc("faktura-czk.isdoc", "</InvoiceLines>", `${extra}</InvoiceLines>`);
-    const { rows } = await parsed(owner, [{ name: "x.isdoc", bytes }]);
-    expect(rows[0]).toMatchObject({ status: "error" });
-    expect(rows[0]!.messages).toContain(R.lineNameTooLong);
-    expect(docs(owner)).toEqual([]);
+    const { id, rows } = await parsed(owner, [{ name: "x.isdoc", bytes }]);
+    expect(rows[0]).toMatchObject({ status: "warning" });
+    expect(rows[0]!.messages).toContain(R.lineNameShortened);
+
+    expect((await committed(db, owner, id)).status).toBe("done");
+    const lines = db
+      .select()
+      .from(invoiceLine)
+      .where(eq(invoiceLine.invoiceId, byNumber(owner, "2026-0001").id))
+      .all();
+    expect(lines).toHaveLength(60);
+    expect(lines.every((line) => line.name.length <= 200 && line.description.length <= 2_000)).toBe(
+      true,
+    );
+    assertConsistent(db, owner);
   });
 
   test("doklad jiného dodavatele je chyba řádku", async () => {

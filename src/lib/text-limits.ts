@@ -148,6 +148,25 @@ export const TEXT_LIMITS: Record<string, number> = {
   "dashboard.name": 60,
 };
 
+// Written by the app rather than typed by a person: history, search text and the reasons of runs.
+// A backup and a restore shorten these to their limit instead of refusing the account (ruling of
+// block A); a person's own text is refused, so nothing they wrote is cut without them knowing.
+export const GENERATED_TEXT: ReadonlySet<string> = new Set([
+  "import_batch.error",
+  "customer.search_text",
+  "catalog_item.search_text",
+  "invoice.search_text",
+  "bank_notification.reason",
+  "email_log.subject",
+  "email_log.body",
+  "email_log.reason",
+  "recurring_run.reason",
+]);
+
+export function isGeneratedText(table: string, column: string): boolean {
+  return GENERATED_TEXT.has(`${table}.${column}`);
+}
+
 export function textLimit(table: string, column: string): number | undefined {
   const key = `${table}.${column}`;
   return Object.hasOwn(TEXT_LIMITS, key) ? TEXT_LIMITS[key] : undefined;

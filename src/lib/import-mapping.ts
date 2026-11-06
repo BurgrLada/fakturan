@@ -280,14 +280,46 @@ function convert(kind: FieldKind, raw: string, mapping: Mapping, format: SheetFo
 
 // Empty lines are left out; every other line keeps its number, so an error points into the file.
 export function applyMapping(sheet: TabularSheet, mapping: Mapping): MappedRow[] {
+  const cells = (row: number) => sheet.rows[row]!;
+  return mapRows(sheet, sheet.rows.length, mapping, {
+    blank: (row) => cells(row).every((cell) => cell.trim() === ""),
+    cell: (row, at) => cells(row)[at],
+  });
+}
+
+// The sheet as columns of the mapped headers only, as the import reads it (R-14 of plan 9).
+export type ColumnarSheet = { headers: string[]; columns: string[][]; rows: number };
+
+export function applyColumns(
+  sheet: ColumnarSheet & { format: SheetFormat },
+  mapping: Mapping,
+): MappedRow[] {
+  // A row whose mapped cells are all empty carries nothing to import, whatever else it holds.
+  return mapRows(sheet, sheet.rows, mapping, {
+    blank: (row) => sheet.columns.every((column) => (column[row] ?? "").trim() === ""),
+    cell: (row, at) => sheet.columns[at]![row],
+  });
+}
+
+type Cells = {
+  blank: (row: number) => boolean;
+  cell: (row: number, at: number) => string | undefined;
+};
+
+function mapRows(
+  { format, headers }: { format: SheetFormat; headers: string[] },
+  count: number,
+  mapping: Mapping,
+  { blank, cell: cellAt }: Cells,
+): MappedRow[] {
   const index = new Map<string, number>();
-  sheet.headers.forEach((h, i) => {
+  headers.forEach((h, i) => {
     if (!index.has(h.trim())) index.set(h.trim(), i);
   });
   const fields = MAPPING_FIELDS[mapping.target] as Record<string, FieldSpec>;
   const rows: MappedRow[] = [];
-  sheet.rows.forEach((cells, i) => {
-    if (cells.every((cell) => cell.trim() === "")) return;
+  for (let i = 0; i < count; i++) {
+    if (blank(i)) continue;
     const line = i + 2;
     const values: Record<string, MappedValue> = {};
     const errors: string[] = [];
@@ -295,14 +327,14 @@ export function applyMapping(sheet: TabularSheet, mapping: Mapping): MappedRow[]
       const spec = fields[field];
       if (!spec) continue;
       const at = index.get(column);
-      const raw = at === undefined ? "" : (cells[at] ?? "").trim();
+      const raw = at === undefined ? "" : (cellAt(i, at) ?? "").trim();
       if (raw === "") {
         values[field] = spec.kind === "text" ? "" : null;
         if (spec.required && !spec.document) errors.push(M.errors.missingValue(line, column));
         continue;
       }
       try {
-        values[field] = convert(spec.kind, raw, mapping, sheet.format);
+        values[field] = convert(spec.kind, raw, mapping, format);
       } catch (error) {
         if (!(error instanceof CellInvalid) && !(error instanceof InputRejected)) throw error;
         values[field] = null;
@@ -314,7 +346,7 @@ export function applyMapping(sheet: TabularSheet, mapping: Mapping): MappedRow[]
       }
     }
     rows.push({ line, values, errors });
-  });
+  }
   return rows;
 }
 

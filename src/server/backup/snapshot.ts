@@ -29,7 +29,7 @@ import {
   rowBytesFor,
   type RestoreLimits,
 } from "@/lib/backup-format";
-import { textLimit } from "@/lib/text-limits";
+import { isGeneratedText, textLimit } from "@/lib/text-limits";
 import { TEXTS } from "@/lib/texts";
 import { db, type Tx } from "../db";
 import { auditLog, file, invoice } from "../db/schema";
@@ -128,11 +128,16 @@ function describeRow(tx: Tx, table: string, row: Record<string, unknown>): strin
 }
 
 // Free text columns with their limit, as the restore checks them (restore-read.ts columnSchema).
-function limitedColumns(entry: BackupTable, columns: [string, AnyColumn][]): [string, number][] {
+function limitedColumns(
+  entry: BackupTable,
+  columns: [string, AnyColumn][],
+): [string, number, boolean][] {
   return columns.flatMap(([name]) => {
     const rule = entry.columns[name];
     const limit = textLimit(entry.name, name);
-    return limit === undefined || rule === "id" || rule?.startsWith("ref:") ? [] : [[name, limit]];
+    return limit === undefined || rule === "id" || rule?.startsWith("ref:")
+      ? []
+      : [[name, limit, isGeneratedText(entry.name, name)]];
   });
 }
 
@@ -334,11 +339,11 @@ export function snapshot(
           and(scoped(ownerId).where(table), entry.rows?.()),
           columns,
           (row) => {
-            for (const [name, limit] of texts) {
+            for (const [name, limit, generated] of texts) {
               const value = row[name];
-              if (typeof value === "string" && value.length > limit) {
-                throw new SnapshotTooLarge(E.textTooLong(describeRow(tx, entry.name, row)));
-              }
+              if (typeof value !== "string" || value.length <= limit) continue;
+              if (generated) row[name] = value.slice(0, limit);
+              else throw new SnapshotTooLarge(E.textTooLong(describeRow(tx, entry.name, row)));
             }
             for (const name of jsonColumns) {
               if (jsonBytes(row[name]) > jsonBytesFor(entry.name, name, limits)) {
