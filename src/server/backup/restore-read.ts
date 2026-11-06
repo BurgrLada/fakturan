@@ -10,6 +10,7 @@ import {
   backupManifestSchema,
   FILES_INDEX_ENTRY,
   fileIndexLineSchema,
+  jsonBytes,
   jsonNodesOfBytes,
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
@@ -17,9 +18,10 @@ import {
   type RestoreLimits,
 } from "@/lib/backup-format";
 import { CURRENCIES } from "@/lib/currency";
-import { INVOICE_TYPES } from "@/lib/invoice";
+import { INVOICE_STATUSES, INVOICE_TYPES } from "@/lib/invoice";
+import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { isCalendarDate } from "@/lib/number-format";
-import { LOGO_POSITIONS } from "@/lib/preferences";
+import { DATE_FORMATS, LANGUAGES, LOGO_POSITIONS, PAYMENT_METHODS } from "@/lib/preferences";
 import { InputRejected } from "@/lib/safe-input/limits";
 import { readZipEntries } from "@/lib/safe-input/zip";
 import { TEXTS } from "@/lib/texts";
@@ -76,9 +78,12 @@ const json = z.custom<unknown>((value) => value !== undefined && shallowEnough(v
 const text = z.string().max(MAX_TEXT);
 const date = z.string().refine(isCalendarDate);
 const strings = z.array(text).max(10_000);
-const appearance = z.looseObject({
+// Stored JSON is read whole by pages, PDF and sending, so its shape is strict: an extra key would be
+// room for any amount of data the app never wrote (C-2 of plan 9). Mirrors the types in
+// src/lib/invoice-document.ts, src/lib/invoice-template.ts and Appearance in src/lib/invoice.ts.
+const appearance = z.strictObject({
   designId: text,
-  colors: z.looseObject({ accent: text, surface: text, text, line: text }),
+  colors: z.strictObject({ accent: text, surface: text, text, line: text }),
   logoPosition: z.enum(LOGO_POSITIONS),
   showLogo: z.boolean(),
   showQr: z.boolean(),
@@ -95,7 +100,7 @@ const party = {
   ico: text,
   dic: text,
 };
-const supplierSnapshot = z.looseObject({
+const supplierSnapshot = z.strictObject({
   ...party,
   email: text,
   phone: text,
@@ -106,9 +111,12 @@ const supplierSnapshot = z.looseObject({
   footerText: text,
   notVatPayerCs: text,
   notVatPayerEn: text,
+  // Absent on snapshots frozen before advance invoices.
+  advanceNoteCs: text.optional(),
+  advanceNoteEn: text.optional(),
 });
-const customerSnapshot = z.looseObject({ ...party, email: text, phone: text });
-const accountSnapshot = z.looseObject({
+const customerSnapshot = z.strictObject({ ...party, email: text, phone: text });
+const accountSnapshot = z.strictObject({
   name: text,
   currency: z.enum(CURRENCIES),
   number: text,
@@ -116,11 +124,114 @@ const accountSnapshot = z.looseObject({
   iban: text,
   swift: text,
 });
-const relatedSnapshot = z.looseObject({
+const relatedSnapshot = z.strictObject({
   type: z.enum(INVOICE_TYPES),
   number: text,
   issueDate: date,
 });
+
+const MAX_DOCUMENT_LINES = 500;
+const integer = z.number().int().safe();
+const nullableId = z.string().max(128).nullable();
+const templateLine = z.strictObject({
+  catalogItemId: nullableId,
+  name: text,
+  description: text,
+  quantityMilli: integer,
+  unit: text,
+  unitPriceMinor: integer,
+  discountKind: z.enum(DISCOUNT_KINDS),
+  discountValue: integer,
+});
+const templateDocument = z.strictObject({
+  type: z.enum(INVOICE_TYPES),
+  bankAccountId: nullableId,
+  dueDays: integer,
+  language: z.enum(LANGUAGES),
+  currency: z.enum(CURRENCIES),
+  paymentMethod: z.enum(PAYMENT_METHODS),
+  orderRef: text,
+  reference: text,
+  textBefore: text,
+  textAfter: text,
+  note: text,
+  discountKind: z.enum(DISCOUNT_KINDS),
+  discountValue: integer,
+  rounding: z.enum(ROUNDING_MODES),
+  appearance,
+  // Templates and plans stored before foreign invoices have neither.
+  foreign: z.boolean().optional(),
+  clause: text.optional(),
+  lines: z.array(templateLine).max(MAX_DOCUMENT_LINES),
+});
+// Versions were frozen by every release since issuing began and fields were added along the way,
+// so each known key may be missing; no other key may be present.
+const nullableDate = date.nullable();
+const invoiceDocument = z
+  .strictObject({
+    id: nullableId,
+    type: z.enum(INVOICE_TYPES),
+    status: z.enum(INVOICE_STATUSES),
+    number: text.nullable(),
+    variableSymbol: text.nullable(),
+    variableSymbolManual: z.boolean(),
+    seriesId: nullableId,
+    customerId: nullableId,
+    customerName: text,
+    bankAccountId: nullableId,
+    issueDate: nullableDate,
+    dueDate: nullableDate,
+    taxableDate: nullableDate,
+    language: z.enum(LANGUAGES),
+    currency: z.enum(CURRENCIES),
+    exchangeRateMicros: integer.nullable(),
+    foreign: z.boolean(),
+    clause: text,
+    paymentMethod: z.enum(PAYMENT_METHODS),
+    orderRef: text,
+    reference: text,
+    textBefore: text,
+    textAfter: text,
+    note: text,
+    discountKind: z.enum(DISCOUNT_KINDS),
+    discountValue: integer,
+    rounding: z.enum(ROUNDING_MODES),
+    dateFormat: z.enum(DATE_FORMATS).nullable(),
+    periodFrom: nullableDate,
+    periodTo: nullableDate,
+    appearance,
+    lines: z.array(templateLine.extend({ netMinor: integer }).partial()).max(MAX_DOCUMENT_LINES),
+    snapshot: z
+      .strictObject({
+        supplier: supplierSnapshot.nullable(),
+        customer: customerSnapshot.nullable(),
+        account: accountSnapshot.nullable(),
+      })
+      .partial(),
+    images: z
+      .strictObject({
+        logoFileId: nullableId,
+        qrLogoFileId: nullableId,
+        signatureFileId: nullableId,
+      })
+      .partial(),
+    totals: z
+      .strictObject({
+        subtotalMinor: integer,
+        discountMinor: integer,
+        roundingMinor: integer,
+        totalMinor: integer,
+        paidMinor: integer,
+        creditsMinor: integer,
+        advanceMinor: integer,
+        supersededAt: z.union([text, integer]).nullable(),
+      })
+      .partial(),
+    relatedDocument: relatedSnapshot.nullable(),
+    paymentUnknown: z.literal(true),
+    sourcePaymentCode: text,
+  })
+  .partial();
 
 // JSON and dates that pages, PDF and sending read without a second check; the remaining JSON only
 // has to be shallow.
@@ -130,6 +241,9 @@ const KNOWN_SHAPES: Record<string, z.ZodType> = {
   "invoice.customer_snapshot": customerSnapshot,
   "invoice.account_snapshot": accountSnapshot,
   "invoice.related_snapshot": relatedSnapshot,
+  "invoice_template.document": templateDocument,
+  "recurring_invoice.document": templateDocument,
+  "invoice_version.document": invoiceDocument,
   "invoice.issue_date": date,
   "invoice.due_date": date,
   "invoice.taxable_date": date,
@@ -174,6 +288,11 @@ function columnSchema(entry: BackupTable, column: AnyColumn): z.ZodType | null {
   else {
     const values = (column as AnyColumn & { enumValues?: string[] }).enumValues;
     schema = values?.length ? z.enum(values as [string, ...string[]]) : text;
+  }
+  // The app reads a JSON column whole wherever it reads it, so its size is capped on its own, as the
+  // app caps what it writes (STORED_JSON_BYTES).
+  if (column.columnType === "SQLiteTextJson") {
+    schema = schema.refine((value) => jsonBytes(value) <= RESTORE_LIMITS.maxJsonBytes);
   }
   return column.notNull ? schema : schema.nullable();
 }
@@ -259,7 +378,8 @@ function eachLine(
     if (end < 0) end = bytes.length;
     // The writer never leaves a blank line; skipping them would let a few bytes of upload carry
     // hundreds of MiB of newlines into the next backup.
-    if (end === start || end - start > budget.limits.maxLineBytes) throw onError();
+    const maxBytes = kind === "rows" ? budget.limits.maxRowBytes : budget.limits.maxLineBytes;
+    if (end === start || end - start > maxBytes) throw onError();
     const shape = jsonNodesOfBytes(bytes, start, end);
     const { containers, nodes, depth } = shape;
     if (containers > budget.limits.maxLineContainers || depth > budget.limits.maxLineDepth) {
@@ -556,6 +676,8 @@ export async function scanArchive(
       await handlers.tableDone?.(table, counted[table.name]!);
     } else if (name.startsWith("files/")) {
       files.push(name.slice("files/".length));
+      // A version 1 archive has no index; the blobs it names are held the same way.
+      if (!fileIndex) guard.hold("files", files.length * HELD_COSTS.file);
       await handlers.file?.(name.slice("files/".length), bytes);
     } else if (name === AUDIT_ENTRY) {
       auditCount = auditLines(bytes, manifest, budget);

@@ -14,6 +14,7 @@ import {
   drainJobs,
   jobInFlight,
   recoverInterrupted,
+  renewHeavy,
   yieldHeavy,
 } from "@/server/jobs/worker";
 import { recoverImportJob } from "@/server/services/import-batch";
@@ -134,6 +135,25 @@ describe("těžká dráha", () => {
 
     expect(blocks).toBe(3);
     expect(row(id).status).toBe("dead");
+  });
+});
+
+describe("obnova lease před dlouhým synchronním úsekem", () => {
+  test("[ARC-007] renewHeavy prodlouží lease hned, bez čekání na 30 s", async () => {
+    let seen: Date | null = null;
+    registerJob("restore.run", {
+      run: async (running) => {
+        current = new Date(current.getTime() + 5_000);
+        db.update(schedulerState)
+          .set({ leaseUntil: new Date(current.getTime() + 1_000) })
+          .run();
+        renewHeavy(running);
+        seen = db.select().from(schedulerState).get()!.leaseUntil;
+      },
+    });
+    put("restore.run");
+    await drainHeavy("w");
+    expect(seen).toEqual(new Date(current.getTime() + 120_000));
   });
 });
 

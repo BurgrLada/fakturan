@@ -46,7 +46,12 @@ import {
   runRestore,
   startRestore,
 } from "@/server/services/account-restore";
-import { invoiceProblems, paymentProblems } from "@/server/services/data-checks";
+import { createMemoryGuard } from "@/server/backup/memory-guard";
+import {
+  accountDataProblems,
+  invoiceProblems,
+  paymentProblems,
+} from "@/server/services/data-checks";
 import { ingestNotice } from "@/server/services/bank-notices";
 import { deleteUser } from "@/server/services/users";
 import { planRecurringRuns } from "@/server/services/recurring-run";
@@ -649,6 +654,50 @@ describe("obnova účtu", () => {
     expect(statements.mock.calls.length).toBeLessThan(20);
     statements.mockRestore();
     db.delete(invoice).where(eq(invoice.userId, owner)).run();
+  });
+
+  test("[IMP-010] kontroly dat po obnově nečtou JSON sloupce ani celé řádky", () => {
+    const owner = seedOwner(db, NOW);
+    seedRichAccount(db, owner, NOW);
+    const statements = vi.spyOn(db.$client, "prepare");
+    accountDataProblems(db, owner);
+    const texts = statements.mock.calls.map(([text]) => String(text));
+    statements.mockRestore();
+    const invoiceReads = texts.filter((text) => /from "invoice"/i.test(text));
+    expect(invoiceReads.length).toBeGreaterThan(0);
+    for (const text of texts) {
+      // A whole-row select names every column; the checks name only scalars.
+      expect(text).not.toMatch(/"(appearance|search_text|text_before|note|document)"/);
+      for (const column of [
+        "supplier_snapshot",
+        "customer_snapshot",
+        "account_snapshot",
+        "related_snapshot",
+      ]) {
+        const uses = text.split(`"${column}"`).length - 1;
+        const tested = text.split(`"${column}" is not null`).length - 1;
+        expect(uses, column).toBe(tested);
+      }
+    }
+  });
+
+  test("[IMP-010] kontroly dat evidují, co drží, a hlídač je zastaví", () => {
+    const owner = seedOwner(db, NOW);
+    seedRichAccount(db, owner, NOW);
+    const held: number[] = [];
+    const watching = createMemoryGuard();
+    const guard = {
+      ...watching,
+      hold(item: string, bytes: number) {
+        if (item === "checks") held.push(bytes);
+        watching.hold(item, bytes);
+      },
+    };
+    expect(accountDataProblems(db, owner, guard)).toEqual([]);
+    expect(Math.max(...held)).toBeGreaterThan(0);
+    expect(held.at(-1)).toBe(0);
+    const tight = createMemoryGuard(undefined, { heldBytes: 100, heapShare: 0.75 });
+    expect(() => accountDataProblems(db, owner, tight)).toThrow(E.memory);
   });
 
   test("[TST-009] kontrola plateb počítá jen doklady téhož účtu", () => {

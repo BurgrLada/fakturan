@@ -933,10 +933,14 @@ Kontroly plánu:
 
 ## Známá rizika
 
-- Celá položka `data/*.jsonl` do 200 MiB se při obnově drží jako bajty mimo haldu. Hlídač ji započítá přes `arrayBuffers`, ale proud položky po řádcích by vyžadoval změnu `readZipEntries` a ten se nemění **[R-4]**.
-- Commit obnovy a potvrzení importu jsou jedna synchronní transakce, takže velký účet blokuje proces jednotky sekund.
+- Celá položka `data/*.jsonl` do 200 MiB se při obnově drží jako bajty mimo haldu. Hlídač ji eviduje jako položku `entry`, ale proud položky po řádcích by vyžadoval změnu `readZipEntries` a ten se nemění **[R-4]**.
+- Commit obnovy a potvrzení importu jsou jedna synchronní transakce. Zastaví celý proces, protože worker běží v procesu Next. Změřeno po opravě bloku A (Node 24, tento stroj, `t1-measure-experiment.test.ts`):
+  - účet o 297 000 řádcích v poměru 1:3:1 a nejhorší tvar pro délku commitu (strop `maxLines`): **18,5 s**;
+  - 75 000 faktur se 173 MiB dat: 11,9 s;
+  - 780 šablon na stropu 256 KiB JSON (187 MiB): 3,8 s.
+  Lease se obnovuje těsně před commitem (`renewHeavy`), takže rezerva je celých 120 s. Proti 90 s je to ~5×, proto se strop řádků nemění. Obnova se dá opakovat nejvýš 5× za hodinu (`restoreUser`).
 - HTML e-mail vypadá v Outlooku jinak než v prohlížeči. Tabulky a inline styly to zmírní, ale ověření ve skutečných klientech je ruční **[R-17]**.
-- Hlídač paměti je heuristika nad `process.memoryUsage()`. Souběžná práce jiného účtu může obnovu odmítnout dřív, což je bezpečný směr **[R-3]**.
+- Hlídač paměti eviduje, co obnova drží, podle změřených cen za položku. Pojistka 75 % haldy čte skutečnou haldu, takže souběžná práce jiného účtu může obnovu odmítnout dřív, což je bezpečný směr **[R-3]**.
 - Reset ukázky v 3:30 může na chvíli kolidovat s přihlášeným návštěvníkem. Ten dostane prázdný stav do konce resetu **[R-31]**.
 - E-mail o limitu hlídá jen DPH. Paušální daň zůstává jen na kartě a v centru upozornění **[R-16]**.
 

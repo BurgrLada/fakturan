@@ -42,6 +42,7 @@ import {
   matches,
   normalizedRate,
   ownerOf,
+  assertStoredDocument,
   searchTextOf,
   sumsOf,
   totalsOf,
@@ -136,13 +137,15 @@ function writeVersion(tx: Tx, ownerId: string, row: Invoice, lines: InvoiceLine[
     .where(scoped(ownerId).where(invoiceVersion, (t, { eq }) => eq(t.invoiceId, row.id)))
     .get();
   const versionNo = (last?.versionNo ?? 0) + 1;
+  const document = documentOf(row, lines);
+  assertStoredDocument(document);
   tx.insert(invoiceVersion)
     .values({
       id: randomUUID(),
       invoiceId: row.id,
       userId: ownerId,
       versionNo,
-      document: documentOf(row, lines),
+      document,
       createdAt: clock.now(),
     })
     .run();

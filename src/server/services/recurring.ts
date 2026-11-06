@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, like } from "drizzle-orm";
 import { z } from "zod";
 import { addDays } from "@/lib/invoice";
 import type { TemplateDocument } from "@/lib/invoice-template";
@@ -39,7 +39,7 @@ import {
   getTemplate,
   templateDocumentSchema,
 } from "./invoice-templates";
-import { assertReferencesOwned, ownerOf, totalsOf } from "./invoices";
+import { assertReferencesOwned, assertStoredDocument, ownerOf, totalsOf } from "./invoices";
 import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
 
@@ -197,6 +197,7 @@ function persist(actor: Actor, action: AuditAction, raw: RecurringInput): { id: 
   const userId = ownerOf(actor);
   const input = parseInput(raw);
   const { id: existingId, confirmSend, name, customerId, document, mode } = input;
+  assertStoredDocument(document);
   const fields = {
     name,
     customerId,
@@ -306,14 +307,17 @@ export function getRecurring(ownerId: string, id: string): RecurringInvoice | nu
   return readPlan(db, ownerId, id);
 }
 
-export type RecurringRow = RecurringInvoice & {
+export type RecurringRow = Omit<RecurringInvoice, "document"> & {
   customerName: string | null;
   nextIssueDate: CalendarDate | null;
 };
 
+// A list never needs the documents, and each may take up to STORED_JSON_BYTES.
+const { document: _document, ...planWithoutDocument } = getTableColumns(recurringInvoice);
+
 export function listRecurring(ownerId: string): RecurringRow[] {
   return db
-    .select({ plan: recurringInvoice, customerName: customer.name })
+    .select({ plan: planWithoutDocument, customerName: customer.name })
     .from(recurringInvoice)
     .leftJoin(customer, eq(customer.id, recurringInvoice.customerId))
     .where(scoped(ownerId).where(recurringInvoice))

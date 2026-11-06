@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { and, asc, getTableColumns, gt, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import { jsonNodes, RESTORE_LIMITS, type RestoreLimits } from "@/lib/backup-format";
+import { jsonBytes, jsonNodes, RESTORE_LIMITS, type RestoreLimits } from "@/lib/backup-format";
 import { db, type Tx } from "../db";
 import { auditLog, file } from "../db/schema";
 import { scoped } from "../db/scoped";
@@ -27,6 +27,8 @@ import {
 import { BACKUP_TABLES, FOLDED_FILES, type BackupTable } from "./tables";
 
 const PAGE = 500;
+// A row with a JSON column may take up to maxRowBytes, so a page of them stays near 16 MiB.
+const PAGE_BYTES = 16 * 1024 * 1024;
 const LINE_BUFFER = 64 * 1024;
 export const AUDIT_FILE = "audit.jsonl";
 export const FILES_DIR = "files";
@@ -63,7 +65,13 @@ type Lines = {
 };
 
 // Counted as the restore will count them: the nodes of rows add up, those of the audit do not.
-function lineFile(path: string, stats: LineStats, watch: Watch, retained = true): Lines {
+function lineFile(
+  path: string,
+  stats: LineStats,
+  watch: Watch,
+  limits: RestoreLimits,
+  retained = true,
+): Lines {
   const fd = openSync(path, "wx");
   let pending = "";
   const flush = () => {
@@ -72,7 +80,8 @@ function lineFile(path: string, stats: LineStats, watch: Watch, retained = true)
   };
   const addLine = (line: string) => {
     const bytes = Buffer.byteLength(line);
-    stats.longest = Math.max(stats.longest, bytes);
+    if (retained) stats.longest = Math.max(stats.longest, bytes);
+    else if (bytes > limits.maxLineBytes) throw new SnapshotTooLarge();
     const shape = jsonNodes(line);
     watch(bytes, lineCost(bytes, shape));
     stats.lineContainers = Math.max(stats.lineContainers, shape.containers);
@@ -111,6 +120,7 @@ function dumpRows(
   where: SQL | undefined,
   fields: [string, AnyColumn][],
   onRow: (row: Record<string, unknown>) => void,
+  pageSize = PAGE,
 ): number {
   const select = Object.fromEntries(fields);
   let after = 0;
@@ -121,7 +131,7 @@ function dumpRows(
       .from(table)
       .where(and(where, gt(sql`rowid`, after)))
       .orderBy(asc(sql`rowid`))
-      .limit(PAGE)
+      .limit(pageSize)
       .all() as Record<string, unknown>[];
     for (const row of page) {
       const out: Record<string, unknown> = {};
@@ -129,7 +139,7 @@ function dumpRows(
       onRow(out);
     }
     total += page.length;
-    if (page.length < PAGE) return total;
+    if (page.length < pageSize) return total;
     after = page.at(-1)!.rowid as number;
   }
 }
@@ -208,17 +218,29 @@ export function snapshot(
     const files: string[] = [];
     for (const entry of BACKUP_TABLES) {
       const table = entry.table as Owned;
-      const lines = lineFile(join(dir, `${entry.name}.jsonl`), stats, watch);
+      const lines = lineFile(join(dir, `${entry.name}.jsonl`), stats, watch, limits);
+      const columns = archivedColumns(entry);
+      // Written before the caps existed, or by a path that missed them: refused here rather than
+      // by the restore (R-35).
+      const jsonColumns = columns
+        .filter(([, column]) => column.columnType === "SQLiteTextJson")
+        .map(([name]) => name);
+      const pageSize =
+        jsonColumns.length > 0 ? Math.max(1, Math.floor(PAGE_BYTES / limits.maxRowBytes)) : PAGE;
       try {
         tables[entry.name] = dumpRows(
           tx,
           table,
           and(scoped(ownerId).where(table), entry.rows?.()),
-          archivedColumns(entry),
+          columns,
           (row) => {
+            for (const name of jsonColumns) {
+              if (jsonBytes(row[name]) > limits.maxJsonBytes) throw new SnapshotTooLarge();
+            }
             lines.add(row);
             if (entry.name === "file") files.push(row.id as string);
           },
+          pageSize,
         );
       } finally {
         lines.close();
@@ -226,7 +248,7 @@ export function snapshot(
     }
     for (const id of files) keepBlob(ownerId, id, join(dir, FILES_DIR, id));
     const rowsSoFar = Object.values(tables).reduce((sum, n) => sum + n, 0);
-    const auditLines = lineFile(join(dir, AUDIT_FILE), stats, watch, false);
+    const auditLines = lineFile(join(dir, AUDIT_FILE), stats, watch, limits, false);
     let audit = 0;
     try {
       // The history an earlier restore archived comes first, line for line as it was archived.

@@ -12,8 +12,80 @@ import { scoped } from "../db/scoped";
 // end of its transaction; tests/helpers/consistency.ts runs them after every scenario.
 
 type Checker = Db | Tx;
-type Invoice = typeof invoice.$inferSelect;
-type Line = typeof invoiceLine.$inferSelect;
+
+// Only scalars, never a JSON or long text column: a restore runs these over every row of the
+// account inside its commit (C-1 of plan 9). A JSON column counts only by whether it is set.
+function invoiceColumns() {
+  const set = (column: SQL) => sql<boolean>`${column} is not null`.mapWith((value) => value === 1);
+  return {
+    id: invoice.id,
+    type: invoice.type,
+    status: invoice.status,
+    currency: invoice.currency,
+    customerId: invoice.customerId,
+    relatedInvoiceId: invoice.relatedInvoiceId,
+    totalMinor: invoice.totalMinor,
+    subtotalMinor: invoice.subtotalMinor,
+    discountMinor: invoice.discountMinor,
+    roundingMinor: invoice.roundingMinor,
+    paidMinor: invoice.paidMinor,
+    creditsMinor: invoice.creditsMinor,
+    advanceMinor: invoice.advanceMinor,
+    discountKind: invoice.discountKind,
+    discountValue: invoice.discountValue,
+    rounding: invoice.rounding,
+    external: invoice.external,
+    sentAt: invoice.sentAt,
+    supersededAt: invoice.supersededAt,
+    exchangeRateMicros: invoice.exchangeRateMicros,
+    exchangeRateSource: invoice.exchangeRateSource,
+    exchangeRateDate: invoice.exchangeRateDate,
+    paymentMethod: invoice.paymentMethod,
+    importBatchId: invoice.importBatchId,
+    dateFormat: invoice.dateFormat,
+    hasNumber: set(sql`${invoice.number}`),
+    hasVariableSymbol: set(sql`${invoice.variableSymbol}`),
+    hasImportUuid: set(sql`${invoice.importUuid}`),
+    hasSourceSystem: set(sql`${invoice.sourceSystem}`),
+    hasRelatedSnapshot: set(sql`${invoice.relatedSnapshot}`),
+    hasSupplierSnapshot: set(sql`${invoice.supplierSnapshot}`),
+    hasCustomerSnapshot: set(sql`${invoice.customerSnapshot}`),
+    hasAccountSnapshot: set(sql`${invoice.accountSnapshot}`),
+  };
+}
+
+const lineColumns = {
+  invoiceId: invoiceLine.invoiceId,
+  quantityMilli: invoiceLine.quantityMilli,
+  unitPriceMinor: invoiceLine.unitPriceMinor,
+  discountKind: invoiceLine.discountKind,
+  discountValue: invoiceLine.discountValue,
+  netMinor: invoiceLine.netMinor,
+};
+
+// Bytes of heap per row the checks hold, measured on Node 24: a row above with its map entry,
+// and a line in its list.
+export const CHECK_COSTS = { invoice: 540, line: 150 };
+
+// Structural, so this file stays free of server-only imports (see the first line).
+export type CheckGuard = { hold(item: string, bytes: number): void; check(): void };
+
+function invoicesOf(q: Checker, ownerId: string) {
+  return q.select(invoiceColumns()).from(invoice).where(scoped(ownerId).where(invoice)).all();
+}
+
+type Invoice = ReturnType<typeof invoicesOf>[number];
+
+function linesOfAccount(q: Checker, ownerId: string) {
+  return q
+    .select(lineColumns)
+    .from(invoiceLine)
+    .where(scoped(ownerId).where(invoiceLine))
+    .orderBy(asc(invoiceLine.invoiceId), asc(invoiceLine.position))
+    .all();
+}
+
+type Line = ReturnType<typeof linesOfAccount>[number];
 
 function count(q: Checker, query: SQL): number {
   return q.get<{ n: number }>(query)?.n ?? 0;
@@ -24,10 +96,10 @@ type ById = Map<string, Invoice>;
 function creditNoteProblems(row: Invoice, byId: ById, label: string): string[] {
   const problems: string[] = [];
   if (row.totalMinor >= 0) problems.push(`${label}: oprava není záporná`);
-  if (row.variableSymbol !== null) problems.push(`${label}: oprava má variabilní symbol`);
+  if (row.hasVariableSymbol) problems.push(`${label}: oprava má variabilní symbol`);
   const original = row.relatedInvoiceId ? byId.get(row.relatedInvoiceId) : undefined;
   if (!original) return [...problems, `${label}: oprava bez původní faktury`];
-  if (!row.relatedSnapshot) problems.push(`${label}: oprava bez zamrzlého odkazu`);
+  if (!row.hasRelatedSnapshot) problems.push(`${label}: oprava bez zamrzlého odkazu`);
   if (original.currency !== row.currency) problems.push(`${label}: oprava v jiné měně`);
   if (original.totalMinor + original.creditsMinor < 0) {
     problems.push(`${label}: opravy přečerpaly fakturu`);
@@ -147,19 +219,25 @@ function externalProblems(row: Invoice, lines: Line[], label: string): string[] 
   return problems;
 }
 
-export function invoiceProblems(q: Checker, ownerId: string): string[] {
+export function invoiceProblems(q: Checker, ownerId: string, guard?: CheckGuard): string[] {
   // An instance without accounts is checked with an empty owner; it has no documents to judge.
   if (!ownerId) return [];
+  return invoiceProblemsOf(q, ownerId, invoicesOf(q, ownerId), guard);
+}
+
+function invoiceProblemsOf(
+  q: Checker,
+  ownerId: string,
+  rows: Invoice[],
+  guard?: CheckGuard,
+): string[] {
   const problems: string[] = [];
-  const rows = q.select().from(invoice).where(scoped(ownerId).where(invoice)).all();
   const byId: ById = new Map(rows.map((row) => [row.id, row]));
+  const lines = linesOfAccount(q, ownerId);
+  guard?.hold("checks", rows.length * CHECK_COSTS.invoice + lines.length * CHECK_COSTS.line);
+  guard?.check();
   const linesOf = new Map<string, Line[]>();
-  for (const line of q
-    .select()
-    .from(invoiceLine)
-    .where(scoped(ownerId).where(invoiceLine))
-    .orderBy(asc(invoiceLine.invoiceId), asc(invoiceLine.position))
-    .all()) {
+  for (const line of lines) {
     const list = linesOf.get(line.invoiceId);
     if (list) list.push(line);
     else linesOf.set(line.invoiceId, [line]);
@@ -175,22 +253,22 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
     );
 
     problems.push(...rateProblems(row, label));
-    if (!row.external && (row.importBatchId || row.importUuid || row.sourceSystem)) {
+    if (!row.external && (row.importBatchId || row.hasImportUuid || row.hasSourceSystem)) {
       problems.push(`${label}: vlastní doklad nese údaje importu`);
     }
     if (row.type === "invoice" && row.relatedInvoiceId) {
       problems.push(...finalProblems(row, byId, label));
     }
     if (row.status === "draft") {
-      if (row.number !== null) problems.push(`${label}: koncept má číslo`);
+      if (row.hasNumber) problems.push(`${label}: koncept má číslo`);
       continue;
     }
-    if (row.number === null) problems.push(`${label}: vystavený doklad nemá číslo`);
-    if (!row.supplierSnapshot || !row.customerSnapshot) {
+    if (!row.hasNumber) problems.push(`${label}: vystavený doklad nemá číslo`);
+    if (!row.hasSupplierSnapshot || !row.hasCustomerSnapshot) {
       problems.push(`${label}: vystavený doklad nemá snapshoty`);
     }
     if (!row.dateFormat) problems.push(`${label}: vystavený doklad nemá formát data`);
-    if (row.paymentMethod === "transfer" && !row.accountSnapshot) {
+    if (row.paymentMethod === "transfer" && !row.hasAccountSnapshot) {
       problems.push(`${label}: převod bez snapshotu účtu`);
     }
     if (row.type === "credit_note") problems.push(...creditNoteProblems(row, byId, label));
@@ -202,13 +280,14 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
       problems.push(`invoice ${row.id}: nahrazený doklad není záloha`);
     }
   }
-  const seen = new Set<string>();
-  const repeated: string[] = [];
-  for (const row of rows) {
-    if (row.number === null) continue;
-    if (seen.has(row.number)) repeated.push(row.number);
-    seen.add(row.number);
-  }
+  // In SQL: the numbers themselves are text the checks never hold.
+  const repeated = q
+    .all<{ number: string }>(
+      sql`SELECT substr(number, 1, 100) AS number FROM invoice
+        WHERE user_id = ${ownerId} AND number IS NOT NULL
+        GROUP BY number HAVING count(*) > 1 LIMIT 20`,
+    )
+    .map((row) => row.number);
   if (repeated.length > 0) problems.push(`invoice: opakovaná čísla ${repeated.join(", ")}`);
   return problems;
 }
@@ -217,6 +296,10 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
 // only a payment in the document currency must credit exactly what it says.
 export function paymentProblems(q: Checker, ownerId: string): string[] {
   if (!ownerId) return [];
+  return paymentProblemsOf(q, ownerId, invoicesOf(q, ownerId));
+}
+
+function paymentProblemsOf(q: Checker, ownerId: string, rows: Invoice[]): string[] {
   const problems: string[] = [];
   const paidByInvoice = new Map(
     q
@@ -226,7 +309,6 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
       )
       .map((row) => [row.id, row.paid]),
   );
-  const rows = q.select().from(invoice).where(scoped(ownerId).where(invoice)).all();
   const byId: ById = new Map(rows.map((row) => [row.id, row]));
   const creditsOf = new Map<string, number>();
   for (const [id, notes] of relatedBy(
@@ -305,6 +387,16 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
   return problems;
 }
 
-export function accountDataProblems(q: Checker, ownerId: string): string[] {
-  return [...invoiceProblems(q, ownerId), ...paymentProblems(q, ownerId)];
+// One read of the documents for both checks; with a guard, what they hold is counted and released.
+export function accountDataProblems(q: Checker, ownerId: string, guard?: CheckGuard): string[] {
+  if (!ownerId) return [];
+  const rows = invoicesOf(q, ownerId);
+  guard?.hold("checks", rows.length * CHECK_COSTS.invoice);
+  guard?.check();
+  const problems = [
+    ...invoiceProblemsOf(q, ownerId, rows, guard),
+    ...paymentProblemsOf(q, ownerId, rows),
+  ];
+  guard?.hold("checks", 0);
+  return problems;
 }

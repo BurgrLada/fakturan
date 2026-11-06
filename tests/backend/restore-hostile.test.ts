@@ -12,7 +12,7 @@ import {
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
 } from "@/lib/backup-format";
-import { createMemoryGuard, MEMORY_LIMITS } from "@/server/backup/memory-guard";
+import { createMemoryGuard, HELD_COSTS, MEMORY_LIMITS } from "@/server/backup/memory-guard";
 import { buildIdMap, remapIds } from "@/server/backup/remap";
 import { prescanManifest, scanArchive } from "@/server/backup/restore-read";
 import { TEXTS } from "@/lib/texts";
@@ -24,6 +24,7 @@ import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore, startRestore } from "@/server/services/account-restore";
 import {
+  asVersion1,
   backupArchive,
   editArchive,
   jsonl,
@@ -281,7 +282,7 @@ describe("obnova z nepřátelského archivu, opravy bloku D", () => {
     writeFileSync(path, bytes);
     return path;
   };
-  const small = { ...RESTORE_LIMITS, maxLinesPerTable: 10, maxLines: 40, maxLineBytes: 4096 };
+  const small = { ...RESTORE_LIMITS, maxLinesPerTable: 10, maxLines: 40, maxRowBytes: 4096 };
   const reasonOf = (promise: Promise<unknown>) =>
     promise.then(
       () => "prošlo",
@@ -506,15 +507,6 @@ describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", ()
     await refusedRun(archive, E.memory);
   });
 
-  // The shape of the worst archive within the counts (plan 8 re-review): unique keys, many small
-  // objects with a new key each and two-byte text holding an archive id, scaled to a tenth.
-  function worstDocument(row: number, archiveId: string) {
-    const objects = Array.from({ length: 5_480 }, (_, index) => ({ [`o${row}_${index}`]: 1 }));
-    const keys: Record<string, number> = {};
-    for (let index = 0; index < 19_000; index++) keys[`u${row}_${index}`] = 1.5;
-    return { a: keys, b: objects, c: `${archiveId} ${czechText(560_000, row)}` };
-  }
-
   // Varied enough that the archive stays under the compression ratio check at any scale.
   function czechText(length: number, seed: number): string {
     const letters = "řžčšěýáíéůú";
@@ -525,13 +517,30 @@ describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", ()
     }).join("");
   }
 
-  test("[IMP-011] nejhorší archiv z re-review v měřítku 1/10 drží nárůst pod 128 MiB", async () => {
+  // The most a template document may be within the stored shape and the cap: many lines of
+  // two-byte text, each naming an id of the archive.
+  function fullDocument(base: Record<string, unknown>, archiveId: string, seed: number) {
+    const line = (index: number) => ({
+      catalogItemId: null,
+      name: `${archiveId} ${czechText(40, seed + index)}`,
+      description: czechText(260, seed * 7 + index),
+      quantityMilli: 1000,
+      unit: "ks",
+      unitPriceMinor: 100,
+      discountKind: "none",
+      discountValue: 0,
+    });
+    return { ...base, lines: Array.from({ length: 300 }, (_, index) => line(index)) };
+  }
+
+  test("[IMP-011] nejhorší archiv uvnitř mezí v měřítku 1/10 drží evidenci pod 128 MiB", async () => {
     const template = readJsonl(unzipSync(archive)["data/invoice_template.jsonl"]!)[0]!;
     const customer = template.customer_id as string;
-    const rows = Array.from({ length: 18 }, (_, index) => ({
+    const base = template.document as Record<string, unknown>;
+    const rows = Array.from({ length: 100 }, (_, index) => ({
       ...template,
       id: randomUUID(),
-      document: worstDocument(index, customer),
+      document: fullDocument(base, customer, index),
     }));
     const lines = jsonl(rows);
     const hostile = editArchive(
@@ -541,7 +550,7 @@ describe("obnova z nepřátelského archivu, mezisoubory a hlídač paměti", ()
       },
       (manifest) => (manifest.counts.tables.invoice_template = rows.length),
     );
-    expect(lines.length).toBeGreaterThan(24 * MiB);
+    expect(lines.length).toBeGreaterThan(20 * MiB);
     const path = onDisk(hostile);
     // What the restore holds at most: the entry being read and its largest parsed line.
     const guard = createMemoryGuard();
@@ -730,4 +739,123 @@ describe("obnova z nepřátelského archivu, seznam souborů v2", () => {
       { rehash: false },
     );
   }
+});
+
+describe("obnova z nepřátelského archivu, meze řádků a tvarů", () => {
+  const MiB = 1024 * 1024;
+  // Random two-byte letters: compresses about 3:1, well under the ratio check.
+  const varied = (length: number) => {
+    const letters = "řžčšěýáíéůú";
+    return Array.from(randomBytes(length), (byte) => letters[byte % letters.length]).join("");
+  };
+  const firstRow = (table: string) => readJsonl(unzipSync(archive)[`data/${table}.jsonl`]!)[0]!;
+
+  test(
+    "[SEC-005] nejhorší archiv recenze (139 řádků šablon po 1,43 MiB) je odmítnutý",
+    { timeout: 120_000 },
+    async () => {
+      const template = firstRow("invoice_template");
+      // One 1.43 MiB line, copied 139 times under fresh ids of the same length.
+      const one = Buffer.from(
+        `${JSON.stringify({ ...template, document: { a: varied(750_000) } })}\n`,
+      );
+      const id = template.id as string;
+      const at = one.indexOf(id);
+      const all = Buffer.alloc(one.length * 139);
+      for (let row = 0; row < 139; row++) {
+        one.copy(all, row * one.length);
+        all.write(randomUUID(), row * one.length + at, "latin1");
+      }
+      expect(one.length).toBeGreaterThan(1.4 * MiB);
+      await refused(
+        editArchive(
+          archive,
+          (entries) => {
+            entries["data/invoice_template.jsonl"] = new Uint8Array(all);
+          },
+          (manifest) => (manifest.counts.tables.invoice_template = 139),
+        ),
+        E.row("invoice_template"),
+      );
+    },
+  );
+
+  test("[SEC-005] řádek pod stropem s JSON nad stropem sloupce je odmítnutý", async () => {
+    expect(RESTORE_LIMITS.maxRowBytes).toBe(512 * 1024);
+    expect(RESTORE_LIMITS.maxJsonBytes).toBe(256 * 1024);
+    const template = firstRow("invoice_template");
+    const document = template.document as Record<string, unknown>;
+    // A valid document of about 300 KiB: lines of a stored template, just too many bytes.
+    const lines = Array.from({ length: 150 }, (_, index) => ({
+      catalogItemId: null,
+      name: `Položka ${index}`,
+      description: "ř".repeat(1_000),
+      quantityMilli: 1000,
+      unit: "ks",
+      unitPriceMinor: 100,
+      discountKind: "none",
+      discountValue: 0,
+    }));
+    const big = { ...document, lines };
+    const bytes = Buffer.byteLength(JSON.stringify(big));
+    expect(bytes).toBeGreaterThan(RESTORE_LIMITS.maxJsonBytes);
+    expect(bytes).toBeLessThan(RESTORE_LIMITS.maxRowBytes);
+    await refused(
+      editRows("invoice_template", (rows) => rows.map((row) => ({ ...row, document: big }))),
+      E.row("invoice_template"),
+    );
+  });
+
+  test("[SEC-005] dokument, vzhled a snapshoty nepřijmou klíč navíc", async () => {
+    await refused(
+      editRows("invoice", (rows) =>
+        rows.map((row) => ({
+          ...row,
+          appearance: { ...(row.appearance as object), extra: [1] },
+        })),
+      ),
+      E.row("invoice"),
+    );
+    await refused(
+      editRows("invoice", (rows) =>
+        rows.map((row) =>
+          row.supplier_snapshot
+            ? { ...row, supplier_snapshot: { ...(row.supplier_snapshot as object), x: 1 } }
+            : row,
+        ),
+      ),
+      E.row("invoice"),
+    );
+    await refused(
+      editRows("invoice_template", (rows) =>
+        rows.map((row) => ({ ...row, document: { ...(row.document as object), q: {} } })),
+      ),
+      E.row("invoice_template"),
+    );
+    await refused(
+      editRows("recurring_invoice", (rows) =>
+        rows.map((row) => ({ ...row, document: { ...(row.document as object), q: 1 } })),
+      ),
+      E.row("recurring_invoice"),
+    );
+  });
+
+  test("[SEC-005] archiv v1 eviduje své soubory", async () => {
+    const v1 = asVersion1(archive);
+    const files = Object.keys(unzipSync(v1)).filter((name) => name.startsWith("files/")).length;
+    const path = join(mkdtempSync(join(tmpdir(), "fakturan-scan-")), "zaloha.zip");
+    writeFileSync(path, v1);
+    const real = createMemoryGuard();
+    let filesHeld = 0;
+    const guard = {
+      ...real,
+      hold(item: string, bytes: number) {
+        if (item === "files") filesHeld = Math.max(filesHeld, bytes);
+        real.hold(item, bytes);
+      },
+    };
+    await scanArchive(path, {}, RESTORE_LIMITS, guard);
+    expect(files).toBeGreaterThan(0);
+    expect(filesHeld).toBeGreaterThanOrEqual(files * HELD_COSTS.file);
+  });
 });

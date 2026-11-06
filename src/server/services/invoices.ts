@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import { DOCUMENT_INPUT_BYTES, jsonBytes, STORED_JSON_BYTES } from "@/lib/backup-format";
 import {
   and,
   asc,
@@ -143,6 +144,33 @@ const lineSchema = z
   .superRefine(checkDiscount)
   .transform(withoutStrayDiscount);
 
+// The lines and texts of a document, as the form can make them, stay within what a backup can carry
+// and the app reads whole (DOCUMENT_INPUT_BYTES, C-2 of plan 9).
+export function checkDocumentSize(
+  value: {
+    lines: unknown[];
+    textBefore?: string;
+    textAfter?: string;
+    note?: string;
+    clause?: string;
+    orderRef?: string;
+    reference?: string;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const { lines, textBefore, textAfter, note, clause, orderRef, reference } = value;
+  const size = jsonBytes({ lines, textBefore, textAfter, note, clause, orderRef, reference });
+  if (size > DOCUMENT_INPUT_BYTES) {
+    ctx.addIssue({ code: "custom", path: ["lines"], message: V.documentTooLarge });
+  }
+}
+
+// The last line of defence where a document is stored: whatever path built it, nothing larger than
+// a restore accepts is written (R-35).
+export function assertStoredDocument(document: unknown): void {
+  if (jsonBytes(document) > STORED_JSON_BYTES) throw new ServiceError(V.documentTooLarge);
+}
+
 export function checkPriceSign(
   value: { type: InvoiceType; lines: { unitPriceMinor: number }[] },
   ctx: z.RefinementCtx,
@@ -217,6 +245,7 @@ export const draftInputSchema = z
   })
   .superRefine(checkDiscount)
   .superRefine(checkPriceSign)
+  .superRefine(checkDocumentSize)
   .transform(withoutStrayDiscount);
 
 // Type, customer and series are absent on purpose: the customer changes only through
@@ -233,6 +262,7 @@ export const issuedInputSchema = z
     ...documentFields,
   })
   .superRefine(checkDiscount)
+  .superRefine(checkDocumentSize)
   .transform(withoutStrayDiscount);
 
 export type DraftInput = z.input<typeof draftInputSchema>;

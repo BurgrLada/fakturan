@@ -80,7 +80,32 @@ export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => 
   1: (_table, row) => row,
 };
 
-const MiB = 1024 * 1024;
+const KiB = 1024;
+const MiB = 1024 * KiB;
+
+// What one stored JSON value may take, and so what a restore accepts for it: about a hundred times a
+// real document, and a template or version of the longest lines the form allows has to be split.
+// The app refuses to write more (R-35 and C-2 of plan 9).
+export const STORED_JSON_BYTES = 256 * KiB;
+// The form checks the lines and texts of a document against this, leaving room for what a version
+// adds around them (snapshots, totals, images).
+export const DOCUMENT_INPUT_BYTES = 224 * KiB;
+
+// UTF-8 length without encoding the text; also runs in the browser.
+export function jsonBytes(value: unknown): number {
+  const text = JSON.stringify(value) ?? "";
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4;
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
 
 // R-35: a backup has its own limits, far above those of a document import. A restore keeps no rows
 // in memory: each row is checked, remapped in place and spooled to a file of its table, and the
@@ -103,7 +128,12 @@ export const RESTORE_LIMITS = {
   fileEntryBytes: 25 * MiB,
   maxLinesPerTable: 300_000,
   maxLines: 300_000,
+  // A line of the audit; it is only archived as a file.
   maxLineBytes: 2 * MiB,
+  // A row of any table: a row the app writes stays far below it (an invoice with its texts and
+  // snapshots ~150 KiB at most); JSON columns are capped tighter (maxJsonBytes).
+  maxRowBytes: 512 * KiB,
+  maxJsonBytes: STORED_JSON_BYTES,
   // Bytes do not bound the heap: three bytes of `{},` become a whole object. Counted on the bytes
   // before a line is parsed, so the budget holds whatever keys the shapes let through (C-1). A
   // legitimate account of 300 000 rows has about 19.3 M nodes and 0.59 M objects (N-2).

@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { addDays, daysBetween, INVOICE_TYPES } from "@/lib/invoice";
 import type { TemplateDocument } from "@/lib/invoice-template";
@@ -18,6 +18,8 @@ import { defaultAccountFor, listBankAccounts } from "./bank-accounts";
 import {
   assertReferencesOwned,
   checkDiscount,
+  assertStoredDocument,
+  checkDocumentSize,
   checkPriceSign,
   documentFields,
   findOwned,
@@ -37,7 +39,10 @@ const MAX_NAME = 100;
 const MAX_DUE_DAYS = 365;
 
 export type InvoiceTemplate = typeof invoiceTemplate.$inferSelect;
-export type TemplateRow = InvoiceTemplate & { customerName: string | null };
+export type TemplateRow = Omit<InvoiceTemplate, "document" | "userId"> & {
+  customerName: string | null;
+  lineCount: number;
+};
 
 const {
   bankAccountId,
@@ -81,6 +86,7 @@ export const templateDocumentSchema = z
   })
   .superRefine(checkDiscount)
   .superRefine(checkPriceSign)
+  .superRefine(checkDocumentSize)
   .refine((value) => value.type !== "credit_note", TEXTS.invoices.validation.creditNoteCopy)
   .transform(withoutStrayDiscount);
 
@@ -124,15 +130,23 @@ export function getTemplate(ownerId: string, id: string): InvoiceTemplate | null
   return readTemplate(db, ownerId, id);
 }
 
+// Without the documents: a list never needs them, and each may take up to STORED_JSON_BYTES.
 export function listTemplates(ownerId: string): TemplateRow[] {
   return db
-    .select({ template: invoiceTemplate, customerName: customer.name })
+    .select({
+      id: invoiceTemplate.id,
+      name: invoiceTemplate.name,
+      customerId: invoiceTemplate.customerId,
+      createdAt: invoiceTemplate.createdAt,
+      updatedAt: invoiceTemplate.updatedAt,
+      lineCount: sql<number>`coalesce(json_array_length(${invoiceTemplate.document}, '$.lines'), 0)`,
+      customerName: customer.name,
+    })
     .from(invoiceTemplate)
     .leftJoin(customer, eq(customer.id, invoiceTemplate.customerId))
     .where(scoped(ownerId).where(invoiceTemplate))
     .orderBy(asc(czech(invoiceTemplate.name)), asc(invoiceTemplate.id))
-    .all()
-    .map((row) => ({ ...row.template, customerName: row.customerName }));
+    .all();
 }
 
 function persist(
@@ -147,6 +161,7 @@ function persist(
   }
   const { id: existingId, name, customerId, document } = parsed.data;
   assertKnownVariables(document);
+  assertStoredDocument(document);
 
   return mutate(actor, action, (tx, audit) => {
     const before = existingId ? readTemplate(tx, userId, existingId) : null;

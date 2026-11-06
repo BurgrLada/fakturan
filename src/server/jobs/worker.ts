@@ -177,6 +177,15 @@ export async function yieldHeavy(row: Job): Promise<void> {
   heavyRenewedAt = now;
 }
 
+// Before a long synchronous step, such as the single commit of a restore: renewed now, the whole
+// 120 s lease is left for it instead of what remains of the last renewal (I-2 of plan 9).
+export function renewHeavy(row: Job): void {
+  if (!row.lockedBy || acquireLease(row.lockedBy) !== "held") {
+    throw new Error("Úloha přišla o zámek plánovače");
+  }
+  heavyRenewedAt = clock.now().getTime();
+}
+
 export function jobInFlight(): boolean {
   return inFlight || heavyInFlight;
 }

@@ -37,7 +37,7 @@ async function TemplatesContent() {
         id: row.id,
         name: row.name,
         customerName: row.customerName,
-        lineCount: row.document.lines.length,
+        lineCount: row.lineCount,
         updatedAt: row.updatedAt,
       }))}
     />

@@ -262,7 +262,7 @@ export function restorableProblem(
   const tooManyLines =
     tableLines.some((n) => n > limits.maxLinesPerTable) ||
     tableLines.reduce((sum, n) => sum + n, 0) + counts.audit > limits.maxLines ||
-    longestLine > limits.maxLineBytes ||
+    longestLine > limits.maxRowBytes ||
     nodes.nodes > limits.maxNodes ||
     nodes.containers > limits.maxContainers ||
     nodes.lineContainers > limits.maxLineContainers ||

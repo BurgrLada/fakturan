@@ -1157,6 +1157,8 @@ export const TEXTS = {
       notDraft: "Smazat jde jen koncept, vystavený doklad jde stornovat",
       tooLong: "Text je příliš dlouhý",
       tooManyLines: "Doklad může mít nejvýš 500 položek",
+      documentTooLarge:
+        "Doklad je příliš dlouhý, texty položek a poznámek dohromady by se nevešly do zálohy účtu. Zkraťte popisy nebo ho rozdělte na dva.",
       type: "Neplatný typ dokladu",
       date: "Neplatné datum",
       language: "Neplatný jazyk",

@@ -40,11 +40,12 @@ import { scoped } from "../db/scoped";
 import { blobPath, removeBlob, removeTempDir, tempDir, writeBlob } from "../files/store";
 import { moveExport } from "../jobs/export-progress";
 import { enqueue, failJob } from "../jobs/queue";
-import { kickWorker, yieldHeavy } from "../jobs/worker";
+import { kickWorker, renewHeavy, yieldHeavy } from "../jobs/worker";
 import { enforceRateLimit, ServiceError } from "./access";
 import { RATE_RULES } from "../rate-limit";
 import { accountDataProblems } from "./data-checks";
 import { assertExportSlot, failExport, findExport, removeResult } from "./exports";
+import { logger } from "../logger";
 import { mutate } from "./mutation";
 import { notify } from "./notifications";
 
@@ -427,7 +428,9 @@ function commit(run: Run, prepared: Prepared): void {
       params: {},
       entity: { type: "file", id: prepared.auditFileId },
     });
-    if (accountDataProblems(tx, ownerId).length > 0) throw new RestoreRejected(E.inconsistent);
+    if (accountDataProblems(tx, ownerId, run.guard).length > 0) {
+      throw new RestoreRejected(E.inconsistent);
+    }
     const moved = tx
       .update(exportJob)
       .set({ status: "done", finishedAt: now, updatedAt: now })
@@ -472,7 +475,15 @@ export async function runRestore(job: Job): Promise<void> {
     const run: Run = { job, ownerId, id, guard: createMemoryGuard() };
     const prepared = await prepare(run);
     try {
-      commit(run, prepared);
+      renewHeavy(job);
+      const started = performance.now();
+      try {
+        commit(run, prepared);
+      } finally {
+        // The commit blocks the process, refused or not; its length is what a restore at the caps
+        // costs (I-2).
+        logger.info("Zápis obnovy", { exportId: id, ms: Math.round(performance.now() - started) });
+      }
     } catch (error) {
       // Every ref was matched against the archive already; the deferred check at COMMIT is the
       // net for anything that still points nowhere.

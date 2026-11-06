@@ -88,7 +88,10 @@ zůstane účet beze změny. Po obnově jsou všechny automatiky vypnuté, pravi
 spustíte na jejich kartě), plán s odesíláním čeká na nové potvrzení, historie změn ze zálohy je ke
 stažení v Nastavení, Záloha a SMTP i schránku s avízy je nutné zadat znovu. Limity: archiv 1 GiB, soubor v něm
 25 MiB, data všech tabulek dohromady 256 MiB po rozbalení, nejvýš 300 000 řádků (tabulky i
-historie změn dohromady) a 200 000 položek archivu (tedy zhruba tolik souborů). Archiv má
+historie změn dohromady), řádek tabulky nejvýš 512 KiB, hodnota JSON (dokument šablony, verze
+dokladu nebo plánu, vzhled, snapshoty) nejvýš 256 KiB a 200 000 položek archivu (tedy zhruba
+tolik souborů). Delší doklad nebo šablonu aplikace nedovolí uložit, takže každá záloha jde
+obnovit. Zápis obnovy je jedna transakce a na stropu zastaví instanci asi na 20 s. Archiv má
 formát verze 2: hned za popisem zálohy leží seznam souborů s jejich kontrolními součty, takže popis
 neroste s počtem souborů; zálohy verze 1 jde dál obnovit. Archiv s víc než 65 535 položkami nese
 záznam ZIP64 na konci, starší rozbalovací programy ho nemusí přečíst. Obnova nedrží

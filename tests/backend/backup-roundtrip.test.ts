@@ -31,7 +31,7 @@ import {
 } from "../helpers/backup-compare";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
-import { seedOwner } from "../helpers/fixtures-mail";
+import { seedCustomer, seedOwner } from "../helpers/fixtures-mail";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -107,16 +107,19 @@ describe("obnova přes mezisoubory", () => {
 
   test("[IMP-010] obnova vloží řádky z mezisouborů a výsledek je kanonicky shodný", async () => {
     const source = seedOwner(db, NOW);
-    const seeded = seedRichAccount(db, source, NOW);
-    // One line well over the 1 MiB read block of the spool files.
-    const note = `Poznámka ${"ř".repeat(700_000)} konec`;
-    db.update(customer).set({ note }).where(eq(customer.id, seeded.customerId)).run();
+    seedRichAccount(db, source, NOW);
+    // Rows near the row cap, so lines of the spool file cross its 1 MiB read blocks.
+    const note = `Poznámka ${"ř".repeat(200_000)} konec`;
+    for (let copy = 0; copy < 3; copy++) seedCustomer(source);
+    db.update(customer).set({ note }).where(eq(customer.userId, source)).run();
     const expected = asRestored(canonicalAccount(db, source));
     const target = emptyAccount();
     const row = await restoreArchive(db, target, await backupArchive(db, source));
     expect(row.status).toBe("done");
     expect(canonicalAccount(db, target)).toEqual(expected);
-    expect(db.select().from(customer).where(eq(customer.userId, target)).get()!.note).toBe(note);
+    const notes = db.select().from(customer).where(eq(customer.userId, target)).all();
+    expect(notes.length).toBeGreaterThanOrEqual(4);
+    expect(notes.every((row) => row.note === note)).toBe(true);
     assertConsistent(db, target);
   });
 });

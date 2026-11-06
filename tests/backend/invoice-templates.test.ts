@@ -123,6 +123,38 @@ beforeEach(() => setClockForTests({ now: () => NOW }));
 afterEach(() => setClockForTests(null));
 
 describe("šablony faktur", () => {
+  test("[TPL-001] [SEC-005] šablona nad strop zálohy se neuloží a koncept s týmiž položkami taky ne", () => {
+    const owner = newOwner();
+    const long = Array.from({ length: 200 }, (_, index) => ({
+      catalogItemId: null,
+      name: `Položka ${index}`,
+      description: "ř".repeat(1_000),
+      quantityMilli: 1000,
+      unit: "ks",
+      unitPriceMinor: 100,
+      discountKind: "none" as const,
+      discountValue: 0,
+    }));
+    expect(Buffer.byteLength(JSON.stringify(long))).toBeGreaterThan(256 * 1024);
+    expect(() =>
+      saveTemplate(actor(owner), input(owner, { document: document(owner, { lines: long }) })),
+    ).toThrow(TEXTS.invoices.validation.documentTooLarge);
+    expect(
+      db.select().from(invoiceTemplate).where(eq(invoiceTemplate.userId, owner)).all(),
+    ).toEqual([]);
+    const draft = newDraftDefaults(owner, null);
+    expect(() =>
+      saveDraft(actor(owner), { ...draft, lines: long.map((line) => ({ ...line })) }),
+    ).toThrow(TEXTS.invoices.validation.documentTooLarge);
+    // A long but ordinary document still saves.
+    expect(() =>
+      saveTemplate(
+        actor(owner),
+        input(owner, { document: document(owner, { lines: long.slice(0, 50) }) }),
+      ),
+    ).not.toThrow();
+  });
+
   test("[TPL-001] šablona uloží položky, poznámky, jazyk, měnu, design, splatnost", () => {
     const owner = newOwner();
     const customerId = newCustomer(owner);
