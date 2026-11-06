@@ -228,7 +228,10 @@ function groupIban(iban: string): string {
 function paymentRows(doc: InvoiceDocument, labels: DocumentLabels): LabeledValue[] {
   const account = doc.paymentMethod === "transfer" ? doc.snapshot.account : null;
   const rows = [
-    { label: labels.paymentMethod, value: labels.paymentMethods[doc.paymentMethod] },
+    {
+      label: labels.paymentMethod,
+      value: doc.paymentUnknown ? "" : labels.paymentMethods[doc.paymentMethod],
+    },
     {
       label: labels.account,
       value: account?.number ? `${account.number}/${account.bankCode}` : "",

@@ -87,32 +87,40 @@ class AlreadyArchived extends Error {
   }
 }
 
+type SentKind = "sent_pdf" | "sent_isdoc";
+
+const SENT_ARCHIVES = {
+  sent_pdf: { mimeType: "application/pdf", column: "fileId" },
+  sent_isdoc: { mimeType: "application/xml", column: "isdocFileId" },
+} as const satisfies Record<SentKind, { mimeType: string; column: "fileId" | "isdocFileId" }>;
+
 // Blob, row and link commit together. The check sits inside the transaction, so a recovered job
-// and the late attempt it replaced cannot both attach a PDF.
-export function archiveSentPdf(
+// and the late attempt it replaced cannot both attach a file.
+function archiveSent(
   actor: Actor,
   logId: string,
+  kind: SentKind,
   data: Buffer,
   name: string,
 ): { id: string } {
   const userId = ownerOf(actor);
-  if (data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new ServiceError(E.notPdf);
+  const { mimeType, column } = SENT_ARCHIVES[kind];
   const id = randomUUID();
   try {
     mutate(actor, "file.create", (tx, audit) => {
       const log = tx
-        .select({ fileId: emailLog.fileId })
+        .select({ linked: emailLog[column] })
         .from(emailLog)
         .where(scoped(userId).where(emailLog, (t, { eq: is }) => is(t.id, logId)))
         .get();
       if (!log) throw new ServiceError(E.logNotFound);
-      if (log.fileId) throw new AlreadyArchived(log.fileId);
+      if (log.linked) throw new AlreadyArchived(log.linked);
       tx.insert(file)
         .values({
           id,
           userId,
-          kind: "sent_pdf",
-          mimeType: "application/pdf",
+          kind,
+          mimeType,
           name: displayName(name),
           size: data.length,
           createdAt: clock.now(),
@@ -120,10 +128,10 @@ export function archiveSentPdf(
         .run();
       writeBlob(userId, id, data);
       tx.update(emailLog)
-        .set({ fileId: id, updatedAt: clock.now() })
+        .set({ [column]: id, updatedAt: clock.now() })
         .where(
           scoped(userId).where(emailLog, (t, { and, eq: is }) =>
-            and(is(t.id, logId), isNull(t.fileId)),
+            and(is(t.id, logId), isNull(t[column])),
           ),
         )
         .run();
@@ -132,7 +140,7 @@ export function archiveSentPdf(
         entityId: id,
         ownerId: userId,
         scope: "user",
-        after: { kind: "sent_pdf", mimeType: "application/pdf", size: data.length, logId },
+        after: { kind, mimeType, size: data.length, logId },
       });
     });
   } catch (error) {
@@ -141,6 +149,26 @@ export function archiveSentPdf(
     throw error;
   }
   return { id };
+}
+
+export function archiveSentPdf(
+  actor: Actor,
+  logId: string,
+  data: Buffer,
+  name: string,
+): { id: string } {
+  if (data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new ServiceError(E.notPdf);
+  return archiveSent(actor, logId, "sent_pdf", data, name);
+}
+
+// Kept like the PDF, so another attempt of the same record sends the very same file (R-25).
+export function archiveSentIsdoc(
+  actor: Actor,
+  logId: string,
+  data: Buffer,
+  name: string,
+): { id: string } {
+  return archiveSent(actor, logId, "sent_isdoc", data, name);
 }
 
 export function readOwnedFile(
@@ -171,7 +199,9 @@ export function deleteFile(actor: Actor, id: string): void {
       .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, id)))
       .get();
     if (!row) throw new FileNotFoundError();
-    if (row.kind === "sent_pdf") throw new ServiceError(E.archiveLocked);
+    if (row.kind === "sent_pdf" || row.kind === "sent_isdoc") {
+      throw new ServiceError(E.archiveLocked);
+    }
     tx.delete(file)
       .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, id)))
       .run();

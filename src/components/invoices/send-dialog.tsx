@@ -107,6 +107,7 @@ function Composer({
   const [body, setBody] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [repeatConfirmed, setRepeatConfirmed] = useState(false);
+  const [attachIsdoc, setAttachIsdoc] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -131,6 +132,7 @@ function Composer({
         setBcc(loaded.bcc.join(", "));
         setSubject(loaded.subject);
         setBody(loaded.body);
+        setAttachIsdoc(loaded.attachIsdoc);
       },
       () => {
         if (current) setError(T.failed);
@@ -144,6 +146,7 @@ function Composer({
   const blocked =
     !draft || (draft.unknownPending && !confirmed) || (draft.repeat === true && !repeatConfirmed);
   const recorded = Boolean(logId && draft?.log?.current);
+  const offersIsdoc = Boolean(draft?.isdocAvailable && !reminder && !receipt);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -162,6 +165,7 @@ function Composer({
           subject,
           body,
           ...(confirmed && { confirmedUnknown: true }),
+          ...(offersIsdoc && attachIsdoc && { attachIsdoc: true }),
         };
         const paymentId = receipt?.paymentId ?? draft.log?.paymentId;
         const reply = reminder
@@ -234,6 +238,20 @@ function Composer({
             <span className="text-muted-foreground">{T.attachment}: </span>
             <span data-testid="send-attachment">{draft.attachmentName}</span>
           </p>
+          {offersIsdoc && (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={attachIsdoc}
+                onChange={(event) => setAttachIsdoc(event.target.checked)}
+              />
+              <span className="flex flex-col">
+                {T.attachIsdoc}
+                <span className="text-muted-foreground">{T.attachIsdocHint}</span>
+              </span>
+            </label>
+          )}
         </div>
       )}
       {draft?.paused && (

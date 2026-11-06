@@ -20,8 +20,9 @@ import type { MailAddress, MailMessage, MailTransport, SendResult } from "../mai
 import { reportFailure } from "../scheduler/report";
 import { automaticSendAllowed } from "./automation";
 import { getCustomer } from "./customers";
-import { archiveSentPdf, readOwnedFile } from "./files";
+import { archiveSentIsdoc, archiveSentPdf, readOwnedFile } from "./files";
 import { applySent } from "./invoice-lifecycle";
+import { assertValidIsdoc, isdocFileFor, IsdocRejected } from "./invoice-isdoc";
 import { invoicePdf } from "./invoice-pdf";
 import { mailNoticeKey as noticeKey, receiptStale, samePayment } from "./invoice-mail";
 import { getInvoice, type InvoiceDetail } from "./invoices";
@@ -226,10 +227,24 @@ async function archivedAttachment(log: EmailLog) {
   return { filename: stored.name, content: stored.data, contentType: stored.mimeType };
 }
 
+// Built and checked once, then archived: a later attempt of this record sends the same bytes.
+async function archivedIsdoc(log: EmailLog) {
+  const actor = actorOf(log);
+  let fileId = log.isdocFileId;
+  if (!fileId) {
+    const isdoc = isdocFileFor(log.userId, log.invoiceId);
+    await assertValidIsdoc([isdoc]);
+    fileId = archiveSentIsdoc(actor, log.id, Buffer.from(isdoc.xml), isdoc.fileName).id;
+  }
+  const stored = readOwnedFile(actor, fileId);
+  return { filename: stored.name, content: stored.data, contentType: stored.mimeType };
+}
+
 type Prepared = { transport: MailTransport; message: MailMessage };
 
 async function prepare(log: EmailLog): Promise<Prepared | null> {
   const attachment = await withDeadline(() => archivedAttachment(log), limits.pdfMs);
+  const isdoc = log.attachIsdoc ? await archivedIsdoc(log) : null;
   const transport = await resolveTransport(log.userId);
   if (!transport) return null;
   const { to, cc, bcc, subject, body } = log;
@@ -244,7 +259,7 @@ async function prepare(log: EmailLog): Promise<Prepared | null> {
       bcc,
       subject,
       text: body,
-      attachments: [attachment],
+      attachments: isdoc ? [attachment, isdoc] : [attachment],
     },
   };
 }
@@ -420,6 +435,11 @@ export async function deliverMail(row: Job): Promise<void> {
   try {
     prepared = await prepare(log);
   } catch (error) {
+    // A message without the promised ISDOC would mislead, and a retry would build the same file.
+    if (error instanceof IsdocRejected) {
+      if (holdsJob(row)) settle(log, "queued", "failed", R.isdocInvalid);
+      return;
+    }
     if (exhausted(row) && holdsJob(row)) settle(log, "queued", "failed", R.archive);
     throw error;
   }

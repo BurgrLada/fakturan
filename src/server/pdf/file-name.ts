@@ -16,6 +16,8 @@ export function fileNameFor(
     .toWellFormed()
     .replace(/\.pdf$/i, "")
     .replace(UNSAFE_NAME_CHARS, "_")
+    // `..` is a path step for an unpacker, even without a slash next to it.
+    .replace(/\.{2,}/g, ".")
     .replace(/^[.\s]+|[.\s]+$/g, "");
   const bounded = Array.from(stem).slice(0, MAX_NAME_CHARS).join("");
   return `${bounded || labels.documentTypes.invoice.toLocaleLowerCase(labels.locale)}.pdf`;

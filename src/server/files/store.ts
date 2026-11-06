@@ -27,6 +27,12 @@ function filePath(userId: string, id: string): string {
   return join(userDir(userId), segment(id));
 }
 
+// For writers and readers that stream instead of holding the whole blob in memory.
+export function blobPath(userId: string, id: string): string {
+  mkdirSync(userDir(userId), { recursive: true });
+  return filePath(userId, id);
+}
+
 export function writeBlob(userId: string, id: string, data: Buffer): void {
   mkdirSync(userDir(userId), { recursive: true });
   writeFileSync(filePath(userId, id), data, { flag: "wx" });

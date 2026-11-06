@@ -13,6 +13,8 @@ import { purgeNotices } from "../services/bank-notices";
 import { planBankPolls, pollMailbox } from "../services/bank-poll";
 import { deliverDigest, planDigests } from "../services/due-alerts";
 import { planRateFetch, runRateFetch } from "../services/exchange-rates";
+import { runExport } from "../services/export-run";
+import { purgeExpiredExports, recoverExportJob } from "../services/exports";
 import { purgeStaleBatches, recoverImportJob } from "../services/import-batch";
 import { runImportCommit } from "../services/import-commit";
 import { runImportParse } from "../services/import-parse";
@@ -62,6 +64,18 @@ export const importCleanupTask: TickTask = {
     if (now.getTime() - importCleanedAt < IMPORT_CLEANUP_MS) return;
     importCleanedAt = now.getTime();
     purgeStaleBatches(now);
+  },
+};
+
+const EXPORT_CLEANUP_MS = 3_600_000;
+let exportCleanedAt = 0;
+
+export const exportCleanupTask: TickTask = {
+  name: "export-cleanup",
+  run(now) {
+    if (now.getTime() - exportCleanedAt < EXPORT_CLEANUP_MS) return;
+    exportCleanedAt = now.getTime();
+    purgeExpiredExports(now);
   },
 };
 
@@ -120,6 +134,7 @@ export function startScheduler(): void {
   registerJob("fx.fetch", { run: runRateFetch });
   registerJob("import.parse", { run: runImportParse, recover: recoverImportJob });
   registerJob("import.commit", { run: runImportCommit, recover: recoverImportJob });
+  registerJob("export.run", { run: runExport, recover: recoverExportJob });
   registerTickTask(deadMailTask);
   registerTickTask(deadRecurringTask);
   registerTickTask(recurringPlanTask);
@@ -130,6 +145,7 @@ export function startScheduler(): void {
   registerTickTask(fxPlanTask);
   registerTickTask(jobCleanupTask);
   registerTickTask(importCleanupTask);
+  registerTickTask(exportCleanupTask);
   registerTickTask(backupTask);
   bindWorker(holder);
   const cron = new Cron(cronPattern(env.SCHEDULER_TICK_SECONDS), { protect: true }, async () => {

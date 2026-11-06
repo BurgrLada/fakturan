@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
+import { parseIsdoc } from "@/server/isdoc/parse";
 import {
   auditLog,
   emailLog,
@@ -556,6 +557,83 @@ async function leaveUnknown(owner: string, invoiceId: string) {
   expect(logsOf(owner).find((log) => log.id === logId)?.status).toBe("unknown");
   return logId;
 }
+
+describe("ISDOC v příloze", () => {
+  test("[MAIL-001] klient dostane ISDOC a opakované doručení pošle stejný obsah", async () => {
+    const { owner, invoiceId } = account();
+    expect(sendPrefill(owner, invoiceId)).toMatchObject({
+      attachIsdoc: false,
+      isdocAvailable: true,
+    });
+    smtp.rejectNext(421);
+    const { logId } = sendInvoice(webActor(owner), invoiceId, input({ attachIsdoc: true }));
+    await drainJobs(WORKER);
+    expect(smtp.messages).toHaveLength(0);
+    const log = logsOf(owner)[0]!;
+    expect(log).toMatchObject({ id: logId, attachIsdoc: true, status: "queued" });
+    expect(log.isdocFileId).toBeTruthy();
+    const archived = db.select().from(file).where(eq(file.id, log.isdocFileId!)).get()!;
+    expect(archived).toMatchObject({ kind: "sent_isdoc", mimeType: "application/xml" });
+
+    setClockForTests({ now: () => new Date(T0.getTime() + 6 * 60_000) });
+    await drainJobs(WORKER);
+    expect(smtp.messages).toHaveLength(1);
+    const mail = smtp.messages[0]!;
+    expect(mail.attachments.map((a) => a.filename)).toEqual([
+      expect.stringMatching(/\.pdf$/),
+      expect.stringMatching(/\.isdoc$/),
+    ]);
+    const isdocFile = mail.attachments[1]!;
+    const stored = readFileSync(join(process.env.DATA_DIR!, "files", owner, log.isdocFileId!));
+    expect(Buffer.compare(isdocFile.content, stored)).toBe(0);
+    const parsedIsdoc = parseIsdoc(new Uint8Array(isdocFile.content));
+    expect(parsedIsdoc).toMatchObject({
+      uuid: invoiceId,
+      number: getInvoice(owner, invoiceId)!.number,
+      totalMinor: 300_000,
+    });
+    expect(logsOf(owner)[0]!.status).toBe("sent");
+    expect(() => deleteFile(webActor(owner), log.isdocFileId!)).toThrow(ServiceError);
+  });
+
+  test("[MAIL-001] bez volby odejde jen PDF", async () => {
+    const { owner, invoiceId } = account();
+    sendInvoice(webActor(owner), invoiceId, input());
+    await drainJobs(WORKER);
+    expect(smtp.messages[0]!.attachments).toHaveLength(1);
+    expect(logsOf(owner)[0]).toMatchObject({ attachIsdoc: false, isdocFileId: null });
+  });
+
+  test("[MAIL-001] neplatný ISDOC zprávu neodešle", async () => {
+    const { owner, invoiceId } = account();
+    db.update(invoice).set({ taxableDate: "2026-02-30" }).where(eq(invoice.id, invoiceId)).run();
+    sendInvoice(webActor(owner), invoiceId, input({ attachIsdoc: true }));
+    await drainJobs(WORKER);
+    expect(smtp.messages).toHaveLength(0);
+    expect(logsOf(owner)[0]).toMatchObject({
+      status: "failed",
+      reason: TEXTS.invoiceMail.reasons.isdocInvalid,
+      isdocFileId: null,
+    });
+    expect(logsOf(owner)[0]!.reason).toContain("isdoc_invalid");
+    const queued = db.select().from(job).where(eq(job.userId, owner)).all();
+    expect(queued.map((row) => row.status)).toEqual(["done"]);
+    setClockForTests({ now: () => new Date(T0.getTime() + 3 * 3_600_000) });
+    await drainJobs(WORKER);
+    expect(smtp.messages).toHaveLength(0);
+  });
+
+  test("[MAIL-001] opakování ze záznamu nese volbu ISDOC", async () => {
+    const { owner, invoiceId } = account();
+    smtp.rejectNext(550);
+    const { logId } = sendInvoice(webActor(owner), invoiceId, input({ attachIsdoc: true }));
+    await drainJobs(WORKER);
+    expect(logsOf(owner)[0]!.status).toBe("failed");
+    resendFromLog(webActor(owner), logId, { confirmedUnknown: false, requestId: randomUUID() });
+    await drainJobs(WORKER);
+    expect(smtp.messages[0]!.attachments).toHaveLength(2);
+  });
+});
 
 describe("sendPrefill", () => {
   test("[MAIL-002] předvyplní zprávu ze šablony včetně stálých kopií, příjemců a nového requestId", () => {

@@ -32,7 +32,7 @@ export function ownerImageReader(ownerId: string) {
   };
 }
 
-async function documentPdf(
+export async function documentPdf(
   ownerId: string,
   doc: InvoiceDocument,
 ): Promise<{ data: Buffer; fileName: string }> {
@@ -75,17 +75,24 @@ export function recordPdfDownload(actor: Actor, ownerId: string, id: string): vo
 }
 
 // Compared without case, because archives are often unpacked on case-insensitive file systems.
-export function uniqueFileNames(names: string[]): string[] {
+// The number goes before the extension, whichever it is.
+export function fileNameTaker(): (name: string) => string {
   const taken = new Set<string>();
-  return names.map((name) => {
-    const stem = name.replace(/\.pdf$/i, "");
+  return (name) => {
+    const extension = /\.[^.\s]{1,8}$/.exec(name)?.[0] ?? "";
+    const stem = name.slice(0, name.length - extension.length);
     let candidate = name;
     for (let n = 2; taken.has(candidate.toLocaleLowerCase("cs")); n += 1) {
-      candidate = `${stem} (${n}).pdf`;
+      candidate = `${stem} (${n})${extension}`;
     }
     taken.add(candidate.toLocaleLowerCase("cs"));
     return candidate;
-  });
+  };
+}
+
+export function uniqueFileNames(names: string[]): string[] {
+  const take = fileNameTaker();
+  return names.map((name) => take(name));
 }
 
 export async function invoicesZip(

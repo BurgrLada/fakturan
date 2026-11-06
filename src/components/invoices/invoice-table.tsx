@@ -33,6 +33,7 @@ import { amountDue } from "@/lib/qr-payload";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import type { InvoiceRow, InvoiceSort, SortLink } from "@/server/services/invoices";
+import { BulkExportDialog } from "./bulk-export-dialog";
 import { BulkSendDialog } from "./bulk-send-dialog";
 import { InvoiceStatusBadge } from "./invoice-status";
 
@@ -108,6 +109,8 @@ export function InvoiceTable({
   const [expired, setExpired] = useState(false);
   const [sending, setSending] = useState<string[] | null>(null);
   const [paying, setPaying] = useState(false);
+  const [exporting, setExporting] = useState<string[] | null>(null);
+  const [exported, setExported] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const selectable = rows.filter((row) => row.status !== "draft");
@@ -126,6 +129,7 @@ export function InvoiceTable({
 
   function download() {
     setMessage(null);
+    setExported(false);
     startTransition(async () => {
       try {
         const error = await downloadZip(chosen);
@@ -216,6 +220,18 @@ export function InvoiceTable({
           <Button
             variant="outline"
             size="sm"
+            disabled={pending || expired}
+            onClick={() => {
+              setMessage(null);
+              setExported(false);
+              setExporting(chosen);
+            }}
+          >
+            {TEXTS.exporting.bulk.action}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             disabled={pending || expired || !mailAvailable}
             onClick={() => setSending(chosen)}
           >
@@ -238,6 +254,26 @@ export function InvoiceTable({
           setMessage({ ok: true, text });
         }}
       />
+      <BulkExportDialog
+        ids={exporting ?? []}
+        open={exporting !== null}
+        onClose={() => setExporting(null)}
+        onDone={() => {
+          setExporting(null);
+          setSelected(new Set());
+          setExported(true);
+        }}
+      />
+      {exported && (
+        <Alert role="status">
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            {TEXTS.exporting.bulk.started}
+            <Link href="/nastaveni/export" className="underline underline-offset-4">
+              {TEXTS.exporting.bulk.open}
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
       <AlertDialog open={paying} onOpenChange={setPaying}>
         <AlertDialogContent>
           <AlertDialogHeader>

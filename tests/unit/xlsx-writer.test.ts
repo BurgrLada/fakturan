@@ -1,7 +1,9 @@
-import { strFromU8, unzipSync } from "fflate";
+import { strFromU8, strToU8, unzipSync, Zip, ZipDeflate } from "fflate";
 import { describe, expect, test } from "vitest";
+import { TABULAR_LIMITS } from "@/lib/safe-input/limits";
+import { readXlsx } from "@/lib/safe-input/xlsx-reader";
 import { money, text, toCsv, type Sheet } from "@/lib/tabular";
-import { toXlsx } from "@/lib/xlsx-writer";
+import { buildSheets, toXlsx } from "@/lib/xlsx-writer";
 
 const SHEET: Sheet = {
   name: "Zákazníci [2026]: A/B",
@@ -116,5 +118,85 @@ describe("XLSX balík", () => {
     expect(xml).not.toContain('r="BZ1"');
     const dosDate = zip[12]! | (zip[13]! << 8);
     expect([1999, 2000]).toContain((dosDate >> 9) + 1980);
+  });
+});
+
+function memorySink() {
+  const chunks: Uint8Array[] = [];
+  const zip = new Zip((error, chunk) => {
+    if (error) throw error;
+    chunks.push(chunk);
+  });
+  const deflatedEntry = (name: string) => {
+    const entry = new ZipDeflate(name, { level: 6 });
+    zip.add(entry);
+    return {
+      push: (chunk: string) => entry.push(strToU8(chunk), false),
+      end: () => entry.push(new Uint8Array(0), true),
+    };
+  };
+  return {
+    addDeflated(name: string, data: string) {
+      const entry = deflatedEntry(name);
+      entry.push(data);
+      entry.end();
+    },
+    deflatedEntry,
+    bytes() {
+      zip.end();
+      const out = new Uint8Array(chunks.reduce((sum, c) => sum + c.length, 0));
+      let offset = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return out;
+    },
+  };
+}
+
+async function* slowRows(count: number) {
+  for (let i = 0; i < count; i += 1) {
+    await Promise.resolve();
+    yield [text(`Doklad ${i}`), money(-50_000, "CZK")];
+  }
+}
+
+describe("XLSX více listů proudově", () => {
+  test("[EXP-001] buildSheets zapíše dva listy po řádcích a první přečte i čtečka importu", async () => {
+    const sink = memorySink();
+    await buildSheets(sink, [
+      { name: "Doklady", columns: ["Číslo", "Celkem"], rows: slowRows(450) },
+      { name: "Doklady", columns: ["Název"], rows: [[text("=1+1")], [text("Položka")]] },
+    ]);
+    const bytes = sink.bytes();
+    const files = unzipSync(bytes);
+    const workbook = strFromU8(files["xl/workbook.xml"]!);
+    expect(workbook).toContain('<sheet name="Doklady" sheetId="1" r:id="rId1"/>');
+    expect(workbook).toContain('<sheet name="Doklady (2)" sheetId="2" r:id="rId2"/>');
+    const rels = strFromU8(files["xl/_rels/workbook.xml.rels"]!);
+    expect(rels).toContain('Id="rId2"');
+    expect(rels).toContain(
+      'Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"',
+    );
+    expect(strFromU8(files["[Content_Types].xml"]!)).toContain("/xl/worksheets/sheet2.xml");
+
+    const first = await readXlsx(bytes, TABULAR_LIMITS);
+    expect(first.rows).toHaveLength(451);
+    expect(first.rows[450]).toEqual(["Doklad 449", "-500.00"]);
+
+    const second = strFromU8(files["xl/worksheets/sheet2.xml"]!);
+    expect(second).toContain('<t xml:space="preserve">\'=1+1</t>');
+    expect(second.endsWith("</sheetData></worksheet>")).toBe(true);
+  });
+
+  test("toXlsx a buildSheets dají pro jeden list stejné části", async () => {
+    const sink = memorySink();
+    await buildSheets(sink, [SHEET]);
+    const streamed = unzipSync(sink.bytes());
+    const whole = unzipSync(toXlsx(SHEET));
+    for (const name of Object.keys(whole)) {
+      expect(strFromU8(streamed[name]!), name).toBe(strFromU8(whole[name]!));
+    }
   });
 });

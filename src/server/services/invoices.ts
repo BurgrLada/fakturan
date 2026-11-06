@@ -249,7 +249,7 @@ export function ownerOf(actor: Actor): string {
   return actor.userId;
 }
 
-function readOwned(q: Reader, ownerId: string, id: string): Invoice | null {
+export function readOwned(q: Reader, ownerId: string, id: string): Invoice | null {
   return (
     q
       .select()
@@ -958,7 +958,7 @@ function statusCondition(status: InvoiceStatusFilter): SQL {
     : eq(invoice.status, status);
 }
 
-function ownedCustomerId(ownerId: string, id: string | undefined): string | undefined {
+export function ownedCustomerId(ownerId: string, id: string | undefined): string | undefined {
   if (!id) return undefined;
   return db
     .select({ id: customer.id })

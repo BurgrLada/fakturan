@@ -27,6 +27,7 @@ import {
   saveEmailTemplateAction,
 } from "@/app/(app)/nastaveni/posta/sablony/actions";
 import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
+import { createExportAction, exportListAction } from "@/app/(app)/nastaveni/export/actions";
 import {
   confirmBatchAction,
   createImportBatchAction,
@@ -148,6 +149,10 @@ import {
 } from "@/server/services/dashboards";
 import { addWidget, removeWidget, updateWidget } from "@/server/services/widgets";
 import { assertIsolated } from "../helpers/isolation";
+import { registerJob } from "@/server/jobs/registry";
+import { drainHeavy } from "@/server/jobs/worker";
+import { runExport } from "@/server/services/export-run";
+import { recoverExportJob } from "@/server/services/exports";
 import { writePreview } from "@/server/services/import-batch";
 import { importBatch } from "@/server/db/schema";
 import { createTestDb } from "../helpers/db";
@@ -1028,5 +1033,50 @@ describe("akce importu", () => {
     expect(cache.revalidated).toBe(before);
     db.update(importBatch).set({ status: "ready" }).where(eq(importBatch.id, batchId)).run();
     expect(await importStateAction({ batchId })).toMatchObject({ ok: true, rows: [row] });
+  });
+});
+
+describe("akce exportu", () => {
+  const download = async (id: string) => {
+    const { GET } = await import("@/app/(app)/nastaveni/export/[id]/route");
+    return GET(new Request("http://localhost/"), { params: Promise.resolve({ id }) });
+  };
+
+  test("[SEC-002] export, jeho seznam ani stažení neprojdou s cizím účtem nebo ID", async () => {
+    registerJob("export.run", { run: runExport, recover: recoverExportJob });
+    const mine = seedOwner(db, new Date());
+    const stranger = seedOwner(db, new Date());
+    const invoiceId = issuedInvoice(mine, seedCustomer(mine));
+
+    session.userId = mine;
+    const created = await createExportAction({ kind: "invoices", format: "csv" });
+    if (!created.ok) throw new Error(created.error);
+    await drainHeavy("w");
+    const own = await download(created.id);
+    expect(own.status).toBe(200);
+    expect(own.headers.get("Content-Disposition")).toMatch(/^attachment/);
+    expect(own.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(own.headers.get("Cache-Control")).toContain("no-store");
+    expect(await own.text()).toContain(getInvoice(mine, invoiceId)!.number!);
+
+    session.userId = stranger;
+    expect((await download(created.id)).status).toBe(404);
+    expect((await download("neexistuje")).status).toBe(404);
+    expect(await exportListAction()).toEqual({ ok: true, rows: [] });
+    expect(
+      await createExportAction({ kind: "invoices", format: "csv", ownerId: mine }),
+    ).toMatchObject({ ok: false });
+    const foreign = await createExportAction({
+      kind: "invoices",
+      format: "pdf_zip",
+      filter: { ids: [invoiceId] },
+    });
+    if (!foreign.ok) throw new Error(foreign.error);
+    await drainHeavy("w");
+    const listed = await exportListAction();
+    expect(listed.ok && listed.rows).toMatchObject([
+      { id: foreign.id, status: "failed", reason: TEXTS.exporting.errors.foreignIds },
+    ]);
+    expect((await download(foreign.id)).status).toBe(404);
   });
 });

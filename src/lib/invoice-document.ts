@@ -131,11 +131,15 @@ export type InvoiceDocument = DocumentHeader & {
   images: DocumentImages;
   totals: DocumentTotals;
   relatedDocument: RelatedSnapshot | null;
+  // An imported document without bank details was stored as cash only to pass the consistency
+  // check; no output may claim that payment means.
+  paymentUnknown?: true;
 };
 
 type DocumentRow = DocumentHeader &
   DocumentImages &
   DocumentTotals & {
+    external?: boolean;
     appearance: Appearance;
     supplierSnapshot: SupplierSnapshot | null;
     customerSnapshot: CustomerSnapshot | null;
@@ -211,5 +215,6 @@ export function invoiceDocument(row: DocumentRow): InvoiceDocument {
       supersededAt: row.supersededAt,
     },
     relatedDocument: row.relatedSnapshot,
+    ...(row.external && !row.accountSnapshot && { paymentUnknown: true as const }),
   };
 }

@@ -273,15 +273,18 @@ export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string 
           doc.variableSymbol ? el("VariableSymbol", doc.variableSymbol) : "",
         )
       : "";
-  const payment = nest(
-    "PaymentMeans",
-    nest(
-      "Payment",
-      el("PaidAmount", amount(payableCurr)),
-      el("PaymentMeansCode", PAYMENT_CODES[doc.paymentMethod]),
-      details,
-    ),
-  );
+  // PaymentMeans is optional, and no code of the schema means "unknown".
+  const payment = doc.paymentUnknown
+    ? ""
+    : nest(
+        "PaymentMeans",
+        nest(
+          "Payment",
+          el("PaidAmount", amount(payableCurr)),
+          el("PaymentMeansCode", PAYMENT_CODES[doc.paymentMethod]),
+          details,
+        ),
+      );
 
   const note = [doc.clause, doc.textBefore, doc.textAfter, doc.note]
     .filter((part) => part.trim())

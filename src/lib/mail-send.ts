@@ -53,6 +53,8 @@ export const sendInputSchema = messageFields
     confirmedUnknown: z.boolean(E.invalid).optional(),
     revision: z.number(E.invalid).int(E.invalid),
     logId: z.string(E.invalid).min(1, E.invalid).optional(),
+    // Off unless chosen in the dialog (MAIL-001).
+    attachIsdoc: z.boolean(E.invalid).optional(),
   })
   .refine(withinRecipientLimit, E.recipients);
 

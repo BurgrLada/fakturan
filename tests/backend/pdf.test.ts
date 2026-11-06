@@ -666,7 +666,7 @@ describe("název souboru", () => {
     expect(fileNameFor("{cislo}.pdf", F.short)).toBe("2026-001.pdf");
     expect(fileNameFor("{cislo}.pdf", { ...F.short, number: null })).toBe("koncept.pdf");
     expect(fileNameFor("{cislo}", F.short)).toBe("2026-001.pdf");
-    expect(fileNameFor("{zakaznik}.pdf", { ...F.short, customerName: "$& ..‮" })).toBe("$& .._.pdf");
+    expect(fileNameFor("{zakaznik}.pdf", { ...F.short, customerName: "$& ..‮" })).toBe("$& ._.pdf");
     expect(fileNameFor("...", F.short)).toBe("faktura.pdf");
     expect(
       fileNameFor("{zakaznik}.pdf", { ...F.short, customerName: "x".repeat(500) }).length,

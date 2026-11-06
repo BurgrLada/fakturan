@@ -52,6 +52,7 @@ export type QueueInput = {
   automation?: AutomationKey;
   stageKey?: string;
   paymentId?: string;
+  attachIsdoc?: boolean;
 };
 
 export { mailNoticeKey };
@@ -127,6 +128,7 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
       automation: input.automation ?? null,
       stageKey: input.stageKey ?? null,
       paymentId: input.paymentId ?? null,
+      attachIsdoc: input.attachIsdoc ?? false,
       receiptPrint:
         kind === "payment_receipt" ? receiptPrint(tx, userId, row, input.paymentId) : null,
       createdAt: now,
@@ -149,6 +151,7 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
       trigger,
       subject: message.subject,
       recipients: message.to.length + message.cc.length + message.bcc.length,
+      ...(input.attachIsdoc && { isdoc: true }),
     },
   });
   return { logId };
@@ -255,6 +258,7 @@ type ClickOptions = {
   // Null only for a receipt: its text states one payment, whatever else changed on the document.
   revision: number | null;
   paymentId?: string | null;
+  attachIsdoc?: boolean;
   // Runs in the queueing transaction: a throw takes the queued message back with it.
   alongside?: (tx: Tx, audit: Audit, row: Invoice, logId: string) => void;
 };
@@ -299,6 +303,8 @@ function queueClicked(
       message,
       stageKey: opts.stageKey ?? undefined,
       paymentId: paymentId ?? undefined,
+      // Only the document itself travels as ISDOC, never a reminder or a receipt about it.
+      attachIsdoc: opts.attachIsdoc === true && kind === kindForInvoice(row.type),
     });
     if (!result) throw new ServiceError(E.alreadySending);
     opts.alongside?.(tx, audit, row, result.logId);
@@ -345,7 +351,14 @@ export function queueReminder(
 export function sendInvoice(actor: Actor, invoiceId: string, raw: SendInput): { logId: string } {
   const userId = ownerOf(actor);
   enforceRateLimit(actor, RATE_RULES.sendUser);
-  const { requestId, confirmedUnknown = false, revision, logId, ...message } = parseSend(raw);
+  const {
+    requestId,
+    confirmedUnknown = false,
+    revision,
+    logId,
+    attachIsdoc = false,
+    ...message
+  } = parseSend(raw);
   const replaced =
     logId && !loggedRequest(userId, requestKey(userId, requestId))
       ? replacedLog(userId, invoiceId, logId)
@@ -356,6 +369,7 @@ export function sendInvoice(actor: Actor, invoiceId: string, raw: SendInput): { 
     kind: replaced?.kind,
     stageKey: replaced?.stageKey,
     paymentId: replaced?.paymentId,
+    attachIsdoc,
   });
 }
 
@@ -469,6 +483,7 @@ export function resendFromLog(
       stageKey: log.stageKey,
       paymentId: log.paymentId,
       revision: log.kind === "payment_receipt" ? null : log.invoiceRevision,
+      attachIsdoc: log.attachIsdoc,
     },
   );
 }
@@ -560,6 +575,8 @@ export function mailStateOf(rows: EmailLogRow[]): {
 export type SendPrefill = MailDraft & {
   requestId: string;
   revision: number;
+  isdocAvailable: boolean;
+  attachIsdoc: boolean;
   unknownPending: boolean;
   paused: boolean;
   repeat?: boolean;
@@ -612,6 +629,8 @@ export function sendPrefill(
       }),
     requestId: randomUUID(),
     revision: row.revision,
+    isdocAvailable: kind === kindForInvoice(row.type),
+    attachIsdoc: log?.attachIsdoc ?? false,
     unknownPending:
       log?.status === "unknown" || hasUnresolvedUnknown(ownerId, invoiceId, kind, paymentId),
     paused: getAutomation(ownerId).paused,

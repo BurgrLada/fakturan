@@ -58,11 +58,17 @@ function csvField(value: string): string {
   return /[";\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
 }
 
+export const CSV_BOM = "\ufeff";
+
+export function csvHeader(columns: string[]): string {
+  return `${columns.map((column) => csvField(neutralizeCsvCell(column))).join(";")}\r\n`;
+}
+
+export function csvRow(row: Cell[]): string {
+  return `${row.map((cell) => csvField(csvValue(cell))).join(";")}\r\n`;
+}
+
 // Czech Excel opens it directly: UTF-8 BOM, semicolons and a decimal comma (REP-004).
 export function toCsv(sheet: Sheet): string {
-  const lines = [
-    sheet.columns.map((column) => csvField(neutralizeCsvCell(column))),
-    ...sheet.rows.map((row) => row.map((cell) => csvField(csvValue(cell)))),
-  ].map((fields) => fields.join(";"));
-  return `﻿${lines.join("\r\n")}\r\n`;
+  return CSV_BOM + csvHeader(sheet.columns) + sheet.rows.map(csvRow).join("");
 }

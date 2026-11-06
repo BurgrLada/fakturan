@@ -63,6 +63,9 @@ export const emailLog = sqliteTable(
     status: text({ enum: EMAIL_STATUSES }).notNull().default("queued"),
     reason: text(),
     fileId: text("file_id").references(() => file.id, { onDelete: "set null" }),
+    // Chosen in the dialog; never set by automation (R-25).
+    attachIsdoc: integer("attach_isdoc", { mode: "boolean" }).notNull().default(false),
+    isdocFileId: text("isdoc_file_id").references(() => file.id, { onDelete: "set null" }),
     invoiceRevision: integer("invoice_revision").notNull(),
     plannedFor: text("planned_for"),
     automation: text({ enum: AUTOMATION_KEYS }),
