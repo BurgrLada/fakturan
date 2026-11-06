@@ -1,4 +1,5 @@
 import "server-only";
+import { PDF_TEXT_BUDGET, printedLength } from "@/lib/printed-length";
 import { desc, inArray } from "drizzle-orm";
 import { addDays, appearanceFrom, INVOICE_STATUSES, type Appearance } from "@/lib/invoice";
 import type { InvoiceDocument } from "@/lib/invoice-document";
@@ -134,7 +135,10 @@ export async function designPreviewPdf(
   ownerId: string,
   appearance: PreviewAppearance,
 ): Promise<Buffer> {
-  const doc = lastIssuedDocument(ownerId) ?? samplePreviewDocument(ownerId);
+  // The same budget as every PDF of a document: one too long for it shows the built-in sample.
+  const last = lastIssuedDocument(ownerId);
+  const doc =
+    last && printedLength(last) <= PDF_TEXT_BUDGET ? last : samplePreviewDocument(ownerId);
   const view = await buildInvoiceView(
     { ...doc, appearance: { ...doc.appearance, ...appearance } },
     {

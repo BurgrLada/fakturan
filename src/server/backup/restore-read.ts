@@ -25,6 +25,7 @@ import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { isCalendarDate } from "@/lib/number-format";
 import { DATE_FORMATS, LANGUAGES, LOGO_POSITIONS, PAYMENT_METHODS } from "@/lib/preferences";
 import { accountRowLimit, PER_PARENT_LIMITS } from "@/lib/account-limits";
+import { textLimit } from "@/lib/text-limits";
 import { MAX_BODY_CHARS, MAX_SUBJECT_CHARS } from "@/lib/email-template";
 import {
   DATE_FORMATS as IMPORT_DATE_FORMATS,
@@ -327,6 +328,11 @@ function columnSchema(entry: BackupTable, column: AnyColumn): z.ZodType | null {
     const cap = jsonBytesFor(entry.name, column.name, RESTORE_LIMITS);
     schema = schema.refine((value) => jsonBytes(value) <= cap);
   }
+  // No longer than the app itself writes (TEXT_LIMITS); ids and refs have their own pattern.
+  const limit = textLimit(entry.name, column.name);
+  if (limit !== undefined && rule !== "id" && !rule.startsWith("ref:")) {
+    schema = schema.refine((value) => typeof value !== "string" || value.length <= limit);
+  }
   return column.notNull ? schema : schema.nullable();
 }
 
@@ -496,9 +502,7 @@ function eachRow(
         const parent = String(parsed.data[perParent.parent]);
         const seen = (children.get(parent) ?? 0) + 1;
         if (seen > perParent.limit) {
-          throw new RestoreRejected(
-            E.tooManyChildren(E.parents[entry.name] ?? "", perParent.limit),
-          );
+          throw new RestoreRejected(E.tooManyChildren(entry.name, perParent.limit));
         }
         children.set(parent, seen);
         budget.guard.hold("children", children.size * HELD_COSTS.id);
@@ -511,6 +515,21 @@ function eachRow(
   );
   budget.guard.hold("children", 0);
   return count;
+}
+
+// For the registry test: every free text column of a backed-up table must have its length limit.
+export function textColumnsWithoutLimit(): string[] {
+  return BACKUP_TABLES.flatMap((entry) =>
+    Object.values(getTableColumns(entry.table))
+      .filter((column) => {
+        const rule = entry.columns[column.name];
+        if (!rule || rule === "omit" || rule === "owner" || rule === "id") return false;
+        if (rule.startsWith("ref:") || column.columnType !== "SQLiteText") return false;
+        return !(column as AnyColumn & { enumValues?: string[] }).enumValues?.length;
+      })
+      .map((column) => `${entry.name}.${column.name}`)
+      .filter((name) => textLimit(...(name.split(".") as [string, string])) === undefined),
+  );
 }
 
 // For the registry test: every JSON column of a backed-up table must have its strict shape.

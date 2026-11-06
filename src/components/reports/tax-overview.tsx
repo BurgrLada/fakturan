@@ -19,7 +19,7 @@ import {
 import { lineNote, TAX_TEXT_REVIEWED, unconvertedText } from "@/lib/tax-text";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
-import type { TaxOverview } from "@/server/reports/tax";
+import type { TaxOverview, TaxPage } from "@/server/reports/tax";
 
 const T = TEXTS.tax;
 const C = T.columns;
@@ -95,10 +95,13 @@ export function TaxOverviewView({
   filter,
   today,
 }: {
-  overview: TaxOverview;
+  // The page gets at most TAX_PAGE_ROWS of each table and the full counts; the exports have all.
+  overview: TaxOverview | TaxPage;
   filter: TaxFilter;
   today: string;
 }) {
+  const linesCount = "linesCount" in overview ? overview.linesCount : overview.lines.length;
+  const unpaidCount = "unpaidCount" in overview ? overview.unpaidCount : overview.unpaid.length;
   const totalLabel =
     overview.basis === "paid" ? T.incomeTotal(overview.year) : T.issuedTotal(overview.year);
   const missing = unconvertedText(overview.unconverted);
@@ -172,6 +175,11 @@ export function TaxOverviewView({
             </TableBody>
           </Table>
         )}
+        {linesCount > overview.lines.length && (
+          <p className="text-sm text-muted-foreground">
+            {T.truncated(overview.lines.length, linesCount)}
+          </p>
+        )}
       </section>
       <section className="space-y-2">
         <h2 className="text-lg">{T.unpaidTitle(day(overview.asOf), overview.asOfToday)}</h2>
@@ -204,6 +212,11 @@ export function TaxOverviewView({
               ))}
             </TableBody>
           </Table>
+        )}
+        {unpaidCount > overview.unpaid.length && (
+          <p className="text-sm text-muted-foreground">
+            {T.truncated(overview.unpaid.length, unpaidCount)}
+          </p>
         )}
         <p className="text-sm">
           {T.unpaidTotal}: <span className="tabular-nums">{czk(overview.unpaidCzkMinor)}</span>

@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DOCUMENT_INPUT_BYTES, jsonBytes, STORED_JSON_BYTES } from "@/lib/backup-format";
+import { DOCUMENT_FRAME_CHARS, PDF_TEXT_BUDGET, printedLength } from "@/lib/printed-length";
 import {
   and,
   asc,
@@ -160,9 +161,12 @@ export function checkDocumentSize(
   ctx: z.RefinementCtx,
 ): void {
   const { lines, textBefore, textAfter, note, clause, orderRef, reference } = value;
-  const size = jsonBytes({ lines, textBefore, textAfter, note, clause, orderRef, reference });
-  if (size > DOCUMENT_INPUT_BYTES) {
+  const own = { lines, textBefore, textAfter, note, clause, orderRef, reference };
+  if (jsonBytes(own) > DOCUMENT_INPUT_BYTES) {
     ctx.addIssue({ code: "custom", path: ["lines"], message: V.documentTooLarge });
+  } else if (printedLength(own) > PDF_TEXT_BUDGET - DOCUMENT_FRAME_CHARS) {
+    // Short in bytes but long in characters: it would be saved and then have no PDF (I-1).
+    ctx.addIssue({ code: "custom", path: ["lines"], message: TEXTS.pdf.tooLong });
   }
 }
 

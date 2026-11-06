@@ -46,6 +46,23 @@ export type UnpaidRow = {
   czkMinor: number | null;
 };
 
+// The page shows this many rows of each table; the totals cover all of them and the full list is in
+// the Excel and CSV exports. Without it a year of a large or restored account would be one page
+// of hundreds of MiB, held again by the cache, the RSC payload and the HTML (plan 9).
+export const TAX_PAGE_ROWS = 2_000;
+
+export type TaxPage = TaxOverview & { linesCount: number; unpaidCount: number };
+
+export function taxPage(overview: TaxOverview, rows = TAX_PAGE_ROWS): TaxPage {
+  return {
+    ...overview,
+    lines: overview.lines.slice(0, rows),
+    unpaid: overview.unpaid.slice(0, rows),
+    linesCount: overview.lines.length,
+    unpaidCount: overview.unpaid.length,
+  };
+}
+
 export type TaxOverview = {
   year: number;
   basis: TaxBasis;

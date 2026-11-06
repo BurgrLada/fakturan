@@ -26,6 +26,7 @@ import { saveUnit } from "@/server/services/catalog";
 import { createDashboard, ensureDashboards } from "@/server/services/dashboards";
 import { saveTemplate } from "@/server/services/invoice-templates";
 import { newDraftDefaults } from "@/server/services/invoices";
+import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { draftFor, seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
 import { savePlan } from "../helpers/fixtures-recurring";
@@ -305,5 +306,42 @@ describe("obnovení verze dokladu", () => {
     expect(() => restoreVersion(webActor(owner), version.id)).toThrow(
       TEXTS.invoices.validation.documentTooLarge,
     );
+  });
+});
+
+describe("délka textu a rozpočet PDF při zápisu", () => {
+  test("[SEC-005] kontrola dat najde text delší, než aplikace smí zapsat", () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    expect(() => assertConsistent(db, owner)).not.toThrow();
+    db.update(customer)
+      .set({ name: "x".repeat(201) })
+      .where(eq(customer.id, customerId))
+      .run();
+    expect(() => assertConsistent(db, owner)).toThrow(/customer\.name/);
+  });
+
+  test("[PDF-005] koncept s 94 položkami po 2 220 znacích se neuloží, PDF by nevzniklo", () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    const lines = Array.from({ length: 94 }, (_, index) => ({
+      catalogItemId: null,
+      name: `${index}`.padEnd(200, "n"),
+      description: "d".repeat(2_000),
+      quantityMilli: 1000,
+      unit: "u".repeat(20),
+      unitPriceMinor: 100,
+      discountKind: "none" as const,
+      discountValue: 0,
+    }));
+    const texts = {
+      textBefore: "a".repeat(2_000),
+      textAfter: "b".repeat(2_000),
+      note: "c".repeat(2_000),
+      orderRef: "o".repeat(200),
+      reference: "r".repeat(200),
+    };
+    expect(jsonBytes({ lines, ...texts })).toBeLessThanOrEqual(DOCUMENT_INPUT_BYTES);
+    expect(() => draftFor(owner, customerId, { lines, ...texts })).toThrow(TEXTS.pdf.tooLong);
   });
 });

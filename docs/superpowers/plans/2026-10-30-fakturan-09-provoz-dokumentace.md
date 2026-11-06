@@ -939,7 +939,8 @@ Kontroly plánu:
   - 75 000 faktur se 173 MiB dat: 11,9 s;
   - 780 šablon na stropu 256 KiB JSON (187 MiB): 3,8 s.
   Lease se obnovuje těsně před commitem (`renewHeavy`), takže rezerva je celých 120 s. Proti 90 s je to ~5×, proto se strop řádků nemění. Obnova se dá opakovat nejvýš 5× za hodinu (`restoreUser`).
-- PDF se vykresluje synchronně a cena roste s textem. Nejdelší doklad, který formulář přijme (500 položek, 158 850 znaků), se vykreslil za 11,1 s a +329 MiB RSS. Rozpočet `PDF_TEXT_BUDGET` je 200 000 znaků, tedy ~0,4 GiB na jeden render. Rendery jdou po jednom (`serializeRender`). Starší nebo obnovený doklad nad rozpočet PDF nemá, aplikace to řekne a odeslání i export skončí s důvodem.
+- PDF se vykresluje synchronně a cena roste s textem a s počtem položek. Rozpočet `PDF_TEXT_BUDGET` je 200 000 znaků. Formulář pustí nejvýš rozpočet minus 10 000 na snapshoty a hlavičku, takže každý doklad z formuláře PDF má. Změřeno (`fix5-pdf-longest.txt`): 94 položek se 190 442 znaky za 4,7 s a +83 MiB RSS, 500 položek se 160 360 znaky za 12,8 s a +480 MiB RSS. Rendery jdou po jednom (`serializeRender`).
+- **Známé omezení:** starší doklad nebo verze nad 200 000 znaků, vzniklé před stropy (až ~2,2 M znaků), nemá PDF. Nejde stáhnout, odeslat ani vyvézt a aplikace řekne proč (`TEXTS.pdf.tooLong`). Koncept jde zkrátit. U vystaveného dokladu jde vystavit opravný doklad, nebo doklad stornovat a vystavit nový kratší; data dokladu se nemění.
 - HTML e-mail vypadá v Outlooku jinak než v prohlížeči. Tabulky a inline styly to zmírní, ale ověření ve skutečných klientech je ruční **[R-17]**.
 - Hlídač paměti eviduje, co obnova drží, podle změřených cen za položku. Pojistka 75 % haldy čte skutečnou haldu, takže souběžná práce jiného účtu může obnovu odmítnout dřív, což je bezpečný směr **[R-3]**.
 - Reset ukázky v 3:30 může na chvíli kolidovat s přihlášeným návštěvníkem. Ten dostane prázdný stav do konce resetu **[R-31]**.

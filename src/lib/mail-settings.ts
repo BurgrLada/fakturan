@@ -16,6 +16,7 @@ const optionalEmail = (message: string) =>
   z
     .string()
     .trim()
+    .max(254, message)
     .refine((value) => value === "" || z.email().safeParse(value).success, message);
 
 export function splitAddresses(value: string): string[] {

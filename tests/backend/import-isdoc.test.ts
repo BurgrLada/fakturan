@@ -247,6 +247,25 @@ describe("import ISDOC", () => {
     assertConsistent(db, owner);
   });
 
+  test("[IMP-001] číslo dokladu nebo jméno odběratele nad strop textu je chyba řádku", async () => {
+    const owner = importOwner(db, NOW);
+    const longNumber = editedIsdoc(
+      "faktura-czk.isdoc",
+      /<ID>2026-0001<\/ID>/,
+      `<ID>${"9".repeat(101)}</ID>`,
+    );
+    const longName = editedIsdoc(
+      "faktura-czk.isdoc",
+      "<Name>Vzorová a. s.</Name>",
+      `<Name>${"V".repeat(201)}</Name>`,
+    );
+    for (const bytes of [longNumber, longName]) {
+      const { rows } = await parsed(owner, [{ name: "x.isdoc", bytes }]);
+      expect(rows[0]).toMatchObject({ status: "error" });
+      expect(rows[0]!.messages).toContain(R.textTooLong);
+    }
+  });
+
   test("doklad jiného dodavatele je chyba řádku", async () => {
     const owner = importOwner(db, NOW);
     const { rows } = await parsed(owner, [

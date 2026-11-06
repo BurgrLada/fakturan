@@ -94,8 +94,10 @@ položek archivu (tedy zhruba tolik souborů). Účet má navíc strop řádků 
 a 2 000 pravidelných faktur, 50 nástěnek po nejvýš 50 widgetech, 200 předvoleb importu, 500 jednotek,
 200 číselných řad, 100 bankovních účtů, 2 000 štítků a 20 pravidel upomínek; doklad má nejvýš 500
 položek. Tytéž stropy platí v aplikaci i při obnově. Delší doklad nebo šablonu ani řádek nad strop
-aplikace nedovolí uložit. PDF dokladu (stažení, odeslání i export) vznikne nejvýš z 200 000 znaků
-textu; nad tím aplikace PDF nevytvoří a řekne proč. Starší šablonu, plán nebo koncept nad strop záloha pojmenuje
+aplikace nedovolí uložit. Každý textový sloupec má strop délky podle formuláře (např. jméno
+zákazníka 200 znaků, popis položky 2 000), stejný v aplikaci i při obnově. PDF dokladu
+(stažení, odeslání i export) vznikne nejvýš z 200 000 znaků textu a formulář delší doklad
+neuloží; starší doklad nad tím PDF nemá a aplikace řekne proč. Starší šablonu, plán nebo koncept nad strop záloha pojmenuje
 a nevznikne, dokud se nezkrátí; verze vystavených dokladů mají rezervu nad vším, co aplikace kdy
 dovolila. Zápis obnovy je jedna transakce a na stropu zastaví instanci asi na 20 s. Archiv má
 formát verze 2: hned za popisem zálohy leží seznam souborů s jejich kontrolními součty, takže popis

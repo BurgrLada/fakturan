@@ -1,4 +1,5 @@
 import "server-only";
+import { PDF_TEXT_BUDGET, printedLength } from "@/lib/printed-length";
 import type { CalendarDate } from "@/lib/number-format";
 import type { TaxFilter } from "@/lib/report-filter";
 import { formatMoney } from "@/lib/money";
@@ -99,11 +100,20 @@ export function setTaxPdfRowLimitForTests(limit: number | null): void {
   pdfRowLimit = limit ?? TAX_PDF_MAX_ROWS;
 }
 
+// The rows are counted above, but their text (customer names, numbers) is what react-pdf pays for,
+// so the overview has the same text budget as a document PDF.
+let pdfTextBudget = PDF_TEXT_BUDGET;
+
+export function setTaxPdfTextBudgetForTests(budget: number | null): void {
+  pdfTextBudget = budget ?? PDF_TEXT_BUDGET;
+}
+
 async function render(overview: TaxOverview, format: TaxExportFormat) {
   if (format === "pdf") {
     if (overview.lines.length + overview.unpaid.length > pdfRowLimit) {
       throw new ServiceError(T.errors.pdfTooLong(pdfRowLimit));
     }
+    if (printedLength(overview) > pdfTextBudget) throw new ServiceError(T.errors.pdfTooMuchText);
     return {
       contentType: "application/pdf",
       body: new Uint8Array(await renderTaxOverviewPdf(overview)),

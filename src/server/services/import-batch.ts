@@ -1,4 +1,5 @@
 import "server-only";
+import { fitText } from "@/lib/text-limits";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { ContentKind } from "@/lib/safe-input/limits";
@@ -418,7 +419,11 @@ export function failBatch(ownerId: string, batchId: string, reason: string): voi
     mutate({ userId: ownerId, source: "system" }, "import.fail", (tx, audit) => {
       const failed = tx
         .update(importBatch)
-        .set({ status: "failed", error: reason, updatedAt: clock.now() })
+        .set({
+          status: "failed",
+          error: fitText("import_batch", "error", reason),
+          updatedAt: clock.now(),
+        })
         .where(
           scoped(ownerId).where(importBatch, (t) =>
             and(eq(t.id, batchId), inArray(t.status, RUNNING)),

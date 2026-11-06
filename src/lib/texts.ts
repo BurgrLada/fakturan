@@ -3123,6 +3123,8 @@ export const TEXTS = {
         "Nový zákazník má v souboru neplatné IČO nebo e-mail, založí se bez nich. Doklad nese údaje ze souboru.",
       noLines: "Doklad nemá žádnou položku",
       lines: "Doklad má víc položek, než Fakturan dovolí",
+      textTooLong:
+        "Číslo, variabilní symbol, identifikátor nebo jméno odběratele je v souboru delší, než Fakturan dovolí",
       ignoredPdf: (name: string) => `PDF ${name} nepatří k žádnému dokladu a nepoužije se`,
       nestedArchive: (name: string) => `Vnořený archiv ${name} se přeskočil`,
       duplicateCustomer: "Zákazník se stejným IČO nebo názvem už je ve Fakturanu nebo v importu",
@@ -3315,6 +3317,8 @@ export const TEXTS = {
   },
   tax: {
     title: "Daňový podklad",
+    truncated: (shown: number, total: number) =>
+      `Zobrazeno prvních ${shown} z ${total} řádků, součty platí pro všechny. Celý seznam je v exportu do Excelu nebo CSV.`,
     tab: "Daňový podklad",
     intro: "Roční souhrn příjmů a neuhrazených faktur jako podklad k přiznání.",
     disclaimer:
@@ -3367,6 +3371,8 @@ export const TEXTS = {
       invalid: "Neplatné zadání exportu",
       pdfTooLong: (limit: number) =>
         `Přehled má víc než ${limit} řádků, to je na PDF příliš. Stáhněte ho jako Excel nebo CSV.`,
+      pdfTooMuchText:
+        "Přehled má na PDF příliš mnoho textu, třeba dlouhá jména zákazníků. Stáhněte ho jako Excel nebo CSV.",
     },
   },
   backup: {
@@ -3467,9 +3473,10 @@ export const TEXTS = {
       filesIndex: "Seznam souborů v archivu není platný.",
       tooManyRows: (table: string) =>
         `Archiv má v části „${tableLabel(table)}“ víc řádků, než jeden účet smí mít.`,
-      tooManyChildren: (what: string, limit: number) =>
-        `${what} v archivu má víc než ${limit} řádků, tolik aplikace nedovolí.`,
-      parents: { invoice_line: "Doklad", dashboard_widget: "Nástěnka" } as Record<string, string>,
+      tooManyChildren: (table: string, limit: number) =>
+        table === "dashboard_widget"
+          ? `Nástěnka v archivu má víc než ${limit} widgetů, tolik aplikace nedovolí.`
+          : `Doklad v archivu má víc než ${limit} položek, tolik aplikace nedovolí.`,
       memory: "Obnova archivu by zabrala víc paměti, než instance dovolí. Účet zůstal beze změny.",
       uploadExpired: "Nahrávání trvalo příliš dlouho a bylo zrušeno. Nahrajte zálohu znovu.",
       audit: "Historie změn v archivu není platná.",

@@ -10,6 +10,7 @@ import * as schema from "@/server/db/schema";
 import { reportSummary } from "@/server/reports/queries";
 import { invoiceProblems, paymentProblems } from "@/server/services/data-checks";
 import { taxOverview, unpaidAsOf } from "@/server/reports/tax";
+import { TEXT_LIMITS } from "@/lib/text-limits";
 
 const OWNER_COLUMNS = ["userId", "ownerId"] as const;
 
@@ -26,6 +27,25 @@ function ownedTables(): { table: string; column: string }[] {
 }
 
 const OWNED = ownedTables();
+
+// Every scenario writes through the app, so this proves the app stays within TEXT_LIMITS, the same
+// limits a restore enforces: a backup the app wrote always comes back.
+function textLimitProblems(db: Db, ownerId: string): string[] {
+  if (!ownerId) return [];
+  const problems: string[] = [];
+  for (const [key, limit] of Object.entries(TEXT_LIMITS)) {
+    const [table, column] = key.split(".") as [string, string];
+    const longest =
+      db.get<{ n: number | null }>(
+        sql`SELECT max(length(${sql.identifier(column)})) AS n FROM ${sql.identifier(table)}
+          WHERE user_id = ${ownerId}`,
+      )?.n ?? 0;
+    if (longest !== null && longest > limit) {
+      problems.push(`${key}: ${longest} znaků nad strop ${limit}`);
+    }
+  }
+  return problems;
+}
 
 function count(db: Db, query: ReturnType<typeof sql>): number {
   return db.get<{ n: number }>(query)?.n ?? 0;
@@ -357,6 +377,7 @@ export function assertConsistent(db: Db, ownerId: string): void {
     problems.push(`audit_log: ${orphanAudit} uživatelských záznamů bez vlastníka`);
 
   problems.push(...invoiceProblems(db, ownerId));
+  problems.push(...textLimitProblems(db, ownerId));
   problems.push(...paymentProblems(db, ownerId));
   problems.push(...mailProblems(db, ownerId));
   problems.push(...recurringProblems(db, ownerId));

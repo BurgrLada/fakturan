@@ -25,8 +25,10 @@ import {
 } from "@/server/services/invoice-pdf";
 import { PdfTooLong } from "@/server/services/access";
 import { DOCUMENT_INPUT_BYTES, jsonBytes } from "@/lib/backup-format";
+import { DOCUMENT_FRAME_CHARS } from "@/lib/printed-length";
 import { TEXTS } from "@/lib/texts";
 import { invoiceLine } from "@/server/db/schema";
+import { designPreviewPdf } from "@/server/services/design-preview";
 import { cancelInvoice, checkIssuable, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { listVersions, updateIssuedInvoice } from "@/server/services/invoice-versions";
 import {
@@ -1057,13 +1059,15 @@ describe("bezpečnost", () => {
 describe("rozpočet textu PDF", () => {
   // The longest document the form accepts: 500 lines of ASCII as long as DOCUMENT_INPUT_BYTES lets
   // them be, the four texts in full and the supplier of the fixture.
-  function longestLines() {
+  // The longest document the form accepts. With 500 lines the JSON keys spend the byte cap first;
+  // with fewer, longer lines the printed-text cap binds, which is the worst case for the PDF.
+  function longestLines(count = 94) {
     const line = (index: number, size: number) => ({
       catalogItemId: null,
-      name: `Řádek ${index}`,
+      name: `${index}`.padEnd(200, "n"),
       description: "x".repeat(size),
       quantityMilli: 1000,
-      unit: "ks",
+      unit: "u".repeat(20),
       unitPriceMinor: 100,
       discountKind: "none" as const,
       discountValue: 0,
@@ -1072,10 +1076,16 @@ describe("rozpočet textu PDF", () => {
       textBefore: "a".repeat(2000),
       textAfter: "b".repeat(2000),
       note: "c".repeat(2000),
+      orderRef: "o".repeat(200),
+      reference: "r".repeat(200),
     };
+    const of = (n: number) => Array.from({ length: count }, (_, index) => line(index, n));
+    const fits = (n: number) =>
+      n <= 2_000 &&
+      jsonBytes({ lines: of(n), ...texts }) <= DOCUMENT_INPUT_BYTES &&
+      printedLength({ lines: of(n), ...texts }) <= PDF_TEXT_BUDGET - DOCUMENT_FRAME_CHARS;
     let size = 1;
-    const of = (n: number) => Array.from({ length: 500 }, (_, index) => line(index, n));
-    while (jsonBytes({ lines: of(size + 1), ...texts }) < DOCUMENT_INPUT_BYTES - 500) size += 1;
+    while (fits(size + 1)) size += 1;
     return { lines: of(size), ...texts };
   }
 
@@ -1083,21 +1093,24 @@ describe("rozpočet textu PDF", () => {
     "[PDF-005] nejdelší doklad z formuláře se vejde do rozpočtu s rezervou",
     { timeout: 120_000 },
     async () => {
-      const { owner, customerId } = newOwner();
-      const { id } = draft(owner, customerId, longestLines());
-      const doc = loadInvoiceDocument(owner, id)!;
-      const length = printedLength(doc);
-      process.stderr.write(`[PDF-005] nejdelší doklad z formuláře: ${length} znaků\n`);
       expect(PDF_TEXT_BUDGET).toBe(200_000);
-      expect(length).toBeLessThan(PDF_TEXT_BUDGET * 0.85);
-      // Under the budget it really renders, so the form never accepts a document without a PDF.
-      const rss = process.memoryUsage().rss;
-      const started = performance.now();
-      const pdf = await documentPdf(owner, doc);
-      expect(pdf.data.subarray(0, 5).toString()).toBe("%PDF-");
-      process.stderr.write(
-        `[PDF-005] render: ${Math.round(performance.now() - started)} ms, RSS +${Math.round((process.memoryUsage().rss - rss) / 1048576)} MiB\n`,
-      );
+      // Fewer long lines spend the most printed text; 500 lines spend the most layout.
+      for (const count of [94, 500]) {
+        const { owner, customerId } = newOwner();
+        const { id } = draft(owner, customerId, longestLines(count));
+        const doc = loadInvoiceDocument(owner, id)!;
+        const length = printedLength(doc);
+        expect(length).toBeLessThanOrEqual(PDF_TEXT_BUDGET);
+        // Under the budget it really renders, so the form never accepts a document without a PDF.
+        const rss = process.memoryUsage().rss;
+        const started = performance.now();
+        const pdf = await documentPdf(owner, doc);
+        expect(pdf.data.subarray(0, 5).toString()).toBe("%PDF-");
+        process.stderr.write(
+          `[PDF-005] ${count} položek, ${length} znaků: ${Math.round(performance.now() - started)} ms, RSS +${Math.round((process.memoryUsage().rss - rss) / 1048576)} MiB\n`,
+        );
+        if (count === 94) expect(length).toBeGreaterThan(PDF_TEXT_BUDGET * 0.9);
+      }
     },
   );
 
@@ -1107,7 +1120,7 @@ describe("rozpočet textu PDF", () => {
     const doc = loadInvoiceDocument(owner, id)!;
     const over = {
       ...doc,
-      lines: doc.lines.map((line) => ({ ...line, description: "y".repeat(700) })),
+      lines: doc.lines.map((line) => ({ ...line, description: "y".repeat(3_000) })),
     };
     expect(printedLength(over)).toBeGreaterThan(PDF_TEXT_BUDGET);
     const started = performance.now();
@@ -1118,7 +1131,7 @@ describe("rozpočet textu PDF", () => {
 
     // A document from a restore stored that long: the route answers with the reason.
     db.update(invoiceLine)
-      .set({ description: "y".repeat(700) })
+      .set({ description: "y".repeat(3_000) })
       .where(eq(invoiceLine.invoiceId, id))
       .run();
     session.actor = actor(owner);
@@ -1126,4 +1139,25 @@ describe("rozpočet textu PDF", () => {
     expect(response.status).toBe(422);
     expect(await response.text()).toContain(TEXTS.pdf.tooLong);
   });
+});
+
+describe("náhled designu a rozpočet textu", () => {
+  test(
+    "[PDF-004] poslední doklad nad rozpočet nahradí v náhledu vzorový doklad",
+    { timeout: 60_000 },
+    async () => {
+      const { owner, customerId } = newOwner();
+      const id = issued(owner, customerId);
+      // As a restore or an old version could leave it: far more text than any PDF may hold.
+      db.update(invoiceLine)
+        .set({ description: `DLOUHY${"y".repeat(PDF_TEXT_BUDGET)}` })
+        .where(eq(invoiceLine.invoiceId, id))
+        .run();
+      const started = performance.now();
+      const pdf = await designPreviewPdf(owner, { designId: "classic" });
+      expect(performance.now() - started).toBeLessThan(20_000);
+      const text = await textOf(pdf);
+      expect(text).not.toContain("DLOUHY");
+    },
+  );
 });

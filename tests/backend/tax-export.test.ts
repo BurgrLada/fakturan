@@ -12,9 +12,11 @@ import { readXlsx } from "@/lib/safe-input/xlsx-reader";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog } from "@/server/db/schema";
+import { TAX_PAGE_ROWS, taxPage } from "@/server/reports/tax";
 import {
   exportTaxOverview,
   setTaxPdfRowLimitForTests,
+  setTaxPdfTextBudgetForTests,
   taxOverview,
 } from "@/server/services/tax-report";
 import {
@@ -187,5 +189,53 @@ describe("výstupy daňového přehledu", () => {
       .all();
     expect(audited).toEqual([]);
     expect((await exportTaxOverview(webActor(owner), FILTER, "xlsx")).filename).toMatch(/xlsx$/);
+  });
+
+  test("[TAX-003] PDF nad rozpočet textu odkáže na Excel a audit nevznikne", async () => {
+    const owner = reportOwner(db, "2026-01-02");
+    const client = namedCustomer(owner, "Dlouhé jméno zákazníka s.r.o.");
+    pay(
+      owner,
+      issuedDocument(owner, client, { issueDate: "2026-01-02", totalMinor: 10_000 }),
+      "2026-01-02",
+      10_000,
+    );
+    setTaxPdfTextBudgetForTests(20);
+    try {
+      await expect(exportTaxOverview(webActor(owner), FILTER, "pdf")).rejects.toThrow(
+        T.errors.pdfTooMuchText,
+      );
+    } finally {
+      setTaxPdfTextBudgetForTests(null);
+    }
+    const audited = db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.ownerId, owner), eq(auditLog.action, "tax.export")))
+      .all();
+    expect(audited).toEqual([]);
+  });
+
+  test("[TAX-001] stránka ukáže nejvýš strop řádků a řekne, kolik jich je", () => {
+    const owner = reportOwner(db, "2026-01-02");
+    const client = namedCustomer(owner, "Mnoho s.r.o.");
+    for (let i = 1; i <= 4; i += 1) {
+      const date = `2026-01-0${i + 1}`;
+      pay(
+        owner,
+        issuedDocument(owner, client, { issueDate: date, totalMinor: 10_000 }),
+        date,
+        10_000,
+      );
+    }
+    const full = taxOverview(owner, FILTER, REPORT_TODAY);
+    const page = taxPage(full, 3);
+    expect(TAX_PAGE_ROWS).toBe(2_000);
+    expect(page.lines).toHaveLength(3);
+    expect(page).toMatchObject({ linesCount: 4, totalCzkMinor: full.totalCzkMinor });
+    const html = renderToStaticMarkup(
+      createElement(TaxOverviewView, { overview: page, filter: FILTER, today: REPORT_TODAY }),
+    );
+    expect(html).toContain(T.truncated(3, 4));
   });
 });

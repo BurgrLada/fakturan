@@ -1,4 +1,5 @@
 import "server-only";
+import { fitText } from "@/lib/text-limits";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { MAX_BATCH_DOCUMENTS, type PreviewRow } from "@/lib/import-preview";
@@ -376,7 +377,10 @@ function finishParse(
         progressTotal: rows.length,
         revision: batch.revision + 1,
         summary,
-        error: warnings.length > 0 ? warnings.slice(0, 20).join("\n") : null,
+        error:
+          warnings.length > 0
+            ? fitText("import_batch", "error", warnings.slice(0, 20).join("\n"))
+            : null,
         updatedAt: clock.now(),
       })
       .where(

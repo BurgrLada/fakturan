@@ -952,16 +952,13 @@ describe("obnova z nepřátelského archivu, řádky na doklad a widgety na nás
       id: randomUUID(),
       position: index,
     }));
-    await refused(withRows("invoice_line", lines), E.tooManyChildren(E.parents.invoice_line!, 500));
+    await refused(withRows("invoice_line", lines), E.tooManyChildren("invoice_line", 500));
   });
 
   test("[SEC-005] nástěnka s 51 widgety je odmítnutá", async () => {
     const widget = firstRow("dashboard_widget");
     const widgets = Array.from({ length: 51 }, () => ({ ...widget, id: randomUUID() }));
-    await refused(
-      withRows("dashboard_widget", widgets),
-      E.tooManyChildren(E.parents.dashboard_widget!, 50),
-    );
+    await refused(withRows("dashboard_widget", widgets), E.tooManyChildren("dashboard_widget", 50));
   });
 
   test("[SEC-005] hlášky obnovy neukazují název tabulky", () => {
@@ -971,5 +968,31 @@ describe("obnova z nepřátelského archivu, řádky na doklad a widgety na nás
       expect(E.tooManyRows(table)).not.toContain(table);
       expect(TEXTS.backup.blocking.row(table)).not.toContain(table);
     }
+  });
+});
+
+describe("obnova z nepřátelského archivu, délka textových sloupců", () => {
+  test("[SEC-005] jméno zákazníka a popis položky delší než formulář jsou odmítnuté", async () => {
+    await refused(
+      editRows("invoice", (rows) =>
+        rows.map((row) => ({ ...row, customer_name: "x".repeat(201) })),
+      ),
+      E.row("invoice"),
+    );
+    await refused(
+      editRows("invoice_line", (rows) =>
+        rows.map((row) => ({ ...row, description: "x".repeat(2_001) })),
+      ),
+      E.row("invoice_line"),
+    );
+    await refused(
+      editRows("customer", (rows) => rows.map((row) => ({ ...row, note: "x".repeat(2_001) }))),
+      E.row("customer"),
+    );
+  });
+
+  test("[SEC-005] hláška o nástěnce mluví o widgetech", () => {
+    expect(E.tooManyChildren("dashboard_widget", 50)).toContain("widgetů");
+    expect(E.tooManyChildren("invoice_line", 500)).toContain("položek");
   });
 });

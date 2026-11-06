@@ -1,4 +1,5 @@
 import "server-only";
+import { textLimit } from "@/lib/text-limits";
 import { and, inArray, ne, or } from "drizzle-orm";
 import { CURRENCIES } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
@@ -219,6 +220,17 @@ export function analyzeRows(
         problems.push(R.currency(doc.currency));
       if (doc.lines.length === 0) problems.push(R.noLines);
       if (doc.lines.length > MAX_LINES) problems.push(R.lines);
+      // The same limits as a restore checks: what the import writes has to come back from a backup.
+      const fits = (value: string | null | undefined, column: string) =>
+        (value ?? "").length <= (textLimit("invoice", column) ?? Number.POSITIVE_INFINITY);
+      if (
+        !fits(doc.number, "number") ||
+        !fits(doc.variableSymbol, "variable_symbol") ||
+        !fits(doc.uuid, "import_uuid") ||
+        !fits(doc.customer?.name.trim(), "customer_name")
+      ) {
+        problems.push(R.textTooLong);
+      }
       const net = doc.lines.reduce((sum, line) => sum + line.netMinor, 0);
       if (Math.abs(doc.totalMinor - net) > MAX_ROUNDING_MINOR) problems.push(R.rounding);
       const fileIco = digits(doc.supplier.ico);

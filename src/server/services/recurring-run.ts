@@ -1,4 +1,5 @@
 import "server-only";
+import { fitText } from "@/lib/text-limits";
 import { randomUUID } from "node:crypto";
 import { and, count, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { kindForInvoice } from "@/lib/email-template";
@@ -114,7 +115,7 @@ function insertRun(
       periodFrom: occurrence.billedPeriod.from,
       periodTo: occurrence.billedPeriod.to,
       status,
-      reason,
+      reason: reason === null ? null : fitText("recurring_run", "reason", reason),
       createdAt: clock.now(),
     })
     .onConflictDoNothing()

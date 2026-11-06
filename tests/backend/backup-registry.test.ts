@@ -12,7 +12,7 @@ import {
   type BackupTable,
 } from "@/server/backup/tables";
 import { USER_OWNED_TABLES } from "@/server/services/users";
-import { jsonColumnsWithoutShape } from "@/server/backup/restore-read";
+import { jsonColumnsWithoutShape, textColumnsWithoutLimit } from "@/server/backup/restore-read";
 import { ACCOUNT_ROW_LIMITS } from "@/lib/account-limits";
 import { findUnregisteredOwnedTables } from "../helpers/audit-guard";
 
@@ -160,6 +160,11 @@ describe("registr zálohy", () => {
   test("[SEC-005] každý JSON sloupec zálohované tabulky má strict tvar", () => {
     // A JSON column without a shape would let any object of the archive into the account.
     expect(jsonColumnsWithoutShape()).toEqual([]);
+  });
+
+  test("[SEC-005] každý textový sloupec zálohované tabulky má strop délky", () => {
+    // A text column without a limit would let a restore put any amount of text where pages read it.
+    expect(textColumnsWithoutLimit()).toEqual([]);
   });
 
   test("[SEC-005] konfigurační tabulky mají strop řádků na účet", () => {

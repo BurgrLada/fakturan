@@ -3,7 +3,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { parseWidgetQuery } from "@/lib/dashboard-filter";
 import { filterFromQuery, taxFromQuery } from "@/lib/report-filter";
 import { accountTag } from "./account-cache";
-import type { TaxOverview } from "./reports/tax";
+import { taxPage, type TaxPage } from "./reports/tax";
 import type { WidgetResult } from "./reports/widget-query";
 import { reportBundle, type ReportBundle } from "./services/reports";
 import { taxOverview } from "./services/tax-report";
@@ -44,10 +44,10 @@ export async function cachedTax(
   stamp: string,
   today: string,
   query: string,
-): Promise<TaxOverview> {
+): Promise<TaxPage> {
   "use cache";
   cacheLife("hours");
   cacheTag(accountTag(userId));
   void stamp;
-  return taxOverview(userId, taxFromQuery(query), today);
+  return taxPage(taxOverview(userId, taxFromQuery(query), today));
 }
