@@ -1088,16 +1088,16 @@ describe("rozpočet textu PDF", () => {
       const doc = loadInvoiceDocument(owner, id)!;
       const length = printedLength(doc);
       process.stderr.write(`[PDF-005] nejdelší doklad z formuláře: ${length} znaků\n`);
-      expect(PDF_TEXT_BUDGET).toBe(300_000);
+      expect(PDF_TEXT_BUDGET).toBe(200_000);
       expect(length).toBeLessThan(PDF_TEXT_BUDGET * 0.85);
-      if (process.env.MEASURE_PDF) {
-        const rss = process.memoryUsage().rss;
-        const started = performance.now();
-        await documentPdf(owner, doc);
-        process.stderr.write(
-          `[PDF-005] render: ${Math.round(performance.now() - started)} ms, RSS +${Math.round((process.memoryUsage().rss - rss) / 1048576)} MiB\n`,
-        );
-      }
+      // Under the budget it really renders, so the form never accepts a document without a PDF.
+      const rss = process.memoryUsage().rss;
+      const started = performance.now();
+      const pdf = await documentPdf(owner, doc);
+      expect(pdf.data.subarray(0, 5).toString()).toBe("%PDF-");
+      process.stderr.write(
+        `[PDF-005] render: ${Math.round(performance.now() - started)} ms, RSS +${Math.round((process.memoryUsage().rss - rss) / 1048576)} MiB\n`,
+      );
     },
   );
 

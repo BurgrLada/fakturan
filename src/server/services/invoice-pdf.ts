@@ -33,10 +33,10 @@ export function ownerImageReader(ownerId: string) {
 }
 
 // react-pdf renders synchronously and its cost grows with the text. The longest document the form
-// accepts prints about 159 000 characters and took 11 s and +329 MiB RSS here (PDF-005 test,
-// MEASURE_PDF=1); the budget leaves it room and stops the hostile or pre-cap documents that would
-// need gigabytes. Renders are serialized (serializeRender), so they do not add up.
-export const PDF_TEXT_BUDGET = 300_000;
+// accepts prints about 159 000 characters and took 11 s and +329 MiB RSS here (PDF-005 test). The
+// budget leaves it room, keeps a render near 0.4 GiB and stops the hostile or pre-cap documents
+// that would need gigabytes. Renders are serialized (serializeRender), so they do not add up.
+export const PDF_TEXT_BUDGET = 200_000;
 
 // Every string the document carries, which bounds what the page shows: lines, texts, snapshots.
 export function printedLength(value: unknown): number {

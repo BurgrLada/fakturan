@@ -939,6 +939,7 @@ Kontroly plánu:
   - 75 000 faktur se 173 MiB dat: 11,9 s;
   - 780 šablon na stropu 256 KiB JSON (187 MiB): 3,8 s.
   Lease se obnovuje těsně před commitem (`renewHeavy`), takže rezerva je celých 120 s. Proti 90 s je to ~5×, proto se strop řádků nemění. Obnova se dá opakovat nejvýš 5× za hodinu (`restoreUser`).
+- PDF se vykresluje synchronně a cena roste s textem. Nejdelší doklad, který formulář přijme (500 položek, 158 850 znaků), se vykreslil za 11,1 s a +329 MiB RSS. Rozpočet `PDF_TEXT_BUDGET` je 200 000 znaků, tedy ~0,4 GiB na jeden render. Rendery jdou po jednom (`serializeRender`). Starší nebo obnovený doklad nad rozpočet PDF nemá, aplikace to řekne a odeslání i export skončí s důvodem.
 - HTML e-mail vypadá v Outlooku jinak než v prohlížeči. Tabulky a inline styly to zmírní, ale ověření ve skutečných klientech je ruční **[R-17]**.
 - Hlídač paměti eviduje, co obnova drží, podle změřených cen za položku. Pojistka 75 % haldy čte skutečnou haldu, takže souběžná práce jiného účtu může obnovu odmítnout dřív, což je bezpečný směr **[R-3]**.
 - Reset ukázky v 3:30 může na chvíli kolidovat s přihlášeným návštěvníkem. Ten dostane prázdný stav do konce resetu **[R-31]**.
