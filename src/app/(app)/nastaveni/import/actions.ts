@@ -11,6 +11,7 @@ import { ServiceError } from "@/server/services/access";
 import {
   confirmBatch,
   createBatch,
+  discardBatch,
   editPreview,
   getBatch,
   readPreview,
@@ -166,5 +167,14 @@ export async function deletePresetAction(
     const input = parse(z.strictObject({ id }), raw);
     deletePreset(await actorFromRequest(), input.id);
     return { presets: listPresets(user.id) };
+  });
+}
+
+export async function discardBatchAction(raw: unknown): Promise<Outcome> {
+  await requireSession();
+  return guarded(async () => {
+    const input = parse(z.strictObject({ batchId: id }), raw);
+    discardBatch(await actorFromRequest(), input.batchId);
+    return {};
   });
 }

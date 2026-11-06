@@ -441,6 +441,40 @@ export function failBatch(ownerId: string, batchId: string, reason: string): voi
   removeBlobs(ownerId, [...removed, previewBlobId(batchId)]);
 }
 
+// Only a batch nothing is working on: a parse or a commit owns its files until it ends.
+const DISCARDABLE: ImportBatchStatus[] = ["uploading", "mapping", "ready"];
+
+// The user gives up an open batch: its files and preview go now, the row stays as failed for the
+// audit trail and is purged with the other failed batches.
+export function discardBatch(actor: Actor, batchId: string): void {
+  const userId = ownerOf(actor);
+  const removed = mutate(actor, "import.discard", (tx, audit) => {
+    const batch = findBatch(tx, userId, batchId);
+    if (!DISCARDABLE.includes(batch.status)) throw new ServiceError(E.status);
+    const moved = tx
+      .update(importBatch)
+      .set({ status: "failed", error: E.discarded, updatedAt: clock.now() })
+      .where(
+        scoped(userId).where(importBatch, (t) =>
+          and(eq(t.id, batchId), inArray(t.status, DISCARDABLE)),
+        ),
+      )
+      .run();
+    if (moved.changes === 0) throw new ServiceError(E.status);
+    const files = takeFiles(tx, userId, batchId, ["import_upload", "import_pdf"]);
+    audit({
+      entity: "import_batch",
+      entityId: batchId,
+      ownerId: userId,
+      scope: "user",
+      before: { status: batch.status },
+      after: { status: "failed", removedFiles: files.length },
+    });
+    return files;
+  });
+  removeBlobs(userId, [...removed, previewBlobId(batchId)]);
+}
+
 // R-8: an interrupted heavy run is never resumed. The user starts the import again.
 export function recoverImportJob(row: Job): void {
   const batchId = row.payload.batchId;

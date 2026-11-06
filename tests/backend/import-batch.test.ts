@@ -7,9 +7,11 @@ import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { file, importBatch, invoice, job, schedulerState } from "@/server/db/schema";
 import { readBlob, userDir } from "@/server/files/store";
+import { drainHeavy } from "@/server/jobs/worker";
 import {
   confirmBatch,
   createBatch,
+  discardBatch,
   editPreview,
   getPreview,
   previewBlobId,
@@ -26,6 +28,7 @@ import {
   isdoc,
   parsed,
   registerImportJobs,
+  tabularUploaded,
   uploadBatch,
 } from "../helpers/import";
 
@@ -172,5 +175,43 @@ describe("dávka importu", () => {
     expect(rows.map((row) => row.document?.number)).toEqual(["2026-0001"]);
     expect(batch.error).toContain(TEXTS.importing.rows.duplicateEntry("doklad.pdf"));
     expect(new Uint8Array(readBlob(owner, rows[0]!.pdfFileId!))).toEqual(first);
+  });
+  test("rozpracovanou dávku jde zahodit, rozběhnuté ani hotové ne", async () => {
+    const owner = importOwner(db, NOW);
+    const actor = webActor(owner);
+    const uploading = await uploadBatch(owner, [
+      { name: "a.isdoc", bytes: isdoc("faktura-czk.isdoc") },
+    ]);
+    const mapping = await tabularUploaded(
+      owner,
+      "z.csv",
+      new TextEncoder().encode("Název\nAlfa\n"),
+    );
+    const ready = await parsed(owner, [{ name: "b.isdoc", bytes: isdoc("faktura-eur.isdoc") }]);
+    for (const id of [uploading, mapping, ready.id]) {
+      discardBatch(actor, id);
+      expect(batchOf(id)).toMatchObject({ status: "failed", error: E.discarded });
+      expect(db.select().from(file).where(eq(file.importBatchId, id)).all()).toEqual([]);
+      expect(existsSync(join(userDir(owner), previewBlobId(id)))).toBe(false);
+    }
+
+    const committing = await parsed(owner, [{ name: "c.isdoc", bytes: isdoc("verze-601.isdoc") }]);
+    confirmBatch(actor, committing.id, committing.batch.revision);
+    expect(() => discardBatch(actor, committing.id)).toThrow(E.status);
+    await drainHeavy("w");
+    expect(batchOf(committing.id).status).toBe("done");
+    expect(() => discardBatch(actor, committing.id)).toThrow(E.status);
+    expect(() => discardBatch(webActor(importOwner(db, NOW)), uploading)).toThrow(E.notFound);
+
+    for (let i = 0; i < 5; i++) createBatch(actor, "isdoc");
+    expect(() => createBatch(actor, "isdoc")).toThrow(E.tooManyOpen(5));
+    const [open] = db
+      .select()
+      .from(importBatch)
+      .where(eq(importBatch.userId, owner))
+      .all()
+      .filter((b) => b.status === "uploading");
+    discardBatch(actor, open!.id);
+    expect(createBatch(actor, "isdoc").id).toBeTruthy();
   });
 });

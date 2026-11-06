@@ -31,6 +31,7 @@ import {
   confirmBatchAction,
   createImportBatchAction,
   deletePresetAction,
+  discardBatchAction,
   editPreviewAction,
   importStateAction,
   remapBatchAction,
@@ -956,6 +957,7 @@ describe("akce importu", () => {
     ).toEqual(notFound);
     expect(await confirmBatchAction({ batchId, revision: 0 })).toEqual(notFound);
     expect(await undoBatchAction({ batchId })).toEqual(notFound);
+    expect(await discardBatchAction({ batchId })).toEqual(notFound);
     expect(await importStateAction({ batchId, extra: 1 })).toMatchObject({ ok: false });
 
     session.userId = mine;
@@ -963,6 +965,8 @@ describe("akce importu", () => {
       ok: true,
       batch: { id: batchId, status: "uploading" },
     });
+    expect(await discardBatchAction({ batchId })).toEqual({ ok: true });
+    expect(await importStateAction({ batchId })).toMatchObject({ batch: { status: "failed" } });
   });
 
   test("[SEC-002] mapování a předlohy importu odmítnou cizí dávku i cizí předlohu", async () => {

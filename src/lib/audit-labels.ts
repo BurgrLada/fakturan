@@ -70,6 +70,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "import.commit_stopped": "Zastavené uložení importu",
   "import.create": "Založení importu",
   "import.date_edit": "Úprava data úhrady v importu",
+  "import.discard": "Zahození rozpracovaného importu",
   "import.fail": "Přerušený import",
   "import.mapping": "Mapování sloupců importu",
   "import.parse": "Zpracování importu",

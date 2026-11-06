@@ -2952,6 +2952,13 @@ export const TEXTS = {
         presetName: "Zadejte název předlohy do 80 znaků",
       },
     },
+    discard: {
+      action: "Zahodit",
+      title: "Zahodit import?",
+      body: "Nahrané soubory a náhled se smažou. Do účtu se nic neuloží.",
+      cancel: "Ponechat",
+      confirm: "Zahodit import",
+    },
     list: {
       title: "Poslední importy",
       empty: "Zatím jste nic neimportovali.",
@@ -3041,8 +3048,9 @@ export const TEXTS = {
       invalidChange: "Neplatná změna náhledu",
       unexpected: "Zpracování se nepovedlo, zkuste import znovu",
       tooManyOpen: (limit: number) =>
-        `Rozpracovaných importů je už ${limit}. Dokončete nebo vraťte některý z nich, nebo počkejte, až se nepotvrzené smažou.`,
+        `Rozpracovaných importů je už ${limit}. Některý z nich dokončete nebo zahoďte.`,
       stuck: "Zpracování importu se nedokončilo do 48 hodin. Spusťte import znovu.",
+      discarded: "Import byl zahozen.",
     },
     rows: {
       unreadable: "Soubor nejde přečíst jako ISDOC",

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { importStateAction, type ImportState } from "@/app/(app)/nastaveni/import/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TEXTS } from "@/lib/texts";
+import { DiscardBatch } from "./discard-batch";
 import { ImportPreview } from "./import-preview";
 
 const T = TEXTS.importing;
@@ -34,10 +35,15 @@ export function ImportProgress({ initial }: { initial: ImportState }) {
   const { batch } = state;
   return (
     <div className="space-y-4">
-      <p className="text-sm" data-testid="import-status">
-        {T.statuses[batch.status]}
-        {batch.status === "parsing" && ` · ${T.progress(batch.progress)}`}
-      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm" data-testid="import-status">
+          {T.statuses[batch.status]}
+          {batch.status === "parsing" && ` · ${T.progress(batch.progress)}`}
+        </p>
+        {(batch.status === "uploading" || batch.status === "ready") && (
+          <DiscardBatch batchId={batch.id} />
+        )}
+      </div>
       {batch.error && (
         <Alert variant={batch.status === "failed" ? "destructive" : "default"} role="status">
           <AlertDescription className="whitespace-pre-line">{batch.error}</AlertDescription>

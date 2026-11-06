@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
+import { DiscardBatch } from "@/components/import/discard-batch";
 import { UploadZone } from "@/components/import/upload-zone";
 import { PageLoading } from "@/components/page-loading";
 import { formatDateTime } from "@/lib/format";
@@ -9,6 +10,7 @@ import { requireSession } from "@/server/auth/session";
 import { listBatches } from "@/server/services/import-batch";
 
 const T = TEXTS.importing;
+const DISCARDABLE = new Set(["uploading", "mapping", "ready"]);
 
 export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
 
@@ -25,9 +27,12 @@ async function BatchList() {
             {batch.summary?.documents !== undefined &&
               ` · ${T.list.documents}: ${batch.summary.documents}`}
           </span>
-          <Link href={`/nastaveni/import/${batch.id}`} className="underline underline-offset-4">
-            {T.list.open}
-          </Link>
+          <span className="flex items-center gap-2">
+            {DISCARDABLE.has(batch.status) && <DiscardBatch batchId={batch.id} />}
+            <Link href={`/nastaveni/import/${batch.id}`} className="underline underline-offset-4">
+              {T.list.open}
+            </Link>
+          </span>
         </li>
       ))}
     </ul>

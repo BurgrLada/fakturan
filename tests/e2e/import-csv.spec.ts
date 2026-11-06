@@ -51,3 +51,26 @@ test("[IMP-001] průvodce od CSV po zákazníka v seznamu", async ({ page, fresh
   await expect(page.getByText("Alfa Zkušební s. r. o.")).toBeVisible();
   await expect(page.getByText('=HYPERLINK("http://example.test","klik")')).toBeVisible();
 });
+
+test("[IMP-001] rozpracovaný import jde zahodit", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await page.goto(`${baseURL}/nastaveni/import`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Tabulku CSV nebo Excel").check();
+  await page.getByLabel("Tabulka k importu").setInputFiles({
+    name: "zakaznici.csv",
+    mimeType: "text/csv",
+    buffer: readFileSync(join("tests", "fixtures", "import", "zakaznici.csv")),
+  });
+  await page.getByRole("button", { name: "Zpracovat" }).click();
+  await expect(page.getByRole("heading", { name: "Mapování sloupců" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole("button", { name: "Zahodit", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toContainText("Zahodit import?");
+  await page.getByRole("button", { name: "Zahodit import" }).click();
+  await expect(page).toHaveURL(`${baseURL}/nastaveni/import`);
+  await expect(page.getByText("Selhalo")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Zahodit", exact: true })).toHaveCount(0);
+});

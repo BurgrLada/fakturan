@@ -30,6 +30,7 @@ import {
 } from "@/lib/import-mapping";
 import type { PresetView } from "@/lib/import-presets";
 import { TEXTS } from "@/lib/texts";
+import { DiscardBatch } from "./discard-batch";
 
 const T = TEXTS.importing;
 const M = T.mapping;
@@ -343,9 +344,12 @@ export function ColumnMapper({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <Button disabled={pending} onClick={submit}>
-        {M.continue}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={pending} onClick={submit}>
+          {M.continue}
+        </Button>
+        <DiscardBatch batchId={batchId} />
+      </div>
     </section>
   );
 }
