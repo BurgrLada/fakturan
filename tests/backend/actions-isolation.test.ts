@@ -171,6 +171,7 @@ import { rateLimit } from "@/server/db/schema";
 import { writePreview } from "@/server/services/import-batch";
 import { importBatch } from "@/server/db/schema";
 import { createTestDb } from "../helpers/db";
+import { readOpened } from "../helpers/opened";
 import { planInput, savePlan } from "../helpers/fixtures-recurring";
 
 const session = vi.hoisted(() => ({ userId: "a1" }));
@@ -1209,7 +1210,7 @@ describe("matice izolace plánů 7 a 8", () => {
       });
       const [owner, other] = owners;
       const [mine] = listExports(owner);
-      expect(openExport(actor(owner), mine!.id).size).toBeGreaterThan(0);
+      expect(readOpened(openExport(actor(owner), mine!.id)).length).toBeGreaterThan(0);
       expect(() => openExport(actor(other), mine!.id)).toThrow(ExportNotFoundError);
 
       const [home] = ensureDashboards(actor(owner));

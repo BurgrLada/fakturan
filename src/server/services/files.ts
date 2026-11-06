@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { closeSync, fstatSync, openSync } from "node:fs";
 import { isNull } from "drizzle-orm";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -7,10 +8,11 @@ import { clock } from "../clock";
 import { db } from "../db";
 import { emailLog, FILE_KINDS, file, type FileKind } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { readBlob, removeBlob, writeBlob } from "../files/store";
+import { blobPath, readBlob, removeBlob, writeBlob } from "../files/store";
+import { RATE_RULES } from "../rate-limit";
 import { InvalidFileError, validateImage } from "../files/validate";
 import { logger } from "../logger";
-import { ServiceError } from "./access";
+import { enforceRateLimit, ServiceError } from "./access";
 import { mutate } from "./mutation";
 
 export type { FileKind };
@@ -171,6 +173,65 @@ export function archiveSentIsdoc(
   return archiveSent(actor, logId, "sent_isdoc", data, name);
 }
 
+// How /soubory/[id] serves each kind; kinds missing here are not served at all. Images render on
+// every page view, so only the downloads are limited and audited (R-7).
+export const FILE_DISPOSITION: Partial<Record<FileKind, "inline" | "attachment">> = {
+  logo: "inline",
+  qr_logo: "inline",
+  signature: "inline",
+  import_pdf: "attachment",
+  audit_archive: "attachment",
+};
+
+export type OpenedFile = {
+  fd: number;
+  size: number;
+  mimeType: string;
+  name: string;
+  kind: FileKind;
+};
+
+// The descriptor is opened before the audit is written, so the bytes sent are those of the file
+// that was audited even if it is removed meanwhile (N-1, m-7). The caller closes `fd`.
+export function openOwnedFile(actor: Actor, id: string): OpenedFile {
+  const userId = ownerOf(actor);
+  const row = db
+    .select()
+    .from(file)
+    .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, id)))
+    .get();
+  const disposition = row ? FILE_DISPOSITION[row.kind] : undefined;
+  if (!row || !disposition) throw new FileNotFoundError();
+  const download = disposition === "attachment";
+  if (download) enforceRateLimit(actor, RATE_RULES.fileDownloadUser);
+  let fd: number;
+  try {
+    fd = openSync(blobPath(userId, id), "r");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new FileNotFoundError();
+    throw error;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    if (download) {
+      mutate(actor, "file.download", (_tx, audit) =>
+        audit({
+          entity: "file",
+          entityId: id,
+          ownerId: userId,
+          scope: "user",
+          after: { kind: row.kind, size },
+        }),
+      );
+    }
+    return { fd, size, mimeType: row.mimeType, name: row.name, kind: row.kind };
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+}
+
+// Whole into memory: only for the app's own small reads, such as mail attachments up to 25 MiB.
 export function readOwnedFile(
   actor: Actor,
   id: string,

@@ -64,8 +64,21 @@ export function enqueueStandalone(input: EnqueueInput): { created: boolean } {
   return db.transaction((tx) => enqueue(tx, input), { behavior: "immediate" });
 }
 
+// m-1: the heavy lane serves the account whose last heavy job started longest ago first, one with
+// none before all others, so three exports of one account do not keep another waiting. The
+// updated_at of a claimed job is when it started, and later steps only move it on.
+function heavyTurn(): SQL {
+  return sql`(select max(j2.updated_at) from ${job} j2 where j2.user_id = ${job.userId}
+    and j2.kind in (${sql.join(
+      HEAVY_JOB_KINDS.map((kind) => sql`${kind}`),
+      sql`, `,
+    )}) and j2.status <> 'pending') asc nulls first`;
+}
+
 export function claimNext(worker: string, lane: JobLane = "any"): Job | null {
   const now = clock.now();
+  const order =
+    lane === "heavy" ? [heavyTurn(), job.runAt, job.createdAt] : [job.runAt, job.createdAt];
   const claimed = db.transaction(
     (tx) => {
       const next = tx
@@ -80,7 +93,7 @@ export function claimNext(worker: string, lane: JobLane = "any"): Job | null {
             laneCondition(lane),
           ),
         )
-        .orderBy(job.runAt, job.createdAt)
+        .orderBy(...order)
         .limit(1);
       return tx
         .update(job)

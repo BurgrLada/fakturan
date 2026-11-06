@@ -1,10 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, readFileSync, readSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { strFromU8, unzipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import type { ExportInput } from "@/lib/export-filter";
+import { EXPORT_LIMITS, type ExportInput } from "@/lib/export-filter";
 import { TABULAR_LIMITS } from "@/lib/safe-input/limits";
 import { readXlsx } from "@/lib/safe-input/xlsx-reader";
 import { TEXTS } from "@/lib/texts";
@@ -23,7 +23,8 @@ import {
   schedulerState,
 } from "@/server/db/schema";
 import { RATE_RULES } from "@/server/rate-limit";
-import { RateLimitError } from "@/server/services/access";
+import { RateLimitError, ServiceError } from "@/server/services/access";
+import { blobPath } from "@/server/files/store";
 import { registerJob } from "@/server/jobs/registry";
 import { drainHeavy } from "@/server/jobs/worker";
 import { saveCatalogItem } from "@/server/services/catalog";
@@ -43,6 +44,7 @@ import { saveTemplate } from "@/server/services/invoice-templates";
 import { getInvoice, newDraftDefaults } from "@/server/services/invoices";
 import { addPayment } from "@/server/services/payments";
 import { createTestDb } from "../helpers/db";
+import { readOpened } from "../helpers/opened";
 import {
   draftFor,
   issuedInvoice,
@@ -85,7 +87,7 @@ async function exported(owner: string, input: ExportInput) {
 }
 
 function bytesOf(owner: string, id: string): Uint8Array {
-  return new Uint8Array(readFileSync(openExport(webActor(owner), id).path));
+  return readOpened(openExport(webActor(owner), id));
 }
 
 function csvLines(owner: string, id: string): string[] {
@@ -289,14 +291,15 @@ describe("hromadný export", () => {
     const owner = seedOwner(db, NOW);
     issuedOn(owner, seedCustomer(owner), "2026-03-01");
     const row = await exported(owner, { kind: "invoices", format: "csv" });
-    const { path } = openExport(webActor(owner), row.id);
+    const path = blobPath(owner, row.fileId!);
+    expect(readOpened(openExport(webActor(owner), row.id)).length).toBeGreaterThan(0);
     expect(existsSync(path)).toBe(true);
     expect(
       db.select().from(auditLog).where(eq(auditLog.action, "export.download")).all().length,
     ).toBeGreaterThan(0);
 
     current = new Date(NOW.getTime() + 7 * 86_400_000 - 60_000);
-    expect(openExport(webActor(owner), row.id).path).toBe(path);
+    expect(readOpened(openExport(webActor(owner), row.id)).length).toBeGreaterThan(0);
     current = new Date(NOW.getTime() + 7 * 86_400_000);
     expect(() => openExport(webActor(owner), row.id)).toThrow(ExportNotFoundError);
 
@@ -481,5 +484,82 @@ describe("hromadný export", () => {
     expect(exportRow(id)).toMatchObject({ status: "failed", reason: TEXTS.exporting.interrupted });
     expect(db.select().from(job).where(eq(job.id, running.id)).get()!.status).toBe("dead");
     expect(db.select().from(invoice).where(eq(invoice.userId, owner)).all()).toHaveLength(1);
+  });
+});
+
+describe("stažení a stropy exportu", () => {
+  const exportsOf = (owner: string) =>
+    db.select().from(exportJob).where(eq(exportJob.userId, owner)).all();
+  const used = (rule: { name: string }, owner: string) =>
+    db
+      .select()
+      .from(rateLimit)
+      .where(eq(rateLimit.key, `${rule.name}:${owner}`))
+      .get()?.count ?? 0;
+
+  test("[EXP-007] export smazaný úklidem po otevření se dočte celý", async () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    for (const day of ["2026-03-01", "2026-03-02", "2026-03-03"]) issuedOn(owner, customerId, day);
+    const row = await exported(owner, { kind: "invoices", format: "csv" });
+    const whole = readFileSync(blobPath(owner, row.fileId!));
+    const opened = openExport(webActor(owner), row.id);
+    expect(opened.size).toBe(whole.length);
+    // As if export-cleanup removed the file between opening and streaming it.
+    current = new Date(NOW.getTime() + 8 * 86_400_000);
+    purgeExpiredExports(current);
+    expect(existsSync(blobPath(owner, row.fileId!))).toBe(false);
+    const read = Buffer.alloc(opened.size);
+    let offset = 0;
+    try {
+      while (offset < read.length) {
+        const n = readSync(opened.fd, read, offset, read.length - offset, null);
+        if (n === 0) break;
+        offset += n;
+      }
+    } finally {
+      closeSync(opened.fd);
+    }
+    expect(read.equals(whole)).toBe(true);
+  });
+
+  test("[EXP-007] pdf_zip nad 2 000 doklady vrátí 422 a úloha nevznikne", () => {
+    expect(EXPORT_LIMITS).toEqual({ pdfZipDocuments: 2_000 });
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    for (const day of ["2026-03-01", "2026-03-02", "2026-03-03"]) issuedOn(owner, customerId, day);
+    const input: ExportInput = { kind: "invoices", format: "pdf_zip" };
+    const run = () => createExport(webActor(owner), input, { pdfZipDocuments: 2 });
+    expect(run).toThrow(ServiceError);
+    expect(run).toThrow(E.pdfZipTooMany(3, 2));
+    expect(exportsOf(owner)).toEqual([]);
+    expect(used(RATE_RULES.exportUser, owner)).toBe(0);
+    // CSV of the same documents has no such cap, nor does a narrower filter.
+    expect(() =>
+      createExport(webActor(owner), { ...input, format: "csv" }, { pdfZipDocuments: 2 }),
+    ).not.toThrow();
+    expect(() =>
+      createExport(
+        webActor(owner),
+        { ...input, filter: { from: "2026-03-02", to: "2026-03-03" } },
+        { pdfZipDocuments: 2 },
+      ),
+    ).not.toThrow();
+  });
+
+  test("[SEC-001] odmítnutí stropem tří rozpracovaných exportů limit nespotřebuje", () => {
+    const owner = seedOwner(db, NOW);
+    for (let index = 0; index < 3; index++) {
+      createExport(webActor(owner), { kind: "customers", format: "csv" });
+    }
+    const before = used(RATE_RULES.exportUser, owner);
+    expect(before).toBe(3);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect(() => createExport(webActor(owner), { kind: "customers", format: "csv" })).toThrow(
+        E.tooManyRunning(3),
+      );
+    }
+    expect(used(RATE_RULES.exportUser, owner)).toBe(before);
+    expect(exportsOf(owner)).toHaveLength(3);
   });
 });

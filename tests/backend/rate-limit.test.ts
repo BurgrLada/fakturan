@@ -118,6 +118,7 @@ describe("checkRateLimit", () => {
 
   test("[SEC-001] pravidla odpovídají hodnotám z plánu", () => {
     expect(RATE_RULES.loginIpEmail).toMatchObject({ limit: 5, windowSeconds: 60 });
+    expect(RATE_RULES.fileDownloadUser).toMatchObject({ limit: 30, windowSeconds: 3600 });
     expect(RATE_RULES.loginIp).toMatchObject({ limit: 20, windowSeconds: 60 });
     expect(RATE_RULES.loginEmail).toMatchObject({ limit: 50, windowSeconds: 3600 });
     expect(RATE_RULES.resetPasswordIpEmail).toMatchObject({ limit: 3, windowSeconds: 3600 });

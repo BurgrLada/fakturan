@@ -72,6 +72,8 @@ function ownerOf(actor: Actor): string {
 
 export function createBackup(actor: Actor): { id: string } {
   const userId = ownerOf(actor);
+  // R-9: a full slot refuses before the limit counts the attempt; checked again in the transaction.
+  assertExportSlot(db, userId);
   enforceRateLimit(actor, RATE_RULES.backupUser);
   const id = randomUUID();
   mutate(actor, "account.backup", (tx, audit) => {

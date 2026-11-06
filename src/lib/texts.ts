@@ -3263,6 +3263,8 @@ export const TEXTS = {
       foreignIds: "Některý vybraný doklad už neexistuje nebo nepatří k účtu. Export se nespustil.",
       tooManyRunning: (limit: number) =>
         `Rozpracované jsou už ${limit} exporty. Počkejte, až některý doběhne.`,
+      pdfZipTooMany: (found: number, limit: number) =>
+        `Výběr má ${found} dokladů, ZIP s PDF jich najednou unese nejvýš ${limit}. Zužte období nebo filtr, nebo zvolte CSV či Excel.`,
       tooLarge: "Export by byl větší než 1 GB. Zužte výběr.",
       isdocInvalid: (number: string, problem: string) =>
         `Doklad ${number} neprošel kontrolou ISDOC (${problem}). Export se zastavil, nic se nestáhne.`,

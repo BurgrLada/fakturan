@@ -1,10 +1,12 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { auditLog, file, user } from "@/server/db/schema";
-import { userDir } from "@/server/files/store";
+import { auditLog, file, rateLimit, user } from "@/server/db/schema";
+import { userDir, writeBlob } from "@/server/files/store";
+import { RATE_RULES } from "@/server/rate-limit";
 import { deleteFile, readOwnedFile, storeFile } from "@/server/services/files";
 import { deleteUser } from "@/server/services/users";
 import { assertIsolated } from "../helpers/isolation";
@@ -16,6 +18,17 @@ vi.mock("@/server/auth/session", () => ({
   actorFromRequest: async () => ({ userId: session.userId, source: "web" }),
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+const blobReads = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@/server/files/store", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/server/files/store")>();
+  return {
+    ...real,
+    readBlob: (...args: Parameters<typeof real.readBlob>) => {
+      blobReads.count += 1;
+      return real.readBlob(...args);
+    },
+  };
+});
 
 vi.stubEnv("DATA_DIR", mkdtempSync(join(tmpdir(), "fakturan-files-")));
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
@@ -258,6 +271,101 @@ describe("route souborů", () => {
       db.update(file).set({ kind }).where(eq(file.id, id)).run();
       expect((await get(id)).status).toBe(404);
     }
+  });
+});
+
+describe("stažení souborů proudem", () => {
+  async function get(id: string) {
+    const { GET } = await import("@/app/(app)/soubory/[id]/route");
+    return GET(new Request("http://localhost/soubory/" + id), { params: Promise.resolve({ id }) });
+  }
+  const downloads = (owner: string) =>
+    db
+      .select()
+      .from(auditLog)
+      .all()
+      .filter((row) => row.action === "file.download" && row.ownerId === owner);
+
+  function stored(owner: string, kind: "audit_archive" | "import_pdf", bytes: Buffer) {
+    seedUser(owner);
+    const id = randomUUID();
+    db.insert(file)
+      .values({
+        id,
+        userId: owner,
+        kind,
+        mimeType: kind === "import_pdf" ? "application/pdf" : "application/x-ndjson",
+        name: kind === "import_pdf" ? "doklad.pdf" : "historie.jsonl",
+        size: bytes.length,
+        createdAt: new Date(),
+      })
+      .run();
+    writeBlob(owner, id, bytes);
+    return id;
+  }
+
+  test("[SEC-005] historie 50 MiB se stáhne proudem a readBlob se nevolá", async () => {
+    const owner = `d-${randomUUID()}`;
+    const bytes = randomBytes(50 * 1024 * 1024);
+    const id = stored(owner, "audit_archive", bytes);
+    session.userId = owner;
+    const before = blobReads.count;
+    const response = await get(id);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-length")).toBe(String(bytes.length));
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body.length).toBe(bytes.length);
+    const sha = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+    expect(sha(body)).toBe(sha(bytes));
+    expect(blobReads.count).toBe(before);
+  });
+
+  test("[SEC-001] 31. stažení historie za hodinu vrátí 429 a zapíše audit", async () => {
+    const owner = `d-${randomUUID()}`;
+    const id = stored(owner, "audit_archive", Buffer.from('{"a":1}\n'));
+    session.userId = owner;
+    for (let attempt = 0; attempt < RATE_RULES.fileDownloadUser.limit; attempt++) {
+      const response = await get(id);
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+    }
+    expect((await get(id)).status).toBe(429);
+    const denied = db
+      .select()
+      .from(auditLog)
+      .all()
+      .filter((row) => row.action === "rate_limit.exceeded" && row.ownerId === owner);
+    expect(denied).toHaveLength(1);
+    expect(denied[0]!.after).toMatchObject({ rule: "fileDownloadUser" });
+    expect(downloads(owner)).toHaveLength(RATE_RULES.fileDownloadUser.limit);
+  });
+
+  test("[AUD-002] stažení import_pdf zapíše file.download s druhem a velikostí", async () => {
+    const owner = `d-${randomUUID()}`;
+    const pdf = Buffer.from("%PDF-1.4 import");
+    const id = stored(owner, "import_pdf", pdf);
+    session.userId = owner;
+    expect((await get(id)).status).toBe(200);
+    expect(downloads(owner)).toMatchObject([
+      { entity: "file", entityId: id, after: { kind: "import_pdf", size: pdf.length } },
+    ]);
+    // Images render on every page view: no audit, no limit.
+    const logo = storeFile(actor(owner), "logo", PNG, "logo.png").id;
+    expect((await get(logo)).status).toBe(200);
+    expect(downloads(owner)).toHaveLength(1);
+  });
+
+  test("[SEC-002] cizí soubor je 404 a nezapíše audit ani limit", async () => {
+    const owner = `d-${randomUUID()}`;
+    const stranger = `d-${randomUUID()}`;
+    seedUser(stranger);
+    const id = stored(owner, "audit_archive", Buffer.from("x\n"));
+    session.userId = stranger;
+    expect((await get(id)).status).toBe(404);
+    expect(downloads(owner)).toEqual([]);
+    expect(downloads(stranger)).toEqual([]);
+    const key = `${RATE_RULES.fileDownloadUser.name}:${stranger}`;
+    expect(db.select().from(rateLimit).where(eq(rateLimit.key, key)).get()).toBeUndefined();
   });
 });
 

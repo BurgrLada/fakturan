@@ -38,6 +38,7 @@ export const RATE_RULES = {
   importUser: rule("importUser", 60, 60),
   exportUser: rule("exportUser", 60, 60),
   exportDownloadUser: rule("exportDownloadUser", 30, 3600),
+  fileDownloadUser: rule("fileDownloadUser", 30, 3600),
   backupUser: rule("backupUser", 5, 3600),
   restoreUser: rule("restoreUser", 5, 3600),
   aresLookup: rule("aresLookup", 30, 60),

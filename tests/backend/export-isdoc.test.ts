@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
@@ -28,6 +28,7 @@ import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { cancelInvoice, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { getInvoice } from "@/server/services/invoices";
 import { createTestDb } from "../helpers/db";
+import { readOpened } from "../helpers/opened";
 import {
   draftFor,
   issuedAdvance,
@@ -68,7 +69,7 @@ async function exported(owner: string, input: ExportInput) {
 }
 
 function entries(owner: string, id: string): Record<string, Uint8Array> {
-  return unzipSync(new Uint8Array(readFileSync(openExport(webActor(owner), id).path)));
+  return unzipSync(readOpened(openExport(webActor(owner), id)));
 }
 
 function issued(owner: string, customerId: string) {

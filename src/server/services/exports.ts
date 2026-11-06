@@ -1,10 +1,11 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { rmSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, rmSync } from "node:fs";
 import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import { backupFileName } from "@/lib/backup-format";
 import {
   EXPORT_KINDS,
+  EXPORT_LIMITS,
   EXPORT_MIME_TYPES,
   exportFileName,
   exportInputSchema,
@@ -12,13 +13,14 @@ import {
   type ExportInput,
   type ExportJobKind,
   type ExportKind,
+  type ExportLimits,
 } from "@/lib/export-filter";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
 import { clock } from "../clock";
-import { db, type Tx } from "../db";
+import { db } from "../db";
 import { exportJob, file, type ExportJob, type ExportStatus, type Job } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { blobPath, removeBlob } from "../files/store";
@@ -27,6 +29,7 @@ import { kickWorker } from "../jobs/worker";
 import { logger } from "../logger";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError, type Reader } from "./access";
+import { countExportInvoices } from "./export-where";
 import { Unchanged, unlessUnchanged } from "./invoices";
 import { mutate } from "./mutation";
 import { notify } from "./notifications";
@@ -74,7 +77,7 @@ function resultFile(row: Pick<ExportJob, "kind" | "format" | "createdAt">): Resu
 }
 
 // One heavy lane serves the whole instance; the cap keeps one account from filling it.
-export function assertExportSlot(tx: Tx, userId: string): void {
+export function assertExportSlot(tx: Reader, userId: string): void {
   const running = tx
     .select({ id: exportJob.id })
     .from(exportJob)
@@ -94,12 +97,25 @@ export function findExport(q: Reader, ownerId: string, id: string): ExportJob | 
     .get();
 }
 
-export function createExport(actor: Actor, raw: ExportInput): { id: string } {
+export function createExport(
+  actor: Actor,
+  raw: ExportInput,
+  limits: ExportLimits = EXPORT_LIMITS,
+): { id: string } {
   const userId = ownerOf(actor);
   const parsed = exportInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);
-  enforceRateLimit(actor, RATE_RULES.exportUser);
   const { kind, format, filter } = parsed.data;
+  // R-9: a refusal by a cap costs nothing; the limit only counts jobs that are really created. The
+  // slot is checked again inside the transaction.
+  if (kind === "invoices" && format === "pdf_zip") {
+    const found = countExportInvoices(userId, filter, format);
+    if (found > limits.pdfZipDocuments) {
+      throw new ServiceError(E.pdfZipTooMany(found, limits.pdfZipDocuments));
+    }
+  }
+  assertExportSlot(db, userId);
+  enforceRateLimit(actor, RATE_RULES.exportUser);
   const id = randomUUID();
   mutate(actor, "export.create", (tx, audit) => {
     assertExportSlot(tx, userId);
@@ -185,9 +201,11 @@ export function latestRestore(ownerId: string): BackupListRow | null {
   return row ? listed(row, clock.now().getTime()) : null;
 }
 
-export type OpenedExport = { path: string; size: number; fileName: string; mimeType: string };
+export type OpenedExport = { fd: number; size: number; fileName: string; mimeType: string };
 
-// Read from disk by the caller as a stream; only the path and the metadata pass through here.
+// Opened before the audit is written and read by the caller as a stream from this descriptor, so
+// export-cleanup removing the file meanwhile no longer cuts a download short (m-7). The caller
+// closes `fd`.
 export function openExport(actor: Actor, id: string): OpenedExport {
   const userId = ownerOf(actor);
   // Every download sends the whole file and writes an audit row, so a loop must not repeat it freely.
@@ -204,26 +222,31 @@ export function openExport(actor: Actor, id: string): OpenedExport {
     .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, fileId)))
     .get();
   if (!stored) throw new ExportNotFoundError();
-  const path = blobPath(userId, stored.id);
-  let size: number;
+  let fd: number;
   try {
-    size = statSync(path).size;
+    fd = openSync(blobPath(userId, stored.id), "r");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new ExportNotFoundError();
     throw error;
   }
-  const { action, entity } = auditOf(row.kind, "download");
-  mutate(actor, action, (_tx, audit) =>
-    audit({
-      entity,
-      entityId: id,
-      ownerId: userId,
-      scope: "user",
-      after: { kind: row.kind, format: row.format, size },
-    }),
-  );
-  const result = resultFile(row);
-  return { path, size, fileName: result.name, mimeType: result.mimeType };
+  try {
+    const size = fstatSync(fd).size;
+    const { action, entity } = auditOf(row.kind, "download");
+    mutate(actor, action, (_tx, audit) =>
+      audit({
+        entity,
+        entityId: id,
+        ownerId: userId,
+        scope: "user",
+        after: { kind: row.kind, format: row.format, size },
+      }),
+    );
+    const result = resultFile(row);
+    return { fd, size, fileName: result.name, mimeType: result.mimeType };
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
 }
 
 // The file row, the result and the notice commit together: the list never offers a half-written

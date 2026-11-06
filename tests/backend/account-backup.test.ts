@@ -1,13 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import v8 from "node:v8";
@@ -62,6 +54,7 @@ import { archiveSentPdf } from "@/server/services/files";
 import pkg from "../../package.json";
 import journal from "../../drizzle/meta/_journal.json";
 import { createTestDb } from "../helpers/db";
+import { readOpened } from "../helpers/opened";
 import { issuedInvoice, seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
 
 const DATA_DIR = mkdtempSync(join(tmpdir(), "fakturan-backup-"));
@@ -103,7 +96,7 @@ async function backedUp(owner: string) {
 }
 
 function archive(owner: string, id: string): Record<string, Uint8Array> {
-  return unzipSync(new Uint8Array(readFileSync(openExport(webActor(owner), id).path)));
+  return unzipSync(readOpened(openExport(webActor(owner), id)));
 }
 
 function rows(entries: Record<string, Uint8Array>, table: string): Record<string, unknown>[] {
@@ -221,6 +214,7 @@ describe("záloha účtu", () => {
     expect(row).toMatchObject({ kind: "backup", status: "done" });
 
     const opened = openExport(webActor(owner), row.id);
+    readOpened(opened);
     expect(opened.fileName).toBe("fakturan-zaloha-2026-03-20.zip");
     expect(opened.mimeType).toBe("application/zip");
     const entries = archive(owner, row.id);

@@ -9,6 +9,12 @@ export const EXPORT_KINDS = ["invoices", "customers", "catalog", "payments", "te
 export type ExportKind = (typeof EXPORT_KINDS)[number];
 
 export const EXPORT_FORMATS = ["pdf_zip", "isdoc_zip", "csv", "xlsx", "json"] as const;
+
+// A ZIP of PDFs renders every document in the one heavy lane, so its size is capped before the job
+// exists (R-8); CSV, Excel and ISDOC of the same documents are cheap enough without a cap.
+export const EXPORT_LIMITS = { pdfZipDocuments: 2_000 };
+
+export type ExportLimits = typeof EXPORT_LIMITS;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 // An account backup and restore run as an export_job, but the export form never offers them.

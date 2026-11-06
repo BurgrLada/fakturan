@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, eq, gte, inArray, lte, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, lte, type SQL } from "drizzle-orm";
 import type { ExportFilter, ExportFormat, ExportKind } from "@/lib/export-filter";
 import { amountDue } from "@/lib/qr-payload";
 import {
@@ -42,7 +42,8 @@ import { failExport, findExport, finishExport, removeResult } from "./exports";
 import { assertValidIsdoc, isdocFileFor, IsdocRejected } from "./invoice-isdoc";
 import { loadInvoiceDocument } from "./invoice-document";
 import { documentPdf, fileNameTaker } from "./invoice-pdf";
-import { ownedCustomerId, type Invoice } from "./invoices";
+import { invoiceWhere } from "./export-where";
+import { type Invoice } from "./invoices";
 
 const E = TEXTS.exporting.errors;
 const C = TEXTS.exporting.columns;
@@ -57,28 +58,6 @@ async function progress(run: Run, step = 1): Promise<void> {
   run.done += step;
   moveExport(run.ownerId, run.row.id, ["running"], { progress: run.done });
   await yieldHeavy(run.job);
-}
-
-function invoiceWhere(ownerId: string, filter: ExportFilter, format: ExportFormat): SQL {
-  // ISDOC has no way to mark a cancellation, so an accountant would book it as a live invoice.
-  // Picked by status or by hand from the list, a cancelled document is what the person asked for.
-  const withoutCancelled = format === "isdoc_zip" && !filter.statuses?.length && !filter.ids;
-  const wantsCustomer = filter.customerId !== undefined;
-  const customerId = ownedCustomerId(ownerId, filter.customerId);
-  return scoped(ownerId).where(invoice, (t, { and: all, eq: is }) =>
-    all(
-      // A draft has no number and no final content, so no export ever carries one (R-24).
-      ne(t.status, "draft"),
-      withoutCancelled ? ne(t.status, "cancelled") : undefined,
-      filter.from ? gte(t.issueDate, filter.from) : undefined,
-      filter.to ? lte(t.issueDate, filter.to) : undefined,
-      filter.types?.length ? inArray(t.type, filter.types) : undefined,
-      filter.statuses?.length ? inArray(t.status, filter.statuses) : undefined,
-      // A customer of another account narrows to nothing instead of being ignored.
-      wantsCustomer ? (customerId ? is(t.customerId, customerId) : sql`0`) : undefined,
-      filter.ids ? inArray(t.id, filter.ids) : undefined,
-    ),
-  );
 }
 
 // IDs from a bulk action are the client's word: every one must be a document of this account.

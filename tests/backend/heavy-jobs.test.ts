@@ -137,6 +137,51 @@ describe("těžká dráha", () => {
   });
 });
 
+describe("spravedlnost těžké dráhy", () => {
+  function account() {
+    const id = randomUUID();
+    db.insert(user)
+      .values({ id, name: id, email: `${id}@x.cz`, createdAt: T0, updatedAt: T0 })
+      .run();
+    return id;
+  }
+
+  test("[ARC-007] tři exporty účtu A a import účtu B se vystřídají A, B, A, A", async () => {
+    const a = account();
+    const b = account();
+    const order: string[] = [];
+    registerJob("export.run", {
+      run: async (running) => {
+        order.push(`A${String(running.payload.n)}`);
+        current = new Date(current.getTime() + 1_000);
+      },
+    });
+    registerJob("import.parse", {
+      run: async () => {
+        order.push("B");
+        current = new Date(current.getTime() + 1_000);
+      },
+    });
+    for (const n of [1, 2, 3]) {
+      put("export.run", { userId: a, payload: { n } });
+      current = new Date(current.getTime() + 1);
+    }
+    put("import.parse", { userId: b });
+
+    expect(await drainHeavy("w")).toEqual({ done: 4, ok: true });
+    expect(order).toEqual(["A1", "B", "A2", "A3"]);
+  });
+
+  test("[ARC-007] lehká dráha zůstává v pořadí runAt a createdAt", () => {
+    const a = account();
+    const b = account();
+    const first = put("mail.send", { userId: a });
+    current = new Date(current.getTime() + 1);
+    put("mail.send", { userId: b });
+    expect(claimNext("w", "light")!.id).toBe(first.id);
+  });
+});
+
 describe("přerušený běh", () => {
   test("[TST-017] přerušená těžká úloha skončí failed a uklidí dočasný soubor", () => {
     const owner = randomUUID();

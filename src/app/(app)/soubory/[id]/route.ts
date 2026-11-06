@@ -1,40 +1,45 @@
+import { closeSync, createReadStream } from "node:fs";
+import { Readable } from "node:stream";
 import { contentDisposition } from "@/lib/content-disposition";
 import { actorFromRequest } from "@/server/auth/session";
-import { FileNotFoundError, readOwnedFile } from "@/server/services/files";
+import { RateLimitError } from "@/server/services/access";
+import { FILE_DISPOSITION, FileNotFoundError, openOwnedFile } from "@/server/services/files";
 
-// The account's images render inline. An imported PDF and the history a restore archived only
-// ever download; uploads, exports and sent archives have routes of their own with audit.
-const DISPOSITION: Partial<Record<string, "inline" | "attachment">> = {
-  logo: "inline",
-  qr_logo: "inline",
-  signature: "inline",
-  import_pdf: "attachment",
-  audit_archive: "attachment",
-};
-
-const notFound = () =>
-  new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
+// Uploads, exports and sent archives have routes of their own; FILE_DISPOSITION says what this
+// one serves and how.
+const reply = (status: number) =>
+  new Response(null, { status, headers: { "Cache-Control": "no-store" } });
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const actor = await actorFromRequest();
-  if (!actor.userId) return notFound();
+  if (!actor.userId) return reply(404);
+  let opened;
   try {
-    const { data, mimeType, name, kind } = readOwnedFile(actor, id);
-    const disposition = DISPOSITION[kind];
-    if (!disposition) return notFound();
-    return new Response(new Uint8Array(data), {
+    opened = openOwnedFile(actor, id);
+  } catch (error) {
+    if (error instanceof FileNotFoundError) return reply(404);
+    if (error instanceof RateLimitError) return reply(429);
+    throw error;
+  }
+  let stream: ReturnType<typeof createReadStream> | null = null;
+  try {
+    stream = createReadStream("", { fd: opened.fd, autoClose: true });
+    const body = Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+    return new Response(body, {
       headers: {
-        "Content-Type": mimeType,
-        "Content-Length": String(data.length),
-        "Content-Disposition": contentDisposition(disposition, name),
+        "Content-Type": opened.mimeType,
+        "Content-Length": String(opened.size),
+        "Content-Disposition": contentDisposition(FILE_DISPOSITION[opened.kind]!, opened.name),
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "sandbox",
         "Cache-Control": "private, no-store",
       },
     });
   } catch (error) {
-    if (error instanceof FileNotFoundError) return notFound();
+    // Once the stream owns the descriptor, destroying it closes it.
+    if (stream) stream.destroy();
+    else closeSync(opened.fd);
     throw error;
   }
 }
