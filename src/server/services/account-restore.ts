@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { and, count, getTableColumns, sql, type AnyColumn } from "drizzle-orm";
+import { and, count, eq, getTableColumns, lt, notExists, sql, type AnyColumn } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { BACKUP_VERSION, RESTORE_LIMITS } from "@/lib/backup-format";
 import { InputRejected } from "@/lib/safe-input/limits";
@@ -14,7 +14,16 @@ import { RestoreRejected, scanArchive, type ArchiveRow } from "../backup/restore
 import { BACKUP_TABLES, type BackupTable } from "../backup/tables";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { dashboard, exportJob, file, preferences, unit, type Job } from "../db/schema";
+import {
+  bankMailbox,
+  dashboard,
+  exportJob,
+  file,
+  job,
+  preferences,
+  unit,
+  type Job,
+} from "../db/schema";
 import { scoped } from "../db/scoped";
 import { blobPath, removeBlob, removeTempDir, tempDir, writeBlob } from "../files/store";
 import { moveExport } from "../jobs/export-progress";
@@ -56,6 +65,14 @@ export function isAccountEmpty(tx: Tx, ownerId: string): boolean {
       .get();
     if (found) return false;
   }
+  // Not in the archive, but a mailbox set up before the restore would go on reading notices
+  // against the restored documents while the text says everything is off.
+  const mailbox = tx
+    .select({ one: sql<number>`1` })
+    .from(bankMailbox)
+    .where(scoped(ownerId).where(bankMailbox))
+    .get();
+  if (mailbox) return false;
   const dashboards =
     tx.select({ n: count() }).from(dashboard).where(scoped(ownerId).where(dashboard)).get()?.n ?? 0;
   return dashboards <= 1;
@@ -65,8 +82,37 @@ export function assertRestoreAllowed(actor: Actor): void {
   enforceRateLimit(actor, RATE_RULES.restoreUser);
 }
 
-// The upload already lies under the id of the restore, so a failed restore removes it like a
-// half-written export.
+function insertRestore(tx: Tx, userId: string, id: string): void {
+  const now = clock.now();
+  tx.insert(exportJob)
+    .values({
+      id,
+      userId,
+      kind: "restore",
+      format: "zip",
+      filter: {},
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+}
+
+// Checked and recorded before a single byte is stored, so a filled account uploads nothing and an
+// upload cut off midway is found again by purgeStaleRestores.
+export function beginRestoreUpload(actor: Actor): { id: string } {
+  const userId = ownerOf(actor);
+  const id = randomUUID();
+  mutate(actor, "account.restore_upload", (tx, audit) => {
+    if (!isAccountEmpty(tx, userId)) throw new ServiceError(E.notEmpty);
+    assertExportSlot(tx, userId);
+    insertRestore(tx, userId, id);
+    audit({ entity: "account_restore", entityId: id, ownerId: userId, scope: "user" });
+  });
+  return { id };
+}
+
+// The upload lies under the id of the restore, so a failed restore removes it like a half-written
+// export.
 export function startRestore(actor: Actor, uploadId: string): { id: string } {
   const userId = ownerOf(actor);
   if (!ID.test(uploadId) || !existsSync(blobPath(userId, uploadId))) {
@@ -77,19 +123,14 @@ export function startRestore(actor: Actor, uploadId: string): { id: string } {
   if (size > RESTORE_LIMITS.archiveBytes) throw new ServiceError(E.tooLarge);
   mutate(actor, "account.restore_start", (tx, audit) => {
     if (!isAccountEmpty(tx, userId)) throw new ServiceError(E.notEmpty);
-    assertExportSlot(tx, userId);
-    const now = clock.now();
-    tx.insert(exportJob)
-      .values({
-        id: uploadId,
-        userId,
-        kind: "restore",
-        format: "zip",
-        filter: {},
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
+    const begun = findExport(tx, userId, uploadId);
+    if (begun && (begun.kind !== "restore" || begun.status !== "queued")) {
+      throw new ServiceError(E.notFound);
+    }
+    if (!begun) {
+      assertExportSlot(tx, userId);
+      insertRestore(tx, userId, uploadId);
+    }
     enqueue(tx, {
       kind: "restore.run",
       key: `restore:${uploadId}`,
@@ -106,6 +147,32 @@ export function startRestore(actor: Actor, uploadId: string): { id: string } {
   });
   kickWorker();
   return { id: uploadId };
+}
+
+const STALE_UPLOAD_MS = 3_600_000;
+
+// An upload whose request died before startRestore has a queued row and no job; after an hour it
+// is failed, which also removes whatever part of the file reached the disk.
+export function purgeStaleRestores(now: Date): number {
+  const stale = db
+    .select({ id: exportJob.id, userId: exportJob.userId })
+    .from(exportJob)
+    .where(
+      and(
+        eq(exportJob.kind, "restore"),
+        eq(exportJob.status, "queued"),
+        lt(exportJob.createdAt, new Date(now.getTime() - STALE_UPLOAD_MS)),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(job)
+            .where(eq(job.key, sql`'restore:' || ${exportJob.id}`)),
+        ),
+      ),
+    )
+    .all();
+  for (const { id, userId } of stale) failExport(userId, id, TEXTS.restore.interrupted);
+  return stale.length;
 }
 
 // R-34: nothing restored may act by itself; switching automation on again is a person's decision.
@@ -231,14 +298,6 @@ async function prepare(run: { job: Job; ownerId: string; id: string }): Promise<
   return prepared;
 }
 
-function foreignKeyProblems(tx: Tx): string | null {
-  for (const entry of BACKUP_TABLES) {
-    const broken = tx.all(sql`PRAGMA foreign_key_check(${sql.identifier(entry.name)})`);
-    if (broken.length > 0) return entry.name;
-  }
-  return null;
-}
-
 function commit(ownerId: string, id: string, prepared: Prepared): void {
   const actor: Actor = { userId: ownerId, source: "import" };
   mutate(actor, "account.restore", (tx, audit) => {
@@ -266,7 +325,7 @@ function commit(ownerId: string, id: string, prepared: Prepared): void {
         userId: ownerId,
         kind: "audit_archive",
         mimeType: "application/x-ndjson",
-        name: "historie-ze-zalohy.jsonl",
+        name: TEXTS.restore.auditFileName,
         size: prepared.auditBytes,
         createdAt: now,
       })
@@ -278,8 +337,6 @@ function commit(ownerId: string, id: string, prepared: Prepared): void {
       params: {},
       entity: { type: "file", id: prepared.auditFileId },
     });
-    const brokenTable = foreignKeyProblems(tx);
-    if (brokenTable) throw new RestoreRejected(E.reference(brokenTable));
     if (accountDataProblems(tx, ownerId).length > 0) throw new RestoreRejected(E.inconsistent);
     const moved = tx
       .update(exportJob)
@@ -322,7 +379,16 @@ export async function runRestore(job: Job): Promise<void> {
   if (!row || !moveExport(ownerId, id, ["queued"], { status: "running", progress: 0 })) return;
   try {
     const prepared = await prepare({ job, ownerId, id });
-    commit(ownerId, id, prepared);
+    try {
+      commit(ownerId, id, prepared);
+    } catch (error) {
+      // Every ref was matched against the archive already; the deferred check at COMMIT is the
+      // net for anything that still points nowhere.
+      if ((error as { code?: string }).code === "SQLITE_CONSTRAINT_FOREIGNKEY") {
+        throw new RestoreRejected(E.references);
+      }
+      throw error;
+    }
     removeResult(ownerId, id);
   } catch (error) {
     removeNewBlobs(ownerId, id);

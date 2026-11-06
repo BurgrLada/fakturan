@@ -1,13 +1,22 @@
 import "server-only";
-import { closeSync, copyFileSync, linkSync, mkdirSync, openSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  linkSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
-import { and, asc, getTableColumns, gt, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, getTableColumns, gt, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { db, type Tx } from "../db";
-import { auditLog } from "../db/schema";
+import { auditLog, file } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { blobPath } from "../files/store";
-import { BACKUP_TABLES, type BackupTable } from "./tables";
+import { isForeignActor } from "../services/audit-read";
+import { BACKUP_TABLES, FOLDED_FILES, type BackupTable } from "./tables";
 
 const PAGE = 500;
 const LINE_BUFFER = 64 * 1024;
@@ -19,22 +28,36 @@ export class MissingBlob extends Error {}
 
 type Owned = SQLiteTable & { userId: AnyColumn };
 
-export type Snapshot = { tables: Record<string, number>; files: string[]; audit: number };
+export type Snapshot = {
+  tables: Record<string, number>;
+  files: string[];
+  audit: number;
+  longestLine: number;
+};
 
-type Lines = { add(row: Record<string, unknown>): void; close(): void };
+type Lines = {
+  add(row: Record<string, unknown>): void;
+  addLine(line: string): void;
+  close(): void;
+};
 
-function lineFile(path: string): Lines {
+function lineFile(path: string, stats: { longest: number }): Lines {
   const fd = openSync(path, "wx");
   let pending = "";
   const flush = () => {
     if (pending) writeSync(fd, pending);
     pending = "";
   };
+  const addLine = (line: string) => {
+    stats.longest = Math.max(stats.longest, Buffer.byteLength(line));
+    pending += `${line}\n`;
+    if (pending.length >= LINE_BUFFER) flush();
+  };
   return {
     add(row) {
-      pending += `${JSON.stringify(row)}\n`;
-      if (pending.length >= LINE_BUFFER) flush();
+      addLine(JSON.stringify(row));
     },
+    addLine,
     close() {
       try {
         flush();
@@ -109,12 +132,13 @@ function keepBlob(ownerId: string, id: string, target: string): void {
 // is written out here in one synchronous transaction; the event loop waits for its length.
 export function snapshot(ownerId: string, dir: string): Snapshot {
   mkdirSync(join(dir, FILES_DIR), { recursive: true });
+  const stats = { longest: 0 };
   return db.transaction((tx) => {
     const tables: Record<string, number> = {};
     const files: string[] = [];
     for (const entry of BACKUP_TABLES) {
       const table = entry.table as Owned;
-      const lines = lineFile(join(dir, `${entry.name}.jsonl`));
+      const lines = lineFile(join(dir, `${entry.name}.jsonl`), stats);
       try {
         tables[entry.name] = dumpRows(
           tx,
@@ -131,20 +155,45 @@ export function snapshot(ownerId: string, dir: string): Snapshot {
       }
     }
     for (const id of files) keepBlob(ownerId, id, join(dir, FILES_DIR, id));
-    // Rows were redacted when written; only the account's own rows leave (R-31).
-    const auditLines = lineFile(join(dir, AUDIT_FILE));
-    let audit: number;
+    const auditLines = lineFile(join(dir, AUDIT_FILE), stats);
+    let audit = 0;
     try {
-      audit = dumpRows(
+      // The history an earlier restore archived comes first, line for line as it was archived.
+      const archived = tx
+        .select({ id: file.id })
+        .from(file)
+        .where(scoped(ownerId).where(file, (t) => inArray(t.kind, FOLDED_FILES)))
+        .orderBy(asc(file.createdAt), asc(file.id))
+        .all();
+      for (const { id } of archived) {
+        let text: string;
+        try {
+          text = readFileSync(blobPath(ownerId, id), "utf8");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new MissingBlob(id);
+          throw error;
+        }
+        for (const line of text.split("\n")) {
+          if (!line) continue;
+          auditLines.addLine(line);
+          audit += 1;
+        }
+      }
+      // Rows were redacted when written; only the account's own rows leave (R-31), and another
+      // person's address and browser are masked as in the audit view.
+      audit += dumpRows(
         tx,
         auditLog as unknown as Owned,
         scoped(ownerId).where(auditLog),
         Object.values(getTableColumns(auditLog)).map((column) => [column.name, column]),
-        (row) => auditLines.add(row),
+        (row) => {
+          const foreign = isForeignActor(row.actor_id as string | null, ownerId);
+          auditLines.add(foreign ? { ...row, ip: null, user_agent: null } : row);
+        },
       );
     } finally {
       auditLines.close();
     }
-    return { tables, files, audit };
+    return { tables, files, audit, longestLine: stats.longest };
   });
 }

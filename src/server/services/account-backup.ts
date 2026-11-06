@@ -9,12 +9,15 @@ import {
   dataEntry,
   fileEntry,
   MANIFEST_ENTRY,
+  RESTORE_LIMITS,
   type BackupManifest,
+  type RestoreLimits,
 } from "@/lib/backup-format";
 import { TEXTS } from "@/lib/texts";
 import pkg from "../../../package.json";
 import journal from "../../../drizzle/meta/_journal.json";
 import type { Actor } from "../audit/context";
+import { entryLimit } from "../backup/restore-read";
 import { AUDIT_FILE, FILES_DIR, MissingBlob, snapshot, type Snapshot } from "../backup/snapshot";
 import { BACKUP_TABLES, backupColumnsHash } from "../backup/tables";
 import { clock } from "../clock";
@@ -162,9 +165,18 @@ async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string)
     counts: { tables: snap.tables, files: snap.files.length, audit: snap.audit },
     entries,
   };
+  const text = JSON.stringify(manifest, null, 2);
+  const problem = restorableProblem(
+    entries,
+    manifest.counts,
+    RESTORE_LIMITS,
+    snap.longestLine,
+    Buffer.byteLength(text),
+  );
+  if (problem) throw new NotRestorable(problem);
   const zip = zipFileWriter(path, { mtime: createdAt });
   try {
-    zip.addDeflated(MANIFEST_ENTRY, JSON.stringify(manifest, null, 2));
+    zip.addDeflated(MANIFEST_ENTRY, text);
     for (const item of planned) {
       await copyEntry(run, zip.deflatedEntry(item.name, item.level), item.source);
     }
@@ -175,7 +187,37 @@ async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string)
   }
 }
 
+type EntrySizes = Record<string, { size: number; sha256?: string }>;
+type Counts = { tables: Record<string, number>; files: number; audit: number };
+
+// R-35: a backup the restore would refuse is never written, so nobody deletes an account trusting
+// a file that cannot come back. Returns the refusal, or null when the archive fits.
+export function restorableProblem(
+  entries: EntrySizes,
+  counts: Counts,
+  limits: RestoreLimits = RESTORE_LIMITS,
+  longestLine = 0,
+  manifestBytes = 0,
+): string | null {
+  const names = Object.keys(entries);
+  const sizes = names.map((name) => entries[name]!.size);
+  const tableLines = Object.values(counts.tables);
+  const tooLarge =
+    names.length + 1 > limits.entries ||
+    names.some((name) => entries[name]!.size > entryLimit(name, limits)) ||
+    sizes.reduce((sum, size) => sum + size, 0) + manifestBytes > limits.archiveBytes ||
+    manifestBytes > limits.manifestBytes;
+  const tooManyLines =
+    tableLines.some((n) => n > limits.maxLinesPerTable) ||
+    tableLines.reduce((sum, n) => sum + n, 0) + counts.audit > limits.maxLines ||
+    longestLine > limits.maxLineBytes;
+  return tooLarge || tooManyLines ? E.notRestorable : null;
+}
+
+class NotRestorable extends Error {}
+
 function reasonOf(error: unknown): string | null {
+  if (error instanceof NotRestorable) return E.notRestorable;
   if (error instanceof MissingBlob) return E.missingFile;
   if (error instanceof ServiceError) return error.message;
   if (error instanceof ExportTooLarge) return E.tooLarge;

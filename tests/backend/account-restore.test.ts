@@ -37,7 +37,14 @@ import {
   recoverBackupJob,
   runBackup,
 } from "@/server/services/account-backup";
-import { recoverRestore, runRestore, startRestore } from "@/server/services/account-restore";
+import {
+  beginRestoreUpload,
+  purgeStaleRestores,
+  recoverRestore,
+  runRestore,
+  startRestore,
+} from "@/server/services/account-restore";
+import { paymentProblems } from "@/server/services/data-checks";
 import { ingestNotice } from "@/server/services/bank-notices";
 import { deleteUser } from "@/server/services/users";
 import { latestRestore } from "@/server/services/exports";
@@ -51,7 +58,7 @@ import {
 } from "../helpers/backup-compare";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
-import { seedBankAccount, TARGET } from "../helpers/fixtures-bank";
+import { seedBankAccount, seedMailbox, TARGET } from "../helpers/fixtures-bank";
 import { issuedInvoice, seedOwner, webActor } from "../helpers/fixtures-mail";
 
 const session = vi.hoisted(() => ({ userId: null as string | null }));
@@ -471,5 +478,112 @@ describe("obnova účtu", () => {
     const rule = "restoreUser";
     db.run(sql`UPDATE rate_limit SET count = 5 WHERE key = ${`${rule}:${target}`}`);
     expect((await post()).status).toBe(429);
+  });
+
+  test("[IMP-010] audit z obnovy jde do audit.jsonl další zálohy, ne jako soubor", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const firstArchive = await backupArchive(db, source);
+    const firstAudit = readJsonl(unzipSync(firstArchive)[AUDIT_ENTRY]!);
+    const middle = emptyAccount();
+    await restoreArchive(db, middle, firstArchive);
+    const second = unzipSync(await backupArchive(db, middle));
+    const kinds = readJsonl(second["data/file.jsonl"]!).map((row) => row.kind);
+    expect(kinds).not.toContain("audit_archive");
+    const audit = readJsonl(second[AUDIT_ENTRY]!);
+    expect(audit.slice(0, firstAudit.length)).toEqual(firstAudit);
+    expect(audit.map((row) => row.action)).toContain("account.restore");
+    const last = emptyAccount();
+    expect((await restoreArchive(db, last, await backupArchive(db, middle))).status).toBe("done");
+  });
+
+  test("[SEC-001] neprázdný účet odmítne nahrání dřív, než se čte tělo", async () => {
+    const busy = seedOwner(db, NOW);
+    session.userId = busy;
+    let pulled = false;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulled = true;
+          controller.enqueue(new Uint8Array(1024));
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const { POST } = await import("@/app/(app)/nastaveni/zaloha/nahrani/route");
+    const response = await POST(
+      new Request("http://localhost:3000/nastaveni/zaloha/nahrani", {
+        method: "POST",
+        body,
+        headers: { origin: "http://localhost:3000" },
+        duplex: "half",
+      } as RequestInit),
+    );
+    expect(response.status).toBe(422);
+    expect(pulled).toBe(false);
+    expect(userFiles(busy)).toEqual([]);
+  });
+
+  test("[IMP-010] nahrání, které obnovu nespustilo, po hodině zmizí", async () => {
+    const target = emptyAccount();
+    const { id } = beginRestoreUpload(webActor(target));
+    writeBlob(target, id, Buffer.from("PK rozepsané"));
+    current = new Date(NOW.getTime() + 2 * 3_600_000);
+    purgeStaleRestores(current);
+    expect(userFiles(target)).toEqual([]);
+    expect(db.select().from(exportJob).where(eq(exportJob.id, id)).get()).toMatchObject({
+      status: "failed",
+    });
+  });
+
+  test("[IMP-010] soubor auditu ze zálohy má jméno z textů", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const target = emptyAccount();
+    await restoreArchive(db, target, await backupArchive(db, source));
+    const archived = db
+      .select()
+      .from(file)
+      .where(and(eq(file.userId, target), eq(file.kind, "audit_archive")))
+      .get()!;
+    expect(archived.name).toBe(TEXTS.restore.auditFileName);
+  });
+
+  test("[IMP-010] nastavená schránka avíz dělá účet neprázdným", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const bytes = await backupArchive(db, source);
+    const target = emptyAccount();
+    seedMailbox(db, target, 993, NOW);
+    const uploadId = randomUUID();
+    writeBlob(target, uploadId, Buffer.from(bytes));
+    expect(() => startRestore(webActor(target), uploadId)).toThrow(E.notEmpty);
+  });
+
+  test("[TST-009] kontrola plateb počítá jen doklady téhož účtu", () => {
+    const owner = seedOwner(db, NOW);
+    const stranger = seedOwner(db, NOW);
+    const theirs = issuedInvoice(stranger);
+    db.insert(payment)
+      .values({
+        id: randomUUID(),
+        userId: owner,
+        invoiceId: theirs,
+        kind: "payment",
+        paidOn: "2026-03-10",
+        amountMinor: 100,
+        currency: "CZK",
+        creditedMinor: 50,
+        method: "transfer",
+        source: "manual",
+        createdAt: NOW,
+        updatedAt: NOW,
+      })
+      .run();
+    const problems = paymentProblems(db, owner);
+    expect(problems.some((problem) => problem.includes("cizím dokladem"))).toBe(true);
+    expect(problems.some((problem) => problem.includes("jinou připsanou částkou"))).toBe(false);
+    db.delete(payment).where(eq(payment.userId, owner)).run();
   });
 });

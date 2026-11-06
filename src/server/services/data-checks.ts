@@ -237,6 +237,7 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
 
   const foreign = count(
     q,
+    // The one join that crosses accounts on purpose: it is the check for exactly that.
     sql`SELECT count(*) AS n FROM payment p LEFT JOIN invoice i ON i.id = p.invoice_id
       WHERE (p.user_id = ${ownerId} OR i.user_id = ${ownerId})
         AND (i.id IS NULL OR i.user_id <> p.user_id)`,
@@ -246,7 +247,7 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
   const miscredited = count(
     q,
     sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
-      WHERE p.user_id = ${ownerId} AND p.currency = i.currency
+      WHERE p.user_id = ${ownerId} AND i.user_id = ${ownerId} AND p.currency = i.currency
         AND p.credited_minor <> p.amount_minor`,
   );
   if (miscredited > 0) problems.push(`payment: ${miscredited} plateb s jinou připsanou částkou`);
@@ -254,7 +255,7 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
   const estimated = count(
     q,
     sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
-      WHERE p.user_id = ${ownerId}
+      WHERE p.user_id = ${ownerId} AND i.user_id = ${ownerId}
         AND ((p.date_estimated = 1 AND p.source <> 'import')
           OR (p.source = 'import' AND i.external = 0))`,
   );
@@ -263,7 +264,7 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
   const noteRefunds = count(
     q,
     sql`SELECT count(*) AS n FROM payment p JOIN invoice i ON i.id = p.invoice_id
-      WHERE p.user_id = ${ownerId} AND i.type = 'credit_note'`,
+      WHERE p.user_id = ${ownerId} AND i.user_id = ${ownerId} AND i.type = 'credit_note'`,
   );
   if (noteRefunds > 0) problems.push(`payment: ${noteRefunds} plateb na opravné faktuře`);
 
@@ -271,7 +272,7 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
     q,
     sql`SELECT count(*) AS n FROM invoice i
       WHERE i.user_id = ${ownerId} AND i.status IN ('draft', 'cancelled')
-        AND EXISTS (SELECT 1 FROM payment p WHERE p.invoice_id = i.id)
+        AND EXISTS (SELECT 1 FROM payment p WHERE p.invoice_id = i.id AND p.user_id = ${ownerId})
         AND (i.status = 'draft' OR i.paid_minor <> 0)`,
   );
   // A cancelled document keeps the history of a fully refunded payment, never money.

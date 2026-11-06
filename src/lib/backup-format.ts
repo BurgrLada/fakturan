@@ -63,18 +63,24 @@ export type BackupManifest = z.output<typeof backupManifestSchema>;
 
 export type BackupRow = Record<string, unknown>;
 
-// Steps from version n to n + 1, applied to each table's rows of an older archive before they are
-// validated. No version before 1 exists, so the list starts empty (R-31).
-export const BACKUP_UPGRADES: Record<number, (table: string, rows: BackupRow[]) => BackupRow[]> =
-  {};
+// Steps from version n to n + 1, applied to each row of an older archive before it is validated.
+// No version before 1 exists, so the list starts empty (R-31).
+export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => BackupRow> = {};
 
 const MiB = 1024 * 1024;
 
 // R-35: a backup has its own limits, far above those of a document import.
 export const RESTORE_LIMITS = {
   archiveBytes: 1024 * MiB,
-  manifestBytes: MiB,
+  // Each entry costs about 110 bytes of manifest, so 200 000 entries need some 22 MiB.
+  manifestBytes: 32 * MiB,
   dataEntryBytes: 200 * MiB,
   fileEntryBytes: 25 * MiB,
   entries: 200_000,
+  // Rows are read line by line against these, so a huge entry of tiny lines stops early.
+  maxLinesPerTable: 500_000,
+  maxLines: 4 * 500_000,
+  maxLineBytes: 2 * MiB,
 };
+
+export type RestoreLimits = typeof RESTORE_LIMITS;

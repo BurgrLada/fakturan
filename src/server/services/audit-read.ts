@@ -99,9 +99,14 @@ function conditions(ownerId: string, filter: AuditFilter): SQL {
   );
 }
 
-// Another user's address and browser (e.g. an administrator acting on this account) are theirs, not the owner's.
+// Another user's address and browser (e.g. an administrator acting on this account) are theirs,
+// not the owner's; the account backup masks them the same way.
+export function isForeignActor(actorId: string | null, ownerId: string): boolean {
+  return actorId !== null && actorId !== ownerId;
+}
+
 function maskForeignActor(row: AuditRow, ownerId: string): AuditRow {
-  if (row.actorId === null || row.actorId === ownerId) return row;
+  if (!isForeignActor(row.actorId, ownerId)) return row;
   return { ...row, ip: null, userAgent: null };
 }
 

@@ -10,7 +10,7 @@ import { purgeFinishedJobs } from "../jobs/queue";
 import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
 import { recoverBackupJob, runBackup } from "../services/account-backup";
-import { recoverRestore, runRestore } from "../services/account-restore";
+import { purgeStaleRestores, recoverRestore, runRestore } from "../services/account-restore";
 import { purgeNotices } from "../services/bank-notices";
 import { planBankPolls, pollMailbox } from "../services/bank-poll";
 import { deliverDigest, planDigests } from "../services/due-alerts";
@@ -78,6 +78,7 @@ export const exportCleanupTask: TickTask = {
     if (now.getTime() - exportCleanedAt < EXPORT_CLEANUP_MS) return;
     exportCleanedAt = now.getTime();
     purgeExpiredExports(now);
+    purgeStaleRestores(now);
   },
 };
 

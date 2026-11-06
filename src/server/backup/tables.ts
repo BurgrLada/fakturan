@@ -51,6 +51,9 @@ const C = "copy";
 // A source upload and an export are temporary and expire on their own; nothing in the archive
 // points at them.
 export const TEMPORARY_FILES: FileKind[] = ["import_upload", "export"];
+// The audit a restore archived as a file goes back into audit.jsonl, not under files/: an archive
+// must stay restorable however long the history grows.
+export const FOLDED_FILES: FileKind[] = ["audit_archive"];
 
 // Parents before children, so a restore can insert in this order (R-31).
 export const BACKUP_TABLES: BackupTable[] = [
@@ -90,7 +93,7 @@ export const BACKUP_TABLES: BackupTable[] = [
       import_batch_id: "ref:import_batch",
       created_at: C,
     },
-    rows: () => notInArray(file.kind, TEMPORARY_FILES),
+    rows: () => notInArray(file.kind, [...TEMPORARY_FILES, ...FOLDED_FILES]),
   },
   {
     name: "supplier",

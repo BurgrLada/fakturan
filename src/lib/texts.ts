@@ -3353,6 +3353,8 @@ export const TEXTS = {
       missingFile:
         "V úložišti chybí soubor účtu, záloha se zastavila. Kontaktujte správce instance.",
       tooLarge: "Záloha by byla větší než 1 GB, to tento formát neumí.",
+      notRestorable:
+        "Záloha by překročila limity, se kterými jde obnovit, a proto nevznikla. Kontaktujte správce instance.",
       unexpected: "Záloha se nepodařila kvůli neočekávané chybě. Zkuste ji znovu.",
     },
   },
@@ -3368,9 +3370,10 @@ export const TEXTS = {
     status: "Stav obnovy",
     done: "Účet je obnovený.",
     interrupted: "Obnova se přerušila. Účet zůstal beze změny, spusťte ji znovu.",
+    auditFileName: "historie-ze-zalohy.jsonl",
     errors: {
       notEmpty:
-        "Obnova jde jen do prázdného účtu. Tento účet už obsahuje data, obnovte zálohu do nového účtu.",
+        "Obnova jde jen do prázdného účtu. Tento účet už obsahuje data nebo nastavenou schránku s avízy, obnovte zálohu do nového účtu.",
       tooLarge: "Soubor je větší než 1 GB, to žádná záloha Fakturanu být nemůže.",
       empty: "Soubor je prázdný.",
       notFound: "Nahraný soubor už neexistuje. Nahrajte ho znovu.",
@@ -3381,6 +3384,9 @@ export const TEXTS = {
       duplicate: "Archiv obsahuje stejnou položku dvakrát.",
       hash: "Obsah archivu neodpovídá kontrolním součtům, soubor je poškozený nebo upravený.",
       counts: "Počty v archivu nesedí s jeho popisem.",
+      tooManyLines: "Archiv má víc řádků, než obnova dovolí.",
+      audit: "Historie změn v archivu není platná.",
+      references: "Data v archivu odkazují na něco, co v něm není.",
       row: (table: string) => `Archiv obsahuje neplatný řádek v tabulce ${table}.`,
       reference: (table: string) => `Řádek v tabulce ${table} odkazuje na něco, co v archivu není.`,
       inconsistent:

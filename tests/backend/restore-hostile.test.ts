@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { strFromU8, strToU8, unzipSync, Zip, ZipDeflate, zipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { MANIFEST_ENTRY } from "@/lib/backup-format";
+import { MANIFEST_ENTRY, RESTORE_LIMITS } from "@/lib/backup-format";
+import { scanArchive } from "@/server/backup/restore-read";
 import { TEXTS } from "@/lib/texts";
 import { BACKUP_TABLES } from "@/server/backup/tables";
 import { setClockForTests } from "@/server/clock";
@@ -138,6 +139,7 @@ describe("obnova z nepřátelského archivu", () => {
       editArchive(archive, (entries) => {
         entries["files/../../x"] = strToU8("x");
       }),
+      E.manifest,
     );
     await refused(
       editRows("customer", (rows) => rows.map((row) => ({ ...row, total_minor: 5 }))),
@@ -262,5 +264,112 @@ describe("obnova z nepřátelského archivu", () => {
       ),
       E.version,
     );
+  });
+});
+
+describe("obnova z nepřátelského archivu, opravy bloku D", () => {
+  const onDisk = (bytes: Uint8Array) => {
+    const path = join(mkdtempSync(join(tmpdir(), "fakturan-scan-")), "zaloha.zip");
+    writeFileSync(path, bytes);
+    return path;
+  };
+  const small = { ...RESTORE_LIMITS, maxLinesPerTable: 10, maxLines: 40, maxLineBytes: 4096 };
+  const reasonOf = (promise: Promise<unknown>) =>
+    promise.then(
+      () => "prošlo",
+      (error: Error) => error.message,
+    );
+
+  test("[SEC-005] řádky nad strop tabulky, archivu i délky se odmítnou hned", async () => {
+    const customers = readJsonl(unzipSync(archive)["data/customer.jsonl"]!);
+    const many = editArchive(
+      archive,
+      (entries) => {
+        entries["data/customer.jsonl"] = jsonl([
+          ...customers,
+          ...Array.from({ length: 10 }, (_, index) => ({
+            ...customers[0]!,
+            id: randomUUID(),
+            name: `Zákazník ${index}`,
+          })),
+        ]);
+      },
+      (manifest) => (manifest.counts.tables.customer = customers.length + 10),
+    );
+    let seen = 0;
+    expect(await reasonOf(scanArchive(onDisk(many), { rows: () => void (seen += 1) }, small))).toBe(
+      E.tooManyLines,
+    );
+    expect(await reasonOf(scanArchive(onDisk(archive), {}, { ...small, maxLines: 5 }))).toBe(
+      E.tooManyLines,
+    );
+    const long = editRows("customer", (rows) =>
+      rows.map((row) => ({ ...row, note: "x".repeat(5000) })),
+    );
+    expect(await reasonOf(scanArchive(onDisk(long), {}, small))).toBe(E.row("customer"));
+    // More lines than the manifest admits stop the read at the first surplus line.
+    const surplus = editArchive(
+      archive,
+      (entries) => {
+        entries["data/customer.jsonl"] = jsonl([
+          ...customers,
+          ...customers.map((row) => ({ ...row, id: randomUUID() })),
+        ]);
+      },
+      () => {},
+    );
+    expect(await reasonOf(scanArchive(onDisk(surplus), {}))).toBe(E.counts);
+  });
+
+  test("[SEC-005] statisíce prázdných řádků v malém archivu skončí chybou a proces žije", async () => {
+    // Below the ratio check's grace, so it is the line reader that has to stop it.
+    const lines = strToU8("[]\n".repeat(200_000));
+    await refused(
+      editArchive(archive, (entries) => {
+        entries["data/unit.jsonl"] = lines;
+        entries["audit.jsonl"] = lines;
+      }),
+      E.counts,
+    );
+    await refused(
+      editArchive(archive, (entries) => {
+        entries["audit.jsonl"] = strToU8('{"action":"x"}\n[]\n');
+      }),
+      E.audit,
+    );
+  });
+
+  test("[SEC-005] JSON sloupce, které čte PDF a odeslání, musí mít svůj tvar", async () => {
+    await refused(
+      editRows("invoice", (rows) => rows.map((row) => ({ ...row, appearance: {} }))),
+      E.row("invoice"),
+    );
+    await refused(
+      editRows("invoice", (rows) => rows.map((row) => ({ ...row, issue_date: "abc" }))),
+      E.row("invoice"),
+    );
+    await refused(
+      editRows("invoice", (rows) =>
+        rows.map((row) =>
+          row.customer_snapshot ? { ...row, customer_snapshot: { name: 1 } } : row,
+        ),
+      ),
+      E.row("invoice"),
+    );
+    await refused(
+      editRows("email_log", (rows) => rows.map((row) => ({ ...row, to: "alfa@example.cz" }))),
+      E.row("email_log"),
+    );
+  });
+
+  test("[IMP-010] porušený cizí klíč v cizím účtu obnovu neblokuje", async () => {
+    const stranger = seedOwner(db, NOW);
+    db.run(sql`PRAGMA foreign_keys = OFF`);
+    db.run(sql`INSERT INTO unit (id, user_id, name, position, created_at)
+      VALUES (${randomUUID()}, ${`chybi-${randomUUID()}`}, 'ks', 0, 0)`);
+    db.run(sql`PRAGMA foreign_keys = ON`);
+    expect(stranger).toBeTruthy();
+    const target = emptyAccount();
+    expect((await restoreArchive(db, target, archive)).status).toBe("done");
   });
 });

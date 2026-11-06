@@ -8,6 +8,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "account.link": "Propojení účtu poskytovatele",
   "account.restore": "Obnova účtu ze zálohy",
   "account.restore_start": "Spuštění obnovy účtu",
+  "account.restore_upload": "Nahrání zálohy k obnově",
   "account.restore_fail": "Neúspěšná obnova účtu",
   "audit.export": "Export historie",
   "auth.account_link_failed": "Neúspěšné propojení účtu poskytovatele",

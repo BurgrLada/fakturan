@@ -11,12 +11,23 @@ import {
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
   type BackupManifest,
+  type RestoreLimits,
 } from "@/lib/backup-format";
+import { CURRENCIES } from "@/lib/currency";
+import { INVOICE_TYPES } from "@/lib/invoice";
+import { isCalendarDate } from "@/lib/number-format";
+import { LOGO_POSITIONS } from "@/lib/preferences";
 import { InputRejected } from "@/lib/safe-input/limits";
 import { readZipEntries } from "@/lib/safe-input/zip";
 import { TEXTS } from "@/lib/texts";
 import { PAYMENT_MEANS_CODES } from "../isdoc/parse";
-import { BACKUP_TABLES, backupColumnsHash, TEMPORARY_FILES, type BackupTable } from "./tables";
+import {
+  BACKUP_TABLES,
+  backupColumnsHash,
+  FOLDED_FILES,
+  TEMPORARY_FILES,
+  type BackupTable,
+} from "./tables";
 
 const E = TEXTS.restore.errors;
 const KiB = 1024;
@@ -55,23 +66,107 @@ function shallowEnough(value: unknown, depth = 0): boolean {
 
 const json = z.custom<unknown>((value) => value !== undefined && shallowEnough(value));
 
+const text = z.string().max(MAX_TEXT);
+const date = z.string().refine(isCalendarDate);
+const strings = z.array(text).max(10_000);
+const appearance = z.looseObject({
+  designId: text,
+  colors: z.looseObject({ accent: text, surface: text, text, line: text }),
+  logoPosition: z.enum(LOGO_POSITIONS),
+  showLogo: z.boolean(),
+  showQr: z.boolean(),
+  showQrLogo: z.boolean(),
+  showSignature: z.boolean(),
+  showDuzp: z.boolean(),
+});
+const party = {
+  name: text,
+  street: text,
+  city: text,
+  zip: text,
+  country: text,
+  ico: text,
+  dic: text,
+};
+const supplierSnapshot = z.looseObject({
+  ...party,
+  email: text,
+  phone: text,
+  web: text,
+  registryNote: text,
+  contactPerson: text,
+  vatIdentified: z.boolean(),
+  footerText: text,
+  notVatPayerCs: text,
+  notVatPayerEn: text,
+});
+const customerSnapshot = z.looseObject({ ...party, email: text, phone: text });
+const accountSnapshot = z.looseObject({
+  name: text,
+  currency: z.enum(CURRENCIES),
+  number: text,
+  bankCode: text,
+  iban: text,
+  swift: text,
+});
+const relatedSnapshot = z.looseObject({
+  type: z.enum(INVOICE_TYPES),
+  number: text,
+  issueDate: date,
+});
+
+// JSON and dates that pages, PDF and sending read without a second check; the remaining JSON only
+// has to be shallow.
+const KNOWN_SHAPES: Record<string, z.ZodType> = {
+  "invoice.appearance": appearance,
+  "invoice.supplier_snapshot": supplierSnapshot,
+  "invoice.customer_snapshot": customerSnapshot,
+  "invoice.account_snapshot": accountSnapshot,
+  "invoice.related_snapshot": relatedSnapshot,
+  "invoice.issue_date": date,
+  "invoice.due_date": date,
+  "invoice.taxable_date": date,
+  "invoice.exchange_rate_date": date,
+  "invoice.period_from": date,
+  "invoice.period_to": date,
+  "invoice.reminders_snooze_until": date,
+  "payment.paid_on": date,
+  "bank_notification.paid_on": date,
+  "recurring_invoice.starts_on": date,
+  "recurring_invoice.ends_on": date,
+  "recurring_invoice.cursor_date": date,
+  "recurring_run.planned_date": date,
+  "recurring_run.period_from": date,
+  "recurring_run.period_to": date,
+  "preferences.fixed_rates": z.partialRecord(z.enum(CURRENCIES), z.number().int().positive()),
+  "customer.extra_emails": strings,
+  "catalog_item.tags": strings,
+  "email_log.to": strings,
+  "email_log.cc": strings,
+  "email_log.bcc": strings,
+  "mail_settings.cc": strings,
+  "mail_settings.bcc": strings,
+};
+
 // What a column may hold, derived from the schema: the archive is never trusted to name a type.
 function columnSchema(entry: BackupTable, column: AnyColumn): z.ZodType | null {
   const rule = entry.columns[column.name];
   if (!rule || rule === "omit") return null;
   if (rule === "owner") return z.string().max(128).optional();
   let schema: z.ZodType;
+  const shape = KNOWN_SHAPES[`${entry.name}.${column.name}`];
   if (rule === "id" || rule.startsWith("ref:")) schema = ID;
   else if (entry.name === "invoice" && column.name === "import_payment_code") {
     schema = z.string().refine((code) => PAYMENT_MEANS_CODES.has(code));
-  } else if (column.columnType === "SQLiteTextJson") schema = json;
+  } else if (shape) schema = shape;
+  else if (column.columnType === "SQLiteTextJson") schema = json;
   else if (column.columnType === "SQLiteBoolean") schema = z.boolean();
   else if (column.columnType === "SQLiteTimestamp") {
     schema = z.number().int().min(0).max(8_640_000_000_000_000);
   } else if (column.columnType === "SQLiteInteger") schema = z.number().int().safe();
   else {
     const values = (column as AnyColumn & { enumValues?: string[] }).enumValues;
-    schema = values?.length ? z.enum(values as [string, ...string[]]) : z.string().max(MAX_TEXT);
+    schema = values?.length ? z.enum(values as [string, ...string[]]) : text;
   }
   return column.notNull ? schema : schema.nullable();
 }
@@ -89,39 +184,92 @@ function rowSchema(entry: BackupTable): z.ZodType<ArchiveRow> {
   let schema: z.ZodType<ArchiveRow> = z.strictObject(shape) as z.ZodType<ArchiveRow>;
   if (entry.name === "file") {
     // A temporary upload or an export never goes into a backup, so one here is planted.
-    schema = schema.refine((row) => !TEMPORARY_FILES.includes(row.kind as never));
+    schema = schema.refine(
+      (row) => ![...TEMPORARY_FILES, ...FOLDED_FILES].includes(row.kind as never),
+    );
   }
   rowSchemas.set(entry.name, schema);
   return schema;
 }
 
-function parseLines(bytes: Uint8Array): unknown[] {
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  return text
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => JSON.parse(line) as unknown);
+type LineBudget = { limits: RestoreLimits; total: number };
+
+// Walks the entry by newline and decodes one line at a time: an entry of millions of tiny lines
+// never becomes one string or one array (C-1). `take` sees each line as it is found and may stop.
+function eachLine(
+  bytes: Uint8Array,
+  budget: LineBudget,
+  cap: number,
+  onError: () => RestoreRejected,
+  take: (value: unknown) => void,
+): number {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let start = 0;
+  let count = 0;
+  while (start < bytes.length) {
+    let end = bytes.indexOf(0x0a, start);
+    if (end < 0) end = bytes.length;
+    if (end > start) {
+      if (end - start > budget.limits.maxLineBytes) throw onError();
+      count += 1;
+      budget.total += 1;
+      if (count > cap || budget.total > budget.limits.maxLines) {
+        throw new RestoreRejected(E.tooManyLines);
+      }
+      let value: unknown;
+      try {
+        value = JSON.parse(decoder.decode(bytes.subarray(start, end)));
+      } catch {
+        throw onError();
+      }
+      take(value);
+    }
+    start = end + 1;
+  }
+  return count;
 }
 
-function upgrade(table: string, rows: unknown[], v: number): unknown[] {
-  let current = rows as ArchiveRow[];
+function upgrade(table: string, row: unknown, v: number): unknown {
+  let current = row as ArchiveRow;
   for (let step = v; step < BACKUP_VERSION; step++)
     current = BACKUP_UPGRADES[step]!(table, current);
   return current;
 }
 
-function validRows(entry: BackupTable, bytes: Uint8Array, v: number): ArchiveRow[] {
-  let lines: unknown[];
-  try {
-    lines = upgrade(entry.name, parseLines(bytes), v);
-  } catch {
-    throw new RestoreRejected(E.row(entry.name));
-  }
+function validRows(
+  entry: BackupTable,
+  bytes: Uint8Array,
+  manifest: BackupManifest,
+  budget: LineBudget,
+): ArchiveRow[] {
   const schema = rowSchema(entry);
-  return lines.map((line) => {
-    const parsed = schema.safeParse(line);
-    if (!parsed.success) throw new RestoreRejected(E.row(entry.name));
-    return parsed.data;
+  const rows: ArchiveRow[] = [];
+  const expected = manifest.counts.tables[entry.name] ?? 0;
+  const invalid = () => new RestoreRejected(E.row(entry.name));
+  eachLine(bytes, budget, budget.limits.maxLinesPerTable, invalid, (line) => {
+    if (rows.length >= expected) throw new RestoreRejected(E.counts);
+    let upgraded: unknown;
+    try {
+      upgraded = upgrade(entry.name, line, manifest.v);
+    } catch {
+      throw invalid();
+    }
+    const parsed = schema.safeParse(upgraded);
+    if (!parsed.success) throw invalid();
+    rows.push(parsed.data);
+  });
+  return rows;
+}
+
+const auditLine = z.custom<object>(
+  (value) => value !== null && typeof value === "object" && !Array.isArray(value),
+);
+
+// The audit is only archived as a file, so its lines are counted and must be JSON objects.
+function auditLines(bytes: Uint8Array, manifest: BackupManifest, budget: LineBudget): number {
+  const invalid = () => new RestoreRejected(E.audit);
+  return eachLine(bytes, budget, manifest.counts.audit, invalid, (line) => {
+    if (!auditLine.safeParse(line).success) throw invalid();
   });
 }
 
@@ -148,10 +296,10 @@ function checkManifest(bytes: Uint8Array): BackupManifest {
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-function entryLimit(name: string): number {
-  if (name === MANIFEST_ENTRY) return RESTORE_LIMITS.manifestBytes;
-  if (name.startsWith("files/")) return RESTORE_LIMITS.fileEntryBytes;
-  return RESTORE_LIMITS.dataEntryBytes;
+export function entryLimit(name: string, limits: RestoreLimits = RESTORE_LIMITS): number {
+  if (name === MANIFEST_ENTRY) return limits.manifestBytes;
+  if (name.startsWith("files/")) return limits.fileEntryBytes;
+  return limits.dataEntryBytes;
 }
 
 async function* hashed(path: string, hash: ReturnType<typeof createHash>) {
@@ -167,14 +315,16 @@ async function* hashed(path: string, hash: ReturnType<typeof createHash>) {
 export async function scanArchive(
   path: string,
   handlers: ArchiveHandlers,
+  limits: RestoreLimits = RESTORE_LIMITS,
 ): Promise<ArchiveSummary> {
+  const budget: LineBudget = { limits, total: 0 };
   const archiveHash = createHash("sha256");
   const byName = new Map(BACKUP_TABLES.map((entry) => [`data/${entry.name}.jsonl`, entry]));
   const seen = new Set<string>();
   const counted: Record<string, number> = {};
   const files: string[] = [];
   let manifest: BackupManifest | null = null;
-  let auditLines = 0;
+  let auditCount = 0;
   let fileRows: string[] = [];
   let rejection: unknown = null;
 
@@ -182,14 +332,14 @@ export async function scanArchive(
     await readZipEntries(
       hashed(path, archiveHash),
       {
-        maxEntries: RESTORE_LIMITS.entries,
-        maxEntryBytes: RESTORE_LIMITS.dataEntryBytes,
-        maxPdfEntryBytes: RESTORE_LIMITS.fileEntryBytes,
-        maxTotalBytes: RESTORE_LIMITS.archiveBytes,
+        maxEntries: limits.entries,
+        maxEntryBytes: limits.dataEntryBytes,
+        maxPdfEntryBytes: limits.fileEntryBytes,
+        maxTotalBytes: limits.archiveBytes,
         maxRatio: 200,
         ratioGraceBytes: 1024 * KiB,
         chunkBytes: 16 * KiB,
-        maxBytesFor: entryLimit,
+        maxBytesFor: (name) => entryLimit(name, limits),
       },
       async ({ name, bytes }) => {
         try {
@@ -222,7 +372,7 @@ export async function scanArchive(
     }
     const table = byName.get(name);
     if (table) {
-      const rows = validRows(table, bytes, manifest.v);
+      const rows = validRows(table, bytes, manifest, budget);
       counted[table.name] = rows.length;
       if (table.name === "file") fileRows = rows.map((row) => row.id as string);
       await handlers.rows?.(table, rows);
@@ -230,7 +380,7 @@ export async function scanArchive(
       files.push(name.slice("files/".length));
       await handlers.file?.(name.slice("files/".length), bytes);
     } else if (name === AUDIT_ENTRY) {
-      auditLines = parseLines(bytes).length;
+      auditCount = auditLines(bytes, manifest, budget);
       await handlers.audit?.(bytes);
     } else {
       throw new RestoreRejected(E.entry);
@@ -245,7 +395,7 @@ export async function scanArchive(
     BACKUP_TABLES.some((entry) => found.counts.tables[entry.name] !== counted[entry.name]) ||
     Object.keys(found.counts.tables).length !== BACKUP_TABLES.length ||
     found.counts.files !== files.length ||
-    found.counts.audit !== auditLines ||
+    found.counts.audit !== auditCount ||
     !seen.has(AUDIT_ENTRY);
   const rowIds = new Set(fileRows);
   const blobsDiffer = rowIds.size !== files.length || files.some((id) => !rowIds.has(id));

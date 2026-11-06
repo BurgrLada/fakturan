@@ -20,6 +20,7 @@ import {
   backupManifestSchema,
   dataEntry,
   MANIFEST_ENTRY,
+  RESTORE_LIMITS,
 } from "@/lib/backup-format";
 import { TEXTS } from "@/lib/texts";
 import { BACKUP_TABLES } from "@/server/backup/tables";
@@ -44,7 +45,12 @@ import { registerJob } from "@/server/jobs/registry";
 import { drainHeavy } from "@/server/jobs/worker";
 import { RATE_RULES } from "@/server/rate-limit";
 import { RateLimitError } from "@/server/services/access";
-import { createBackup, recoverBackupJob, runBackup } from "@/server/services/account-backup";
+import {
+  createBackup,
+  recoverBackupJob,
+  restorableProblem,
+  runBackup,
+} from "@/server/services/account-backup";
 import { ExportNotFoundError, openExport } from "@/server/services/exports";
 import { archiveSentPdf } from "@/server/services/files";
 import pkg from "../../package.json";
@@ -397,5 +403,82 @@ describe("záloha účtu", () => {
     expect(existsSync(dir)).toBe(false);
     expect(existsSync(`${blobPath(owner, second.id)}.part`)).toBe(false);
     expect(db.select().from(job).where(eq(job.id, running.id)).get()!.status).toBe("dead");
+  });
+
+  test("[EXP-009] IP a prohlížeč správce z auditu účtu do zálohy nejdou", async () => {
+    const owner = seedOwner(db, NOW);
+    const admin = seedOwner(db, NOW);
+    db.insert(auditLog)
+      .values([
+        {
+          at: NOW,
+          actorId: admin,
+          ownerId: owner,
+          source: "web",
+          scope: "instance",
+          action: "user.deactivate",
+          entity: "user",
+          entityId: owner,
+          ip: "203.0.113.77",
+          userAgent: "ZNACKA-SPRAVCE-UA",
+        },
+        {
+          at: NOW,
+          actorId: owner,
+          ownerId: owner,
+          source: "web",
+          scope: "user",
+          action: "auth.login",
+          entity: "session",
+          entityId: null,
+          ip: "198.51.100.9",
+          userAgent: "VLASTNI-UA",
+        },
+      ])
+      .run();
+    const audit = strFromU8(archive(owner, (await backedUp(owner)).id)[AUDIT_ENTRY]!);
+    expect(audit).not.toContain("203.0.113.77");
+    expect(audit).not.toContain("ZNACKA-SPRAVCE-UA");
+    expect(audit).toContain("VLASTNI-UA");
+  });
+
+  test("[EXP-006] záloha, kterou by obnova odmítla, vůbec nevznikne", async () => {
+    const entries = { "data/unit.jsonl": { sha256: "0".repeat(64), size: 10 } };
+    const small = {
+      ...RESTORE_LIMITS,
+      dataEntryBytes: 5,
+      fileEntryBytes: 3,
+      archiveBytes: 100,
+      entries: 2,
+    };
+    const counts = { tables: { unit: 1 }, files: 0, audit: 0 };
+    expect(restorableProblem(entries, counts, small)).toBe(E.notRestorable);
+    expect(
+      restorableProblem({ "files/x": { sha256: "0".repeat(64), size: 4 } }, counts, small),
+    ).toBe(E.notRestorable);
+    expect(
+      restorableProblem(
+        entries,
+        { ...counts, tables: { unit: 11 } },
+        { ...RESTORE_LIMITS, maxLinesPerTable: 10 },
+      ),
+    ).toBe(E.notRestorable);
+    expect(restorableProblem(entries, counts, RESTORE_LIMITS)).toBeNull();
+
+    const owner = seedOwner(db, NOW);
+    const big = randomUUID();
+    db.insert(file)
+      .values({
+        id: big,
+        userId: owner,
+        kind: "logo",
+        mimeType: "image/png",
+        name: "velke.png",
+        size: 1,
+        createdAt: NOW,
+      })
+      .run();
+    writeBlob(owner, big, Buffer.alloc(RESTORE_LIMITS.fileEntryBytes + 1));
+    expect(await backedUp(owner)).toMatchObject({ status: "failed", reason: E.notRestorable });
   });
 });
