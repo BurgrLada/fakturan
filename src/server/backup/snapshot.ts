@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { and, asc, getTableColumns, gt, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import { RESTORE_LIMITS, type RestoreLimits } from "@/lib/backup-format";
+import { jsonNodes, RESTORE_LIMITS, type RestoreLimits } from "@/lib/backup-format";
 import { db, type Tx } from "../db";
 import { auditLog, file } from "../db/schema";
 import { scoped } from "../db/scoped";
@@ -37,7 +37,12 @@ export type Snapshot = {
   files: string[];
   audit: number;
   longestLine: number;
+  nodes: NodeStats;
 };
+
+export type NodeStats = { nodes: number; containers: number; lineContainers: number };
+
+type LineStats = { longest: number } & NodeStats;
 
 type Lines = {
   add(row: Record<string, unknown>): void;
@@ -45,7 +50,8 @@ type Lines = {
   close(): void;
 };
 
-function lineFile(path: string, stats: { longest: number }): Lines {
+// Counted as the restore will count them: rows are held until the commit, the audit is not.
+function lineFile(path: string, stats: LineStats, retained = true): Lines {
   const fd = openSync(path, "wx");
   let pending = "";
   const flush = () => {
@@ -54,6 +60,12 @@ function lineFile(path: string, stats: { longest: number }): Lines {
   };
   const addLine = (line: string) => {
     stats.longest = Math.max(stats.longest, Buffer.byteLength(line));
+    const shape = jsonNodes(line);
+    stats.lineContainers = Math.max(stats.lineContainers, shape.containers);
+    if (retained) {
+      stats.nodes += shape.nodes;
+      stats.containers += shape.containers;
+    }
     pending += `${line}\n`;
     if (pending.length >= LINE_BUFFER) flush();
   };
@@ -140,7 +152,7 @@ export function snapshot(
   limits: RestoreLimits = RESTORE_LIMITS,
 ): Snapshot {
   mkdirSync(join(dir, FILES_DIR), { recursive: true });
-  const stats = { longest: 0 };
+  const stats: LineStats = { longest: 0, nodes: 0, containers: 0, lineContainers: 0 };
   return db.transaction((tx) => {
     const tables: Record<string, number> = {};
     const files: string[] = [];
@@ -164,7 +176,7 @@ export function snapshot(
     }
     for (const id of files) keepBlob(ownerId, id, join(dir, FILES_DIR, id));
     const rowsSoFar = Object.values(tables).reduce((sum, n) => sum + n, 0);
-    const auditLines = lineFile(join(dir, AUDIT_FILE), stats);
+    const auditLines = lineFile(join(dir, AUDIT_FILE), stats, false);
     let audit = 0;
     try {
       // The history an earlier restore archived comes first, line for line as it was archived.
@@ -211,6 +223,13 @@ export function snapshot(
     } finally {
       auditLines.close();
     }
-    return { tables, files, audit, longestLine: stats.longest };
+    const { nodes, containers, lineContainers } = stats;
+    return {
+      tables,
+      files,
+      audit,
+      longestLine: stats.longest,
+      nodes: { nodes, containers, lineContainers },
+    };
   });
 }

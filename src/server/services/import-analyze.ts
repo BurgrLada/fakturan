@@ -354,6 +354,18 @@ export function analyzeRows(
       if (advance) {
         row.advance = advance;
         depositPart = doc.paidDepositsMinor;
+        // The file says the advance was paid; if the paired one is not, the final invoice would
+        // carry a debt the source system no longer shows.
+        const inBatch = advance.kind === "batch" && live.find((other) => other.key === advance.key);
+        const paired = inBatch
+          ? inBatch.document.totalMinor - inBatch.document.payableMinor
+          : advance.kind === "account"
+            ? (accountDocs.find((other) => other.id === advance.id)?.paidMinor ?? 0)
+            : 0;
+        if (paired < doc.paidDepositsMinor) {
+          row.status = "warning";
+          row.messages.push(R.advanceUnpaid);
+        }
       } else {
         row.status = "warning";
         row.messages.push(R.advanceMissing);

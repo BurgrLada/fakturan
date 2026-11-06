@@ -19,11 +19,13 @@ function count(q: Checker, query: SQL): number {
   return q.get<{ n: number }>(query)?.n ?? 0;
 }
 
-function creditNoteProblems(row: Invoice, rows: Invoice[], label: string): string[] {
+type ById = Map<string, Invoice>;
+
+function creditNoteProblems(row: Invoice, byId: ById, label: string): string[] {
   const problems: string[] = [];
   if (row.totalMinor >= 0) problems.push(`${label}: oprava není záporná`);
   if (row.variableSymbol !== null) problems.push(`${label}: oprava má variabilní symbol`);
-  const original = rows.find((other) => other.id === row.relatedInvoiceId);
+  const original = row.relatedInvoiceId ? byId.get(row.relatedInvoiceId) : undefined;
   if (!original) return [...problems, `${label}: oprava bez původní faktury`];
   if (!row.relatedSnapshot) problems.push(`${label}: oprava bez zamrzlého odkazu`);
   if (original.currency !== row.currency) problems.push(`${label}: oprava v jiné měně`);
@@ -33,8 +35,8 @@ function creditNoteProblems(row: Invoice, rows: Invoice[], label: string): strin
   return problems;
 }
 
-function finalProblems(row: Invoice, rows: Invoice[], label: string): string[] {
-  const advance = rows.find((other) => other.id === row.relatedInvoiceId);
+function finalProblems(row: Invoice, byId: ById, label: string): string[] {
+  const advance = row.relatedInvoiceId ? byId.get(row.relatedInvoiceId) : undefined;
   if (advance?.type !== "advance") return [`${label}: konečná faktura bez zálohy`];
   const problems: string[] = [];
   if (advance.currency !== row.currency) problems.push(`${label}: faktura v jiné měně než záloha`);
@@ -44,24 +46,33 @@ function finalProblems(row: Invoice, rows: Invoice[], label: string): string[] {
   return problems;
 }
 
+// Every check walks the rows once and looks related documents up in maps, so a restore of a large
+// archive spends linear time here inside its transaction (I-4).
+function relatedBy(rows: Invoice[], keep: (row: Invoice) => boolean): Map<string, Invoice[]> {
+  const out = new Map<string, Invoice[]>();
+  for (const row of rows) {
+    if (!row.relatedInvoiceId || !keep(row)) continue;
+    const list = out.get(row.relatedInvoiceId);
+    if (list) list.push(row);
+    else out.set(row.relatedInvoiceId, [row]);
+  }
+  return out;
+}
+
 function advanceProblems(rows: Invoice[]): string[] {
-  return rows
-    .filter((row) => row.type === "advance")
-    .flatMap((row) => {
-      const finals = rows.filter(
-        (other) =>
-          other.type === "invoice" &&
-          other.relatedInvoiceId === row.id &&
-          other.status !== "cancelled",
-      );
-      const problems: string[] = [];
-      if (finals.length > 1) problems.push(`invoice ${row.id}: více aktivních konečných faktur`);
-      const issued = finals.some((other) => other.status !== "draft");
-      if ((row.supersededAt !== null) !== issued) {
-        problems.push(`invoice ${row.id}: superseded_at neodpovídá konečné faktuře`);
-      }
-      return problems;
-    });
+  const finalsOf = relatedBy(rows, (row) => row.type === "invoice" && row.status !== "cancelled");
+  const problems: string[] = [];
+  for (const row of rows) {
+    if (row.type !== "advance") continue;
+    const finals = finalsOf.get(row.id) ?? [];
+    if (finals.length > 1) problems.push(`invoice ${row.id}: více aktivních konečných faktur`);
+    let issued = false;
+    for (const other of finals) if (other.status !== "draft") issued = true;
+    if ((row.supersededAt !== null) !== issued) {
+      problems.push(`invoice ${row.id}: superseded_at neodpovídá konečné faktuře`);
+    }
+  }
+  return problems;
 }
 
 function rateProblems(row: Invoice, label: string): string[] {
@@ -141,6 +152,7 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
   if (!ownerId) return [];
   const problems: string[] = [];
   const rows = q.select().from(invoice).where(scoped(ownerId).where(invoice)).all();
+  const byId: ById = new Map(rows.map((row) => [row.id, row]));
   const linesOf = new Map<string, Line[]>();
   for (const line of q
     .select()
@@ -148,7 +160,9 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
     .where(scoped(ownerId).where(invoiceLine))
     .orderBy(asc(invoiceLine.invoiceId), asc(invoiceLine.position))
     .all()) {
-    linesOf.set(line.invoiceId, [...(linesOf.get(line.invoiceId) ?? []), line]);
+    const list = linesOf.get(line.invoiceId);
+    if (list) list.push(line);
+    else linesOf.set(line.invoiceId, [line]);
   }
 
   for (const row of rows) {
@@ -165,7 +179,7 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
       problems.push(`${label}: vlastní doklad nese údaje importu`);
     }
     if (row.type === "invoice" && row.relatedInvoiceId) {
-      problems.push(...finalProblems(row, rows, label));
+      problems.push(...finalProblems(row, byId, label));
     }
     if (row.status === "draft") {
       if (row.number !== null) problems.push(`${label}: koncept má číslo`);
@@ -179,7 +193,7 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
     if (row.paymentMethod === "transfer" && !row.accountSnapshot) {
       problems.push(`${label}: převod bez snapshotu účtu`);
     }
-    if (row.type === "credit_note") problems.push(...creditNoteProblems(row, rows, label));
+    if (row.type === "credit_note") problems.push(...creditNoteProblems(row, byId, label));
   }
 
   problems.push(...advanceProblems(rows));
@@ -188,8 +202,13 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
       problems.push(`invoice ${row.id}: nahrazený doklad není záloha`);
     }
   }
-  const numbers = rows.flatMap((row) => row.number ?? []);
-  const repeated = numbers.filter((number, i) => numbers.indexOf(number) !== i);
+  const seen = new Set<string>();
+  const repeated: string[] = [];
+  for (const row of rows) {
+    if (row.number === null) continue;
+    if (seen.has(row.number)) repeated.push(row.number);
+    seen.add(row.number);
+  }
   if (repeated.length > 0) problems.push(`invoice: opakovaná čísla ${repeated.join(", ")}`);
   return problems;
 }
@@ -208,26 +227,28 @@ export function paymentProblems(q: Checker, ownerId: string): string[] {
       .map((row) => [row.id, row.paid]),
   );
   const rows = q.select().from(invoice).where(scoped(ownerId).where(invoice)).all();
+  const byId: ById = new Map(rows.map((row) => [row.id, row]));
+  const creditsOf = new Map<string, number>();
+  for (const [id, notes] of relatedBy(
+    rows,
+    (row) => row.type === "credit_note" && isActiveDocument(row.status),
+  )) {
+    creditsOf.set(
+      id,
+      notes.reduce((sum, note) => sum + note.totalMinor, 0),
+    );
+  }
   for (const row of rows) {
     const label = `invoice ${row.id}`;
     const paid = paidByInvoice.get(row.id) ?? 0;
     if (row.paidMinor !== paid) problems.push(`${label}: paid_minor neodpovídá součtu plateb`);
     if (row.paidMinor < 0) problems.push(`${label}: paid_minor je záporné`);
-    const creditsMinor = rows
-      .filter(
-        (other) =>
-          other.type === "credit_note" &&
-          other.relatedInvoiceId === row.id &&
-          isActiveDocument(other.status),
-      )
-      .reduce((sum, other) => sum + other.totalMinor, 0);
+    const creditsMinor = creditsOf.get(row.id) ?? 0;
     if (row.creditsMinor !== creditsMinor) {
       problems.push(`${label}: credits_minor neodpovídá aktivním opravám`);
     }
-    const advance = rows.find(
-      (other) => other.id === row.relatedInvoiceId && other.type === "advance",
-    );
-    const advanceMinor = advance?.paidMinor ?? 0;
+    const related = row.relatedInvoiceId ? byId.get(row.relatedInvoiceId) : undefined;
+    const advanceMinor = related?.type === "advance" ? related.paidMinor : 0;
     // A cancelled final invoice is left out of balance updates until it is restored.
     if (row.status !== "cancelled" && row.advanceMinor !== advanceMinor) {
       problems.push(`${label}: advance_minor neodpovídá úhradě zálohy`);

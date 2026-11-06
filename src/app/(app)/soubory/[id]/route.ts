@@ -2,13 +2,14 @@ import { contentDisposition } from "@/lib/content-disposition";
 import { actorFromRequest } from "@/server/auth/session";
 import { FileNotFoundError, readOwnedFile } from "@/server/services/files";
 
-// The account's images render inline. An imported PDF is someone else's document and only ever
-// downloads; uploads, exports and archives have routes of their own with audit.
+// The account's images render inline. An imported PDF and the history a restore archived only
+// ever download; uploads, exports and sent archives have routes of their own with audit.
 const DISPOSITION: Partial<Record<string, "inline" | "attachment">> = {
   logo: "inline",
   qr_logo: "inline",
   signature: "inline",
   import_pdf: "attachment",
+  audit_archive: "attachment",
 };
 
 const notFound = () =>

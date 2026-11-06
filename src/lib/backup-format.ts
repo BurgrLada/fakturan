@@ -70,8 +70,8 @@ export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => 
 const MiB = 1024 * 1024;
 
 // R-35: a backup has its own limits, far above those of a document import. A restore holds the
-// remapped rows of the whole archive until its single commit, so rows and data bytes are capped
-// to keep that under about half a GiB of heap.
+// remapped rows of the whole archive until its single commit, so rows, data bytes, JSON objects
+// and JSON values are all capped: at the limits that stays around half a GiB of heap.
 export const RESTORE_LIMITS = {
   archiveBytes: 1024 * MiB,
   // A compact manifest costs at most about 140 bytes per entry, so 28 000 entries fit in 4 MiB.
@@ -84,6 +84,50 @@ export const RESTORE_LIMITS = {
   maxLinesPerTable: 300_000,
   maxLines: 300_000,
   maxLineBytes: 2 * MiB,
+  // Bytes do not bound the heap: three bytes of `{},` become a whole object. Counted on the bytes
+  // before a line is parsed, so the budget holds whatever keys the shapes let through (C-1).
+  maxLineContainers: 20_000,
+  maxLineDepth: 40,
+  maxContainers: 1_000_000,
+  maxNodes: 10_000_000,
 };
 
 export type RestoreLimits = typeof RESTORE_LIMITS;
+
+export type JsonShape = { containers: number; nodes: number; depth: number };
+
+const QUOTE = 0x22;
+const BACKSLASH = 0x5c;
+
+// Objects and arrays, and keys plus values (commas, colons and containers), outside strings. The
+// same count runs over the bytes of a restored line and over the text a backup writes.
+function shape(length: number, at: (index: number) => number): JsonShape {
+  const result: JsonShape = { containers: 0, nodes: 0, depth: 0 };
+  let depth = 0;
+  let inString = false;
+  for (let i = 0; i < length; i++) {
+    const code = at(i);
+    if (inString) {
+      if (code === BACKSLASH) i += 1;
+      else if (code === QUOTE) inString = false;
+      continue;
+    }
+    if (code === QUOTE) inString = true;
+    else if (code === 0x7b || code === 0x5b) {
+      depth += 1;
+      result.containers += 1;
+      result.nodes += 1;
+      if (depth > result.depth) result.depth = depth;
+    } else if (code === 0x7d || code === 0x5d) depth -= 1;
+    else if (code === 0x2c || code === 0x3a) result.nodes += 1;
+  }
+  return result;
+}
+
+export function jsonNodes(text: string): JsonShape {
+  return shape(text.length, (index) => text.charCodeAt(index));
+}
+
+export function jsonNodesOfBytes(bytes: Uint8Array, start: number, end: number): JsonShape {
+  return shape(end - start, (index) => bytes[start + index]!);
+}

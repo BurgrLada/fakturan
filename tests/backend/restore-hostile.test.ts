@@ -374,7 +374,54 @@ describe("obnova z nepřátelského archivu, opravy bloku D", () => {
   });
 });
 
+describe("obnova z nepřátelského archivu, rozpočet uzlů JSON", () => {
+  const onDisk = (bytes: Uint8Array) => {
+    const path = join(mkdtempSync(join(tmpdir(), "fakturan-scan-")), "zaloha.zip");
+    writeFileSync(path, bytes);
+    return path;
+  };
+  const reasonOf = (promise: Promise<unknown>) =>
+    promise.then(
+      () => "prošlo",
+      (error: Error) => error.message,
+    );
+
+  test("[SEC-005] mnoho prázdných objektů v JSON sloupci je chyba dřív, než se parsuje", async () => {
+    const bomb = Array.from({ length: 25_000 }, () => ({}));
+    await refused(
+      editRows("invoice_template", (rows) => rows.map((row) => ({ ...row, document: bomb }))),
+      E.row("invoice_template"),
+    );
+    // Extra keys of a loosely checked shape count the same.
+    await refused(
+      editRows("invoice", (rows) =>
+        rows.map((row) => ({ ...row, appearance: { ...(row.appearance as object), extra: bomb } })),
+      ),
+      E.row("invoice"),
+    );
+  });
+
+  test("[SEC-005] rozpočet uzlů platí i na celý archiv", async () => {
+    expect(
+      await reasonOf(scanArchive(onDisk(archive), {}, { ...RESTORE_LIMITS, maxNodes: 50 })),
+    ).toBe(E.tooManyNodes);
+    expect(
+      await reasonOf(scanArchive(onDisk(archive), {}, { ...RESTORE_LIMITS, maxContainers: 5 })),
+    ).toBe(E.tooManyNodes);
+    expect(await reasonOf(scanArchive(onDisk(archive), {}))).toBe("prošlo");
+  });
+});
+
 describe("obnova z nepřátelského archivu, opravné kolo 2", () => {
+  test("[SEC-005] typ souboru mimo výčet jeho druhu je chyba", async () => {
+    await refused(
+      editRows("file", (rows) =>
+        rows.map((row) => (row.kind === "logo" ? { ...row, mime_type: "text/html" } : row)),
+      ),
+      E.row("file"),
+    );
+  });
+
   test("[SEC-005] prázdný řádek v auditu i v datech je chyba", async () => {
     await refused(
       editArchive(archive, (entries) => {

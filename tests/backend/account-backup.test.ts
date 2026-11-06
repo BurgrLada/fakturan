@@ -14,6 +14,7 @@ import { and, eq } from "drizzle-orm";
 import { strFromU8, unzipSync } from "fflate";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  jsonNodes,
   AUDIT_ENTRY,
   BACKUP_FORMAT,
   BACKUP_VERSION,
@@ -526,5 +527,48 @@ describe("záloha účtu", () => {
     expect(
       restorableProblem(entries, counts, { ...RESTORE_LIMITS, dataTotalBytes: 120 }),
     ).toBeNull();
+  });
+
+  test("[EXP-006] záloha počítá uzly JSON stejně jako obnova", () => {
+    expect(jsonNodes('{"a":[1,2,{"b":"x,y{"}],"c":{}}')).toMatchObject({
+      containers: 4,
+      nodes: 10,
+      depth: 3,
+    });
+    const counts = { tables: { unit: 1 }, files: 0, audit: 0 };
+    const entries = { "data/unit.jsonl": { size: 10 } };
+    const small = { ...RESTORE_LIMITS, maxNodes: 10, maxContainers: 3, maxLineContainers: 2 };
+    expect(
+      restorableProblem(entries, counts, small, 0, 0, {
+        nodes: 11,
+        containers: 1,
+        lineContainers: 1,
+      }),
+    ).toBe(E.notRestorable);
+    expect(
+      restorableProblem(entries, counts, small, 0, 0, {
+        nodes: 5,
+        containers: 4,
+        lineContainers: 1,
+      }),
+    ).toBe(E.notRestorable);
+    expect(
+      restorableProblem(entries, counts, small, 0, 0, {
+        nodes: 5,
+        containers: 1,
+        lineContainers: 3,
+      }),
+    ).toBe(E.notRestorable);
+    expect(
+      restorableProblem(entries, counts, small, 0, 0, {
+        nodes: 5,
+        containers: 1,
+        lineContainers: 1,
+      }),
+    ).toBeNull();
+    const owner = seedOwner(db, NOW);
+    const stats = snapshot(owner, join(DATA_DIR, "snimek", randomUUID()), RESTORE_LIMITS).nodes;
+    expect(stats.nodes).toBeGreaterThan(stats.containers);
+    expect(stats.lineContainers).toBeGreaterThan(0);
   });
 });

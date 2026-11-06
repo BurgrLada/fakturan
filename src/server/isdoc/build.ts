@@ -3,7 +3,6 @@ import { isDomesticCountry, DOMESTIC_COUNTRY } from "@/lib/customers";
 import { RATE_UNIT, toCzkMinor } from "@/lib/fx";
 import type { CustomerSnapshot, InvoiceDocument, SupplierSnapshot } from "@/lib/invoice-document";
 import { ISDOC_NAMESPACE } from "@/lib/safe-input/pdf-embedded";
-import { amountDue } from "@/lib/qr-payload";
 import { decimalMinor } from "@/lib/tabular";
 import { PAYMENT_MEANS_CODES } from "./parse";
 
@@ -173,10 +172,11 @@ export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string 
   const sumHome = lines.reduce((sum, line) => sum + line.net.home, 0);
   const rounding = pair(doc.totals.roundingMinor);
   const deposits = pair(doc.totals.advanceMinor + doc.totals.paidMinor);
-  const due = pair(amountDue(doc.totals));
-  // Overpaid leaves nothing to pay, and converted parts must not exceed the converted ceiling.
-  const payableCurr = Math.max(0, Math.min(due.curr, sumCurr + rounding.curr - deposits.curr));
-  const payableHome = Math.max(0, Math.min(due.home, sumHome + rounding.home - deposits.home));
+  // What is left of this document after what was really paid on it. Credit notes travel as their
+  // own documents and a replaced advance is still unpaid, so neither may lower PayableAmount: a
+  // reader takes the gap between the total and PayableAmount for a payment (IMP-012).
+  const payableCurr = Math.max(0, sumCurr + rounding.curr - deposits.curr);
+  const payableHome = Math.max(0, sumHome + rounding.home - deposits.home);
 
   const money = (name: string, home: number, curr: number, currFirst: boolean) => {
     const homeXml = el(name, amount(home));

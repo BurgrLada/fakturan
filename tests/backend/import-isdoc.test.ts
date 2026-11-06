@@ -353,6 +353,26 @@ describe("import ISDOC", () => {
     assertConsistent(db, owner);
   });
 
+  test("[ADV-005] neuhrazená záloha spárovaná s konečnou fakturou dá varování", async () => {
+    const owner = importOwner(db, NOW);
+    const { rows } = await parsed(owner, [
+      { name: "konecna.isdoc", bytes: isdoc("konecna-se-zalohou.isdoc") },
+      { name: "zaloha.isdoc", bytes: isdoc("zalohova.isdoc") },
+    ]);
+    expect(rows[0]).toMatchObject({ status: "warning", advance: { kind: "batch" } });
+    expect(rows[0]!.messages).toContain(TEXTS.importing.rows.advanceUnpaid);
+    const paidAdvance = editedIsdoc(
+      "zalohova.isdoc",
+      "<PayableAmount>10000.00</PayableAmount>",
+      "<PayableAmount>0.00</PayableAmount>",
+    );
+    const paired = await parsed(importOwner(db, NOW), [
+      { name: "konecna.isdoc", bytes: isdoc("konecna-se-zalohou.isdoc") },
+      { name: "zaloha.isdoc", bytes: paidAdvance },
+    ]);
+    expect(paired.rows[0]!.messages).not.toContain(TEXTS.importing.rows.advanceUnpaid);
+  });
+
   test("[IMP-009] chybný řádek zablokuje potvrzení, po přeskočení projde", async () => {
     const owner = importOwner(db, NOW);
     const { id, rows, batch } = await parsed(owner, [

@@ -29,7 +29,7 @@ import {
 } from "@/server/db/schema";
 import { readBlob, writeBlob } from "@/server/files/store";
 import { registerJob } from "@/server/jobs/registry";
-import { drainHeavy } from "@/server/jobs/worker";
+import { drainHeavy, drainJobs } from "@/server/jobs/worker";
 import { ServiceError } from "@/server/services/access";
 import {
   createBackup,
@@ -39,15 +39,17 @@ import {
 } from "@/server/services/account-backup";
 import {
   beginRestoreUpload,
+  listAuditArchives,
   purgeStaleRestores,
   recoverRestore,
   touchRestoreUpload,
   runRestore,
   startRestore,
 } from "@/server/services/account-restore";
-import { paymentProblems } from "@/server/services/data-checks";
+import { invoiceProblems, paymentProblems } from "@/server/services/data-checks";
 import { ingestNotice } from "@/server/services/bank-notices";
 import { deleteUser } from "@/server/services/users";
+import { planRecurringRuns } from "@/server/services/recurring-run";
 import { latestRestore } from "@/server/services/exports";
 import {
   asRestored,
@@ -60,7 +62,7 @@ import {
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { seedBankAccount, seedMailbox, TARGET } from "../helpers/fixtures-bank";
-import { issuedInvoice, seedOwner, webActor } from "../helpers/fixtures-mail";
+import { issuedInvoice, seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
 
 const session = vi.hoisted(() => ({ userId: null as string | null }));
 vi.mock("@/server/auth/session", () => ({
@@ -316,6 +318,31 @@ describe("obnova účtu", () => {
     expect(statuses).toEqual(["done", "failed"]);
   });
 
+  test("[IMP-010] pravidelné plány jsou po obnově pozastavené a nic nevystaví", async () => {
+    const source = seedOwner(db, NOW);
+    const seeded = seedRichAccount(db, source, NOW);
+    db.update(recurringInvoice)
+      .set({ mode: "issue" })
+      .where(eq(recurringInvoice.id, seeded.planId))
+      .run();
+    const target = emptyAccount();
+    await restoreArchive(db, target, await backupArchive(db, source));
+    const plans = db
+      .select()
+      .from(recurringInvoice)
+      .where(eq(recurringInvoice.userId, target))
+      .all();
+    expect(plans.map((plan) => plan.status)).toEqual(["paused"]);
+    const before = db.select().from(invoice).where(eq(invoice.userId, target)).all().length;
+    for (let day = 0; day < 40; day += 1) {
+      current = new Date(NOW.getTime() + day * 86_400_000);
+      planRecurringRuns(current);
+      await drainJobs("w");
+    }
+    expect(db.select().from(invoice).where(eq(invoice.userId, target)).all()).toHaveLength(before);
+    expect(TEXTS.notifications.kinds.backup_restored()).toMatch(/[Pp]ravidelné faktury/);
+  });
+
   test("[IMP-010] queued a sending skončí cancelled a index neblokuje", async () => {
     const source = seedOwner(db, NOW);
     const seeded = seedRichAccount(db, source, NOW);
@@ -538,6 +565,28 @@ describe("obnova účtu", () => {
     });
   });
 
+  test("[IMP-010] historie ze zálohy jde stáhnout jen vlastníkovi a stránka na ni odkazuje", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const bytes = await backupArchive(db, source);
+    const target = emptyAccount();
+    await restoreArchive(db, target, bytes);
+    const [archived] = listAuditArchives(target);
+    expect(archived).toMatchObject({ name: TEXTS.restore.auditFileName });
+    const { GET } = await import("@/app/(app)/soubory/[id]/route");
+    const fetchAs = async (userId: string) => {
+      session.userId = userId;
+      return GET(new Request("http://localhost/"), {
+        params: Promise.resolve({ id: archived!.id }),
+      });
+    };
+    const own = await fetchAs(target);
+    expect(own.status).toBe(200);
+    expect(own.headers.get("Content-Disposition")).toMatch(/^attachment/);
+    expect(await own.text()).toBe(strFromU8(unzipSync(bytes)[AUDIT_ENTRY]!));
+    expect((await fetchAs(source)).status).toBe(404);
+  });
+
   test("[IMP-010] soubor auditu ze zálohy má jméno z textů", async () => {
     const source = seedOwner(db, NOW);
     seedRichAccount(db, source, NOW);
@@ -565,6 +614,41 @@ describe("obnova účtu", () => {
   test("[TST-009] kontrola dat instance bez účtu nic nehledá a nespadne", () => {
     expect(paymentProblems(db, "")).toEqual([]);
     expect(() => assertConsistent(db, "")).not.toThrow();
+  });
+
+  test("[TST-009] kontroly dat procházejí doklady lineárně a stálým počtem dotazů", () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    const first = issuedInvoice(owner, customerId);
+    const base = db.select().from(invoice).where(eq(invoice.id, first)).get()!;
+    const N = 2_000;
+    db.transaction((tx) => {
+      for (let i = 0; i < N; i++) {
+        tx.insert(invoice)
+          .values({ ...base, id: randomUUID(), number: `R${i}`, totalMinor: 0, subtotalMinor: 0 })
+          .run();
+      }
+    });
+    let scanned = 0;
+    const counted = <K extends "find" | "filter" | "indexOf" | "some">(name: K) => {
+      const original = Array.prototype[name] as (...args: unknown[]) => unknown;
+      return vi.spyOn(Array.prototype, name).mockImplementation(function (
+        this: unknown[],
+        ...args: unknown[]
+      ) {
+        scanned += this.length;
+        return original.apply(this, args);
+      } as never);
+    };
+    const statements = vi.spyOn(db.$client, "prepare");
+    const spies = (["find", "filter", "indexOf", "some"] as const).map(counted);
+    invoiceProblems(db, owner);
+    paymentProblems(db, owner);
+    for (const spy of spies) spy.mockRestore();
+    expect(scanned).toBeLessThan(20 * N);
+    expect(statements.mock.calls.length).toBeLessThan(20);
+    statements.mockRestore();
+    db.delete(invoice).where(eq(invoice.userId, owner)).run();
   });
 
   test("[TST-009] kontrola plateb počítá jen doklady téhož účtu", () => {

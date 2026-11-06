@@ -8,6 +8,7 @@ import {
   BACKUP_UPGRADES,
   BACKUP_VERSION,
   backupManifestSchema,
+  jsonNodesOfBytes,
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
   type BackupManifest,
@@ -171,6 +172,18 @@ function columnSchema(entry: BackupTable, column: AnyColumn): z.ZodType | null {
   return column.notNull ? schema : schema.nullable();
 }
 
+const IMAGES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+// The type a file is served with comes from what the app itself stores for that kind, never from
+// an archive's say-so (m-8).
+const MIMES_BY_KIND: Record<string, readonly string[]> = {
+  logo: IMAGES,
+  qr_logo: IMAGES,
+  signature: IMAGES,
+  sent_pdf: ["application/pdf"],
+  import_pdf: ["application/pdf"],
+  sent_isdoc: ["application/xml"],
+};
+
 const rowSchemas = new Map<string, z.ZodType<ArchiveRow>>();
 
 function rowSchema(entry: BackupTable): z.ZodType<ArchiveRow> {
@@ -185,14 +198,16 @@ function rowSchema(entry: BackupTable): z.ZodType<ArchiveRow> {
   if (entry.name === "file") {
     // A temporary upload or an export never goes into a backup, so one here is planted.
     schema = schema.refine(
-      (row) => ![...TEMPORARY_FILES, ...FOLDED_FILES].includes(row.kind as never),
+      (row) =>
+        ![...TEMPORARY_FILES, ...FOLDED_FILES].includes(row.kind as never) &&
+        (MIMES_BY_KIND[row.kind as string] ?? []).includes(row.mime_type as string),
     );
   }
   rowSchemas.set(entry.name, schema);
   return schema;
 }
 
-type LineBudget = { limits: RestoreLimits; total: number };
+type LineBudget = { limits: RestoreLimits; total: number; containers: number; nodes: number };
 
 // Walks the entry by newline and decodes one line at a time: an entry of millions of tiny lines
 // never becomes one string or one array (C-1). `take` sees each line as it is found and may stop.
@@ -202,6 +217,7 @@ function eachLine(
   cap: number,
   onError: () => RestoreRejected,
   take: (value: unknown) => void,
+  retained = true,
 ): number {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let start = 0;
@@ -212,6 +228,22 @@ function eachLine(
     // The writer never leaves a blank line; skipping them would let a few bytes of upload carry
     // hundreds of MiB of newlines into the next backup.
     if (end === start || end - start > budget.limits.maxLineBytes) throw onError();
+    const { containers, nodes, depth } = jsonNodesOfBytes(bytes, start, end);
+    if (containers > budget.limits.maxLineContainers || depth > budget.limits.maxLineDepth) {
+      throw onError();
+    }
+    // Rows stay in memory until the commit, so their objects and values count for the archive;
+    // the audit is only read through.
+    if (retained) {
+      budget.containers += containers;
+      budget.nodes += nodes;
+      if (
+        budget.containers > budget.limits.maxContainers ||
+        budget.nodes > budget.limits.maxNodes
+      ) {
+        throw new RestoreRejected(E.tooManyNodes);
+      }
+    }
     count += 1;
     budget.total += 1;
     if (count > cap || budget.total > budget.limits.maxLines) {
@@ -268,9 +300,16 @@ const auditLine = z.custom<object>(
 // The audit is only archived as a file, so its lines are counted and must be JSON objects.
 function auditLines(bytes: Uint8Array, manifest: BackupManifest, budget: LineBudget): number {
   const invalid = () => new RestoreRejected(E.audit);
-  return eachLine(bytes, budget, manifest.counts.audit, invalid, (line) => {
-    if (!auditLine.safeParse(line).success) throw invalid();
-  });
+  return eachLine(
+    bytes,
+    budget,
+    manifest.counts.audit,
+    invalid,
+    (line) => {
+      if (!auditLine.safeParse(line).success) throw invalid();
+    },
+    false,
+  );
 }
 
 const OPEN_BRACE = 0x7b;
@@ -349,7 +388,7 @@ export async function scanArchive(
   handlers: ArchiveHandlers,
   limits: RestoreLimits = RESTORE_LIMITS,
 ): Promise<ArchiveSummary> {
-  const budget: LineBudget = { limits, total: 0 };
+  const budget: LineBudget = { limits, total: 0, containers: 0, nodes: 0 };
   const archiveHash = createHash("sha256");
   const byName = new Map(BACKUP_TABLES.map((entry) => [`data/${entry.name}.jsonl`, entry]));
   const seen = new Set<string>();

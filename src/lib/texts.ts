@@ -1581,7 +1581,7 @@ export const TEXTS = {
         `Export ${p.label ?? ""} je hotový a 7 dní ke stažení v Nastavení, Export.`,
       backup_ready: () => "Záloha účtu je hotová a 7 dní ke stažení v Nastavení, Záloha.",
       backup_restored: () =>
-        "Účet je obnovený ze zálohy. Hesla v ní nejsou: zadejte znovu SMTP v Nastavení, Pošta a schránku s avízy v Nastavení, Avíza. Všechny automatiky jsou vypnuté, zapněte je, až data zkontrolujete.",
+        "Účet je obnovený ze zálohy. Hesla v ní nejsou: zadejte znovu SMTP v Nastavení, Pošta a schránku s avízy v Nastavení, Avíza. Všechny automatiky jsou vypnuté a pravidelné faktury pozastavené, zapněte je znovu, až data zkontrolujete. Historii změn ze zálohy stáhnete v Nastavení, Záloha.",
       notices_over_limit: (p: Record<string, unknown>) =>
         `Dorazilo přes ${p.limit ?? 0} neověřených nebo nerozpoznaných zpráv za den, může jít o podvržené avízo. Další jsou v sekci Platby uložené bez textu, zkontrolujte je.`,
     },
@@ -3075,6 +3075,8 @@ export const TEXTS = {
       originalCurrency: "Původní doklad je v jiné měně",
       originalExceeded: "Opravy by přečerpaly původní doklad",
       advanceMissing: "Záloha nenalezena, úhrada zálohy se zapíše jako platba",
+      advanceUnpaid:
+        "Soubor vede zálohu jako uhrazenou, ale spárovaná záloha uhrazená není. Zapište platbu na zálohu, jinak faktura zůstane dlužná.",
       chooseCustomer: "Zákazníku odpovídá víc záznamů, vyberte jeden",
       customerInvalid: (message: string) => `Údaje zákazníka nejsou platné: ${message}`,
       customerTrimmed:
@@ -3340,6 +3342,8 @@ export const TEXTS = {
       empty: "Zatím žádná záloha.",
     },
     interrupted: "Záloha se přerušila. Spusťte ji znovu.",
+    auditArchives: "Historie změn ze zálohy",
+    auditArchiveDownload: "Stáhnout historii",
     deleteOffer: {
       last: (date: string) => `Poslední záloha: ${date}.`,
       none: "Účet zatím nemá žádnou zálohu.",
@@ -3361,7 +3365,7 @@ export const TEXTS = {
   restore: {
     title: "Obnova ze zálohy",
     intro:
-      "Obnova nahraje celý účet ze souboru zálohy Fakturanu. Jde jen do prázdného účtu, třeba hned po registraci na nové instanci. Po obnově jsou všechny automatiky vypnuté a hesla k poště a avízům je nutné zadat znovu.",
+      "Obnova nahraje celý účet ze souboru zálohy Fakturanu. Jde jen do prázdného účtu, třeba hned po registraci na nové instanci. Po obnově jsou všechny automatiky vypnuté, pravidelné faktury pozastavené a hesla k poště a avízům je nutné zadat znovu.",
     file: "Soubor zálohy (ZIP)",
     start: "Obnovit ze zálohy",
     uploading: "Nahrávám soubor…",
@@ -3386,6 +3390,7 @@ export const TEXTS = {
       counts: "Počty v archivu nesedí s jeho popisem.",
       tooManyLines: "Archiv má víc řádků, než obnova dovolí.",
       dataTooLarge: "Data v archivu jsou po rozbalení větší, než obnova dovolí.",
+      tooManyNodes: "Data v archivu mají víc položek, než obnova dovolí.",
       uploadExpired: "Nahrávání trvalo příliš dlouho a bylo zrušeno. Nahrajte zálohu znovu.",
       audit: "Historie změn v archivu není platná.",
       references: "Data v archivu odkazují na něco, co v něm není.",

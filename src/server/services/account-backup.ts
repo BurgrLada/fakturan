@@ -24,6 +24,7 @@ import {
   MissingBlob,
   snapshot,
   SnapshotTooLarge,
+  type NodeStats,
   type Snapshot,
 } from "../backup/snapshot";
 import { BACKUP_TABLES, backupColumnsHash } from "../backup/tables";
@@ -180,6 +181,7 @@ async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string)
     RESTORE_LIMITS,
     snap.longestLine,
     Buffer.byteLength(text),
+    snap.nodes,
   );
   if (problem) throw new NotRestorable(problem);
   const zip = zipFileWriter(path, { mtime: createdAt });
@@ -206,6 +208,7 @@ export function restorableProblem(
   limits: RestoreLimits = RESTORE_LIMITS,
   longestLine = 0,
   manifestBytes = 0,
+  nodes: NodeStats = { nodes: 0, containers: 0, lineContainers: 0 },
 ): string | null {
   const names = Object.keys(entries);
   const sizes = names.map((name) => entries[name]!.size);
@@ -222,7 +225,10 @@ export function restorableProblem(
   const tooManyLines =
     tableLines.some((n) => n > limits.maxLinesPerTable) ||
     tableLines.reduce((sum, n) => sum + n, 0) + counts.audit > limits.maxLines ||
-    longestLine > limits.maxLineBytes;
+    longestLine > limits.maxLineBytes ||
+    nodes.nodes > limits.maxNodes ||
+    nodes.containers > limits.maxContainers ||
+    nodes.lineContainers > limits.maxLineContainers;
   return tooLarge || tooManyLines ? E.notRestorable : null;
 }
 

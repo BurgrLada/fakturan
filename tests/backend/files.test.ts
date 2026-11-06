@@ -237,7 +237,7 @@ describe("route souborů", () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(PNG);
   });
 
-  test("[SEC-005] původní PDF importu jde jen stáhnout, nahrávka ani archiv ne", async () => {
+  test("[SEC-005] původní PDF importu a historie ze zálohy jdou jen stáhnout, nahrávka ani archiv ne", async () => {
     const { id } = storeFile(actor("u1"), "logo", PNG, "a.png");
     session.userId = "u1";
     db.update(file).set({ kind: "import_pdf" }).where(eq(file.id, id)).run();
@@ -247,7 +247,14 @@ describe("route souborů", () => {
     session.userId = "u2";
     expect((await get(id)).status).toBe(404);
     session.userId = "u1";
-    for (const kind of ["import_upload", "export", "audit_archive", "sent_pdf"] as const) {
+    db.update(file).set({ kind: "audit_archive" }).where(eq(file.id, id)).run();
+    const history = await get(id);
+    expect(history.status).toBe(200);
+    expect(history.headers.get("content-disposition")).toMatch(/^attachment;/);
+    session.userId = "u2";
+    expect((await get(id)).status).toBe(404);
+    session.userId = "u1";
+    for (const kind of ["import_upload", "export", "sent_pdf"] as const) {
       db.update(file).set({ kind }).where(eq(file.id, id)).run();
       expect((await get(id)).status).toBe(404);
     }

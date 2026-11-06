@@ -17,6 +17,13 @@ function reference(sign: string, whole: string, fraction: string, scale: number)
 }
 
 describe("desetinná čísla z cizích souborů", () => {
+  test("[IMP-001] číslo delší než 32 znaků se odmítne dřív, než se počítá", () => {
+    expect(() => decimalToMinor(`${"0".repeat(40)}1`, 2)).toThrow(InputRejected);
+    expect(() => decimalToMinor(`1,${"0".repeat(40)}`, 2)).toThrow(InputRejected);
+    expect(() => decimalToMinor("9".repeat(5_000_000), 2)).toThrow(InputRejected);
+    expect(decimalToMinor(`  ${"1".repeat(13)},50  `, 2)).toBe(111_111_111_111_150);
+  });
+
   test("decimalToMinor odpovídá BigInt výpočtu pro všechny řetězce do 4 míst", () => {
     fc.assert(
       fc.property(

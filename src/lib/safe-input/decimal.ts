@@ -3,12 +3,18 @@ import { InputRejected } from "./limits";
 const DECIMAL = /^([+-]?)(\d*)(?:[.,](\d*))?$/;
 const ONE = BigInt(1);
 const MAX = BigInt(Number.MAX_SAFE_INTEGER);
+const MAX_DIGITS = 32;
 
 // Amounts from foreign files never pass through Number or parseFloat.
 export function decimalToMinor(text: string, scale: number): number {
   if (!Number.isInteger(scale) || scale < 0 || scale > 12)
     throw new RangeError(`Neplatné měřítko: ${scale}`);
-  const match = DECIMAL.exec(text.trim());
+  const trimmed = text.trim();
+  // No amount, rate or quantity needs more digits; a 25 MB cell must not reach BigInt.
+  if (trimmed.length > MAX_DIGITS) {
+    throw new InputRejected("decimal_overflow", undefined, trimmed.slice(0, 40));
+  }
+  const match = DECIMAL.exec(trimmed);
   const whole = match?.[2] ?? "";
   const fraction = match?.[3] ?? "";
   if (!match || whole.length + fraction.length === 0) {

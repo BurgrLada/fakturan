@@ -12,6 +12,10 @@ import { parseIsdoc } from "@/server/isdoc/parse";
 import { registerJob } from "@/server/jobs/registry";
 import { drainHeavy } from "@/server/jobs/worker";
 import { createCreditNote } from "@/server/services/credit-notes";
+import { convertAdvance } from "@/server/services/advances";
+import { addPayment } from "@/server/services/payments";
+import { taxOverview } from "@/server/reports/tax";
+import { amountDue } from "@/lib/qr-payload";
 import { runExport } from "@/server/services/export-run";
 import {
   createExport,
@@ -24,7 +28,13 @@ import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { cancelInvoice, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { getInvoice } from "@/server/services/invoices";
 import { createTestDb } from "../helpers/db";
-import { draftFor, seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
+import {
+  draftFor,
+  issuedAdvance,
+  seedCustomer,
+  seedOwner,
+  webActor,
+} from "../helpers/fixtures-mail";
 import { committed, editedIsdoc, importOwner, parsed, registerImportJobs } from "../helpers/import";
 import { pdfText } from "../helpers/pdf";
 
@@ -218,5 +228,65 @@ describe("export ISDOC", () => {
 
     const text = (await pdfText((await invoicePdf(owner, imported.id)).data)).join(" ");
     expect(text).not.toContain("Hotově");
+  });
+});
+
+describe("ISDOC tam a zpět", () => {
+  test("[TST-015] export a import zpět nevytvoří platby, které nebyly, a přehled sedí", async () => {
+    const source = importOwner(db, NOW);
+    const customerId = seedCustomer(source);
+    const web = webActor(source);
+    const pay = (id: string, amountMinor: number) => {
+      const row = getInvoice(source, id)!;
+      addPayment(web, id, {
+        revision: row.revision,
+        paidOn: "2026-03-05",
+        amountMinor,
+        currency: "CZK",
+        method: "transfer",
+        note: "",
+      });
+    };
+    const paid = issued(source, customerId);
+    pay(paid, getInvoice(source, paid)!.totalMinor);
+    const partial = issued(source, customerId);
+    pay(partial, 50_000);
+    const credited = issued(source, customerId);
+    const credit = createCreditNote(web, credited);
+    issueInvoice(web, credit.id, { revision: getInvoice(source, credit.id)!.revision });
+    const advance = issuedAdvance(source, customerId, 1_000_000, { issueDate: "2026-03-01" });
+    const final = convertAdvance(web, advance);
+    issueInvoice(web, final.id, { revision: getInvoice(source, final.id)!.revision });
+    expect(getInvoice(source, advance)!.supersededAt).not.toBeNull();
+
+    const row = await exported(source, { kind: "invoices", format: "isdoc_zip" });
+    expect(row.status).toBe("done");
+    const files = Object.entries(entries(source, row.id)).map(([name, bytes]) => ({ name, bytes }));
+    const target = importOwner(db, NOW);
+    await committed(db, target, (await parsed(target, files)).id);
+
+    const state = (owner: string) =>
+      db
+        .select()
+        .from(invoice)
+        .where(eq(invoice.userId, owner))
+        .all()
+        .map((doc) => ({
+          number: doc.number,
+          type: doc.type,
+          status: doc.status,
+          paid: doc.paidMinor,
+          due: amountDue(doc),
+        }))
+        .sort((a, b) => (a.number! < b.number! ? -1 : 1));
+    const advanceTarget = state(target).find((doc) => doc.type === "advance")!;
+    expect(advanceTarget).toMatchObject({ paid: 0, status: "issued" });
+    const mine = state(source).filter((doc) => doc.type !== "advance");
+    expect(state(target).filter((doc) => doc.type !== "advance")).toEqual(mine);
+    for (const basis of ["paid", "issued"] as const) {
+      const overview = (owner: string) =>
+        taxOverview(db, owner, { year: 2026, basis }, "2026-03-20");
+      expect(overview(target).totalCzkMinor, basis).toBe(overview(source).totalCzkMinor);
+    }
   });
 });

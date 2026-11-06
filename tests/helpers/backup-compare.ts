@@ -259,7 +259,10 @@ export function asRestored(account: Canonical): Canonical {
     row.reminders_open_since = null;
   });
   edit("preferences", (row) => (row.advance_final_mode = "draft"));
-  edit("recurring_invoice", (row) => (row.send_confirmed_at = null));
+  edit("recurring_invoice", (row) => {
+    row.send_confirmed_at = null;
+    if (row.status === "active") row.status = "paused";
+  });
   edit("mail_settings", (row) => (row.verified_at = null));
   edit("email_log", (row) => {
     if (row.status === "queued" || row.status === "sending") row.status = "cancelled";

@@ -2,7 +2,17 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { and, count, eq, getTableColumns, lt, notExists, sql, type AnyColumn } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  lt,
+  notExists,
+  sql,
+  type AnyColumn,
+} from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { BACKUP_VERSION, RESTORE_LIMITS } from "@/lib/backup-format";
 import { InputRejected } from "@/lib/safe-input/limits";
@@ -76,6 +86,18 @@ export function isAccountEmpty(tx: Tx, ownerId: string): boolean {
   const dashboards =
     tx.select({ n: count() }).from(dashboard).where(scoped(ownerId).where(dashboard)).get()?.n ?? 0;
   return dashboards <= 1;
+}
+
+// The history a restore brought along, newest first; downloaded through /soubory/[id].
+export function listAuditArchives(
+  ownerId: string,
+): { id: string; name: string; createdAt: Date }[] {
+  return db
+    .select({ id: file.id, name: file.name, createdAt: file.createdAt })
+    .from(file)
+    .where(scoped(ownerId).where(file, (t, { eq: is }) => is(t.kind, "audit_archive")))
+    .orderBy(desc(file.createdAt))
+    .all();
 }
 
 export function assertRestoreAllowed(actor: Actor): void {
@@ -195,7 +217,15 @@ function silenced(table: string, row: ArchiveRow): ArchiveRow {
     };
   }
   if (table === "preferences") return { ...row, advance_final_mode: "draft" };
-  if (table === "recurring_invoice") return { ...row, send_confirmed_at: null };
+  // Paused, not only unconfirmed: a plan that issues by itself would hand out numbers the source
+  // instance may still be using. Resuming it is the person's call and goes through markMissed.
+  if (table === "recurring_invoice") {
+    return {
+      ...row,
+      send_confirmed_at: null,
+      status: row.status === "active" ? "paused" : row.status,
+    };
+  }
   if (table === "mail_settings") return { ...row, verified_at: null };
   if (table === "email_log" && (row.status === "queued" || row.status === "sending")) {
     return { ...row, status: "cancelled" };
