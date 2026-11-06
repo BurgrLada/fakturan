@@ -344,4 +344,31 @@ describe("délka textu a rozpočet PDF při zápisu", () => {
     expect(jsonBytes({ lines, ...texts })).toBeLessThanOrEqual(DOCUMENT_INPUT_BYTES);
     expect(() => draftFor(owner, customerId, { lines, ...texts })).toThrow(TEXTS.pdf.tooLong);
   });
+
+  test("[PDF-005] koncept, který přeroste rozpočet PDF až po dosazení proměnných, se nevystaví", () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    db.update(customer)
+      .set({ name: "Z".repeat(200) })
+      .where(eq(customer.id, customerId))
+      .run();
+    const lines = Array.from({ length: 94 }, (_, index) => ({
+      catalogItemId: null,
+      name: `${index}`.padEnd(200, "n"),
+      description: `{{zakaznik}}{{zakaznik}}${"d".repeat(1_600)}`,
+      quantityMilli: 1000,
+      unit: "u".repeat(20),
+      unitPriceMinor: 100,
+      discountKind: "none" as const,
+      discountValue: 0,
+    }));
+    const { id, revision } = draftFor(owner, customerId, {
+      lines,
+      textBefore: "a".repeat(2_000),
+      textAfter: "b".repeat(2_000),
+      note: "c".repeat(2_000),
+    });
+    expect(() => issueInvoice(webActor(owner), id, { revision })).toThrow(TEXTS.pdf.tooLong);
+    expect(getInvoice(owner, id)!.status).toBe("draft");
+  });
 });

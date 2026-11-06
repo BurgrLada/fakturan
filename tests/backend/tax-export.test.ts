@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,7 @@ import { TABULAR_LIMITS } from "@/lib/safe-input/limits";
 import { readXlsx } from "@/lib/safe-input/xlsx-reader";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
-import { auditLog } from "@/server/db/schema";
+import { auditLog, invoice } from "@/server/db/schema";
 import { TAX_PAGE_ROWS, taxPage } from "@/server/reports/tax";
 import {
   exportTaxOverview,
@@ -215,6 +216,30 @@ describe("výstupy daňového přehledu", () => {
       .all();
     expect(audited).toEqual([]);
   });
+
+  test("[TAX-003] 2 000 běžných řádků se do PDF vejde, identifikátory se do rozpočtu nepočítají", async () => {
+    const owner = reportOwner(db, "2026-01-02");
+    const client = namedCustomer(owner, "Obchodní společnost Novák a synové s.r.o.");
+    const first = issuedDocument(owner, client, { issueDate: "2026-01-02", totalMinor: 10_000 });
+    const row = db.select().from(invoice).where(eq(invoice.id, first)).get()!;
+    db.transaction((tx) => {
+      for (let i = 2; i <= 1_000; i += 1) {
+        const number = `2026${String(i).padStart(6, "0")}`;
+        tx.insert(invoice)
+          .values({ ...row, id: randomUUID(), number, variableSymbol: number })
+          .run();
+      }
+    });
+    const filter = { ...FILTER, basis: "issued" as const };
+    const overview = taxOverview(owner, filter, REPORT_TODAY);
+    expect(overview.lines.length + overview.unpaid.length).toBe(2_000);
+    const pdf = await exportTaxOverview(webActor(owner), filter, "pdf");
+    expect(
+      Buffer.from(pdf.body as Uint8Array)
+        .subarray(0, 5)
+        .toString(),
+    ).toBe("%PDF-");
+  }, 120_000);
 
   test("[TAX-001] stránka ukáže nejvýš strop řádků a řekne, kolik jich je", () => {
     const owner = reportOwner(db, "2026-01-02");

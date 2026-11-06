@@ -231,6 +231,8 @@ export function analyzeRows(
       ) {
         problems.push(R.textTooLong);
       }
+      const nameLimit = textLimit("invoice_line", "name") ?? Number.POSITIVE_INFINITY;
+      if (doc.lines.some((line) => line.name.length > nameLimit)) problems.push(R.lineNameTooLong);
       const net = doc.lines.reduce((sum, line) => sum + line.netMinor, 0);
       if (Math.abs(doc.totalMinor - net) > MAX_ROUNDING_MINOR) problems.push(R.rounding);
       const fileIco = digits(doc.supplier.ico);

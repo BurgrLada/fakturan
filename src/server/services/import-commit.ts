@@ -7,6 +7,7 @@ import { appearanceFrom } from "@/lib/invoice";
 import type { ImportDocument } from "@/lib/import-document";
 import { importsRow, rowBlocks, type PreviewRow } from "@/lib/import-preview";
 import { calendarDateInPrague } from "@/lib/number-format";
+import { fitText } from "@/lib/text-limits";
 import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
@@ -188,11 +189,11 @@ function insertDocument(ctx: Context, row: PreviewRow): string {
       importUuid: doc.uuid,
       sourceSystem: (doc.issuingSystem ?? ctx.sourceSystem ?? "ISDOC").slice(0, 200),
       importPdfFileId: row.pdfFileId && ctx.pdfs.has(row.pdfFileId) ? row.pdfFileId : null,
-      searchText: searchTextOf({
-        number: doc.number,
-        customerName: party?.name ?? "",
-        lines: doc.lines,
-      }),
+      searchText: fitText(
+        "invoice",
+        "search_text",
+        searchTextOf({ number: doc.number, customerName: party?.name ?? "", lines: doc.lines }),
+      ),
       revision: 1,
       createdAt: now,
       updatedAt: now,

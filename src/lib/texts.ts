@@ -1943,6 +1943,8 @@ export const TEXTS = {
       alreadySending: "Tento doklad se právě odesílá, počkejte na výsledek",
       logNotFound: "Záznam o odeslání neexistuje",
       notResendable: "Tuto zprávu nejde odeslat znovu",
+      bodyTooLong:
+        "Text zprávy je po doplnění údajů dokladu příliš dlouhý, a proto se neodešle. Zkraťte šablonu e-mailu.",
       superseded: "Tato zpráva už byla odeslána znovu, podívejte se do historie",
       notAcknowledgeable: "Tento záznam už nejde vzít na vědomí",
       confirmUnknown: "Nevíme, zda zpráva odešla. Opakované odeslání musíte potvrdit",
@@ -3125,6 +3127,8 @@ export const TEXTS = {
       lines: "Doklad má víc položek, než Fakturan dovolí",
       textTooLong:
         "Číslo, variabilní symbol, identifikátor nebo jméno odběratele je v souboru delší, než Fakturan dovolí",
+      lineNameTooLong:
+        "Název některé položky je v souboru delší než 200 znaků, víc Fakturan nedovolí",
       ignoredPdf: (name: string) => `PDF ${name} nepatří k žádnému dokladu a nepoužije se`,
       nestedArchive: (name: string) => `Vnořený archiv ${name} se přeskočil`,
       duplicateCustomer: "Zákazník se stejným IČO nebo názvem už je ve Fakturanu nebo v importu",
@@ -3411,6 +3415,8 @@ export const TEXTS = {
         `Účet má víc než ${limit} ${what}, tolik jich obnova nepřijme, a proto záloha nevznikla. Nepotřebné smažte a zálohu spusťte znovu.`,
       documentTooLarge: (what: string) =>
         `${what} je delší, než záloha unese, a proto nevznikla. Zkraťte ho a zálohu spusťte znovu.`,
+      textTooLong: (what: string) =>
+        `${what}: některý text je delší, než obnova přijme, a proto záloha nevznikla. Zkraťte ho a zálohu spusťte znovu, nebo se obraťte na správce instance.`,
       tooManyFiles: (limit: string) =>
         `Účet má víc než ${limit} souborů, tolik jich záloha neunese, a proto nevznikla. Kontaktujte správce instance.`,
       unexpected: "Záloha se nepodařila kvůli neočekávané chybě. Zkuste ji znovu.",
@@ -3422,6 +3428,17 @@ export const TEXTS = {
       row: (table: string) => `Řádek v části „${tableLabel(table)}“`,
       draft: (customer: string) =>
         customer ? `Koncept dokladu pro „${customer}“` : "Koncept dokladu bez zákazníka",
+      customer: (name: string) => `Zákazník „${name}“`,
+      catalogItem: (name: string) => `Položka ceníku „${name}“`,
+      bankAccount: (name: string) => `Bankovní účet „${name}“`,
+      series: (name: string) => `Číselná řada „${name}“`,
+      unit: (name: string) => `Jednotka „${name}“`,
+      tag: (name: string) => `Štítek „${name}“`,
+      preset: (name: string) => `Předvolba importu „${name}“`,
+      dashboard: (name: string) => `Nástěnka „${name}“`,
+      file: (name: string) => `Soubor „${name}“`,
+      supplier: "Údaje dodavatele",
+      emailTemplate: (kind: string, language: string) => `Šablona e-mailu „${kind}“ (${language})`,
     },
   },
   accountLimits: {

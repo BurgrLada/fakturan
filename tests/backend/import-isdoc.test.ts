@@ -266,6 +266,18 @@ describe("import ISDOC", () => {
     }
   });
 
+  test("[IMP-001] název položky nad strop textu je chyba řádku, ne zkrácený doklad", async () => {
+    const owner = importOwner(db, NOW);
+    const zero = (i: number) =>
+      `<InvoiceLine><ID>${i}</ID><InvoicedQuantity unitCode="ks">1.000</InvoicedQuantity><LineExtensionAmount>0.00</LineExtensionAmount><LineExtensionAmountTaxInclusive>0.00</LineExtensionAmountTaxInclusive><LineExtensionTaxAmount>0.00</LineExtensionTaxAmount><UnitPrice>0.00</UnitPrice><UnitPriceTaxInclusive>0.00</UnitPriceTaxInclusive><ClassifiedTaxCategory><Percent>0</Percent><VATCalculationMethod>0</VATCalculationMethod><VATApplicable>false</VATApplicable></ClassifiedTaxCategory><Item><Description>${String(i).padEnd(1_850, "p")}</Description></Item></InvoiceLine>`;
+    const extra = Array.from({ length: 58 }, (_, i) => zero(i + 3)).join("");
+    const bytes = editedIsdoc("faktura-czk.isdoc", "</InvoiceLines>", `${extra}</InvoiceLines>`);
+    const { rows } = await parsed(owner, [{ name: "x.isdoc", bytes }]);
+    expect(rows[0]).toMatchObject({ status: "error" });
+    expect(rows[0]!.messages).toContain(R.lineNameTooLong);
+    expect(docs(owner)).toEqual([]);
+  });
+
   test("doklad jiného dodavatele je chyba řádku", async () => {
     const owner = importOwner(db, NOW);
     const { rows } = await parsed(owner, [

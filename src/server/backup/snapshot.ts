@@ -9,7 +9,17 @@ import {
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
-import { and, asc, getTableColumns, gt, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  getTableColumns,
+  gt,
+  inArray,
+  sql,
+  type AnyColumn,
+  type SQL,
+} from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import {
   jsonBytes,
@@ -19,9 +29,10 @@ import {
   rowBytesFor,
   type RestoreLimits,
 } from "@/lib/backup-format";
+import { textLimit } from "@/lib/text-limits";
 import { TEXTS } from "@/lib/texts";
 import { db, type Tx } from "../db";
-import { auditLog, file } from "../db/schema";
+import { auditLog, file, invoice } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { blobPath } from "../files/store";
 import { isForeignActor } from "../services/audit-read";
@@ -40,6 +51,7 @@ const PAGE_BYTES = 16 * 1024 * 1024;
 const LINE_BUFFER = 64 * 1024;
 export const AUDIT_FILE = "audit.jsonl";
 export const FILES_DIR = "files";
+const E = TEXTS.backup.errors;
 
 // A file row of the account without its blob: the archive would silently miss it.
 export class MissingBlob extends Error {}
@@ -54,20 +66,74 @@ export class SnapshotTooLarge extends Error {
   }
 }
 
-// The row a person can find and shorten: a template or plan by name, a document by number.
-function blocking(table: string, row: Record<string, unknown>): string {
+const SHOWN_NAME = 60;
+const shown = (value: unknown) => {
+  const text = String(value ?? "");
+  return text.length > SHOWN_NAME ? `${text.slice(0, SHOWN_NAME)}…` : text;
+};
+
+// The row a person can find and shorten, named as the app names it: never a table or an id.
+function describeRow(tx: Tx, table: string, row: Record<string, unknown>): string {
   const B = TEXTS.backup.blocking;
-  const what =
-    table === "invoice_template"
-      ? B.template(String(row.name))
-      : table === "recurring_invoice"
-        ? B.plan(String(row.name))
-        : table === "invoice"
-          ? row.number
-            ? B.invoice(String(row.number))
-            : B.draft(String(row.customer_name ?? ""))
-          : B.row(table);
-  return TEXTS.backup.errors.documentTooLarge(what);
+  const name = shown(row.name);
+  const documentOf = (invoiceRow: { number: unknown; customer_name: unknown }) =>
+    invoiceRow.number
+      ? B.invoice(shown(invoiceRow.number))
+      : B.draft(shown(invoiceRow.customer_name));
+  switch (table) {
+    case "invoice_template":
+      return B.template(name);
+    case "recurring_invoice":
+      return B.plan(name);
+    case "invoice":
+      return documentOf(row as { number: unknown; customer_name: unknown });
+    case "customer":
+      return B.customer(name);
+    case "catalog_item":
+      return B.catalogItem(name);
+    case "bank_account":
+      return B.bankAccount(name);
+    case "number_series":
+      return B.series(name);
+    case "unit":
+      return B.unit(name);
+    case "tag":
+      return B.tag(name);
+    case "mapping_preset":
+      return B.preset(name);
+    case "dashboard":
+      return B.dashboard(name);
+    case "file":
+      return B.file(name);
+    case "supplier":
+      return B.supplier;
+    case "email_template": {
+      const kinds: Record<string, string> = TEXTS.emailTemplates.kinds;
+      const languages: Record<string, string> = TEXTS.emailTemplates.languages;
+      return B.emailTemplate(
+        kinds[String(row.kind)] ?? String(row.kind),
+        (languages[String(row.language)] ?? String(row.language)).toLowerCase(),
+      );
+    }
+  }
+  if (typeof row.invoice_id === "string") {
+    const parent = tx
+      .select({ number: invoice.number, customer_name: invoice.customerName })
+      .from(invoice)
+      .where(eq(invoice.id, row.invoice_id))
+      .get();
+    if (parent) return documentOf(parent);
+  }
+  return B.row(table);
+}
+
+// Free text columns with their limit, as the restore checks them (restore-read.ts columnSchema).
+function limitedColumns(entry: BackupTable, columns: [string, AnyColumn][]): [string, number][] {
+  return columns.flatMap(([name]) => {
+    const rule = entry.columns[name];
+    const limit = textLimit(entry.name, name);
+    return limit === undefined || rule === "id" || rule?.startsWith("ref:") ? [] : [[name, limit]];
+  });
 }
 
 type Owned = SQLiteTable & { userId: AnyColumn };
@@ -256,6 +322,7 @@ export function snapshot(
       const jsonColumns = columns
         .filter(([, column]) => column.columnType === "SQLiteTextJson")
         .map(([name]) => name);
+      const texts = limitedColumns(entry, columns);
       const pageSize =
         jsonColumns.length > 0
           ? Math.max(4, Math.floor(PAGE_BYTES / rowBytesFor(entry.name, limits)))
@@ -267,14 +334,20 @@ export function snapshot(
           and(scoped(ownerId).where(table), entry.rows?.()),
           columns,
           (row) => {
+            for (const [name, limit] of texts) {
+              const value = row[name];
+              if (typeof value === "string" && value.length > limit) {
+                throw new SnapshotTooLarge(E.textTooLong(describeRow(tx, entry.name, row)));
+              }
+            }
             for (const name of jsonColumns) {
               if (jsonBytes(row[name]) > jsonBytesFor(entry.name, name, limits)) {
-                throw new SnapshotTooLarge(blocking(entry.name, row));
+                throw new SnapshotTooLarge(E.documentTooLarge(describeRow(tx, entry.name, row)));
               }
             }
             const bytes = lines.add(row);
             if (bytes > rowBytesFor(entry.name, limits)) {
-              throw new SnapshotTooLarge(blocking(entry.name, row));
+              throw new SnapshotTooLarge(E.documentTooLarge(describeRow(tx, entry.name, row)));
             }
             stats.longest = Math.max(stats.longest, Math.min(bytes, limits.maxRowBytes));
             if (entry.name === "file") files.push(row.id as string);

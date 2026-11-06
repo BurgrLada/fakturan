@@ -10,6 +10,7 @@ import type { Language } from "@/lib/preferences";
 import { amountDue } from "@/lib/qr-payload";
 import { isSendable, sendInputSchema, type EmailTrigger, type SendInput } from "@/lib/mail-send";
 import type { CalendarDate } from "@/lib/number-format";
+import { textLimit } from "@/lib/text-limits";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -104,6 +105,14 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
       .get()
   ) {
     return null;
+  }
+  // Every caller parses the message, so this guards a new path; never cut silently, a restore
+  // would refuse the row (TEXT_LIMITS).
+  if (
+    message.body.length > textLimit("email_log", "body")! ||
+    message.subject.length > textLimit("email_log", "subject")!
+  ) {
+    throw new ServiceError(E.bodyTooLong);
   }
   const row = findOwned(tx, userId, invoiceId);
   // The last guard: no message, manual or automatic, ever leaves about an imported document.

@@ -12,6 +12,7 @@ import { discountNotes, formRateNotes } from "@/lib/invoice-form";
 import { rateDate } from "@/lib/fx";
 import { allowsNegativePrice } from "@/lib/invoice-totals";
 import { calendarDateInPrague, variableSymbolFrom } from "@/lib/number-format";
+import { DOCUMENT_FRAME_CHARS, PDF_TEXT_BUDGET, printedLength } from "@/lib/printed-length";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import type { AuditAction } from "../audit/record";
@@ -360,9 +361,18 @@ function textProblems(texts: {
   textBefore: string;
   textAfter: string;
   note: string;
-  lines: Pick<InvoiceLine, "name" | "description">[];
+  lines: Pick<InvoiceLine, "name" | "description" | "unit">[];
 }): IssueProblem[] {
   const found: IssueProblem[] = [];
+  const { orderRef, reference, textBefore, textAfter, note } = texts;
+  const printed = {
+    texts: [orderRef, reference, textBefore, textAfter, note],
+    lines: texts.lines.map(({ name, description, unit }) => [name, description, unit]),
+  };
+  // The form measured the raw text; variables can grow it past what the PDF renders (I-1).
+  if (printedLength(printed) > PDF_TEXT_BUDGET - DOCUMENT_FRAME_CHARS) {
+    found.push({ field: "lines", message: TEXTS.pdf.tooLong });
+  }
   for (const field of ["orderRef", "reference"] as const) {
     if (texts[field].length > MAX_REFERENCE) found.push({ field, message: T[field] });
   }

@@ -22,6 +22,7 @@ import {
   exportJob,
   file,
   invoice,
+  invoiceLine,
   invoiceTemplate,
   invoiceVersion,
   job,
@@ -368,5 +369,74 @@ describe("záloha účtu s dokumenty a řádky z dřívějška", () => {
         ACCOUNT_ROW_LIMITS.invoice_template,
       ),
     });
+  });
+
+  test("[EXP-006] text delší, než obnova přijme, zálohu zastaví a řekne, kde je", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const client = db.select().from(customer).where(eq(customer.userId, source)).get()!;
+    const doc = db
+      .select()
+      .from(invoice)
+      .where(eq(invoice.userId, source))
+      .all()
+      .find((row) => row.number)!;
+    const line = db.select().from(invoiceLine).where(eq(invoiceLine.invoiceId, doc.id)).get()!;
+    const backedUp = async () => {
+      const { id } = createBackup({ userId: source, source: "web" });
+      await drainHeavy("w");
+      return db.select().from(exportJob).where(eq(exportJob.id, id)).get()!;
+    };
+    const cases: [() => void, () => void, string][] = [
+      [
+        () =>
+          db
+            .update(customer)
+            .set({ name: "Z".repeat(201) })
+            .where(eq(customer.id, client.id))
+            .run(),
+        () =>
+          db.update(customer).set({ name: client.name }).where(eq(customer.id, client.id)).run(),
+        TEXTS.backup.blocking.customer(`${"Z".repeat(60)}…`),
+      ],
+      [
+        () =>
+          db
+            .update(invoiceLine)
+            .set({ description: "p".repeat(2_001) })
+            .where(eq(invoiceLine.id, line.id))
+            .run(),
+        () =>
+          db
+            .update(invoiceLine)
+            .set({ description: line.description })
+            .where(eq(invoiceLine.id, line.id))
+            .run(),
+        TEXTS.backup.blocking.invoice(doc.number!),
+      ],
+      [
+        () =>
+          db
+            .update(invoice)
+            .set({ variableSymbol: "1".repeat(11) })
+            .where(eq(invoice.id, doc.id))
+            .run(),
+        () =>
+          db
+            .update(invoice)
+            .set({ variableSymbol: doc.variableSymbol })
+            .where(eq(invoice.id, doc.id))
+            .run(),
+        TEXTS.backup.blocking.invoice(doc.number!),
+      ],
+    ];
+    for (const [spoil, mend, what] of cases) {
+      spoil();
+      const row = await backedUp();
+      expect(row).toMatchObject({ status: "failed", reason: BE.textTooLong(what) });
+      expect(row.reason).not.toMatch(/customer|invoice_line|[0-9a-f]{8}-[0-9a-f]{4}/);
+      mend();
+    }
+    expect((await backedUp()).status).toBe("done");
   });
 });

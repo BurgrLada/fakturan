@@ -1,5 +1,5 @@
 import "server-only";
-import { PDF_TEXT_BUDGET, printedLength } from "@/lib/printed-length";
+import { PDF_TEXT_BUDGET } from "@/lib/printed-length";
 import type { CalendarDate } from "@/lib/number-format";
 import type { TaxFilter } from "@/lib/report-filter";
 import { formatMoney } from "@/lib/money";
@@ -101,7 +101,29 @@ export function setTaxPdfRowLimitForTests(limit: number | null): void {
 }
 
 // The rows are counted above, but their text (customer names, numbers) is what react-pdf pays for,
-// so the overview has the same text budget as a document PDF.
+// so the overview has the same text budget as a document PDF. Only what is printed counts: ids,
+// types and currency codes would spend the budget of an ordinary year of 2 000 rows.
+export function taxPrintedLength(overview: TaxOverview): number {
+  const lines = overview.lines.reduce(
+    (sum, line) =>
+      sum +
+      line.date.length +
+      line.number.length +
+      line.customer.length +
+      (line.related?.number?.length ?? 0),
+    0,
+  );
+  return overview.unpaid.reduce(
+    (sum, row) =>
+      sum +
+      row.issueDate.length +
+      (row.dueDate?.length ?? 0) +
+      row.number.length +
+      row.customer.length,
+    lines,
+  );
+}
+
 let pdfTextBudget = PDF_TEXT_BUDGET;
 
 export function setTaxPdfTextBudgetForTests(budget: number | null): void {
@@ -113,7 +135,7 @@ async function render(overview: TaxOverview, format: TaxExportFormat) {
     if (overview.lines.length + overview.unpaid.length > pdfRowLimit) {
       throw new ServiceError(T.errors.pdfTooLong(pdfRowLimit));
     }
-    if (printedLength(overview) > pdfTextBudget) throw new ServiceError(T.errors.pdfTooMuchText);
+    if (taxPrintedLength(overview) > pdfTextBudget) throw new ServiceError(T.errors.pdfTooMuchText);
     return {
       contentType: "application/pdf",
       body: new Uint8Array(await renderTaxOverviewPdf(overview)),

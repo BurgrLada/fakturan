@@ -7,9 +7,10 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { registerSqlFunctions } from "@/lib/sql-functions";
+import { textLimit } from "@/lib/text-limits";
 import { setClockForTests } from "@/server/clock";
 import { createDb, runMigrations, setDbForTests, type Db } from "@/server/db";
-import { job, schedulerState, user } from "@/server/db/schema";
+import { invoice, job, schedulerState, user } from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
@@ -124,6 +125,30 @@ describe("upgrade databáze", () => {
     runMigrations(db);
     return db;
   }
+
+  test("[SEC-005] upgrade zkrátí vyhledávací text dokladu nad strop, aby šla záloha obnovit", () => {
+    setClockForTests({ now: () => NOW });
+    const at = journal.entries.findIndex((entry) => entry.tag === "0046_search_text_limit");
+    expect(at).toBeGreaterThan(0);
+    const db = freshDb();
+    migrate(db, { migrationsFolder: prefixFolder(at) });
+    setDbForTests(db);
+    const owner = seedOwner(db, NOW);
+    const id = issuedInvoice(owner, seedCustomer(owner));
+    const limit = textLimit("invoice", "search_text")!;
+    db.update(invoice)
+      .set({ searchText: "x".repeat(limit + 5_000) })
+      .where(eq(invoice.id, id))
+      .run();
+    runMigrations(db);
+    const row = db
+      .select({ searchText: invoice.searchText })
+      .from(invoice)
+      .where(eq(invoice.id, id))
+      .get()!;
+    expect(row.searchText).toBe("x".repeat(limit));
+    assertConsistent(db, owner);
+  });
 
   test("[TST-019] uložený stav verze 0.1.0 projde upgradem a soulad dat drží", () => {
     expect(releases).toContain("0.1.0.sql");

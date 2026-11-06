@@ -56,6 +56,9 @@ import {
 import { assertIsolated } from "../helpers/isolation";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
 import { TEXTS } from "@/lib/texts";
+import { MAX_BODY_CHARS } from "@/lib/email-template";
+import { textLimit } from "@/lib/text-limits";
+import { saveEmailTemplate } from "@/server/services/email-templates";
 
 const session = vi.hoisted(() => ({ userId: null as string | null }));
 const mocks = vi.hoisted(() => ({ captureException: vi.fn() }));
@@ -148,6 +151,46 @@ describe("sendInvoice", () => {
     expect(sendInvoice(webActor(owner), invoiceId, first)).toEqual({ logId });
     await drainJobs(WORKER);
     expect(smtp.messages).toHaveLength(1);
+  });
+
+  test("[SEC-006] queueMail odmítne tělo delší, než obnova přijme, a nic nezapíše", () => {
+    const { owner, invoiceId } = account();
+    const body = "b".repeat(textLimit("email_log", "body")! + 1);
+    expect(() =>
+      mutate(webActor(owner), "invoice.send", (tx, audit) =>
+        queueMail(tx, audit, {
+          userId: owner,
+          invoiceId,
+          kind: "invoice",
+          trigger: "automatic",
+          key: "mail:long",
+          message: { to: ["a@example.cz"], cc: [], bcc: [], subject: "S", body },
+          automation: "recurringSend",
+        }),
+      ),
+    ).toThrow(TEXTS.invoiceMail.errors.bodyTooLong);
+    expect(logsOf(owner)).toEqual([]);
+  });
+
+  test("[SEC-006] tělo, které přeroste strop až po dosazení proměnných, se neodešle", () => {
+    const { owner, invoiceId } = account();
+    saveEmailTemplate(webActor(owner), {
+      kind: "invoice",
+      language: "cs",
+      subject: "Faktura {{cislo_faktury}}",
+      body: Array.from({ length: 60 }, () => "{{zakaznik}}").join("\n"),
+    });
+    db.update(invoice)
+      .set({ customerName: "Z".repeat(200) })
+      .where(eq(invoice.id, invoiceId))
+      .run();
+    const prefill = sendPrefill(owner, invoiceId);
+    expect(prefill.body.length).toBeGreaterThan(MAX_BODY_CHARS);
+    const { to, cc, bcc, subject, body } = prefill;
+    expect(
+      fail(() => sendInvoice(webActor(owner), invoiceId, input({ to, cc, bcc, subject, body }))),
+    ).toBe(TEXTS.emailTemplates.errors.bodyTooLong);
+    expect(logsOf(owner)).toEqual([]);
   });
 
   test("queueMail vrátí null při obsazeném klíči i při běžícím odeslání", () => {
