@@ -160,6 +160,29 @@ describe("export ISDOC", () => {
     expect(pdf).not.toContain("Převodem");
   });
 
+  test("[EXP-005] uložený kód platby mimo výčet ISDOC se do exportu nedostane", async () => {
+    const owner = importOwner(db, NOW);
+    const bytes = editedIsdoc(
+      "faktura-czk.isdoc",
+      /<PaymentMeans>[\s\S]*<\/PaymentMeans>/,
+      "<PaymentMeans><Payment><PaidAmount>3350.50</PaidAmount><PaymentMeansCode>10</PaymentMeansCode>" +
+        "<Details><PaymentDueDate>2026-02-16</PaymentDueDate><ID></ID><BankCode></BankCode>" +
+        "<Name></Name><IBAN></IBAN><BIC></BIC></Details></Payment></PaymentMeans>",
+    );
+    const batch = await parsed(owner, [{ name: "hotove.isdoc", bytes }]);
+    await committed(db, owner, batch.id);
+    const imported = db.select().from(invoice).where(eq(invoice.userId, owner)).get()!;
+    db.update(invoice).set({ importPaymentCode: "99" }).where(eq(invoice.id, imported.id)).run();
+
+    const xml = buildIsdoc(loadInvoiceDocument(owner, imported.id)!, {
+      uuid: imported.importUuid!,
+    });
+    expect(xml).not.toContain("<PaymentMeans>");
+
+    const row = await exported(owner, { kind: "invoices", format: "isdoc_zip" });
+    expect(row.status).toBe("done");
+  });
+
   test("[EXP-001] ISDOC ZIP bez výběru stavu vynechá storna", async () => {
     const owner = seedOwner(db, NOW);
     const customerId = seedCustomer(owner);

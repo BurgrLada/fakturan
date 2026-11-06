@@ -187,6 +187,19 @@ describe("čtení ISDOC", () => {
     expect(parseIsdoc(fixture("cizi-dodavatel.isdoc")).supplier.ico).toBe("99900050");
   });
 
+  test("[IMP-003] kód platby se bere ze stejné platby jako splatnost a účet", () => {
+    const twoPayments = edited(
+      "faktura-czk.isdoc",
+      "<PaymentMeans><Payment>",
+      "<PaymentMeans><Payment><PaidAmount>0.00</PaidAmount><PaymentMeansCode>10</PaymentMeansCode></Payment><Payment>",
+    );
+    expect(parseIsdoc(twoPayments)).toMatchObject({
+      paymentMeansCode: "42",
+      dueDate: "2026-02-16",
+      variableSymbol: "20260001",
+    });
+  });
+
   test("zaokrouhlení dokladu jde do celku a rozdílu proti řádkům", () => {
     const rounded = edited(
       "verze-601.isdoc",

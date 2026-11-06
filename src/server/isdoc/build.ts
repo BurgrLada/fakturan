@@ -5,6 +5,7 @@ import type { CustomerSnapshot, InvoiceDocument, SupplierSnapshot } from "@/lib/
 import { ISDOC_NAMESPACE } from "@/lib/safe-input/pdf-embedded";
 import { amountDue } from "@/lib/qr-payload";
 import { decimalMinor } from "@/lib/tabular";
+import { PAYMENT_MEANS_CODES } from "./parse";
 
 export const ISDOC_EXPORT_VERSION = "6.0.2";
 const LOCAL_CURRENCY = "CZK";
@@ -275,7 +276,13 @@ export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string 
       : "";
   // PaymentMeans is optional, and no code of the schema means "unknown": an imported document
   // without bank details carries only the code its source file stated, or none at all.
-  const code = doc.paymentUnknown ? doc.sourcePaymentCode : PAYMENT_CODES[doc.paymentMethod];
+  // A stored source code is data from a file or a backup, so only a code of the schema passes.
+  const source = doc.sourcePaymentCode;
+  const code = doc.paymentUnknown
+    ? source && PAYMENT_MEANS_CODES.has(source)
+      ? source
+      : undefined
+    : PAYMENT_CODES[doc.paymentMethod];
   const payment = !code
     ? ""
     : nest(

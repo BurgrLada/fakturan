@@ -14,8 +14,17 @@ import { InputRejected, XML_LIMITS } from "@/lib/safe-input/limits";
 import { ISDOC_NAMESPACE } from "@/lib/safe-input/pdf-embedded";
 import { children, firstChild, parseXml, type XmlNode } from "@/lib/safe-input/xml";
 
-// The enumeration of PaymentMeansCodeType in the 6.0.x schemas.
-const PAYMENT_MEANS_CODES = new Set(["10", "20", "31", "42", "48", "49", "50", "97"]);
+// The enumeration of PaymentMeansCodeType in the 6.0.x schemas; the export allows only these too.
+export const PAYMENT_MEANS_CODES: ReadonlySet<string> = new Set([
+  "10",
+  "20",
+  "31",
+  "42",
+  "48",
+  "49",
+  "50",
+  "97",
+]);
 
 export const SUPPORTED_VERSIONS = ["6.0.1", "6.0.2"] as const;
 
@@ -214,11 +223,13 @@ export function isdocFromXml(root: XmlNode): ImportDocument {
   const totalMinor = money(totals, "TaxInclusiveAmount") + rounding;
   const subtotalMinor = lines.reduce((sum, line) => sum + line.netMinor, 0);
 
-  const payments = children(at(root, "PaymentMeans") ?? root, "Payment").map((p) =>
-    at(p, "Details"),
-  );
-  const details = payments.find((d) => d && text(d, "PaymentDueDate")) ?? payments.find(Boolean);
-  const paymentMeansCode = text(root, "PaymentMeans", "Payment", "PaymentMeansCode");
+  const payments = children(at(root, "PaymentMeans") ?? root, "Payment");
+  const chosen =
+    payments.find((p) => text(at(p, "Details"), "PaymentDueDate")) ??
+    payments.find((p) => at(p, "Details")) ??
+    payments[0];
+  const details = chosen && at(chosen, "Details");
+  const paymentMeansCode = chosen ? text(chosen, "PaymentMeansCode") : "";
 
   const account: ImportAccount = {
     number: text(details, "ID"),
