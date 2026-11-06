@@ -199,3 +199,52 @@ describe("archiv v2 se seznamem souborů", () => {
     expect(restored).toHaveLength(ids.length + 1);
   });
 });
+
+describe("dlouhá záloha a obnova", () => {
+  test(
+    "[ARC-007] záloha a obnova delší než lease 120 s si zámek obnovují",
+    { timeout: 160_000 },
+    async () => {
+      const source = seedOwner(db, NOW);
+      for (let batch = 0; batch < 2; batch++) {
+        const rows = Array.from({ length: 1_000 }, (_, index) => ({
+          id: randomUUID(),
+          userId: source,
+          kind: "logo" as const,
+          mimeType: "image/png",
+          name: `logo-${batch}-${index}.png`,
+          size: 16,
+          createdAt: NOW,
+        }));
+        db.insert(file).values(rows).run();
+        for (const row of rows) writeBlob(source, row.id, Buffer.from(row.id.slice(0, 16)));
+      }
+      // Every reading of the clock is a second later, so the jobs run for simulated hours; any
+      // reading that finds the lease of the running worker lapsed is recorded.
+      let now = NOW.getTime();
+      let lapsed = 0;
+      let watching = false;
+      setClockForTests({
+        now: () => {
+          now += 1_000;
+          const at = new Date(now);
+          if (watching) {
+            watching = false;
+            const state = db.select().from(schedulerState).get();
+            if (state?.holder === "w" && state.leaseUntil && state.leaseUntil <= at) lapsed += 1;
+            watching = true;
+          }
+          return at;
+        },
+      });
+      watching = true;
+      const archive = await backupArchive(db, source);
+      const target = emptyAccount();
+      const row = await restoreArchive(db, target, archive);
+      watching = false;
+      expect(row.status).toBe("done");
+      expect(now - NOW.getTime()).toBeGreaterThan(10 * 120_000);
+      expect(lapsed).toBe(0);
+    },
+  );
+});
