@@ -91,7 +91,35 @@ export function taxSheet(overview: TaxOverview): Sheet {
 
 export type TaxFile = { filename: string; contentType: string; body: string | Uint8Array };
 
-// Computed straight from the database: an export must never come from a stale cache entry.
+// Beyond this a render would hold the shared PDF queue for long; the sheets have no such cost.
+export const TAX_PDF_MAX_ROWS = 2_000;
+let pdfRowLimit = TAX_PDF_MAX_ROWS;
+
+export function setTaxPdfRowLimitForTests(limit: number | null): void {
+  pdfRowLimit = limit ?? TAX_PDF_MAX_ROWS;
+}
+
+async function render(overview: TaxOverview, format: TaxExportFormat) {
+  if (format === "pdf") {
+    if (overview.lines.length + overview.unpaid.length > pdfRowLimit) {
+      throw new ServiceError(T.errors.pdfTooLong(pdfRowLimit));
+    }
+    return {
+      contentType: "application/pdf",
+      body: new Uint8Array(await renderTaxOverviewPdf(overview)),
+    };
+  }
+  const sheet = taxSheet(overview);
+  return format === "csv"
+    ? { contentType: "text/csv; charset=utf-8", body: toCsv(sheet) }
+    : {
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        body: toXlsx(sheet),
+      };
+}
+
+// Computed straight from the database: an export must never come from a stale cache entry. The
+// audit follows the render, so it never records a file that did not come out.
 export async function exportTaxOverview(
   actor: Actor,
   input: TaxFilter & { today: CalendarDate },
@@ -101,6 +129,7 @@ export async function exportTaxOverview(
   if (!ownerId) throw new ServiceError(T.errors.signedOut);
   enforceRateLimit(actor, RATE_RULES.exportUser);
   const overview = overviewOf(db, ownerId, input, input.today);
+  const file = await render(overview, format);
   mutate(actor, "tax.export", (_tx, audit) =>
     audit({
       entity: "tax_overview",
@@ -110,20 +139,5 @@ export async function exportTaxOverview(
       after: { format, year: input.year, basis: input.basis, lines: overview.lines.length },
     }),
   );
-  const filename = `danovy-podklad-${input.year}-${input.basis}.${format}`;
-  if (format === "pdf") {
-    return {
-      filename,
-      contentType: "application/pdf",
-      body: new Uint8Array(await renderTaxOverviewPdf(overview)),
-    };
-  }
-  const sheet = taxSheet(overview);
-  return format === "csv"
-    ? { filename, contentType: "text/csv; charset=utf-8", body: toCsv(sheet) }
-    : {
-        filename,
-        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        body: toXlsx(sheet),
-      };
+  return { filename: `danovy-podklad-${input.year}-${input.basis}.${format}`, ...file };
 }

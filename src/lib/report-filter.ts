@@ -188,7 +188,7 @@ export function defaultTaxYear(today: CalendarDate): number {
   return today.slice(5) <= "03-31" ? year - 1 : year;
 }
 
-const FIRST_TAX_YEAR = 2000;
+export const FIRST_TAX_YEAR = 2000;
 
 function taxYear(value: string | undefined, today: CalendarDate): number | undefined {
   if (!value || !/^\d{4}$/.test(value)) return undefined;

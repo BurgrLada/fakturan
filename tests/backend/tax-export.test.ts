@@ -12,7 +12,11 @@ import { readXlsx } from "@/lib/safe-input/xlsx-reader";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog } from "@/server/db/schema";
-import { exportTaxOverview, taxOverview } from "@/server/services/tax-report";
+import {
+  exportTaxOverview,
+  setTaxPdfRowLimitForTests,
+  taxOverview,
+} from "@/server/services/tax-report";
 import {
   issuedDocument,
   namedCustomer,
@@ -133,5 +137,55 @@ describe("výstupy daňového přehledu", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-disposition")).toMatch(/^attachment/);
     expect(decoder.decode(await response.arrayBuffer())).toContain(T.disclaimer);
+
+    const strict = (fields: Record<string, string>) =>
+      POST(
+        new Request("http://localhost:3000/prehledy/dane/export", {
+          method: "POST",
+          headers: { origin: "http://localhost:3000" },
+          body: new URLSearchParams(fields),
+        }) as never,
+      );
+    const good = { rok: "2026", zaklad: "uhrada", format: "csv" };
+    expect((await strict(good)).status).toBe(200);
+    for (const bad of [
+      { ...good, rok: "2031" },
+      { ...good, rok: "abc" },
+      { ...good, zaklad: "jiny" },
+      { ...good, format: "docx" },
+      { ...good, navic: "1" },
+      { rok: "2026", zaklad: "uhrada" },
+    ]) {
+      expect((await strict(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+  });
+
+  test("[TAX-003] PDF nad strop řádků odkáže na Excel a audit nevznikne", async () => {
+    const owner = reportOwner(db, "2026-01-02");
+    const client = namedCustomer(owner, "Strop s.r.o.");
+    for (let i = 1; i <= 4; i += 1) {
+      const date = `2026-01-0${i + 1}`;
+      pay(
+        owner,
+        issuedDocument(owner, client, { issueDate: date, totalMinor: 10_000 }),
+        date,
+        10_000,
+      );
+    }
+    setTaxPdfRowLimitForTests(3);
+    try {
+      await expect(exportTaxOverview(webActor(owner), FILTER, "pdf")).rejects.toThrow(
+        T.errors.pdfTooLong(3),
+      );
+    } finally {
+      setTaxPdfRowLimitForTests(null);
+    }
+    const audited = db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.ownerId, owner), eq(auditLog.action, "tax.export")))
+      .all();
+    expect(audited).toEqual([]);
+    expect((await exportTaxOverview(webActor(owner), FILTER, "xlsx")).filename).toMatch(/xlsx$/);
   });
 });

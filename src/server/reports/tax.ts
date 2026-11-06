@@ -91,7 +91,8 @@ function relatedNumber(ownerId: string, role: "final" | "advance"): SQL<string |
   return role === "final"
     ? sql<string | null>`(SELECT f.number FROM invoice AS f
         WHERE f.user_id = ${ownerId} AND f.related_invoice_id = ${outer("id")}
-          AND f.type = 'invoice' AND f.status NOT IN ('draft', 'cancelled') LIMIT 1)`
+          AND f.type = 'invoice' AND f.status NOT IN ('draft', 'cancelled')
+        ORDER BY f.issue_date, f.number, f.id LIMIT 1)`
     : sql<string | null>`(SELECT a.number FROM invoice AS a
         WHERE a.user_id = ${ownerId} AND a.id = ${outer("related_invoice_id")}
           AND a.type = 'advance' LIMIT 1)`;
