@@ -2,7 +2,7 @@ import { MAX_UPLOAD_BYTES } from "@/lib/import-preview";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { env } from "@/server/env";
-import { readCapped, TooLarge } from "@/server/monitoring/tunnel";
+import { readCapped, ReadTimeout, TooLarge } from "@/server/monitoring/tunnel";
 import { RATE_RULES } from "@/server/rate-limit";
 import { enforceRateLimit, RateLimitError, ServiceError } from "@/server/services/access";
 import { attachImportPdf, ImportPdfRefused } from "@/server/services/files";
@@ -43,6 +43,7 @@ export async function POST(
   } catch (error) {
     await request.body?.cancel().catch(() => {});
     if (error instanceof TooLarge) return reply(413, { error: T.pdfTooLarge });
+    if (error instanceof ReadTimeout) return reply(408, { error: T.uploadTimeout });
     if (error instanceof RateLimitError) return reply(429, { error: error.message });
     if (error instanceof ImportPdfRefused) return reply(error.status, { error: error.message });
     if (error instanceof ServiceError) {

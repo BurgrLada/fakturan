@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { MAX_UPLOAD_BYTES } from "@/lib/import-preview";
+import { TEXTS } from "@/lib/texts";
 import { auditLog, file, importBatch, rateLimit } from "@/server/db/schema";
 import { userDir } from "@/server/files/store";
 import { createBatch } from "@/server/services/import-batch";
@@ -216,6 +217,38 @@ describe("ruční PDF k importovanému dokladu", () => {
     expect(linked(id)).toBeNull();
     expect(filesOf(owner)).toEqual([]);
     expect(onDisk(owner)).toEqual([]);
+  });
+
+  test("[SEC-005] nahrávání, které se zasekne, skončí po 120 s chybou 408 a nic neuloží", async () => {
+    const { owner, id } = imported();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { POST } = await import("@/app/(app)/faktury/[id]/priloha/route");
+      // Sends the PDF header and then nothing more, never closing the body.
+      const stalled = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(pdf.subarray(0, 8));
+        },
+      });
+      const pending = POST(
+        new Request(`${ORIGIN}/faktury/${id}/priloha`, {
+          method: "POST",
+          body: stalled,
+          headers: { origin: ORIGIN, "x-file-name": "faktura.pdf" },
+          duplex: "half",
+        } as RequestInit),
+        { params: Promise.resolve({ id }) },
+      );
+      await vi.advanceTimersByTimeAsync(120_001);
+      const response = await pending;
+
+      expect(response.status).toBe(408);
+      expect(await response.json()).toEqual({ error: TEXTS.importing.imported.uploadTimeout });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(linked(id)).toBeNull();
+    expect(filesOf(owner)).toEqual([]);
   });
 
   test("[SEC-001] bez přihlášení nebo z cizího původu se nic neuloží", async () => {

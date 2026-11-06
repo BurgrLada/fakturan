@@ -3085,6 +3085,7 @@ export const TEXTS = {
       notPdf: "Soubor není PDF",
       notImported: "PDF jde přiložit jen k importovanému dokladu",
       pdfTooLarge: "PDF je větší než 25 MB",
+      uploadTimeout: "Nahrávání PDF trvalo příliš dlouho, zkuste to znovu",
       attachFailed: "PDF se nepodařilo nahrát, zkuste to znovu",
     },
     errors: {

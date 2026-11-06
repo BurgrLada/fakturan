@@ -7,6 +7,7 @@ const READ_TIMEOUT_MS = 5000;
 type Send = (url: string, init: RequestInit) => Promise<Response>;
 
 export class TooLarge extends Error {}
+export class ReadTimeout extends Error {}
 
 // Aborts as soon as the cap is crossed, so an oversize body is never buffered whole.
 export async function readCapped(
@@ -40,7 +41,7 @@ export async function readCapped(
   } finally {
     clearTimeout(timer);
   }
-  if (timedOut) throw new Error("timeout");
+  if (timedOut) throw new ReadTimeout("timeout");
   return Buffer.concat(chunks);
 }
 

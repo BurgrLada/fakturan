@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
@@ -15,7 +15,9 @@ import {
   payment,
   schedulerState,
 } from "@/server/db/schema";
-import { readBlob } from "@/server/files/store";
+import { blobPath, readBlob } from "@/server/files/store";
+import { attachImportPdf } from "@/server/services/files";
+import { undoBatch } from "@/server/services/import-undo";
 import { drainHeavy } from "@/server/jobs/worker";
 import { confirmBatch, editPreview, getPreview, startParse } from "@/server/services/import-batch";
 import { listPayments } from "@/server/services/payments";
@@ -539,3 +541,25 @@ describe("import ISDOC", () => {
 function committedSync(owner: string, batchId: string, revision: number) {
   return confirmBatch(webActor(owner), batchId, revision);
 }
+
+describe("ruční PDF a vrácení importu", () => {
+  test("[IMP-005] vrácení importu smaže i PDF přiložené ručně", async () => {
+    const owner = importOwner(db, NOW);
+    const { id } = await parsed(owner, [{ name: "x.isdoc", bytes: isdoc("faktura-czk.isdoc") }]);
+    await committed(db, owner, id);
+    const doc = byNumber(owner, "2026-0001");
+    const { fileId } = attachImportPdf(
+      webActor(owner),
+      doc.id,
+      Buffer.from("%PDF-1.4\n%%EOF"),
+      "faktura.pdf",
+    );
+    expect(existsSync(blobPath(owner, fileId))).toBe(true);
+
+    undoBatch(webActor(owner), id);
+
+    expect(docs(owner)).toEqual([]);
+    expect(db.select().from(file).where(eq(file.id, fileId)).get()).toBeUndefined();
+    expect(existsSync(blobPath(owner, fileId))).toBe(false);
+  });
+});
