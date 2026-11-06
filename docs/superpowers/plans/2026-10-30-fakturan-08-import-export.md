@@ -639,3 +639,34 @@ Kontroly plánu: všechna ID z rozsahu v `tests/spec-pending.txt` mají úkol, E
 - **Plán 9:** dokumentace importu, exportu a obnovy, UI-010, UI-012, UI-002. Limit těla na reverzní proxy pro zálohu 1 GiB **[R-35]**. Sledovat místo na svazku u výsledků exportu a dočasných složek, rozhodnout o limitu na účet. `TST-013` s novými soubory. Verze aplikace v manifestu zálohy jako běžná součást vydání. Přidat `tests/fixtures/db/<verze>.sql` při každém vydání **[R-36]**.
 - **Ruční ověření:** otevřít Excel z exportu a XLSX z importu ve skutečném Excelu a LibreOffice, ISDOC z exportu načíst v jednom cizím programu nebo validátoru, PDF daňového přehledu vytisknout.
 - **Známá rizika:** Schematron se nespouští, soulad nad rámec `rules.ts` je jen podle XSD **[R-3]**. Verze 6.0 a 6.0.0 nejsou podporované kvůli chybějícímu XSD **[R-1]**. Skener PDF nečte přílohy s jiným filtrem než Flate a neověřuje vztah přílohy `/AFRelationship`, spoléhá na kořen dokumentu **[R-6]**. Importovaná platba v cizí měně je kurzem dokladu, ne dnem úhrady **[R-14]**. Doklad stornovaný po 31. 12. přehled v minulém roce neukáže **[R-28]**. Záloha je nezašifrovaný archiv s osobními údaji, ukládá si ji uživatel, stránka to říká. Archiv není podepsaný, změněný obsah projde, pokud je platný a sedí SHA-256 v manifestu, škoda je omezená na účet, který ho obnovuje **[R-30]**. Synchronní potvrzení dávky a první fáze zálohy krátce blokují proces **[R-8]**. Import a obnova změní razítko plánu 7 a zneplatní celou cache účtu, což je správně.
+
+### Doplněno při uzavření plánu (Task 10)
+
+**Přenos do plánu 9**
+- **IMP-005:** ruční přiložení PDF k importovanému dokladu po importu. Dnes se přiloží jen PDF z dávky importu (partial).
+- **TST-013:** mutační skóre nových modulů je pod prahem 90 (`tests/spec-partial.txt`). Doplnit testy hlavně pro `pdf-embedded`, `isdoc/parse` (spolu s backendovými testy ISDOC) a `safe-input/csv`.
+- **Paměť obnovy:** řádky celého archivu leží v paměti až do jediné transakce, nejvýš kolem 2 milionů řádků podle `RESTORE_LIMITS`. Nečtená položka ZIPu se drží celá jako bajty (do 200 MiB) a řetězce ani pole z ní nevznikají. Delší výhled je mezisoubor a vkládání po tabulkách ve stejné transakci.
+- **Interní texty** `worker.ts` („Úloha přišla o zámek plánovače“), `import-parse.ts` a `pdf-embedded.ts` přesunout do `texts.ts` (m-12 bloku B).
+- **Testovací háček** `setTaxPdfRowLimitForTests` v produkčním kódu nahradit parametrem (N-4 bloku C).
+
+**Známá omezení**
+- Import z CSV a Excelu umí jen typ `invoice` (m-11 bloku B).
+- Faktura z tabulky bez účtu nemá způsob platby: ISDOC ji exportuje bez `PaymentMeans` a PDF způsob platby neukazuje.
+- Doklady importované před migrací `0045` nemají uložený `PaymentMeansCode`, takže jejich ISDOC export nemá `PaymentMeans`, splatnost ani VS.
+- PDF daňového přehledu má strop 2 000 řádků. Delší přehled je jen v Excelu a CSV (422 s hláškou). PDF se vykresluje synchronně, jen se stropem.
+- Potvrzení dávky s 5 000 doklady drží event loop asi 18 s, protože jde o jednu synchronní `mutate` [R-8]. Snímek zálohy 5 000 dokladů trvá 0,5 s.
+- Průběh importu a exportu se zapisuje mimo `mutate` (`jobs/import-progress.ts`, `jobs/export-progress.ts`). Je to stav úlohy, ne data účtu, a zápis je omezený `user_id` i ID dávky (m-7 bloku B).
+- Matice TST-009 kryje entity plánů 7 a 8: `dashboard`, `dashboard_widget`, `import_batch`, `mapping_preset`, `export_job` a stažení exportu. Proti každé stojí cizí uživatel i administrátor.
+- Odložené drobnosti:
+  - **ZIP:** uložená položka s data descriptorem je odmítnutá jako poškozená a hláška zatím neradí uložit archiv s kompresí. XLSX se rozbaluje dvakrát. Kódy zemí `UK` a `XI` se nepřevádějí (blok A).
+  - **Dávky importu:** zahozená dávka se do úklidu ukazuje jako „Selhalo“. Zahození dávky během běžícího nahrání může nechat soubor až do úklidu (blok B).
+  - **Čísla:** číselná buňka XLSX v exponentu (`1E-3`) se hlásí jako neplatné číslo (m-10 bloku B).
+  - **Limity:** limit požadavků se spotřebuje i tehdy, když export nebo zálohu odmítne strop 3 rozpracovaných (N-3 bloku C).
+  - **Daňový export:** souborová pole ve formuláři nedají 400 (N-5 bloku C).
+  - **Bez vlastního testu** zůstaly společný strop PDF a ISDOC v poště, snímek ID exportu a selhání `finishExport` (m-2, m-3 a m-5 bloku C).
+  - **Obnova** (m-2, m-7 a m-8 bloku D):
+    - libovolné ID z archivu nahradí stejný řetězec ve všech `json-ids` sloupcích účtu, například ID `manual`;
+    - přeskočené adresáře a vnořené archivy v ZIPu obejdou kontrolu „každá položka je v manifestu“;
+    - commit obnovy je jedna synchronní dávka.
+- **Obnova** kontroluje tvar jen u JSON sloupců, které čtou stránky, PDF a odeslání (vzhled, snapshoty, pevné kurzy, adresy, data). U ostatních JSON hlídá jen hloubku.
+- **Upload k obnově**, který nespustil obnovu, se smaže po hodině úlohou `export-cleanup`.

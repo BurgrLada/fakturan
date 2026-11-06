@@ -137,6 +137,8 @@ function externalProblems(row: Invoice, lines: Line[], label: string): string[] 
 }
 
 export function invoiceProblems(q: Checker, ownerId: string): string[] {
+  // An instance without accounts is checked with an empty owner; it has no documents to judge.
+  if (!ownerId) return [];
   const problems: string[] = [];
   const rows = q.select().from(invoice).where(scoped(ownerId).where(invoice)).all();
   const linesOf = new Map<string, Line[]>();
@@ -195,6 +197,7 @@ export function invoiceProblems(q: Checker, ownerId: string): string[] {
 // A payment in a foreign currency is valid (PAY-006), so currency is checked through the credit:
 // only a payment in the document currency must credit exactly what it says.
 export function paymentProblems(q: Checker, ownerId: string): string[] {
+  if (!ownerId) return [];
   const problems: string[] = [];
   const paidByInvoice = new Map(
     q

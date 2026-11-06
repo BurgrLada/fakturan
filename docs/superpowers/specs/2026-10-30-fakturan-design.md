@@ -465,7 +465,7 @@ Princip: uživatel si ve Fio nastaví e-mailová oznámení do své schránky a 
 
 ### Daňový přehled (TAX)
 
-- **TAX-001** Roční přehled: příjmy podle data úhrady, seznam plateb, součet v CZK, neuhrazené faktury k 31. 12.
+- **TAX-001** Roční přehled: příjmy podle data úhrady, seznam plateb, součet v CZK, neuhrazené faktury k 31. 12. Neuhrazené k 31. 12. se skládají z historie, ne z dnešního zůstatku: doklady vystavené do toho dne mimo koncepty a storna, bez záloh, a odečítají se jen platby, opravy a uhrazená záloha s datem do toho dne. Pro běžný rok platí dnešek a nadpis to řekne. Doklad stornovaný až později se nezobrazí, protože storno nemá datum, a přehled to uvádí. Doklad bez kurzu je mezi nepřepočtenými.
 - **TAX-002** Přepínač základu: datum úhrady, nebo datum vystavení. Výchozí datum úhrady.
 - **TAX-003** Výstup PDF, Excel, CSV.
 - **TAX-004** Přehled obsahuje upozornění, že jde o podklad, ne o daňové poradenství.
@@ -476,16 +476,16 @@ Princip: uživatel si ve Fio nastaví e-mailová oznámení do své schránky a 
 - **IMP-001** Import zákazníků, ceníku a faktur z CSV a Excelu přes průvodce: nahrání, mapování sloupců, náhled, kontrola chyb, potvrzení. Slouží jako záloha pro systémy bez ISDOC.
 - **IMP-002** Mapování jde uložit jako předlohu. Součástí aplikace jsou předlohy pro CSV exporty Fakturoidu a iDokladu, pokud to umožní jejich reálné soubory (viz 24).
 - **IMP-003** Import dokumentu ISDOC převezme číslo, UUID, typ dokladu, data, zákazníka, položky, měnu, částky, VS a účet. UUID je klíč proti duplicitám.
-- **IMP-012** ISDOC neobsahuje datum úhrady. Doklad s `PayableAmount` 0 (ověřeno proti skutečným úhradám ve Fakturovači) se založí jako uhrazený s datem úhrady rovným datu splatnosti a příznakem „datum odhadnuto“. Náhled importu to ukáže a datum jde upravit jednotlivě i hromadně. Roční daňový přehled na odhadnutá data upozorní **[návrh]**.
+- **IMP-012** ISDOC neobsahuje datum úhrady. Doklad s `PayableAmount` 0 (ověřeno proti skutečným úhradám ve Fakturovači) se založí jako uhrazený s datem úhrady rovným datu splatnosti a příznakem „datum odhadnuto“. Náhled importu to ukáže a datum jde upravit jednotlivě i hromadně. Roční daňový přehled na odhadnutá data upozorní **[návrh]**. Doklad s `0 < PayableAmount < celek` dostane platbu na rozdíl, stav částečně uhrazeno, rovněž s odhadem. Platba z importu nespouští potvrzení ani konečnou fakturu zálohy, platby v cizí měně nesou kurz dokladu a dobropis platbu nedostává. `PaidDepositsAmount` se páruje se zálohou v dávce nebo v účtu: při shodě se konečná faktura naváže na zálohu a platba nevznikne, bez shody vznikne platba s odhadem a upozorněním „záloha nenalezena“, takže úhrada zálohy se nikdy nezapočte dvakrát.
 - **IMP-013** Skutečné faktury se do repozitáře nedávají. Testovací fixture ISDOC jsou smyšlené, se strukturou podle reálného exportu.
 - **IMP-004** Importovaná faktura má štítek „vytvořeno jinde“ a název zdroje, zachová původní číslo a nezasahuje do číselných řad.
-- **IMP-005** Importovaná faktura jde jen číst **[návrh]**, lze k ní přiložit původní PDF. Uhrazení a smazání jsou povolené.
+- **IMP-005** Importovaná faktura jde jen číst **[návrh]**, lze k ní přiložit původní PDF. Uhrazení a smazání jsou povolené. Importovaný doklad nespouští žádnou automatiku: upomínky ho přeskakují, potvrzení platby ani konečná faktura zálohy nevzniknou ani po ruční platbě a avízo ho samo nespáruje, nabídne ho k ručnímu přiřazení. Upozornění na splatnost a pohledávky ho dál ukazují.
 - **IMP-006** Zákazníci se párují podle IČO, jinak názvu. Chybějící se založí, náhled to ukáže.
 - **IMP-007** Duplicity (stejné číslo) se přeskočí a vypíšou.
 - **IMP-008** Celý import je transakční a jde vrátit zpět podle dávky.
 - **IMP-009** Chybný řádek zastaví potvrzení s přesnou chybou, nebo jde přeskočit.
 - **IMP-010** **[návrh]** Záloha se obnovuje jen do prázdného účtu, i na jiné instanci, s novými ID. Po obnově jsou všechny automatiky vypnuté a SMTP a IMAP je nutné zadat znovu. Audit log ze zálohy se neslučuje: přiloží se jako soubor ke čtení a do nového logu přibude záznam o obnovení.
-- **IMP-011** Importovaný soubor má limit 25 MB **[návrh]**, zpracovává se na pozadí s průběhem.
+- **IMP-011** Importovaný soubor má limit 25 MB **[návrh]**, zpracovává se na pozadí s průběhem. Výjimkou je záloha účtu: má vlastní nahrání s limitem 1 GiB a stejný limit platí už při jejím vytvoření, záloha, kterou by obnova odmítla, vůbec nevznikne. Formát ZIP bez ZIP64 nesmí ani tiše dojít ke 4 GiB. Reverzní proxy musí mít limit těla aspoň 1 GiB.
 
 ## 17. Export (EXP)
 

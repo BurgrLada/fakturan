@@ -363,7 +363,8 @@ export function assertConsistent(db: Db, ownerId: string): void {
   problems.push(...noticeProblems(db, ownerId));
   problems.push(...rateListProblems(db));
   problems.push(...reportProblems(db, ownerId));
-  problems.push(...taxProblems(db, ownerId));
+  // An instance without accounts is checked with an empty owner; the tax reports refuse one.
+  if (ownerId) problems.push(...taxProblems(db, ownerId));
 
   if (problems.length > 0) {
     throw new Error(`Data účtu ${ownerId} nejsou konzistentní:\n${problems.join("\n")}`);

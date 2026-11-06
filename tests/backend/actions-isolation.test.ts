@@ -153,7 +153,17 @@ import { assertIsolated } from "../helpers/isolation";
 import { registerJob } from "@/server/jobs/registry";
 import { drainHeavy } from "@/server/jobs/worker";
 import { runExport } from "@/server/services/export-run";
-import { recoverExportJob } from "@/server/services/exports";
+import {
+  createExport,
+  ExportNotFoundError,
+  findExport,
+  listExports,
+  openExport,
+  recoverExportJob,
+} from "@/server/services/exports";
+import { createBatch, discardBatch, getBatch, listBatches } from "@/server/services/import-batch";
+import { deletePreset, listPresets, savePreset } from "@/server/services/mapping-presets";
+import { listInstanceAudit } from "@/server/services/instance-audit";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { backupListAction, createBackupAction } from "@/app/(app)/nastaveni/zaloha/actions";
 import { RATE_RULES } from "@/server/rate-limit";
@@ -1132,6 +1142,100 @@ describe("akce zálohy", () => {
     for (const bytes of Object.values(foreign)) {
       expect(strFromU8(bytes)).not.toContain(invoiceId);
       expect(strFromU8(bytes)).not.toContain(mine);
+    }
+  });
+});
+
+describe("matice izolace plánů 7 a 8", () => {
+  const mapping = {
+    target: "customers" as const,
+    columns: { name: "Název" },
+    dateFormat: "dmy" as const,
+    decimal: "," as const,
+    currency: "CZK" as const,
+    source: "",
+  };
+  let round = 0;
+  // Each subject is checked against a plain stranger and against an administrator: the admin role
+  // reaches users and instance settings, never another account's data (TST-009).
+  const pairs = (): [string, string][] => {
+    round += 1;
+    const owner = `matice-${round}`;
+    const stranger = `matice-${round}-cizi`;
+    const admin = `matice-${round}-admin`;
+    for (const id of [owner, stranger, admin]) seed(id);
+    db.update(user).set({ role: "admin" }).where(eq(user.id, admin)).run();
+    return [
+      [owner, stranger],
+      [`${owner}-b`, admin],
+    ].map(([a, b]) => {
+      seed(a!);
+      return [a!, b!] as [string, string];
+    });
+  };
+
+  test("[TST-009] cizí uživatel i administrátor nedostanou entity plánů 7 a 8", async () => {
+    registerJob("export.run", { run: runExport, recover: recoverExportJob });
+    for (const owners of pairs()) {
+      await assertIsolated({
+        owners,
+        create: (ownerId) => createBatch(actor(ownerId), "isdoc").id,
+        find: (ownerId, id) => getBatch(ownerId, id),
+        list: (ownerId) => listBatches(ownerId).map((row) => row.id),
+        update: (ownerId, id) => {
+          discardBatch(actor(ownerId), id);
+          return 1;
+        },
+      });
+      await assertIsolated({
+        owners,
+        create: (ownerId) => savePreset(actor(ownerId), { name: `Moje ${ownerId}`, mapping }).id,
+        find: (ownerId, id) => listPresets(ownerId).find((preset) => preset.id === id),
+        list: (ownerId) => listPresets(ownerId).map((preset) => preset.id),
+        remove: (ownerId, id) => {
+          deletePreset(actor(ownerId), id);
+          return 1;
+        },
+      });
+      await assertIsolated({
+        owners,
+        create: async (ownerId) => {
+          const { id } = createExport(actor(ownerId), { kind: "customers", format: "csv" });
+          await drainHeavy("w");
+          return id;
+        },
+        find: (ownerId, id) => findExport(db, ownerId, id),
+        list: (ownerId) => listExports(ownerId).map((row) => row.id),
+      });
+      const [owner, other] = owners;
+      const [mine] = listExports(owner);
+      expect(openExport(actor(owner), mine!.id).size).toBeGreaterThan(0);
+      expect(() => openExport(actor(other), mine!.id)).toThrow(ExportNotFoundError);
+
+      const [home] = ensureDashboards(actor(owner));
+      ensureDashboards(actor(other));
+      expect(getDashboard(other, home!.id)).toBeFalsy();
+      expect(listDashboards(other).map((row) => row.id)).not.toContain(home!.id);
+      const widget = home && getDashboard(owner, home.id)!.widgets[0];
+      expect(() => removeWidget(actor(other), { id: widget!.id })).toThrow();
+      expect(getDashboard(owner, home!.id)!.widgets.map((row) => row.id)).toContain(widget!.id);
+    }
+
+    // The instance audit an administrator reads names no entity of an account.
+    const admin = `matice-${round}-admin`;
+    const entities = listInstanceAudit(actor(admin), { pageSize: 500 }).rows.map(
+      (row) => row.entity,
+    );
+    for (const entity of [
+      "import_batch",
+      "mapping_preset",
+      "export_job",
+      "account_backup",
+      "account_restore",
+      "dashboard",
+      "dashboard_widget",
+    ]) {
+      expect(entities).not.toContain(entity);
     }
   });
 });

@@ -561,6 +561,11 @@ describe("obnova účtu", () => {
     expect(() => startRestore(webActor(target), uploadId)).toThrow(E.notEmpty);
   });
 
+  test("[TST-009] kontrola dat instance bez účtu nic nehledá a nespadne", () => {
+    expect(paymentProblems(db, "")).toEqual([]);
+    expect(() => assertConsistent(db, "")).not.toThrow();
+  });
+
   test("[TST-009] kontrola plateb počítá jen doklady téhož účtu", () => {
     const owner = seedOwner(db, NOW);
     const stranger = seedOwner(db, NOW);

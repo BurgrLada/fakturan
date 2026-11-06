@@ -72,6 +72,24 @@ docker run --rm -v fakturan-data:/data debian:bookworm-slim sh -c \
 docker start fakturan
 ```
 
+### Záloha a obnova jednoho účtu
+
+Každý uživatel si v Nastavení, Záloha vytvoří archiv `fakturan-zaloha-RRRR-MM-DD.zip` s celým
+účtem: doklady, platby, zákazníci, ceník, šablony, pravidelné faktury, nastavení, nástěnky,
+přiložené soubory (loga, odeslaná PDF a ISDOC, PDF z importu) a historie změn. Záloha běží na
+pozadí a je 7 dní ke stažení. Hesla SMTP a schránky s avízy v ní nejsou, IP adresa a prohlížeč
+jiných osob (správce) v historii jsou skryté. Archiv není šifrovaný ani podepsaný, obsahuje osobní
+údaje a ukládá si ho uživatel.
+
+Obnova jde jen do prázdného účtu, třeba hned po registraci na jiné instanci: v Nastavení, Záloha
+nahrajte ZIP a stiskněte Obnovit ze zálohy. Archiv se dvakrát celý ověří (limity, kontrolní součty,
+každý řádek), všechna ID dostanou nové hodnoty a data se zapíšou v jedné transakci, takže při chybě
+zůstane účet beze změny. Po obnově jsou všechny automatiky vypnuté, plán s odesíláním čeká na nové
+potvrzení a SMTP i schránku s avízy je nutné zadat znovu. Limity: archiv 1 GiB, soubor v něm
+25 MiB, tabulka 200 MiB po rozbalení, 200 000 položek; záloha, která by limity překročila, vůbec
+nevznikne. Smazání účtu nabídne zálohu, ale nečeká na ni a archiv zmizí s účtem, proto ho stáhněte
+předem.
+
 ## Automatizace a pošta
 
 Plánovač běží uvnitř aplikace, žádná externí úloha není potřeba. Každou minutu zpracuje frontu,
@@ -149,9 +167,29 @@ nezná IP klienta, všichni klienti sdílejí jeden bucket rate limitu (20 přih
 přepisovat nebo k němu přidávat, nikdy ho nepředávat od klienta beze změny. V produkci bez
 `TRUST_PROXY` aplikace při startu zapíše varování.
 
+Proxy musí pustit tělo požadavku aspoň 1 GiB na `POST /nastaveni/zaloha/nahrani` (nahrání zálohy
+k obnově) a 25 MB na `POST /nastaveni/import/nahrani`. V nginx `client_max_body_size 1g;` pro tuto
+cestu, v Traefiku middleware `buffering` s `maxRequestBodyBytes`. Nižší limit skončí chybou 413
+z proxy dřív, než požadavek dorazí do aplikace.
+
+## Ověření importu proti zdroji (TST-020)
+
+Ruční krok nad skutečnými doklady, vždy mimo repozitář:
+
+1. Na testovací instanci importujte export ze zdrojového systému (ZIP s ISDOC nebo PDF).
+2. Zastavte instanci a zkopírujte `fakturan.db` mimo složku dat.
+3. Spusťte `node scripts/import-compare.ts <export.zip> <kopie.db> [id účtu]`. Skript čte soubor
+   stejnými čtečkami jako import, kopii databáze jen načte do paměti a nic nezapisuje.
+4. Výpis obsahuje jen počty a součty podle roku a měny pro zdroj a pro Fakturan a sloupec shody.
+   Porovnejte je i se součty ve zdrojovém systému. Skutečné doklady ani výpis do repozitáře
+   nepatří (`.gitignore` hlídá `*.isdoc`, `isdoc-faktury-*.zip` a `local-samples/`).
+
 ## Licence
 
 MIT
+
+Schémata ISDOC v `src/server/isdoc/schema/` jsou nezměněné kopie z isdoc.cz a řídí se vlastní
+licencí v jejich hlavičce (text je i v `src/server/isdoc/schema/LICENSE.txt`), ne licencí MIT.
 
 ## Přihlašování
 

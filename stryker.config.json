@@ -16,12 +16,23 @@
     "src/lib/recurrence.ts",
     "src/lib/czech-holidays.ts",
     "src/lib/fx.ts",
-    "src/lib/cnb-rates.ts"
+    "src/lib/cnb-rates.ts",
+    "src/lib/safe-input/**/*.ts",
+    "src/server/isdoc/parse.ts",
+    "src/server/isdoc/rules.ts",
+    "src/server/backup/remap.ts",
+    "src/server/reports/tax.ts"
   ],
-  "vitest": { "configFile": "vitest.config.ts" },
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
   "coverageAnalysis": "perTest",
   "reporters": ["clear-text", "progress"],
-  "thresholds": { "high": 95, "low": 90, "break": 90 },
+  "thresholds": {
+    "high": 95,
+    "low": 90,
+    "break": 90
+  },
   "tempDirName": ".stryker-tmp",
   "cleanTempDir": true
 }
