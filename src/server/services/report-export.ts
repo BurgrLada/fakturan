@@ -68,7 +68,7 @@ function seriesSheet(
   totals: [number, number],
 ): Sheet {
   const currency = bundle.currency;
-  const aligned = alignPrevious(current, previous);
+  const aligned = alignPrevious(current, previous, bundle.anchor);
   return {
     name,
     columns: [C.period, heading, previousLabel(bundle)],

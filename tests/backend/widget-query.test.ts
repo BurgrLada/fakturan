@@ -289,6 +289,91 @@ describe("filtry a období", () => {
     ]);
   });
 
+  test("[DSH-015] běžící listopad 1.–6. se denně páruje s 1.–6. října", () => {
+    const today = "2026-11-06";
+    const owner = reportOwner(db);
+    const customer = namedCustomer(owner, "Den s.r.o.");
+    for (let day = 1; day <= 6; day++) {
+      issuedDocument(owner, customer, { issueDate: `2026-11-0${day}`, totalMinor: day * 100 });
+      issuedDocument(owner, customer, { issueDate: `2026-10-0${day}`, totalMinor: day * 1_000 });
+    }
+    issuedDocument(owner, customer, { issueDate: "2026-10-07", totalMinor: 99_900 });
+    const zeros = (count: number) => Array<number>(count).fill(0);
+
+    const result = run(
+      { period: "this_month", display: "bar", groupBy: "day", compare: "previous" },
+      owner,
+      { today },
+    );
+    expect(result.compare!.range).toEqual({ from: "2026-10-01", to: "2026-10-06" });
+    expect(result.compare!.points).toEqual([
+      1_000,
+      2_000,
+      3_000,
+      4_000,
+      5_000,
+      6_000,
+      ...zeros(24),
+    ]);
+    expect(result.compare!.total).toBe(21_000);
+
+    const bundle = reportBundle(db, owner, parseReportFilter({ obdobi: "mesic" }, today), today);
+    expect(bundle.unit).toBe("day");
+    expect(bundle.invoiced.points.slice(0, 6).map((p) => p.amountMinor)).toEqual([
+      100, 200, 300, 400, 500, 600,
+    ]);
+    expect(alignPrevious(bundle.invoiced, bundle.previousInvoiced, bundle.anchor)).toEqual(
+      result.compare!.points,
+    );
+  });
+
+  test("[DSH-015] ukončený měsíc se dál páruje od konce a součet sedí se souhrnem", () => {
+    const owner = reportOwner(db);
+    const customer = namedCustomer(owner, "Konec s.r.o.");
+    issuedDocument(owner, customer, { issueDate: "2026-08-01", totalMinor: 100 });
+    issuedDocument(owner, customer, { issueDate: "2026-08-02", totalMinor: 200 });
+    issuedDocument(owner, customer, { issueDate: "2026-08-31", totalMinor: 300 });
+    issuedDocument(owner, customer, { issueDate: "2026-09-01", totalMinor: 50 });
+    const september = { from: "2026-09-01", to: "2026-09-30" };
+
+    const result = run(
+      { period: september, display: "bar", groupBy: "day", compare: "previous" },
+      owner,
+    );
+    const points = result.compare!.points!;
+    expect(result.compare!.range).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+    expect(points).toHaveLength(30);
+    expect(points[0]).toBe(300);
+    expect(points[29]).toBe(300);
+    expect(points.reduce((sum, value) => sum + value, 0)).toBe(result.compare!.total);
+
+    const bundle = reportBundle(
+      db,
+      owner,
+      parseReportFilter({ obdobi: "vlastni", od: september.from, do: september.to }, TODAY),
+      TODAY,
+    );
+    expect(bundle.anchor).toBe("end");
+    expect(alignPrevious(bundle.invoiced, bundle.previousInvoiced, bundle.anchor)).toEqual(points);
+    expect(bundle.previous.invoicedMinor).toBe(600);
+  });
+
+  test("[DSH-015] alignPrevious od začátku páruje den se dnem a přebytek dá do posledního", () => {
+    const series = (values: number[]) => ({
+      points: values.map((amountMinor, index) => ({ key: `d${index + 1}`, amountMinor })),
+      unconverted: { count: 0, byCurrency: [] },
+    });
+    const october = series(
+      Array.from({ length: 31 }, (_, index) => (index < 6 ? 10 * (index + 1) : 0)),
+    );
+    expect(alignPrevious(series([1, 2, 3, 4, 5, 6]), october, "start")).toEqual([
+      10, 20, 30, 40, 50, 60,
+    ]);
+    expect(alignPrevious(series([1, 2]), series([1, 2, 3, 4]), "start")).toEqual([1, 9]);
+    expect(alignPrevious(series([1, 2, 3]), series([5, 7]), "start")).toEqual([5, 7, 0]);
+    expect(alignPrevious(series([1, 2, 3]), series([5, 7]))).toEqual([0, 5, 7]);
+  });
+
   test("widget s období 11 let nebo denními koši nad 400 je odmítnutý", () => {
     const eleven = { from: "2015-01-01", to: "2025-12-31" };
     expect(() => run({ period: eleven })).toThrow(ServiceError);

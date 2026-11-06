@@ -33,7 +33,7 @@ import { dueSql, overdueCondition } from "../db/invoice-sql";
 import { customer, invoice, invoiceLine, payment } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "../services/access";
-import { alignPrevious, spanSeries } from "./align";
+import { alignPrevious, anchorFor, spanSeries } from "./align";
 import * as core from "./queries";
 import type { SystemDetail } from "./system-widgets";
 import type { ReportFilter, Unconverted } from "./types";
@@ -496,9 +496,11 @@ function runQuery(
     current.total === null || previous.total === null ? null : current.total - previous.total;
   result.compare = { range: before.range, total: previous.total, delta };
   if (isBucketUnit(config.groupBy) && isAdditive(config.metric) && !config.cumulative) {
+    const span = previousRange(range, mode);
     result.compare.points = alignPrevious(
       asSeries(current.series[0]),
-      spanSeries(asSeries(previous.series[0]), previousRange(range, mode), config.groupBy),
+      spanSeries(asSeries(previous.series[0]), span, config.groupBy),
+      anchorFor(before.range, span),
     );
   }
   return result;

@@ -13,7 +13,7 @@ import { NOT_IN_TOTALS } from "../db/invoice-sql";
 import { invoice, preferences } from "../db/schema";
 import { scoped } from "../db/scoped";
 import type { Reader } from "../services/access";
-import { spanSeries } from "./align";
+import { anchorFor, spanSeries, type AlignAnchor } from "./align";
 import { forecast, type ForecastMonth } from "./forecast";
 import * as core from "./queries";
 import { limitStates, type LimitState } from "./turnover";
@@ -33,6 +33,7 @@ export type ReportBundle = {
   today: CalendarDate;
   range: DateRange;
   previousRange: DateRange;
+  anchor: AlignAnchor;
   compare: CompareMode;
   unit: BucketUnit;
   currency: Currency;
@@ -86,6 +87,7 @@ export function reportBundle(
         today,
         range: filter.range,
         previousRange: before.range,
+        anchor: anchorFor(before.range, span),
         compare,
         unit,
         currency: filter.currency ?? "CZK",

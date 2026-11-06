@@ -176,6 +176,30 @@ describe("doklady bez kurzu a zarovnání období", () => {
     expect(data.previous.invoicedMinor).toBe(170_000);
   });
 
+  test("[DSH-015] export běžícího měsíce páruje dny od začátku jako stránka", () => {
+    const today = "2026-11-06";
+    const owner = reportOwner(db, "2026-09-01");
+    const customer = namedCustomer(owner, "Den s.r.o.");
+    for (let day = 1; day <= 6; day++) {
+      issuedDocument(owner, customer, { issueDate: `2026-11-0${day}`, totalMinor: day * 100 });
+      issuedDocument(owner, customer, { issueDate: `2026-10-0${day}`, totalMinor: day * 1_000 });
+    }
+    setClockForTests({ now: () => new Date(`${today}T10:00:00Z`) });
+    const data = reportBundle(owner, parseReportFilter({ obdobi: "mesic" }, today), today);
+
+    expect(data.anchor).toBe("start");
+    const rows = buildSheet("fakturace", data).rows;
+    expect(rows.slice(0, 6).map((row) => [minor(row[1]), minor(row[2])])).toEqual([
+      [100, 1_000],
+      [200, 2_000],
+      [300, 3_000],
+      [400, 4_000],
+      [500, 5_000],
+      [600, 6_000],
+    ]);
+    expect(minor(totalRow(rows)[2])).toBe(data.previous.invoicedMinor);
+  });
+
   test("[REP-001] kratší předchozí období se doplní nulou na začátku", () => {
     const current = {
       points: [1, 2, 3].map((n) => ({ key: `k${n}`, amountMinor: n })),

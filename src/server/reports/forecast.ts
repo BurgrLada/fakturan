@@ -1,4 +1,5 @@
-import { and, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { Currency } from "@/lib/currency";
 import { addDays } from "@/lib/invoice";
 import { occurrencesBetween } from "@/lib/recurrence";
@@ -115,6 +116,17 @@ function forecastIn(
     result[index]![series] += Number(czk);
   }
 
+  const rateMemo = new Map<string, number | null>();
+  function rateOf(currency: Currency, date: CalendarDate): number | null {
+    if (currency === "CZK") return null;
+    const key = `${currency}:${date}`;
+    if (!rateMemo.has(key)) {
+      rateMemo.set(key, resolveRate(q, ownerId, currency, date, now)?.rateMicros ?? null);
+    }
+    return rateMemo.get(key)!;
+  }
+
+  const advance = alias(invoice, "advance");
   const documents = q
     .select({
       currency: invoice.currency,
@@ -124,9 +136,19 @@ function forecastIn(
       issueDate: invoice.issueDate,
       dueDate: invoice.dueDate,
       due: dueSql,
-      draftRemaining: sql<number>`${invoice.totalMinor} - ${invoice.advanceMinor}`,
+      totalMinor: invoice.totalMinor,
+      advanceTotal: sql<number | null>`${advance.totalMinor} + ${advance.creditsMinor}`,
     })
     .from(invoice)
+    .leftJoin(
+      advance,
+      and(
+        eq(advance.id, invoice.relatedInvoiceId),
+        eq(advance.type, "advance"),
+        ne(advance.status, "cancelled"),
+        scoped(ownerId).where(advance),
+      ),
+    )
     .where(
       scoped(ownerId).where(invoice, (t) =>
         or(
@@ -140,25 +162,17 @@ function forecastIn(
     )
     .all();
   for (const row of documents) {
-    const advance = row.type === "advance";
+    const isAdvance = row.type === "advance";
     if (row.status === "draft") {
-      const rate =
-        row.rateMicros ??
-        (row.currency === "CZK"
-          ? null
-          : (resolveRate(q, ownerId, row.currency, row.issueDate ?? today, now)?.rateMicros ??
-            null));
-      add(
-        advance ? "advances" : "plannedDrafts",
-        row.dueDate,
-        row.currency,
-        row.draftRemaining,
-        rate,
-      );
+      const rate = row.rateMicros ?? rateOf(row.currency, row.issueDate ?? today);
+      // The advance itself stays in `advances` with what is still due on it, so a payment moves
+      // money from one series to the other: the draft only adds what exceeds the whole advance.
+      const remaining = Math.max(0, row.totalMinor - (row.advanceTotal ?? 0));
+      add(isAdvance ? "advances" : "plannedDrafts", row.dueDate, row.currency, remaining, rate);
       continue;
     }
     const overdue = row.dueDate !== null && row.dueDate < today;
-    const series = advance ? "advances" : overdue ? "overdue" : "open";
+    const series = isAdvance ? "advances" : overdue ? "overdue" : "open";
     add(series, row.dueDate, row.currency, row.due, row.rateMicros);
   }
 
@@ -181,11 +195,7 @@ function forecastIn(
     const series = document.type === "advance" ? "advances" : "planned";
     for (const occurrence of occurrencesOf(q, plan, through)) {
       const due = addDays(occurrence, document.dueDays);
-      const rate =
-        document.currency === "CZK"
-          ? null
-          : (resolveRate(q, ownerId, document.currency, occurrence, now)?.rateMicros ?? null);
-      add(series, due, document.currency, amountMinor, rate);
+      add(series, due, document.currency, amountMinor, rateOf(document.currency, occurrence));
     }
   }
 

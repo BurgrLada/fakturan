@@ -22,7 +22,7 @@ function comparedSeries(bundle: ReportBundle): ChartSeries[] {
   ];
 }
 
-// alignPrevious pairs the buckets from the end, as the export does.
+// Pairs the buckets the same way as the export and the dashboard widget.
 function compared(
   bundle: ReportBundle,
   kind: ChartSpec["kind"],
@@ -31,7 +31,7 @@ function compared(
   previous: Series,
   cumulative = false,
 ): ChartSpec {
-  const aligned = alignPrevious(current, previous);
+  const aligned = alignPrevious(current, previous, bundle.anchor);
   let sums = { current: 0, previous: 0 };
   return {
     kind,

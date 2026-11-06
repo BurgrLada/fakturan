@@ -7,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
 import { exchangeRate, invoice, recurringInvoice, recurringRun } from "@/server/db/schema";
 import { forecast, type ForecastSeries } from "@/server/reports/forecast";
+import { convertAdvance } from "@/server/services/advances";
+import { resolveRate } from "@/server/services/exchange-rates";
 import { pauseRecurring } from "@/server/services/recurring-run";
 import {
   at,
@@ -20,6 +22,11 @@ import {
 import { createTestDb } from "../helpers/db";
 import { webActor } from "../helpers/fixtures-mail";
 import { planDocument, savePlan } from "../helpers/fixtures-recurring";
+
+vi.mock("@/server/services/exchange-rates", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/services/exchange-rates")>();
+  return { ...actual, resolveRate: vi.fn(actual.resolveRate) };
+});
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -294,6 +301,118 @@ describe("předpověď příjmů", () => {
 
     expect(db.select().from(recurringInvoice).all()).toEqual(before);
     expect(db.select().from(invoice).all()).toHaveLength(drafts);
+  });
+});
+
+describe("převedená záloha v předpovědi", () => {
+  const sum = (owner: string, name: ForecastSeries) =>
+    series(owner, name).reduce((total, value) => total + value, 0);
+  const expected = (owner: string) => sum(owner, "advances") + sum(owner, "plannedDrafts");
+
+  function converted(owner: string, customer: string) {
+    const advance = issuedDocument(owner, customer, {
+      type: "advance",
+      issueDate: "2026-10-25",
+      dueDate: "2026-11-30",
+      totalMinor: 7_000_000,
+    });
+    at(REPORT_TODAY);
+    const final = convertAdvance(webActor(owner), advance).id;
+    return { advance, final };
+  }
+
+  test("[REP-003] neuhrazená záloha 70 000,00 a její koncept dají 70 000,00, ne 140 000,00", () => {
+    const { owner, customer } = account();
+    converted(owner, customer);
+    at(REPORT_TODAY);
+
+    expect(expected(owner)).toBe(7_000_000);
+    expect(sum(owner, "advances")).toBe(7_000_000);
+    expect(sum(owner, "plannedDrafts")).toBe(0);
+  });
+
+  test("[REP-003] záloha uhrazená 30 000,00 dá 40 000,00 a koncept 0", () => {
+    const { owner, customer } = account();
+    const { advance } = converted(owner, customer);
+    pay(owner, advance, REPORT_TODAY, 3_000_000);
+    at(REPORT_TODAY);
+
+    expect(expected(owner)).toBe(4_000_000);
+    expect(sum(owner, "advances")).toBe(4_000_000);
+    expect(sum(owner, "plannedDrafts")).toBe(0);
+  });
+
+  test("[REP-003] koncept 100 000,00 po neuhrazené záloze 70 000,00 dá 70 000,00 + 30 000,00", () => {
+    const { owner, customer } = account();
+    const { final } = converted(owner, customer);
+    db.update(invoice).set({ totalMinor: 10_000_000 }).where(eq(invoice.id, final)).run();
+    at(REPORT_TODAY);
+
+    expect(sum(owner, "advances")).toBe(7_000_000);
+    expect(sum(owner, "plannedDrafts")).toBe(3_000_000);
+  });
+
+  test("[REP-003] po úhradě celé zálohy zůstane jen doplatek 30 000,00 v plannedDrafts", () => {
+    const { owner, customer } = account();
+    const { advance, final } = converted(owner, customer);
+    db.update(invoice).set({ totalMinor: 10_000_000 }).where(eq(invoice.id, final)).run();
+    pay(owner, advance, REPORT_TODAY, 7_000_000);
+    at(REPORT_TODAY);
+
+    expect(sum(owner, "advances")).toBe(0);
+    expect(sum(owner, "plannedDrafts")).toBe(3_000_000);
+  });
+
+  test("[REP-003] koncept nevidí zálohu cizího účtu se stejným ID vazby", () => {
+    const mine = account();
+    const { final } = converted(mine.owner, mine.customer);
+    const other = account();
+    const foreign = issuedDocument(other.owner, other.customer, {
+      type: "advance",
+      issueDate: "2026-10-25",
+      dueDate: "2026-11-30",
+      totalMinor: 9_000_000,
+    });
+    db.update(invoice)
+      .set({ relatedInvoiceId: foreign, totalMinor: 10_000_000 })
+      .where(eq(invoice.id, final))
+      .run();
+    at(REPORT_TODAY);
+
+    expect(sum(mine.owner, "plannedDrafts")).toBe(10_000_000);
+  });
+});
+
+describe("kurzy v předpovědi", () => {
+  test("[REP-003] 200 konceptů v EUR se stejným datem zavolá resolveRate jednou", () => {
+    const { owner, customer } = account();
+    db.insert(exchangeRate)
+      .values({
+        currency: "EUR",
+        listDate: "2026-10-30",
+        rateMicros: 25_000_000,
+        fetchedAt: new Date("2026-10-30T13:00:00Z"),
+      })
+      .onConflictDoNothing()
+      .run();
+    const id = plan(owner, customer, { startsOn: "2027-06-01" });
+    for (let index = 0; index < 200; index++) {
+      draftDocument(owner, customer, {
+        issueDate: "2026-11-01",
+        dueDate: "2026-12-10",
+        currency: "EUR",
+        totalMinor: 1_000,
+      });
+    }
+    db.update(invoice).set({ recurringId: id }).where(eq(invoice.userId, owner)).run();
+    at(REPORT_TODAY);
+    vi.mocked(resolveRate).mockClear();
+
+    const [, december] = forecast(db, owner, REPORT_TODAY);
+
+    expect(vi.mocked(resolveRate)).toHaveBeenCalledTimes(1);
+    expect(december!.unconverted.plannedDrafts.count).toBe(0);
+    expect(december!.plannedDrafts).toBeGreaterThan(0);
   });
 });
 
