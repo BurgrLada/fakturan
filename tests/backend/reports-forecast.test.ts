@@ -7,7 +7,9 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
 import { exchangeRate, invoice, recurringInvoice, recurringRun } from "@/server/db/schema";
 import { forecast, type ForecastSeries } from "@/server/reports/forecast";
+import { TEXTS } from "@/lib/texts";
 import { convertAdvance } from "@/server/services/advances";
+import { getInvoice, saveDraft } from "@/server/services/invoices";
 import { resolveRate } from "@/server/services/exchange-rates";
 import { pauseRecurring } from "@/server/services/recurring-run";
 import {
@@ -380,6 +382,60 @@ describe("převedená záloha v předpovědi", () => {
     at(REPORT_TODAY);
 
     expect(sum(mine.owner, "plannedDrafts")).toBe(10_000_000);
+  });
+});
+
+describe("převedená záloha, okrajové stavy", () => {
+  function converted(owner: string, customer: string) {
+    const advance = issuedDocument(owner, customer, {
+      type: "advance",
+      issueDate: "2026-10-25",
+      dueDate: "2026-11-30",
+      totalMinor: 7_000_000,
+    });
+    at(REPORT_TODAY);
+    return { advance, final: convertAdvance(webActor(owner), advance).id };
+  }
+  const total = (owner: string, name: ForecastSeries) =>
+    series(owner, name).reduce((sum, value) => sum + value, 0);
+
+  test("[REP-003] zrušená záloha se od konceptu neodečte", () => {
+    const { owner, customer } = account();
+    const { advance, final } = converted(owner, customer);
+    db.update(invoice).set({ totalMinor: 10_000_000 }).where(eq(invoice.id, final)).run();
+    // cancelInvoice refuses an advance with a final invoice, so the state is written directly.
+    db.update(invoice).set({ status: "cancelled" }).where(eq(invoice.id, advance)).run();
+    at(REPORT_TODAY);
+
+    expect(total(owner, "advances")).toBe(0);
+    expect(total(owner, "plannedDrafts")).toBe(10_000_000);
+  });
+
+  test("[REP-003] koncept po záloze nejde převést do jiné měny, odečet je vždy v téže měně", () => {
+    const { owner, customer } = account();
+    const { final } = converted(owner, customer);
+    const { lines, ...doc } = getInvoice(owner, final)!;
+
+    expect(() =>
+      saveDraft(webActor(owner), {
+        ...doc,
+        currency: "EUR",
+        exchangeRateMicros: 25_000_000,
+        paymentMethod: "cash",
+        bankAccountId: null,
+        lines: lines.map((item) => ({
+          catalogItemId: item.catalogItemId,
+          name: item.name,
+          description: item.description,
+          quantityMilli: item.quantityMilli,
+          unit: item.unit,
+          unitPriceMinor: item.unitPriceMinor,
+          discountKind: item.discountKind,
+          discountValue: item.discountValue,
+        })),
+      }),
+    ).toThrow(TEXTS.invoices.validation.linkedLocked);
+    expect(getInvoice(owner, final)!.currency).toBe("CZK");
   });
 });
 
