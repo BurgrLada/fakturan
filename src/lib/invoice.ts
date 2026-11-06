@@ -64,6 +64,8 @@ export function daysBetween(from: CalendarDate, to: CalendarDate): number {
 
 // Bulk actions render or change documents one by one, so the batch has to stay bounded.
 export const MAX_BULK_DOCUMENTS = 200;
+// Lines of one document, in the form, the import and a restore alike.
+export const MAX_DOCUMENT_LINES = 500;
 
 export const AWAITING_PAYMENT = ["issued", "sent", "partially_paid"] as const;
 

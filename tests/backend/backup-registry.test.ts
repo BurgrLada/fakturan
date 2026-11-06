@@ -164,9 +164,9 @@ describe("registr zálohy", () => {
 
   test("[SEC-005] konfigurační tabulky mají strop řádků na účet", () => {
     expect(ACCOUNT_ROW_LIMITS).toEqual({
-      reminder_rule: 200,
-      invoice_template: 500,
-      recurring_invoice: 500,
+      reminder_rule: 20,
+      invoice_template: 2_000,
+      recurring_invoice: 2_000,
       dashboard: 50,
       dashboard_widget: 2_500,
       mapping_preset: 200,

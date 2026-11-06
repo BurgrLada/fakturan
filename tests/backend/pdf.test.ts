@@ -17,7 +17,16 @@ import { saveBankAccount } from "@/server/services/bank-accounts";
 import { saveCustomer } from "@/server/services/customers";
 import { loadInvoiceDocument } from "@/server/services/invoice-document";
 import { fileNameFor } from "@/server/pdf/file-name";
-import { invoicePdf } from "@/server/services/invoice-pdf";
+import {
+  documentPdf,
+  invoicePdf,
+  PDF_TEXT_BUDGET,
+  printedLength,
+} from "@/server/services/invoice-pdf";
+import { PdfTooLong } from "@/server/services/access";
+import { DOCUMENT_INPUT_BYTES, jsonBytes } from "@/lib/backup-format";
+import { TEXTS } from "@/lib/texts";
+import { invoiceLine } from "@/server/db/schema";
 import { cancelInvoice, checkIssuable, issueInvoice } from "@/server/services/invoice-lifecycle";
 import { listVersions, updateIssuedInvoice } from "@/server/services/invoice-versions";
 import {
@@ -1042,5 +1051,79 @@ describe("bezpečnost", () => {
     const { fileName } = await invoicePdf(owner, id);
 
     expect(fileName).toMatch(/^FA .+\.pdf$/);
+  });
+});
+
+describe("rozpočet textu PDF", () => {
+  // The longest document the form accepts: 500 lines of ASCII as long as DOCUMENT_INPUT_BYTES lets
+  // them be, the four texts in full and the supplier of the fixture.
+  function longestLines() {
+    const line = (index: number, size: number) => ({
+      catalogItemId: null,
+      name: `Řádek ${index}`,
+      description: "x".repeat(size),
+      quantityMilli: 1000,
+      unit: "ks",
+      unitPriceMinor: 100,
+      discountKind: "none" as const,
+      discountValue: 0,
+    });
+    const texts = {
+      textBefore: "a".repeat(2000),
+      textAfter: "b".repeat(2000),
+      note: "c".repeat(2000),
+    };
+    let size = 1;
+    const of = (n: number) => Array.from({ length: 500 }, (_, index) => line(index, n));
+    while (jsonBytes({ lines: of(size + 1), ...texts }) < DOCUMENT_INPUT_BYTES - 500) size += 1;
+    return { lines: of(size), ...texts };
+  }
+
+  test(
+    "[PDF-005] nejdelší doklad z formuláře se vejde do rozpočtu s rezervou",
+    { timeout: 120_000 },
+    async () => {
+      const { owner, customerId } = newOwner();
+      const { id } = draft(owner, customerId, longestLines());
+      const doc = loadInvoiceDocument(owner, id)!;
+      const length = printedLength(doc);
+      process.stderr.write(`[PDF-005] nejdelší doklad z formuláře: ${length} znaků\n`);
+      expect(PDF_TEXT_BUDGET).toBe(300_000);
+      expect(length).toBeLessThan(PDF_TEXT_BUDGET * 0.85);
+      if (process.env.MEASURE_PDF) {
+        const rss = process.memoryUsage().rss;
+        const started = performance.now();
+        await documentPdf(owner, doc);
+        process.stderr.write(
+          `[PDF-005] render: ${Math.round(performance.now() - started)} ms, RSS +${Math.round((process.memoryUsage().rss - rss) / 1048576)} MiB\n`,
+        );
+      }
+    },
+  );
+
+  test("[PDF-005] doklad nad rozpočet textu se nevykreslí a řekne proč", async () => {
+    const { owner, customerId } = newOwner();
+    const { id } = draft(owner, customerId, longestLines());
+    const doc = loadInvoiceDocument(owner, id)!;
+    const over = {
+      ...doc,
+      lines: doc.lines.map((line) => ({ ...line, description: "y".repeat(700) })),
+    };
+    expect(printedLength(over)).toBeGreaterThan(PDF_TEXT_BUDGET);
+    const started = performance.now();
+    await expect(documentPdf(owner, over)).rejects.toThrow(PdfTooLong);
+    await expect(documentPdf(owner, over)).rejects.toThrow(TEXTS.pdf.tooLong);
+    // Refused before react-pdf: a render of that much text takes seconds.
+    expect(performance.now() - started).toBeLessThan(1_000);
+
+    // A document from a restore stored that long: the route answers with the reason.
+    db.update(invoiceLine)
+      .set({ description: "y".repeat(700) })
+      .where(eq(invoiceLine.invoiceId, id))
+      .run();
+    session.actor = actor(owner);
+    const response = await pdfRoute(request(`/faktury/${id}/pdf`), params(id));
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain(TEXTS.pdf.tooLong);
   });
 });

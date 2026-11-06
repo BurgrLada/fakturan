@@ -28,6 +28,7 @@ import {
   INVOICE_STATUSES,
   INVOICE_TYPES,
   isOverdue,
+  MAX_DOCUMENT_LINES,
   toDiscount,
   type InvoiceStatus,
   type InvoiceType,
@@ -77,7 +78,7 @@ import { linkTags, listTags, tagsOf, type Tag } from "./tags";
 export { dueSql, fullDue, openCondition, overdueCondition } from "../db/invoice-sql";
 
 const V = TEXTS.invoices.validation;
-const MAX_LINES = 500;
+const MAX_LINES = MAX_DOCUMENT_LINES;
 const MAX_NUMBER = 100;
 export const MAX_LINE_NAME = 200;
 export const MAX_REFERENCE = 200;

@@ -15,6 +15,9 @@ export class RateLimitError extends ServiceError {}
 
 export class InvoicePdfNotFoundError extends Error {}
 
+// A document with more text than a PDF may hold; the message is for the person (PDF budget).
+export class PdfTooLong extends ServiceError {}
+
 export function assertAdmin(q: Reader, actor: Actor): void {
   const row = actor.userId
     ? q

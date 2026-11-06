@@ -3,6 +3,7 @@ import { and, inArray, ne, or } from "drizzle-orm";
 import { CURRENCIES } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
 import type { ImportDocument, ImportParty } from "@/lib/import-document";
+import { MAX_DOCUMENT_LINES } from "@/lib/invoice";
 import type { CustomerAction, PreviewLink, PreviewRow, PreviewStatus } from "@/lib/import-preview";
 import type { CalendarDate } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
@@ -15,7 +16,7 @@ import { finalOf } from "./invoice-balance";
 const R = TEXTS.importing.rows;
 // R-12: within a unit of the currency the difference is rounding, beyond it the file is wrong.
 const MAX_ROUNDING_MINOR = 100;
-const MAX_LINES = 500;
+const MAX_LINES = MAX_DOCUMENT_LINES;
 // A table has no supplier: the account's own profile stands in for it, so it is never someone else.
 export const TABULAR_SOURCE = "tabular";
 

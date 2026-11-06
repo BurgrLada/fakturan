@@ -90,10 +90,12 @@ stažení v Nastavení, Záloha a SMTP i schránku s avízy je nutné zadat znov
 25 MiB, data všech tabulek dohromady 256 MiB po rozbalení, nejvýš 300 000 řádků (tabulky i
 historie změn dohromady), řádek tabulky nejvýš 512 KiB, hodnota JSON (dokument šablony nebo
 plánu, vzhled, snapshoty) nejvýš 256 KiB, verze vystaveného dokladu nejvýš 16 MiB a 200 000
-položek archivu (tedy zhruba tolik souborů). Účet má navíc strop řádků v konfiguraci: 500 šablon
-a 500 pravidelných faktur, 50 nástěnek, 200 předvoleb importu, 500 jednotek, 200 číselných řad,
-100 bankovních účtů, 2 000 štítků a 20 pravidel upomínek. Delší doklad nebo šablonu ani řádek
-nad strop aplikace nedovolí uložit. Starší šablonu, plán nebo koncept nad strop záloha pojmenuje
+položek archivu (tedy zhruba tolik souborů). Účet má navíc strop řádků v konfiguraci: 2 000 šablon
+a 2 000 pravidelných faktur, 50 nástěnek po nejvýš 50 widgetech, 200 předvoleb importu, 500 jednotek,
+200 číselných řad, 100 bankovních účtů, 2 000 štítků a 20 pravidel upomínek; doklad má nejvýš 500
+položek. Tytéž stropy platí v aplikaci i při obnově. Delší doklad nebo šablonu ani řádek nad strop
+aplikace nedovolí uložit. PDF dokladu (stažení, odeslání i export) vznikne nejvýš z 300 000 znaků
+textu; nad tím aplikace PDF nevytvoří a řekne proč. Starší šablonu, plán nebo koncept nad strop záloha pojmenuje
 a nevznikne, dokud se nezkrátí; verze vystavených dokladů mají rezervu nad vším, co aplikace kdy
 dovolila. Zápis obnovy je jedna transakce a na stropu zastaví instanci asi na 20 s. Archiv má
 formát verze 2: hned za popisem zálohy leží seznam souborů s jejich kontrolními součty, takže popis

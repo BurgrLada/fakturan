@@ -933,3 +933,43 @@ describe("obnova z nepřátelského archivu, tvary všech JSON a stropy řádků
     );
   });
 });
+
+describe("obnova z nepřátelského archivu, řádky na doklad a widgety na nástěnku", () => {
+  const firstRow = (table: string) => readJsonl(unzipSync(archive)[`data/${table}.jsonl`]!)[0]!;
+  const withRows = (table: string, rows: Record<string, unknown>[]) =>
+    editArchive(
+      archive,
+      (entries) => {
+        entries[`data/${table}.jsonl`] = jsonl(rows);
+      },
+      (manifest) => (manifest.counts.tables[table] = rows.length),
+    );
+
+  test("[SEC-005] doklad s 501 položkami je odmítnutý", async () => {
+    const line = firstRow("invoice_line");
+    const lines = Array.from({ length: 501 }, (_, index) => ({
+      ...line,
+      id: randomUUID(),
+      position: index,
+    }));
+    await refused(withRows("invoice_line", lines), E.tooManyChildren(E.parents.invoice_line!, 500));
+  });
+
+  test("[SEC-005] nástěnka s 51 widgety je odmítnutá", async () => {
+    const widget = firstRow("dashboard_widget");
+    const widgets = Array.from({ length: 51 }, () => ({ ...widget, id: randomUUID() }));
+    await refused(
+      withRows("dashboard_widget", widgets),
+      E.tooManyChildren(E.parents.dashboard_widget!, 50),
+    );
+  });
+
+  test("[SEC-005] hlášky obnovy neukazují název tabulky", () => {
+    for (const table of BACKUP_TABLES.map((entry) => entry.name)) {
+      expect(E.row(table)).not.toContain(table);
+      expect(E.reference(table)).not.toContain(table);
+      expect(E.tooManyRows(table)).not.toContain(table);
+      expect(TEXTS.backup.blocking.row(table)).not.toContain(table);
+    }
+  });
+});

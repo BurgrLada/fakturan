@@ -5,7 +5,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { actorFromRequest } from "../auth/session";
 import type { RateRule } from "../rate-limit";
-import { enforceRateLimit, RateLimitError } from "./access";
+import { enforceRateLimit, PdfTooLong, RateLimitError } from "./access";
 import { InvoicePdfNotFoundError } from "./invoice-pdf";
 
 type Disposition = "inline" | "attachment";
@@ -56,6 +56,7 @@ export async function servePdf(
     return pdfBody(data, type, fileName);
   } catch (error) {
     if (error instanceof InvoicePdfNotFoundError) return emptyResponse(404);
+    if (error instanceof PdfTooLong) return messageResponse(422, error.message);
     if (error instanceof InvalidPreviewQuery) return messageResponse(400, TEXTS.pdf.previewFailed);
     if (error instanceof RateLimitError) {
       return type === "inline" ? messageResponse(429, TEXTS.pdf.previewBusy) : emptyResponse(429);

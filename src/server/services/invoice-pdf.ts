@@ -10,7 +10,7 @@ import { fileNameFor } from "../pdf/file-name";
 import { renderInvoicePdf } from "../pdf/render";
 import { buildInvoiceView } from "../pdf/view";
 import { RATE_RULES } from "../rate-limit";
-import { enforceRateLimit, InvoicePdfNotFoundError, ServiceError } from "./access";
+import { enforceRateLimit, InvoicePdfNotFoundError, PdfTooLong, ServiceError } from "./access";
 import { FileNotFoundError, readOwnedFile } from "./files";
 import { loadInvoiceDocument } from "./invoice-document";
 import { getVersion } from "./invoice-versions";
@@ -32,10 +32,31 @@ export function ownerImageReader(ownerId: string) {
   };
 }
 
+// react-pdf renders synchronously and its cost grows with the text. The longest document the form
+// accepts prints about 159 000 characters and took 11 s and +329 MiB RSS here (PDF-005 test,
+// MEASURE_PDF=1); the budget leaves it room and stops the hostile or pre-cap documents that would
+// need gigabytes. Renders are serialized (serializeRender), so they do not add up.
+export const PDF_TEXT_BUDGET = 300_000;
+
+// Every string the document carries, which bounds what the page shows: lines, texts, snapshots.
+export function printedLength(value: unknown): number {
+  if (typeof value === "string") return value.length;
+  if (Array.isArray(value))
+    return value.reduce((sum: number, item) => sum + printedLength(item), 0);
+  if (value !== null && typeof value === "object") {
+    let sum = 0;
+    for (const item of Object.values(value)) sum += printedLength(item);
+    return sum;
+  }
+  return 0;
+}
+
+// One gate for every PDF of a document: the invoice, a version, a sent message and an export.
 export async function documentPdf(
   ownerId: string,
   doc: InvoiceDocument,
 ): Promise<{ data: Buffer; fileName: string }> {
+  if (printedLength(doc) > PDF_TEXT_BUDGET) throw new PdfTooLong(TEXTS.pdf.tooLong);
   const view = await buildInvoiceView(doc, {
     today: calendarDateInPrague(clock.now()),
     draft: doc.status === "draft",

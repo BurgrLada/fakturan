@@ -63,7 +63,9 @@ function blocking(table: string, row: Record<string, unknown>): string {
       : table === "recurring_invoice"
         ? B.plan(String(row.name))
         : table === "invoice"
-          ? B.invoice(String(row.number ?? row.id))
+          ? row.number
+            ? B.invoice(String(row.number))
+            : B.draft(String(row.customer_name ?? ""))
           : B.row(table);
   return TEXTS.backup.errors.documentTooLarge(what);
 }

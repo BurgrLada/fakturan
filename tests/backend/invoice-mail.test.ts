@@ -11,6 +11,7 @@ import {
   emailLog,
   file,
   invoice,
+  invoiceLine,
   job,
   notification,
   rateLimit,
@@ -602,6 +603,22 @@ describe("ISDOC v příloze", () => {
     await drainJobs(WORKER);
     expect(smtp.messages[0]!.attachments).toHaveLength(1);
     expect(logsOf(owner)[0]).toMatchObject({ attachIsdoc: false, isdocFileId: null });
+  });
+
+  test("[MAIL-001] doklad nad rozpočet textu PDF zprávu neodešle a řekne proč", async () => {
+    const { owner, invoiceId } = account();
+    db.update(invoiceLine)
+      .set({ description: "y".repeat(310_000) })
+      .where(eq(invoiceLine.invoiceId, invoiceId))
+      .run();
+    sendInvoice(webActor(owner), invoiceId, input());
+    await drainJobs(WORKER);
+    expect(smtp.messages).toHaveLength(0);
+    expect(logsOf(owner)[0]).toMatchObject({
+      status: "failed",
+      reason: TEXTS.pdf.tooLong,
+      fileId: null,
+    });
   });
 
   test("[MAIL-001] neplatný ISDOC zprávu neodešle", async () => {

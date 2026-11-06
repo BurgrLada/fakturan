@@ -18,6 +18,7 @@ import { completeJob, retryJob } from "../jobs/queue";
 import { RetryLater } from "../jobs/registry";
 import type { MailAddress, MailMessage, MailTransport, SendResult } from "../mail/transport";
 import { reportFailure } from "../scheduler/report";
+import { PdfTooLong } from "./access";
 import { automaticSendAllowed } from "./automation";
 import { getCustomer } from "./customers";
 import { archiveSentIsdoc, archiveSentPdf, readOwnedFile } from "./files";
@@ -442,6 +443,11 @@ export async function deliverMail(row: Job): Promise<void> {
     // A message without the promised ISDOC would mislead, and a retry would build the same file.
     if (error instanceof IsdocRejected) {
       if (holdsJob(row)) settle(log, "queued", "failed", R.isdocInvalid);
+      return;
+    }
+    // The same document gives the same answer; another attempt would only repeat it.
+    if (error instanceof PdfTooLong) {
+      if (holdsJob(row)) settle(log, "queued", "failed", error.message);
       return;
     }
     if (exhausted(row) && holdsJob(row)) settle(log, "queued", "failed", R.archive);

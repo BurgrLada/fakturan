@@ -16,6 +16,7 @@ import {
   exportJob,
   file,
   invoice,
+  invoiceLine,
   job,
   mailSettings,
   notification,
@@ -592,5 +593,18 @@ describe("HEAD exportu", () => {
     expect(downloads()).toBe(audited);
     const key = `${RATE_RULES.exportDownloadUser.name}:${owner}`;
     expect(db.select().from(rateLimit).where(eq(rateLimit.key, key)).get()).toBeUndefined();
+  });
+});
+
+describe("PDF exportu nad rozpočet textu", () => {
+  test("[EXP-007] ZIP s PDF dokladu nad rozpočet skončí s důvodem", async () => {
+    const owner = seedOwner(db, NOW);
+    const id = issuedOn(owner, seedCustomer(owner), "2026-03-01");
+    db.update(invoiceLine)
+      .set({ description: "y".repeat(310_000) })
+      .where(eq(invoiceLine.invoiceId, id))
+      .run();
+    const row = await exported(owner, { kind: "invoices", format: "pdf_zip" });
+    expect(row).toMatchObject({ status: "failed", reason: TEXTS.pdf.tooLong, fileId: null });
   });
 });

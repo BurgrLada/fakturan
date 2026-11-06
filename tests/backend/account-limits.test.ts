@@ -18,7 +18,7 @@ import {
 } from "@/server/db/schema";
 import { DOCUMENT_INPUT_BYTES, jsonBytes, STORED_JSON_BYTES } from "@/lib/backup-format";
 import { issueInvoice } from "@/server/services/invoice-lifecycle";
-import { updateIssuedInvoice } from "@/server/services/invoice-versions";
+import { restoreVersion, updateIssuedInvoice } from "@/server/services/invoice-versions";
 import { getInvoice } from "@/server/services/invoices";
 import { planRecurringRuns } from "@/server/services/recurring-run";
 import { forecast } from "@/server/reports/forecast";
@@ -247,5 +247,63 @@ describe("plány bez dokumentu", () => {
     );
     expect(texts.some((text) => /from "recurring_invoice"/i.test(text))).toBe(true);
     expect(whole).toEqual([]);
+  });
+});
+
+describe("obnovení verze dokladu", () => {
+  test("[SEC-005] verze nad strop položek nebo bajtů formuláře se neobnoví", () => {
+    const owner = seedOwner(db, NOW);
+    const customerId = seedCustomer(owner);
+    const { id, revision } = draftFor(owner, customerId);
+    issueInvoice(webActor(owner), id, { revision });
+    const doc = getInvoice(owner, id)!;
+    const { lines: stored, ...fields } = doc;
+    updateIssuedInvoice(webActor(owner), id, {
+      revision: doc.revision,
+      number: doc.number!,
+      variableSymbol: doc.variableSymbol ?? "",
+      bankAccountId: fields.bankAccountId,
+      issueDate: fields.issueDate,
+      dueDate: fields.dueDate,
+      taxableDate: fields.taxableDate,
+      language: fields.language,
+      currency: fields.currency,
+      exchangeRateMicros: fields.exchangeRateMicros,
+      paymentMethod: fields.paymentMethod,
+      orderRef: fields.orderRef,
+      reference: fields.reference,
+      textBefore: fields.textBefore,
+      textAfter: fields.textAfter,
+      note: "Jiná poznámka",
+      discountKind: fields.discountKind,
+      discountValue: fields.discountValue,
+      rounding: fields.rounding,
+      appearance: fields.appearance,
+      lines: stored.map((item) => ({
+        catalogItemId: item.catalogItemId,
+        name: item.name,
+        description: item.description,
+        quantityMilli: item.quantityMilli,
+        unit: item.unit,
+        unitPriceMinor: item.unitPriceMinor,
+        discountKind: item.discountKind,
+        discountValue: item.discountValue,
+      })),
+    });
+    const version = db.select().from(invoiceVersion).where(eq(invoiceVersion.invoiceId, id)).get()!;
+    const line = version.document.lines[0]!;
+    const set = (document: typeof version.document) =>
+      db.update(invoiceVersion).set({ document }).where(eq(invoiceVersion.id, version.id)).run();
+    set({ ...version.document, lines: Array.from({ length: 501 }, () => line) });
+    expect(() => restoreVersion(webActor(owner), version.id)).toThrow(
+      TEXTS.invoices.validation.tooManyLines,
+    );
+    set({
+      ...version.document,
+      lines: [{ ...line, description: "x".repeat(DOCUMENT_INPUT_BYTES) }],
+    });
+    expect(() => restoreVersion(webActor(owner), version.id)).toThrow(
+      TEXTS.invoices.validation.documentTooLarge,
+    );
   });
 });

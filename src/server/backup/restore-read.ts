@@ -20,11 +20,11 @@ import {
   type RestoreLimits,
 } from "@/lib/backup-format";
 import { CURRENCIES } from "@/lib/currency";
-import { INVOICE_STATUSES, INVOICE_TYPES } from "@/lib/invoice";
+import { INVOICE_STATUSES, INVOICE_TYPES, MAX_DOCUMENT_LINES } from "@/lib/invoice";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { isCalendarDate } from "@/lib/number-format";
 import { DATE_FORMATS, LANGUAGES, LOGO_POSITIONS, PAYMENT_METHODS } from "@/lib/preferences";
-import { accountRowLimit } from "@/lib/account-limits";
+import { accountRowLimit, PER_PARENT_LIMITS } from "@/lib/account-limits";
 import { MAX_BODY_CHARS, MAX_SUBJECT_CHARS } from "@/lib/email-template";
 import {
   DATE_FORMATS as IMPORT_DATE_FORMATS,
@@ -128,7 +128,6 @@ const relatedSnapshot = z.strictObject({
   issueDate: date,
 });
 
-const MAX_DOCUMENT_LINES = 500;
 const integer = z.number().int().safe();
 const nullableId = z.string().max(128).nullable();
 const templateLine = z.strictObject({
@@ -471,6 +470,11 @@ function eachRow(
   const invalid = () => new RestoreRejected(E.row(entry.name));
   // A configuration table the app reads whole holds no more rows than the app lets an account have.
   const accountLimit = accountRowLimit(entry.name) ?? Number.POSITIVE_INFINITY;
+  // Lines of one document, widgets of one dashboard: the app reads and renders them together.
+  const perParent = Object.hasOwn(PER_PARENT_LIMITS, entry.name)
+    ? PER_PARENT_LIMITS[entry.name]
+    : undefined;
+  const children = new Map<string, number>();
   let count = 0;
   eachLine(
     bytes,
@@ -488,12 +492,24 @@ function eachRow(
       }
       const parsed = schema.safeParse(upgraded);
       if (!parsed.success) throw invalid();
+      if (perParent) {
+        const parent = String(parsed.data[perParent.parent]);
+        const seen = (children.get(parent) ?? 0) + 1;
+        if (seen > perParent.limit) {
+          throw new RestoreRejected(
+            E.tooManyChildren(E.parents[entry.name] ?? "", perParent.limit),
+          );
+        }
+        children.set(parent, seen);
+        budget.guard.hold("children", children.size * HELD_COSTS.id);
+      }
       count += 1;
       take(parsed.data);
     },
     "rows",
     rowBytesFor(entry.name, budget.limits),
   );
+  budget.guard.hold("children", 0);
   return count;
 }
 

@@ -1,6 +1,42 @@
 const rateOrigin = (p: Record<string, unknown>) =>
   p.plan ? `Faktura z plánu „${p.plan}“` : `Faktura ${p.invoice ?? ""}`;
 
+// Czech names of the tables an account backup carries, for messages: a person never sees the
+// name of a database table.
+const BACKUP_TABLE_LABELS: Record<string, string> = {
+  import_batch: "dávky importu",
+  file: "soubory",
+  supplier: "údaje dodavatele",
+  bank_account: "bankovní účty",
+  number_series: "číselné řady",
+  number_series_counter: "počítadla číselných řad",
+  preferences: "předvolby",
+  unit: "jednotky",
+  customer: "zákazníci",
+  catalog_item: "ceník",
+  mapping_preset: "předvolby importu",
+  tag: "štítky",
+  recurring_invoice: "pravidelné faktury",
+  invoice: "doklady",
+  invoice_line: "položky dokladů",
+  invoice_tag: "štítky dokladů",
+  invoice_version: "verze dokladů",
+  invoice_template: "šablony faktur",
+  bank_notification: "avíza z banky",
+  payment: "platby",
+  email_log: "historie e-mailů",
+  reminder_rule: "pravidla upomínek",
+  reminder_sent: "odeslané upomínky",
+  recurring_run: "běhy pravidelných faktur",
+  notification: "upozornění",
+  mail_settings: "nastavení pošty",
+  automation_settings: "nastavení automatik",
+  email_template: "šablony e-mailů",
+  dashboard: "nástěnky",
+  dashboard_widget: "widgety nástěnek",
+};
+const tableLabel = (table: string) => BACKUP_TABLE_LABELS[table] ?? "data účtu";
+
 export const TEXTS = {
   appName: "Fakturan",
   nav: {
@@ -2490,6 +2526,8 @@ export const TEXTS = {
   pdf: {
     previewBusy: "Náhledů je teď příliš mnoho. Počkejte chvíli a změňte výběr znovu.",
     previewFailed: "Náhled se nepodařilo vytvořit. Zkuste to prosím znovu.",
+    tooLong:
+      "Doklad má na PDF příliš mnoho textu, a proto se PDF nevytvoří. Zkraťte popisy položek nebo poznámky.",
   },
   designs: {
     title: "Designy faktur",
@@ -3375,12 +3413,14 @@ export const TEXTS = {
       template: (name: string) => `Šablona „${name}“`,
       plan: (name: string) => `Pravidelná faktura „${name}“`,
       invoice: (number: string) => `Doklad ${number}`,
-      row: (table: string) => `Řádek tabulky ${table}`,
+      row: (table: string) => `Řádek v části „${tableLabel(table)}“`,
+      draft: (customer: string) =>
+        customer ? `Koncept dokladu pro „${customer}“` : "Koncept dokladu bez zákazníka",
     },
   },
   accountLimits: {
     tooMany: (what: string, limit: number) =>
-      `Účet už má ${limit} ${what}, víc jich mít nejde. Nepotřebné smažte.`,
+      `Účet už má ${limit} ${what}, víc jich mít nejde. Smažte nebo ukončete nepotřebné, nebo se obraťte na správce instance.`,
     names: {
       reminder_rule: "pravidel upomínek",
       invoice_template: "šablon faktur",
@@ -3426,13 +3466,17 @@ export const TEXTS = {
       tooManyNodes: "Data v archivu mají víc položek, než obnova dovolí.",
       filesIndex: "Seznam souborů v archivu není platný.",
       tooManyRows: (table: string) =>
-        `Archiv má v tabulce ${table} víc řádků, než jeden účet smí mít.`,
+        `Archiv má v části „${tableLabel(table)}“ víc řádků, než jeden účet smí mít.`,
+      tooManyChildren: (what: string, limit: number) =>
+        `${what} v archivu má víc než ${limit} řádků, tolik aplikace nedovolí.`,
+      parents: { invoice_line: "Doklad", dashboard_widget: "Nástěnka" } as Record<string, string>,
       memory: "Obnova archivu by zabrala víc paměti, než instance dovolí. Účet zůstal beze změny.",
       uploadExpired: "Nahrávání trvalo příliš dlouho a bylo zrušeno. Nahrajte zálohu znovu.",
       audit: "Historie změn v archivu není platná.",
       references: "Data v archivu odkazují na něco, co v něm není.",
-      row: (table: string) => `Archiv obsahuje neplatný řádek v tabulce ${table}.`,
-      reference: (table: string) => `Řádek v tabulce ${table} odkazuje na něco, co v archivu není.`,
+      row: (table: string) => `Archiv obsahuje neplatný řádek v části „${tableLabel(table)}“.`,
+      reference: (table: string) =>
+        `Řádek v části „${tableLabel(table)}“ odkazuje na něco, co v archivu není.`,
       inconsistent:
         "Data v archivu si odporují (součty nebo platby nesedí). Účet zůstal beze změny.",
       unexpected: "Obnova se nepodařila kvůli neočekávané chybě. Účet zůstal beze změny.",

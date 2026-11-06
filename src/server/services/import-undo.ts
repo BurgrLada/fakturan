@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, ne, notInArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { isFinalInvoice } from "@/lib/invoice";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -153,19 +153,17 @@ export function undoBatch(actor: Actor, batchId: string): void {
       .from(catalogItem)
       .where(scoped(userId).where(catalogItem, (t, { eq }) => eq(t.importBatchId, batchId)))
       .all();
-    // Templates and plans keep their lines as JSON, so their references have no foreign key.
-    const drafts = [
-      ...tx
-        .select({ document: invoiceTemplate.document })
-        .from(invoiceTemplate)
-        .where(scoped(userId).where(invoiceTemplate))
-        .all(),
-      ...tx
-        .select({ document: recurringInvoice.document })
-        .from(recurringInvoice)
-        .where(scoped(userId).where(recurringInvoice))
-        .all(),
-    ];
+    // Templates and plans keep their lines as JSON, so their references have no foreign key. SQLite
+    // reads them with json_each: no document is loaded into the process (N-3 of plan 9).
+    const inDocuments = (table: typeof invoiceTemplate | typeof recurringInvoice) =>
+      tx
+        .all<{ id: string }>(
+          sql`SELECT DISTINCT json_extract(line.value, '$.catalogItemId') AS id
+            FROM ${table}, json_each(${table.document}, '$.lines') AS line
+            WHERE ${table.userId} = ${userId}
+              AND json_extract(line.value, '$.catalogItemId') IS NOT NULL`,
+        )
+        .map((row) => row.id);
     const usedItems = new Set([
       ...tx
         .select({ id: invoiceLine.catalogItemId })
@@ -173,7 +171,8 @@ export function undoBatch(actor: Actor, batchId: string): void {
         .where(scoped(userId).where(invoiceLine, (t) => isNotNull(t.catalogItemId)))
         .all()
         .map((row) => row.id),
-      ...drafts.flatMap((row) => (row.document.lines ?? []).map((line) => line.catalogItemId)),
+      ...inDocuments(invoiceTemplate),
+      ...inDocuments(recurringInvoice),
     ]);
     const spareItems = items.filter((row) => !usedItems.has(row.id)).map((row) => row.id);
     if (spareItems.length > 0) {

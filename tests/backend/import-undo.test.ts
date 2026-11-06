@@ -8,6 +8,7 @@ import { setClockForTests } from "@/server/clock";
 import {
   customer,
   file,
+  catalogItem,
   importBatch,
   invoice,
   job,
@@ -17,6 +18,9 @@ import {
 import { userDir } from "@/server/files/store";
 import { saveCustomer } from "@/server/services/customers";
 import { undoBatch } from "@/server/services/import-undo";
+import { saveCatalogItem } from "@/server/services/catalog";
+import { saveTemplate } from "@/server/services/invoice-templates";
+import { newDraftDefaults } from "@/server/services/invoices";
 import { addPayment } from "@/server/services/payments";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
@@ -113,6 +117,61 @@ describe("vrácení importu", () => {
       status: "undone",
     });
     assertConsistent(db, owner);
+  });
+
+  test("[IMP-008] položka ceníku v šabloně vrácení přežije a dokumenty se nenačtou", async () => {
+    const owner = importOwner(db, NOW);
+    const id = await importedBatch(owner);
+    const item = (name: string) =>
+      saveCatalogItem(webActor(owner), {
+        name,
+        description: "",
+        unit: "ks",
+        priceMinor: 100,
+        currency: "CZK",
+        category: "",
+        tags: [],
+      }).id;
+    const used = item("V šabloně");
+    const spare = item("Nikde");
+    db.update(catalogItem).set({ importBatchId: id }).where(eq(catalogItem.userId, owner)).run();
+    const draft = newDraftDefaults(owner, null);
+    saveTemplate(webActor(owner), {
+      name: "Šablona",
+      customerId: null,
+      document: {
+        ...draft,
+        type: "invoice",
+        dueDays: 14,
+        lines: [
+          {
+            catalogItemId: used,
+            name: "V šabloně",
+            description: "",
+            quantityMilli: 1000,
+            unit: "ks",
+            unitPriceMinor: 100,
+            discountKind: "none",
+            discountValue: 0,
+          },
+        ],
+      },
+    });
+    const statements = vi.spyOn(db.$client, "prepare");
+    undoBatch(webActor(owner), id);
+    const texts = statements.mock.calls.map(([text]) => String(text));
+    statements.mockRestore();
+    const items = db
+      .select({ id: catalogItem.id })
+      .from(catalogItem)
+      .where(eq(catalogItem.userId, owner))
+      .all();
+    expect(items.map((row) => row.id)).toEqual([used]);
+    expect(spare).not.toBe(used);
+    // Read by SQLite through json_each, never selected into the process.
+    for (const text of texts) {
+      expect(text).not.toMatch(/select "document" from "(invoice_template|recurring_invoice)"/i);
+    }
   });
 
   test("[IMP-008] vrácení s ruční platbou je odmítnuté a jmenuje doklad", async () => {

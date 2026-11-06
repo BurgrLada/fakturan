@@ -1,5 +1,6 @@
 import "server-only";
-import { VERSION_JSON_BYTES } from "@/lib/backup-format";
+import { DOCUMENT_INPUT_BYTES, jsonBytes, VERSION_JSON_BYTES } from "@/lib/backup-format";
+import { MAX_DOCUMENT_LINES } from "@/lib/invoice";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, max } from "drizzle-orm";
 import type { InvoiceStatus } from "@/lib/invoice";
@@ -426,6 +427,20 @@ export function restoreVersion(actor: Actor, versionId: string): EditResult {
       const before = findOwned(tx, userId, version.invoiceId);
       assertEditable(before);
 
+      // A version frozen before the caps, or one from a restore, comes back only within what the
+      // form allows today (C-2 of plan 9).
+      const frozen = version.document;
+      if ((frozen.lines ?? []).length > MAX_DOCUMENT_LINES) throw new ServiceError(V.tooManyLines);
+      const size = jsonBytes({
+        lines: frozen.lines,
+        textBefore: frozen.textBefore,
+        textAfter: frozen.textAfter,
+        note: frozen.note,
+        clause: frozen.clause,
+        orderRef: frozen.orderRef,
+        reference: frozen.reference,
+      });
+      if (size > DOCUMENT_INPUT_BYTES) throw new ServiceError(V.documentTooLarge);
       const document = withLiveReferences(tx, userId, version.document);
       const current = documentOf(before, linesOf(tx, userId, before.id));
       if (diffInvoices(current, document).length === 0)
