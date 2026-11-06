@@ -60,4 +60,6 @@ export type ImportDocument = {
   vatApplicable: boolean;
   note: string;
   issuingSystem: string | null;
+  // Only a table states when a document was paid; ISDOC never does (IMP-012).
+  paidOn?: CalendarDate | null;
 };

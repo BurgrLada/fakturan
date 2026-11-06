@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ImportDocument } from "./import-document";
+import type { TabularSample } from "./import-mapping";
 import { isCalendarDate, type CalendarDate } from "./number-format";
 
 export const MAX_BATCH_DOCUMENTS = 5000;
@@ -34,9 +35,19 @@ export type PreviewRow = {
   original: PreviewLink | null;
   advance: PreviewLink | null;
   pdfFileId: string | null;
+  // A customer or a catalog item from a table: the raw input, checked again by its schema on commit.
+  record?: PreviewRecord;
 };
 
-export type Preview = { rows: PreviewRow[] };
+export type PreviewRecord = {
+  target: "customers" | "catalog";
+  input: Record<string, unknown>;
+  name: string;
+  detail: string;
+};
+
+// The sample of a table stays next to the rows, so the mapping can be changed from the preview.
+export type Preview = { rows: PreviewRow[]; sample?: TabularSample };
 
 export function rowBlocks(row: PreviewRow): boolean {
   if (row.status === "skipped" || row.status === "duplicate") return false;

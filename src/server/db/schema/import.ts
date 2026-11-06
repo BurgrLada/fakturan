@@ -1,4 +1,5 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { MAPPING_TARGETS } from "@/lib/import-mapping";
 import { user } from "./auth";
 
 export const IMPORT_KINDS = ["isdoc", "tabular"] as const;
@@ -16,8 +17,7 @@ export const IMPORT_BATCH_STATUSES = [
 ] as const;
 export type ImportBatchStatus = (typeof IMPORT_BATCH_STATUSES)[number];
 
-export const MAPPING_TARGETS = ["customers", "catalog", "invoices"] as const;
-export type MappingTarget = (typeof MAPPING_TARGETS)[number];
+export { MAPPING_TARGETS, type MappingTarget } from "@/lib/import-mapping";
 
 // An undone batch stays for the audit trail; only undoBatch removes what it created (R-20).
 export const importBatch = sqliteTable(

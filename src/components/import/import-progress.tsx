@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { importStateAction, type ImportState } from "@/app/(app)/nastaveni/import/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -11,8 +12,15 @@ const POLL_MS = 1000;
 const RUNNING = new Set(["uploading", "parsing", "committing"]);
 
 export function ImportProgress({ initial }: { initial: ImportState }) {
+  const router = useRouter();
   const [state, setState] = useState(initial);
   const running = RUNNING.has(state.batch.status);
+  const mapping = state.batch.status === "mapping";
+
+  // The column mapper is rendered by the page from the sample, so the page has to load again.
+  useEffect(() => {
+    if (mapping) router.refresh();
+  }, [mapping, router]);
 
   useEffect(() => {
     if (!running) return;
@@ -37,7 +45,9 @@ export function ImportProgress({ initial }: { initial: ImportState }) {
       )}
       {batch.status === "done" && (
         <p className="text-sm" role="status">
-          {T.preview.done(batch.summary?.documents ?? 0)}
+          {batch.kind === "tabular" && batch.target !== "invoices"
+            ? T.preview.doneRecords(batch.summary?.documents ?? 0)
+            : T.preview.done(batch.summary?.documents ?? 0)}
         </p>
       )}
       {batch.status === "undone" && <p className="text-sm">{T.preview.undone}</p>}

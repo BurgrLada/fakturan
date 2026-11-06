@@ -16,7 +16,7 @@ import { LANGUAGES, type Preferences } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
-import { db } from "../db";
+import { db, type Tx } from "../db";
 import { czech } from "../db/collation";
 import { customer, invoice } from "../db/schema";
 import { scoped } from "../db/scoped";
@@ -25,7 +25,7 @@ import { isDesignId } from "../pdf/designs";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError, type Reader } from "./access";
 import type { Page } from "./audit-read";
-import { mutate } from "./mutation";
+import { mutate, type Audit } from "./mutation";
 
 const V = TEXTS.customers.validation;
 
@@ -194,47 +194,70 @@ export function duplicateIcoOf(q: Reader, ownerId: string, row: Pick<Customer, "
   return other ? row.ico : null;
 }
 
+export type CustomerValues = z.output<typeof customerInputSchema>;
+
+export function parseCustomerInput(raw: CustomerInput): CustomerValues {
+  const parsed = customerInputSchema.safeParse(raw);
+  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
+  return parsed.data;
+}
+
+// The write inside a caller's transaction; an import passes its batch, which only a new row takes.
+export function saveCustomerIn(
+  tx: Tx,
+  audit: Audit,
+  userId: string,
+  parsed: CustomerValues,
+  importBatchId: string | null = null,
+): { id: string; duplicateOfIco: string | null } {
+  const { id: existingId, ...values } = parsed;
+  const before = existingId ? findOwned(tx, userId, existingId) : null;
+  const id = before?.id ?? randomUUID();
+  const now = clock.now();
+  // The verification belongs to the VAT ID that was checked.
+  const searchText = searchTextOf(values);
+  const vatChanged = before !== null && before.dic !== values.dic;
+  if (before) {
+    tx.update(customer)
+      .set({
+        ...values,
+        searchText,
+        ...(vatChanged ? { vatVerifiedAt: null, vatValid: null } : {}),
+        updatedAt: now,
+      })
+      .where(and(eq(customer.id, id), eq(customer.userId, userId)))
+      .run();
+  } else {
+    tx.insert(customer)
+      .values({
+        id,
+        userId,
+        ...values,
+        searchText,
+        ...(importBatchId ? { importBatchId } : {}),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+  audit({
+    entity: "customer",
+    entityId: id,
+    ownerId: userId,
+    scope: "user",
+    before: before && snapshot(before),
+    after: snapshot(findOwned(tx, userId, id)),
+  });
+  return { id, duplicateOfIco: duplicateIcoOf(tx, userId, { id, ico: values.ico }) };
+}
+
 export function saveCustomer(
   actor: Actor,
   raw: CustomerInput,
 ): { id: string; duplicateOfIco: string | null } {
   const userId = ownerOf(actor);
-  const parsed = customerInputSchema.safeParse(raw);
-  if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
-  const { id: existingId, ...values } = parsed.data;
-
-  return mutate(actor, "customer.save", (tx, audit) => {
-    const before = existingId ? findOwned(tx, userId, existingId) : null;
-    const id = before?.id ?? randomUUID();
-    const now = clock.now();
-    // The verification belongs to the VAT ID that was checked.
-    const searchText = searchTextOf(values);
-    const vatChanged = before !== null && before.dic !== values.dic;
-    if (before) {
-      tx.update(customer)
-        .set({
-          ...values,
-          searchText,
-          ...(vatChanged ? { vatVerifiedAt: null, vatValid: null } : {}),
-          updatedAt: now,
-        })
-        .where(and(eq(customer.id, id), eq(customer.userId, userId)))
-        .run();
-    } else {
-      tx.insert(customer)
-        .values({ id, userId, ...values, searchText, createdAt: now, updatedAt: now })
-        .run();
-    }
-    audit({
-      entity: "customer",
-      entityId: id,
-      ownerId: userId,
-      scope: "user",
-      before: before && snapshot(before),
-      after: snapshot(findOwned(tx, userId, id)),
-    });
-    return { id, duplicateOfIco: duplicateIcoOf(tx, userId, { id, ico: values.ico }) };
-  });
+  const parsed = parseCustomerInput(raw);
+  return mutate(actor, "customer.save", (tx, audit) => saveCustomerIn(tx, audit, userId, parsed));
 }
 
 function setArchived(actor: Actor, id: string, archived: boolean): void {

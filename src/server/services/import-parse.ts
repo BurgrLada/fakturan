@@ -17,7 +17,7 @@ import { readZipEntries } from "@/lib/safe-input/zip";
 import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
 import { db } from "../db";
-import { file, importBatch, type Job } from "../db/schema";
+import { file, importBatch, type ImportBatch, type Job } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { readBlob, writeBlob } from "../files/store";
 import { isdocFromXml, IsdocInvalid } from "../isdoc/parse";
@@ -25,6 +25,7 @@ import { isdocRules } from "../isdoc/rules";
 import { validateIsdoc } from "../isdoc/validate";
 import { setImportProgress } from "../jobs/import-progress";
 import { yieldHeavy } from "../jobs/worker";
+import { ServiceError } from "./access";
 import { analyzeRows, type RowInput } from "./import-analyze";
 import {
   failBatch,
@@ -34,6 +35,7 @@ import {
   uploadsOf,
   writePreview,
 } from "./import-batch";
+import { parseTabular } from "./import-tabular";
 import { mutate } from "./mutation";
 
 const T = TEXTS.importing;
@@ -347,6 +349,56 @@ function summaryOf(rows: PreviewRow[]): Record<string, number> {
   };
 }
 
+function finishParse(
+  ownerId: string,
+  batch: ImportBatch,
+  status: "mapping" | "ready",
+  rows: PreviewRow[],
+  warnings: string[],
+): void {
+  const summary = status === "ready" ? summaryOf(rows) : null;
+  mutate(importActor(ownerId), "import.parsed", (tx, audit) => {
+    const moved = tx
+      .update(importBatch)
+      .set({
+        status,
+        progress: rows.length,
+        progressTotal: rows.length,
+        revision: batch.revision + 1,
+        summary,
+        error: warnings.length > 0 ? warnings.slice(0, 20).join("\n") : null,
+        updatedAt: clock.now(),
+      })
+      .where(
+        scoped(ownerId).where(importBatch, (t) => and(eq(t.id, batch.id), eq(t.status, "parsing"))),
+      )
+      .run();
+    if (moved.changes === 0) throw new BatchRejected(T.errors.status);
+    audit({
+      entity: "import_batch",
+      entityId: batch.id,
+      ownerId,
+      scope: "user",
+      after: summary ?? { status },
+    });
+  });
+}
+
+async function parseIsdoc(job: Job, ownerId: string, batch: ImportBatch): Promise<void> {
+  const batchId = batch.id;
+  const uploads = uploadsOf(db, ownerId, batchId);
+  const reader = new Reader(job, ownerId, batchId);
+  for (const upload of uploads) await readUpload(reader, upload, ownerId);
+  await reader.flush();
+  if (reader.sources.length === 0) throw new BatchRejected(T.errors.noDocuments);
+  const wanted = pairPdfs(reader);
+  await storePdfs(job, ownerId, batchId, wanted);
+  const today = calendarDateInPrague(clock.now());
+  const rows = analyzeRows(db, ownerId, reader.sources, today);
+  writePreview(ownerId, batchId, { rows });
+  finishParse(ownerId, batch, "ready", rows, reader.warnings);
+}
+
 export async function runImportParse(job: Job): Promise<void> {
   const ownerId = job.userId;
   const batchId = job.payload.batchId;
@@ -354,41 +406,20 @@ export async function runImportParse(job: Job): Promise<void> {
   const batch = findBatch(db, ownerId, batchId);
   if (batch.status !== "parsing") return;
   try {
-    const uploads = uploadsOf(db, ownerId, batchId);
-    const reader = new Reader(job, ownerId, batchId);
-    for (const upload of uploads) await readUpload(reader, upload, ownerId);
-    await reader.flush();
-    if (reader.sources.length === 0) throw new BatchRejected(T.errors.noDocuments);
-    const wanted = pairPdfs(reader);
-    await storePdfs(job, ownerId, batchId, wanted);
-    const today = calendarDateInPrague(clock.now());
-    const rows = analyzeRows(db, ownerId, reader.sources, today);
-    writePreview(ownerId, batchId, { rows });
-    const summary = summaryOf(rows);
-    mutate(importActor(ownerId), "import.parsed", (tx, audit) => {
-      const moved = tx
-        .update(importBatch)
-        .set({
-          status: "ready",
-          progress: rows.length,
-          progressTotal: rows.length,
-          revision: batch.revision + 1,
-          summary,
-          error: reader.warnings.length > 0 ? reader.warnings.slice(0, 20).join("\n") : null,
-          updatedAt: clock.now(),
-        })
-        .where(
-          scoped(ownerId).where(importBatch, (t) =>
-            and(eq(t.id, batchId), eq(t.status, "parsing")),
-          ),
-        )
-        .run();
-      if (moved.changes === 0) throw new BatchRejected(T.errors.status);
-      audit({ entity: "import_batch", entityId: batchId, ownerId, scope: "user", after: summary });
-    });
+    if (batch.kind === "tabular") {
+      const result = await parseTabular(job, ownerId, batch);
+      writePreview(ownerId, batchId, { rows: result.rows, sample: result.sample });
+      finishParse(ownerId, batch, result.status, result.rows, []);
+    } else {
+      await parseIsdoc(job, ownerId, batch);
+    }
   } catch (error) {
     if (error instanceof BatchRejected) return failBatch(ownerId, batchId, error.message);
     if (error instanceof InputRejected) return failBatch(ownerId, batchId, rejectionText(error));
+    // Refusals of a table (no header, a mapping that no longer fits) carry their own text.
+    if (error instanceof ServiceError && batch.kind === "tabular") {
+      return failBatch(ownerId, batchId, error.message);
+    }
     failBatch(ownerId, batchId, T.errors.unexpected);
     throw error;
   }

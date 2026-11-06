@@ -1,0 +1,5 @@
+Číslo;Vystaveno;Splatnost;DUZP;Uhrazeno;VS;Zákazník;Ulice;Město;PSČ;Země;DIČ;Měna;Kurz;Položka;Množství;Jednotka;Cena za jednotku;Cena položky
+2026-0002;2.2.2026;16.2.2026;2.2.2026;;20260002;Beispiel GmbH;Musterstraße 5;Musterstadt;12345;Německo;DE999999999;EUR;25,125;Beratung;3;h;120,00;360,00
+2026-0002;;;;;;;;;;;;;;Lizenz;1;ks;49,99;49,99
+2026-0003;3.2.2026;17.2.2026;3.2.2026;20.2.2026;20260003;Beispiel GmbH;Musterstraße 5;Musterstadt;12345;Německo;DE999999999;EUR;25,125;Beratung;1;h;120,00;120,00
+;4.2.2026;;;;;;;;;;;;;Bez čísla;1;ks;1,00;1,00

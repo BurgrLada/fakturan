@@ -6,6 +6,7 @@ import {
   confirmBatchAction,
   editPreviewAction,
   importStateAction,
+  remapBatchAction,
   undoBatchAction,
   type ImportState,
 } from "@/app/(app)/nastaveni/import/actions";
@@ -71,6 +72,7 @@ export function ImportPreview({ state, onChange }: Props) {
   const [pending, startTransition] = useTransition();
   const { batch, rows } = state;
   const ready = batch.status === "ready";
+  const records = batch.kind === "tabular" && batch.target !== "invoices";
 
   const reload = async () => {
     const next = await importStateAction({ batchId: batch.id });
@@ -99,12 +101,42 @@ export function ImportPreview({ state, onChange }: Props) {
 
   const undo = () =>
     startTransition(async () => {
-      if (!window.confirm(T.undoConfirm)) return;
+      if (!window.confirm(records ? T.undoRecordsConfirm : T.undoConfirm)) return;
       const result = await undoBatchAction({ batchId: batch.id });
       if (!result.ok) return setError(result.error);
       await reload();
       router.refresh();
     });
+
+  const remap = () =>
+    startTransition(async () => {
+      setError(null);
+      const result = await remapBatchAction({ batchId: batch.id, revision: batch.revision });
+      if (!result.ok) return setError(result.error);
+      router.refresh();
+    });
+
+  const skipButton = (row: PreviewRow) => (
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={pending}
+      onClick={() => edit({ kind: "skip", keys: [row.key], skip: row.status !== "skipped" })}
+    >
+      {row.status === "skipped" ? T.unskip : T.skip}
+    </Button>
+  );
+
+  const statusCell = (row: PreviewRow) => (
+    <>
+      <Badge variant={VARIANT[row.status]}>{T.statuses[row.status]}</Badge>
+      {row.messages.map((message) => (
+        <p key={message} className="mt-1 text-xs text-muted-foreground">
+          {message}
+        </p>
+      ))}
+    </>
+  );
 
   const keys = [...selected];
   const toggle = (key: string) =>
@@ -124,7 +156,48 @@ export function ImportPreview({ state, onChange }: Props) {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {ready && (
+      {ready && batch.kind === "tabular" && (
+        <Button variant="outline" disabled={pending} onClick={remap}>
+          {TEXTS.importing.mapping.back}
+        </Button>
+      )}
+      {ready && records && (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" aria-label={T.title}>
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="p-2">{T.source}</th>
+                  <th className="p-2">{T.name}</th>
+                  <th className="p-2">{T.detail}</th>
+                  <th className="p-2">{T.status}</th>
+                  <th className="p-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr
+                    key={row.key}
+                    className="border-b align-top"
+                    data-testid={`import-row-${row.key}`}
+                  >
+                    <td className="p-2">{row.source}</td>
+                    <td className="max-w-64 truncate p-2">{row.record?.name ?? ""}</td>
+                    <td className="p-2">{row.record?.detail ?? ""}</td>
+                    <td className="p-2">{statusCell(row)}</td>
+                    <td className="p-2">{skipButton(row)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {blocked && <p className="text-sm text-muted-foreground">{T.confirmHint}</p>}
+          <Button disabled={pending || blocked} onClick={confirm}>
+            {T.confirmRecords}
+          </Button>
+        </>
+      )}
+      {ready && !records && (
         <>
           <p className="text-sm text-muted-foreground">{T.withTax}</p>
           {paidCount > 0 && <p className="text-sm">{T.paidCount(paidCount)}</p>}
@@ -225,14 +298,7 @@ export function ImportPreview({ state, onChange }: Props) {
                           <span className="text-muted-foreground"> ({T.estimated})</span>
                         )}
                       </td>
-                      <td className="p-2">
-                        <Badge variant={VARIANT[row.status]}>{T.statuses[row.status]}</Badge>
-                        {row.messages.map((message) => (
-                          <p key={message} className="mt-1 text-xs text-muted-foreground">
-                            {message}
-                          </p>
-                        ))}
-                      </td>
+                      <td className="p-2">{statusCell(row)}</td>
                       <td className="space-y-1 p-2">
                         {row.ownConfirmed === false && row.status !== "skipped" && (
                           <Button
@@ -244,16 +310,7 @@ export function ImportPreview({ state, onChange }: Props) {
                             {T.confirmOwn}
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={pending}
-                          onClick={() =>
-                            edit({ kind: "skip", keys: [row.key], skip: row.status !== "skipped" })
-                          }
-                        >
-                          {row.status === "skipped" ? T.unskip : T.skip}
-                        </Button>
+                        {skipButton(row)}
                       </td>
                     </tr>
                   );

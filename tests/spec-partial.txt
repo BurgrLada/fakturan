@@ -10,3 +10,4 @@ TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálný
 ADV-005	Chybí daňový přehled	plán 8
 IMP-000	Fakturoid, iDoklad, SuperFaktura, Vyfakturuj a ABRA Flexi jsou ověřené jen z dokumentace	kap. 24
 IMP-005	Ruční přiložení PDF k importovanému dokladu po importu, přiloží se jen PDF z importu	plán 9
+IMP-002	Vestavěné předlohy čekají na reálné soubory Fakturoidu a iDokladu	kap. 24

@@ -30,9 +30,13 @@ import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
 import {
   confirmBatchAction,
   createImportBatchAction,
+  deletePresetAction,
   editPreviewAction,
   importStateAction,
+  remapBatchAction,
+  savePresetAction,
   startParseAction,
+  submitMappingAction,
   undoBatchAction,
 } from "@/app/(app)/nastaveni/import/actions";
 import {
@@ -951,5 +955,47 @@ describe("akce importu", () => {
       ok: true,
       batch: { id: batchId, status: "uploading" },
     });
+  });
+
+  test("[SEC-002] mapování a předlohy importu odmítnou cizí dávku i cizí předlohu", async () => {
+    const mine = seedOwner(db, new Date());
+    const stranger = seedOwner(db, new Date());
+    session.userId = mine;
+    const created = await createImportBatchAction({ kind: "tabular" });
+    if (!created.ok) throw new Error(created.error);
+    const batchId = created.id;
+    const mapping = {
+      target: "customers",
+      columns: { name: "Název" },
+      dateFormat: "dmy",
+      decimal: ",",
+      currency: "CZK",
+      source: "",
+    };
+    const saved = await savePresetAction({ name: "Moje", mapping });
+    if (!saved.ok) throw new Error(saved.error);
+    const notFound = { ok: false, error: TEXTS.importing.errors.notFound };
+
+    session.userId = stranger;
+    expect(await submitMappingAction({ batchId, revision: 0, mapping })).toEqual(notFound);
+    expect(await remapBatchAction({ batchId, revision: 0 })).toEqual(notFound);
+    expect(await deletePresetAction({ id: saved.id })).toEqual({
+      ok: false,
+      error: TEXTS.importing.mapping.errors.presetNotFound,
+    });
+    const own = await savePresetAction({ name: "Moje", mapping });
+    expect(own.ok && own.id).not.toBe(saved.id);
+    expect(own.ok && own.presets.some((preset) => preset.id === saved.id)).toBe(false);
+    expect(await createImportBatchAction({ kind: "jiny" })).toMatchObject({ ok: false });
+    expect(await savePresetAction({ name: "X", mapping: { ...mapping, rows: [] } })).toMatchObject({
+      ok: false,
+    });
+
+    session.userId = mine;
+    expect(await importStateAction({ batchId })).toMatchObject({
+      ok: true,
+      batch: { id: batchId, kind: "tabular", status: "uploading" },
+    });
+    expect(await deletePresetAction({ id: saved.id })).toMatchObject({ ok: true });
   });
 });

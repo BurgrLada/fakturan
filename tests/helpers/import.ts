@@ -16,6 +16,8 @@ import {
 } from "@/server/services/import-batch";
 import { runImportCommit } from "@/server/services/import-commit";
 import { runImportParse } from "@/server/services/import-parse";
+import { submitMapping } from "@/server/services/import-tabular";
+import type { Mapping } from "@/lib/import-mapping";
 import { seedOwner, webActor } from "./fixtures-mail";
 
 export const FIXTURE_SUPPLIER_ICO = "99900017";
@@ -83,4 +85,21 @@ export async function committed(db: Db, owner: string, batchId: string) {
   confirmBatch(webActor(owner), batchId, batch.revision);
   await drainHeavy("w");
   return db.select().from(importBatch).where(eq(importBatch.id, batchId)).get()!;
+}
+
+// Upload and the first pass: the batch then waits in `mapping` with the sample of the sheet.
+export async function tabularUploaded(owner: string, name: string, bytes: Uint8Array) {
+  const actor = webActor(owner);
+  const { id } = createBatch(actor, "tabular");
+  await storeUpload(actor, id, streamOf(bytes), { name, declaredBytes: bytes.length });
+  startParse(actor, id);
+  await drainHeavy("w");
+  return id;
+}
+
+export async function tabularMapped(owner: string, batchId: string, mapping: Mapping) {
+  const batch = getPreview(owner, batchId)!.batch;
+  submitMapping(webActor(owner), batchId, batch.revision, mapping);
+  await drainHeavy("w");
+  return getPreview(owner, batchId)!;
 }

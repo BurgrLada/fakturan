@@ -38,6 +38,7 @@ import { Unchanged, unlessUnchanged } from "./invoices";
 import { mutate } from "./mutation";
 
 const E = TEXTS.importing.errors;
+const M = TEXTS.importing.mapping;
 const STALE_MS = 24 * 3_600_000;
 
 // The upload and the preview carry personal data and are useless once the batch cannot go on.
@@ -161,11 +162,16 @@ export async function storeUpload(
   try {
     if (stored.size === 0) throw new ServiceError(E.empty);
     const kind = sniffContent(stored.head);
-    if (!ACCEPTED[batch.kind].includes(kind)) throw new ServiceError(E.unsupported);
+    if (!ACCEPTED[batch.kind].includes(kind)) {
+      throw new ServiceError(batch.kind === "tabular" ? M.errors.unsupported : E.unsupported);
+    }
     const name = displayName(meta.name);
     mutate(actor, "import.upload", (tx, audit) => {
       const current = findBatch(tx, userId, batchId);
       if (current.status !== "uploading") throw new ServiceError(E.status);
+      if (current.kind === "tabular" && current.uploadedBytes > 0) {
+        throw new ServiceError(M.errors.oneFile);
+      }
       const uploadedBytes = current.uploadedBytes + stored.size;
       // Two uploads in parallel each saw the old total; the sum decides here.
       if (uploadedBytes > MAX_UPLOAD_BYTES) throw new UploadTooLarge();

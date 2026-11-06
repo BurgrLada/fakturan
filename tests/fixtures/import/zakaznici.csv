@@ -1,0 +1,6 @@
+﻿Název;IČO;DIČ;Ulice;Město;PSČ;Země;E-mail;Splatnost
+Alfa Zkušební s. r. o.;09990011;CZ09990011;Testovací 2;Testov;123 45;CZ;alfa@example.test;14
+Beta Pokusná;;;Hlavní 3;Brno;602 00;Česká republika;beta@example.test;
+Gama Existující;09990020;;;;;;;
+Delta Chybná;;;;;;;neni-email;
+"=HYPERLINK(""http://example.test"",""klik"")";;;;;;;;

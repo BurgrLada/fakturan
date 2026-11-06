@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { and, eq, notInArray } from "drizzle-orm";
 import type { Currency } from "@/lib/currency";
 import { isDomesticCountry } from "@/lib/customers";
-import { foldText } from "@/lib/fold-text";
 import { appearanceFrom } from "@/lib/invoice";
 import type { ImportDocument } from "@/lib/import-document";
 import { importsRow, rowBlocks, type PreviewRow } from "@/lib/import-preview";
@@ -11,9 +10,11 @@ import { calendarDateInPrague } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
-import { customer, file, importBatch, invoice, invoiceLine, type Job } from "../db/schema";
+import { file, importBatch, invoice, invoiceLine, type ImportBatch, type Job } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { syncSuperseded } from "./advances";
+import { catalogInputSchema, saveCatalogItemIn } from "./catalog";
+import { customerInputSchema, saveCustomerIn } from "./customers";
 import {
   analyzeRows,
   type RowDecisions,
@@ -30,6 +31,7 @@ import {
   takeFiles,
   writePreview,
 } from "./import-batch";
+import { analyzeRecords, type RecordInput } from "./import-tabular";
 import { refreshBalance } from "./invoice-balance";
 import { auditSnapshot, findOwned, searchTextOf } from "./invoices";
 import { mutate, type Audit } from "./mutation";
@@ -80,27 +82,7 @@ function insertCustomer(
   if (!parsed.success)
     throw new CommitStopped(T.rows.customerInvalid(parsed.error.issues[0]?.message ?? ""));
   const { id: _ignored, ...values } = parsed.data;
-  const id = randomUUID();
-  const now = clock.now();
-  tx.insert(customer)
-    .values({
-      id,
-      userId: ownerId,
-      ...values,
-      searchText: foldText([values.name, values.ico, values.dic, values.email].join("\n")),
-      importBatchId: batchId,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
-  audit({
-    entity: "customer",
-    entityId: id,
-    ownerId,
-    scope: "user",
-    after: { name: values.name, ico: values.ico, importBatchId: batchId },
-  });
-  return id;
+  return saveCustomerIn(tx, audit, ownerId, values, batchId).id;
 }
 
 type Context = {
@@ -258,7 +240,7 @@ function insertDocument(ctx: Context, row: PreviewRow): string {
 
 // Back to the preview with what changed since: nothing of the batch is written.
 function stop(ownerId: string, batchId: string, rows: PreviewRow[], message: string): void {
-  writePreview(ownerId, batchId, { rows });
+  writePreview(ownerId, batchId, { ...readPreview(ownerId, batchId), rows });
   mutate(importActor(ownerId), "import.commit_stopped", (tx, audit) => {
     const batch = findBatch(tx, ownerId, batchId);
     tx.update(importBatch)
@@ -287,6 +269,9 @@ export async function runImportCommit(job: Job): Promise<void> {
   const batch = findBatch(db, ownerId, batchId);
   if (batch.status !== "committing") return;
   const stored = readPreview(ownerId, batchId)?.rows ?? [];
+  if (batch.target === "customers" || batch.target === "catalog") {
+    return commitRecords(ownerId, batch, stored);
+  }
   const today = calendarDateInPrague(clock.now());
   // Checked again right before the write: documents and customers may have changed since.
   const rows = analyzeRows(db, ownerId, inputsOf(stored), today, decisionsOf(stored));
@@ -362,6 +347,66 @@ export async function runImportCommit(job: Job): Promise<void> {
       if (moved.changes === 0) throw new CommitStopped(T.errors.status);
       audit({ entity: "import_batch", entityId: batchId, ownerId, scope: "user", after: summary });
       return [...spare, ...uploads];
+    });
+  } catch (error) {
+    if (error instanceof CommitStopped) return stop(ownerId, batchId, rows, error.message);
+    failBatch(ownerId, batchId, T.errors.unexpected);
+    throw error;
+  }
+  removeBlobs(ownerId, [...removed, previewBlobId(batchId)]);
+}
+
+function recordInputsOf(rows: PreviewRow[]): RecordInput[] {
+  return rows.map((row) => ({
+    key: row.key,
+    source: row.source,
+    record: row.record ?? null,
+    errors: row.record ? [] : row.messages,
+  }));
+}
+
+// Customers and catalog items from a table: checked again against the account, then one write.
+function commitRecords(ownerId: string, batch: ImportBatch, stored: PreviewRow[]): void {
+  const batchId = batch.id;
+  const rows = analyzeRecords(db, ownerId, recordInputsOf(stored), decisionsOf(stored));
+  if (rows.some(rowBlocks)) return stop(ownerId, batchId, rows, T.errors.blocked);
+  const chosen = rows.filter(importsRow);
+  let removed: string[];
+  try {
+    removed = mutate(importActor(ownerId), "import.commit", (tx, audit) => {
+      for (const row of chosen) {
+        const record = row.record!;
+        if (record.target === "customers") {
+          const parsed = customerInputSchema.safeParse(record.input);
+          if (!parsed.success) throw new CommitStopped(parsed.error.issues[0]?.message ?? "");
+          const { id: _ignored, ...values } = parsed.data;
+          saveCustomerIn(tx, audit, ownerId, values, batchId);
+        } else {
+          const parsed = catalogInputSchema.safeParse(record.input);
+          if (!parsed.success) throw new CommitStopped(parsed.error.issues[0]?.message ?? "");
+          const { id: _ignored, ...values } = parsed.data;
+          saveCatalogItemIn(tx, audit, ownerId, values, batchId);
+        }
+      }
+      const uploads = takeFiles(tx, ownerId, batchId);
+      const summary = {
+        documents: chosen.length,
+        duplicates: rows.filter((row) => row.status === "duplicate").length,
+        skipped: rows.filter((row) => row.status === "skipped").length,
+      };
+      const now = clock.now();
+      const moved = tx
+        .update(importBatch)
+        .set({ status: "done", summary, error: null, committedAt: now, updatedAt: now })
+        .where(
+          scoped(ownerId).where(importBatch, (t) =>
+            and(eq(t.id, batchId), eq(t.status, "committing")),
+          ),
+        )
+        .run();
+      if (moved.changes === 0) throw new CommitStopped(T.errors.status);
+      audit({ entity: "import_batch", entityId: batchId, ownerId, scope: "user", after: summary });
+      return uploads;
     });
   } catch (error) {
     if (error instanceof CommitStopped) return stop(ownerId, batchId, rows, error.message);

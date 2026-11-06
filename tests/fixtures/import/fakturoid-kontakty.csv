@@ -1,0 +1,2 @@
+name,street,city,zip,country,registration_no,vat_no,bank_account,iban,web,variable_symbol,full_name,phone,email,email_copy,private_note,type,due,currency,language
+Omega Zkušební s.r.o.,Polní 7,Testov,123 45,CZ,09990038,CZ09990038,,,,,Ota Zkušební,+420 600 000 000,omega@example.test,,Smyšlený kontakt,customer,30,CZK,cs

@@ -16,6 +16,8 @@ const R = TEXTS.importing.rows;
 // R-12: within a unit of the currency the difference is rounding, beyond it the file is wrong.
 const MAX_ROUNDING_MINOR = 100;
 const MAX_LINES = 500;
+// A table has no supplier: the account's own profile stands in for it, so it is never someone else.
+export const TABULAR_SOURCE = "tabular";
 
 export type RowInput = {
   key: string;
@@ -223,7 +225,7 @@ export function analyzeRows(
       if (problems.length > 0) {
         status = "error";
         row.messages.push(...problems);
-      } else if (!fileIco || !ownIco) {
+      } else if ((!fileIco || !ownIco) && doc.sourceType !== TABULAR_SOURCE) {
         row.ownConfirmed = decided?.ownConfirmed ?? false;
         if (!row.ownConfirmed) row.messages.push(R.confirmOwn);
       }
@@ -363,6 +365,8 @@ export function analyzeRows(
       const earlier = decisions.get(row.key);
       if (earlier?.paidOn && !earlier.dateEstimated) {
         row.paidOn = earlier.paidOn;
+      } else if (doc.paidOn) {
+        row.paidOn = doc.paidOn;
       } else {
         row.paidOn = paidOnFor(doc, today);
         row.dateEstimated = true;

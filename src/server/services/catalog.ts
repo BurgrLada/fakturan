@@ -13,7 +13,7 @@ import { catalogItem, unit } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { ServiceError, type Reader } from "./access";
 import type { Page } from "./audit-read";
-import { mutate } from "./mutation";
+import { mutate, type Audit } from "./mutation";
 
 const V = TEXTS.catalog.validation;
 
@@ -175,8 +175,6 @@ export function listCategories(ownerId: string): string[] {
     .map((row) => row.category);
 }
 
-type Audit = Parameters<Parameters<typeof mutate>[2]>[1];
-
 // Defaults are written inside the first write, never while a page renders; until then listUnits
 // reports them without ids.
 function ensureDefaultUnits(tx: Tx, ownerId: string, audit: Audit): void {
@@ -203,38 +201,63 @@ function ensureDefaultUnits(tx: Tx, ownerId: string, audit: Audit): void {
   });
 }
 
-export function saveCatalogItem(actor: Actor, raw: CatalogInput): { id: string } {
-  const userId = ownerOf(actor);
+export type CatalogValues = z.output<typeof catalogInputSchema>;
+
+export function parseCatalogInput(raw: CatalogInput): CatalogValues {
   const parsed = catalogInputSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? V.invalid);
-  const { id: existingId, ...values } = parsed.data;
+  return parsed.data;
+}
 
-  return mutate(actor, "catalog_item.save", (tx, audit) => {
-    ensureDefaultUnits(tx, userId, audit);
-    const before = existingId ? findOwned(tx, userId, existingId) : null;
-    const id = before?.id ?? randomUUID();
-    const now = clock.now();
-    const searchText = searchTextOf(values);
-    if (before) {
-      tx.update(catalogItem)
-        .set({ ...values, searchText, updatedAt: now })
-        .where(and(eq(catalogItem.id, id), eq(catalogItem.userId, userId)))
-        .run();
-    } else {
-      tx.insert(catalogItem)
-        .values({ id, userId, ...values, searchText, createdAt: now, updatedAt: now })
-        .run();
-    }
-    audit({
-      entity: "catalog_item",
-      entityId: id,
-      ownerId: userId,
-      scope: "user",
-      before: before && snapshot(before),
-      after: snapshot(findOwned(tx, userId, id)),
-    });
-    return { id };
+// The write inside a caller's transaction; an import passes its batch, which only a new row takes.
+export function saveCatalogItemIn(
+  tx: Tx,
+  audit: Audit,
+  userId: string,
+  parsed: CatalogValues,
+  importBatchId: string | null = null,
+): { id: string } {
+  const { id: existingId, ...values } = parsed;
+  ensureDefaultUnits(tx, userId, audit);
+  const before = existingId ? findOwned(tx, userId, existingId) : null;
+  const id = before?.id ?? randomUUID();
+  const now = clock.now();
+  const searchText = searchTextOf(values);
+  if (before) {
+    tx.update(catalogItem)
+      .set({ ...values, searchText, updatedAt: now })
+      .where(and(eq(catalogItem.id, id), eq(catalogItem.userId, userId)))
+      .run();
+  } else {
+    tx.insert(catalogItem)
+      .values({
+        id,
+        userId,
+        ...values,
+        searchText,
+        ...(importBatchId ? { importBatchId } : {}),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+  audit({
+    entity: "catalog_item",
+    entityId: id,
+    ownerId: userId,
+    scope: "user",
+    before: before && snapshot(before),
+    after: snapshot(findOwned(tx, userId, id)),
   });
+  return { id };
+}
+
+export function saveCatalogItem(actor: Actor, raw: CatalogInput): { id: string } {
+  const userId = ownerOf(actor);
+  const parsed = parseCatalogInput(raw);
+  return mutate(actor, "catalog_item.save", (tx, audit) =>
+    saveCatalogItemIn(tx, audit, userId, parsed),
+  );
 }
 
 function setArchived(actor: Actor, id: string, archived: boolean): void {
