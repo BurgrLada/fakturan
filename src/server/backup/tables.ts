@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { notInArray, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { BACKUP_VERSION, type ColumnRule } from "@/lib/backup-format";
@@ -49,7 +50,7 @@ const C = "copy";
 
 // A source upload and an export are temporary and expire on their own; nothing in the archive
 // points at them.
-const TEMPORARY_FILES: FileKind[] = ["import_upload", "export"];
+export const TEMPORARY_FILES: FileKind[] = ["import_upload", "export"];
 
 // Parents before children, so a restore can insert in this order (R-31).
 export const BACKUP_TABLES: BackupTable[] = [
@@ -685,4 +686,10 @@ export function backupColumnsFingerprint(tables = BACKUP_TABLES): BackupFingerpr
       ]),
     ),
   };
+}
+
+export function backupColumnsHash(tables = BACKUP_TABLES): string {
+  return createHash("sha256")
+    .update(JSON.stringify(backupColumnsFingerprint(tables)))
+    .digest("hex");
 }

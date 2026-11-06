@@ -44,6 +44,8 @@ export const backupManifestSchema = z
     v: z.number().int().min(1),
     app: z.string().min(1).max(64),
     migration: z.string().min(1).max(128),
+    // SHA-256 of the column registry the archive was written with; same v, same registry.
+    columns: z.string().regex(/^[0-9a-f]{64}$/),
     createdAt: z.iso.datetime(),
     counts: z.strictObject({
       tables: z.record(z.string().regex(TABLE_NAME), count),
@@ -58,3 +60,21 @@ export const backupManifestSchema = z
   .refine((manifest) => Object.keys(manifest.entries).length <= MAX_ENTRIES);
 
 export type BackupManifest = z.output<typeof backupManifestSchema>;
+
+export type BackupRow = Record<string, unknown>;
+
+// Steps from version n to n + 1, applied to each table's rows of an older archive before they are
+// validated. No version before 1 exists, so the list starts empty (R-31).
+export const BACKUP_UPGRADES: Record<number, (table: string, rows: BackupRow[]) => BackupRow[]> =
+  {};
+
+const MiB = 1024 * 1024;
+
+// R-35: a backup has its own limits, far above those of a document import.
+export const RESTORE_LIMITS = {
+  archiveBytes: 1024 * MiB,
+  manifestBytes: MiB,
+  dataEntryBytes: 200 * MiB,
+  fileEntryBytes: 25 * MiB,
+  entries: 200_000,
+};

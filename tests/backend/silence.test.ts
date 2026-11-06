@@ -17,7 +17,7 @@ import {
   reminderPlanTask,
 } from "@/server/scheduler/start";
 import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
-import { setAutomation, setPaused } from "@/server/services/automation";
+import { setAutomation, setDailyDigest, setPaused } from "@/server/services/automation";
 import { assignNotice, ingestNotice } from "@/server/services/bank-notices";
 import { deliverDigest } from "@/server/services/due-alerts";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
@@ -25,6 +25,9 @@ import { savePreferences } from "@/server/services/preferences";
 import { deliverUserNotice, runRecurringJob } from "@/server/services/recurring-run";
 import { saveReminderRule, snoozeReminders } from "@/server/services/reminders";
 import { deactivateUser, reactivateUser } from "@/server/services/users";
+import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
+import { recoverRestore, runRestore } from "@/server/services/account-restore";
+import { backupArchive, restoreArchive } from "../helpers/backup-compare";
 import { externalInvoice } from "../fixtures/external-invoice";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
@@ -430,4 +433,44 @@ describe("bez kliknutí", () => {
     expect(smtp.connections()).toBe(0);
     assertConsistent(db, owner);
   }, 60_000);
+});
+
+describe("[TST-016] ticho po obnově zálohy", () => {
+  test("[TST-016] po obnově nic neodejde: plán send, upomínka, potvrzení, záloha, digest", async () => {
+    registerJob("backup.run", { run: runBackup, recover: recoverBackupJob });
+    registerJob("restore.run", { run: runRestore, recover: recoverRestore });
+    const sources = available.map((key) => armed(key));
+    for (const owner of sources) {
+      setDailyDigest(webActor(owner), true);
+    }
+    const archives = [];
+    for (const owner of sources) archives.push(await backupArchive(db, owner));
+    db.update(user).set({ banned: true }).where(ne(user.id, admin)).run();
+
+    const targets: string[] = [];
+    for (const bytes of archives) {
+      const target = `obnova-${targets.length}-${Date.now()}`;
+      db.insert(user)
+        .values({
+          id: target,
+          name: target,
+          email: `${target}@example.cz`,
+          createdAt: T0,
+          updatedAt: T0,
+        })
+        .run();
+      expect((await restoreArchive(db, target, bytes)).status).toBe("done");
+      targets.push(target);
+    }
+    await everyDay();
+    expect(toClient()).toEqual([]);
+    expect(smtp.messages).toEqual([]);
+
+    // Turning sending back on is a person's act, and a plan in send mode still waits for its
+    // confirmation, so a restored plan only drafts.
+    for (const target of targets) setAutomation(webActor(target), "recurringSend", true, ENABLED);
+    await afterOutage();
+    expect(toClient()).toEqual([]);
+    for (const target of targets) assertConsistent(db, target);
+  });
 });

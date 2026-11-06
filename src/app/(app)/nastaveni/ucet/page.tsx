@@ -14,6 +14,12 @@ import { enabledProviders } from "@/server/auth/providers";
 import { requireSession } from "@/server/auth/session";
 import { env } from "@/server/env";
 import { hasPassword } from "@/server/services/users";
+import { lastBackupOf } from "@/server/services/account-backup";
+
+function backupOffer(ownerId: string) {
+  const { lastBackupAt, running } = lastBackupOf(ownerId);
+  return { lastBackupAt: lastBackupAt ? formatDateTime(lastBackupAt) : null, running };
+}
 
 export const metadata: Metadata = { title: `${TEXTS.account.title} | ${TEXTS.appName}` };
 
@@ -63,7 +69,7 @@ async function AccountContent({
       </section>
       <section className="flex flex-col gap-2">
         <h2 className="text-lg">{TEXTS.account.deleteTitle}</h2>
-        <DeleteAccountForm hasPassword={hasPassword(user.id)} />
+        <DeleteAccountForm hasPassword={hasPassword(user.id)} backup={backupOffer(user.id)} />
       </section>
     </>
   );

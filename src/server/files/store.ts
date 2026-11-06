@@ -52,12 +52,12 @@ export function blobWriter(userId: string, id: string): WriteStream {
 }
 
 // Inside the account folder, so removeUserDir takes a leftover with the account.
-export function tempDir(userId: string, id: string): string {
-  return join(userDir(userId), segment(`tmp-${id}`));
+export function tempDir(userId: string, id: string, prefix: "tmp" | "restore" = "tmp"): string {
+  return join(userDir(userId), segment(`${prefix}-${id}`));
 }
 
-export function removeTempDir(userId: string, id: string): void {
-  rmSync(tempDir(userId, id), { recursive: true, force: true });
+export function removeTempDir(userId: string, id: string, prefix: "tmp" | "restore" = "tmp"): void {
+  rmSync(tempDir(userId, id, prefix), { recursive: true, force: true });
 }
 
 export function readBlob(userId: string, id: string): Buffer {

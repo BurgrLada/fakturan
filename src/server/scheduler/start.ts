@@ -10,6 +10,7 @@ import { purgeFinishedJobs } from "../jobs/queue";
 import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
 import { recoverBackupJob, runBackup } from "../services/account-backup";
+import { recoverRestore, runRestore } from "../services/account-restore";
 import { purgeNotices } from "../services/bank-notices";
 import { planBankPolls, pollMailbox } from "../services/bank-poll";
 import { deliverDigest, planDigests } from "../services/due-alerts";
@@ -137,6 +138,7 @@ export function startScheduler(): void {
   registerJob("import.commit", { run: runImportCommit, recover: recoverImportJob });
   registerJob("export.run", { run: runExport, recover: recoverExportJob });
   registerJob("backup.run", { run: runBackup, recover: recoverBackupJob });
+  registerJob("restore.run", { run: runRestore, recover: recoverRestore });
   registerTickTask(deadMailTask);
   registerTickTask(deadRecurringTask);
   registerTickTask(recurringPlanTask);

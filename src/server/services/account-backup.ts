@@ -16,7 +16,7 @@ import pkg from "../../../package.json";
 import journal from "../../../drizzle/meta/_journal.json";
 import type { Actor } from "../audit/context";
 import { AUDIT_FILE, FILES_DIR, MissingBlob, snapshot, type Snapshot } from "../backup/snapshot";
-import { BACKUP_TABLES } from "../backup/tables";
+import { BACKUP_TABLES, backupColumnsHash } from "../backup/tables";
 import { clock } from "../clock";
 import { db } from "../db";
 import { exportJob, type Job } from "../db/schema";
@@ -42,6 +42,16 @@ const E = TEXTS.backup.errors;
 const CHUNK = 1024 * 1024;
 
 export { listBackups };
+
+// What the delete form offers (ADM-009): the last finished backup and whether one is running.
+export function lastBackupOf(ownerId: string): { lastBackupAt: Date | null; running: boolean } {
+  const rows = listBackups(ownerId);
+  const done = rows.find((row) => row.status === "done" || row.status === "expired");
+  return {
+    lastBackupAt: done?.finishedAt ?? null,
+    running: rows.some((row) => row.status === "queued" || row.status === "running"),
+  };
+}
 
 function ownerOf(actor: Actor): string {
   if (!actor.userId) throw new ServiceError(TEXTS.invoices.validation.forbidden);
@@ -80,14 +90,28 @@ export function createBackup(actor: Actor): { id: string } {
 }
 
 type Run = { job: Job; ownerId: string; exportId: string; done: number };
+type Digest = { sha256: string; size: number };
 
-async function copyEntry(
-  run: Run,
-  stream: EntryStream,
-  source: string,
-): Promise<{ sha256: string; size: number }> {
+async function digest(run: Run, source: string): Promise<Digest> {
   const hash = createHash("sha256");
   let size = 0;
+  const fd = openSync(source, "r");
+  try {
+    const block = Buffer.allocUnsafe(CHUNK);
+    for (;;) {
+      const read = readSync(fd, block, 0, CHUNK, null);
+      if (read === 0) break;
+      hash.update(block.subarray(0, read));
+      size += read;
+      await yieldHeavy(run.job);
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return { sha256: hash.digest("hex"), size };
+}
+
+async function copyEntry(run: Run, stream: EntryStream, source: string): Promise<void> {
   const fd = openSync(source, "r");
   try {
     for (;;) {
@@ -95,10 +119,7 @@ async function copyEntry(
       const block = Buffer.allocUnsafe(CHUNK);
       const read = readSync(fd, block, 0, CHUNK, null);
       if (read === 0) break;
-      const chunk = block.subarray(0, read);
-      hash.update(chunk);
-      size += read;
-      stream.push(chunk);
+      stream.push(block.subarray(0, read));
       await yieldHeavy(run.job);
     }
   } finally {
@@ -108,41 +129,45 @@ async function copyEntry(
   run.done += 1;
   moveExport(run.ownerId, run.exportId, ["running"], { progress: run.done });
   await yieldHeavy(run.job);
-  return { sha256: hash.digest("hex"), size };
 }
 
+type Planned = { name: string; source: string; level: 0 | 6 };
+
+// The manifest goes first, so a restore can check every entry against it as the entry arrives;
+// the hashes therefore come from the snapshot files before the archive is written.
 async function writeArchive(run: Run, dir: string, snap: Snapshot, path: string): Promise<number> {
   const createdAt = clock.now();
-  const zip = zipFileWriter(path, { mtime: createdAt });
+  const planned: Planned[] = [
+    ...BACKUP_TABLES.map((entry) => ({
+      name: dataEntry(entry.name),
+      source: join(dir, `${entry.name}.jsonl`),
+      level: 6 as const,
+    })),
+    ...snap.files.map((id) => ({
+      name: fileEntry(id),
+      source: join(dir, FILES_DIR, id),
+      level: 0 as const,
+    })),
+    { name: AUDIT_ENTRY, source: join(dir, AUDIT_FILE), level: 6 },
+  ];
   const entries: BackupManifest["entries"] = {};
+  for (const item of planned) entries[item.name] = await digest(run, item.source);
+  const manifest: BackupManifest = {
+    format: BACKUP_FORMAT,
+    v: BACKUP_VERSION,
+    app: pkg.version,
+    migration: journal.entries.at(-1)!.tag,
+    columns: backupColumnsHash(),
+    createdAt: createdAt.toISOString(),
+    counts: { tables: snap.tables, files: snap.files.length, audit: snap.audit },
+    entries,
+  };
+  const zip = zipFileWriter(path, { mtime: createdAt });
   try {
-    for (const entry of BACKUP_TABLES) {
-      const name = dataEntry(entry.name);
-      entries[name] = await copyEntry(
-        run,
-        zip.deflatedEntry(name),
-        join(dir, `${entry.name}.jsonl`),
-      );
-    }
-    for (const id of snap.files) {
-      const name = fileEntry(id);
-      entries[name] = await copyEntry(run, zip.deflatedEntry(name, 0), join(dir, FILES_DIR, id));
-    }
-    entries[AUDIT_ENTRY] = await copyEntry(
-      run,
-      zip.deflatedEntry(AUDIT_ENTRY),
-      join(dir, AUDIT_FILE),
-    );
-    const manifest: BackupManifest = {
-      format: BACKUP_FORMAT,
-      v: BACKUP_VERSION,
-      app: pkg.version,
-      migration: journal.entries.at(-1)!.tag,
-      createdAt: createdAt.toISOString(),
-      counts: { tables: snap.tables, files: snap.files.length, audit: snap.audit },
-      entries,
-    };
     zip.addDeflated(MANIFEST_ENTRY, JSON.stringify(manifest, null, 2));
+    for (const item of planned) {
+      await copyEntry(run, zip.deflatedEntry(item.name, item.level), item.source);
+    }
     return zip.close();
   } catch (error) {
     zip.abort();
@@ -184,6 +209,8 @@ export async function runBackup(job: Job): Promise<void> {
     moveExport(ownerId, exportId, ["running"], { progressTotal: total });
     size = await writeArchive(run, dir, snap, path);
   } catch (error) {
+    // The account was deleted meanwhile: its folder and rows are gone, nothing is left to report.
+    if (!findExport(db, ownerId, exportId)) return;
     const reason = reasonOf(error);
     failExport(ownerId, exportId, reason ?? E.unexpected);
     // A code failure leaves a dead job and a report; a refusal is an answer, not an incident.
@@ -201,6 +228,7 @@ export async function runBackup(job: Job): Promise<void> {
       audit: snap.audit,
     });
   } catch (error) {
+    if (!findExport(db, ownerId, exportId)) return;
     failExport(ownerId, exportId, E.unexpected);
     throw error;
   }

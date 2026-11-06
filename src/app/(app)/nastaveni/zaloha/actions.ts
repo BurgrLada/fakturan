@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
 import { createBackup, listBackups } from "@/server/services/account-backup";
-import type { BackupListRow } from "@/server/services/exports";
+import { latestRestore, type BackupListRow } from "@/server/services/exports";
 
 type Outcome<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -33,4 +33,10 @@ export async function createBackupAction(): Promise<Outcome<{ id: string }>> {
 export async function backupListAction(): Promise<Outcome<{ rows: BackupListRow[] }>> {
   const { user } = await requireSession();
   return guarded(() => ({ rows: listBackups(user.id) }), false);
+}
+
+// Polled while a restore runs; the upload itself goes through the nahrani route.
+export async function restoreStateAction(): Promise<Outcome<{ restore: BackupListRow | null }>> {
+  const { user } = await requireSession();
+  return guarded(() => ({ restore: latestRestore(user.id) }), false);
 }

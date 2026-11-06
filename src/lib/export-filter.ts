@@ -11,8 +11,8 @@ export type ExportKind = (typeof EXPORT_KINDS)[number];
 export const EXPORT_FORMATS = ["pdf_zip", "isdoc_zip", "csv", "xlsx", "json"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
-// An account backup runs and downloads as an export_job, but the export form never offers it.
-export const EXPORT_JOB_KINDS = [...EXPORT_KINDS, "backup"] as const;
+// An account backup and restore run as an export_job, but the export form never offers them.
+export const EXPORT_JOB_KINDS = [...EXPORT_KINDS, "backup", "restore"] as const;
 export type ExportJobKind = (typeof EXPORT_JOB_KINDS)[number];
 export const EXPORT_JOB_FORMATS = [...EXPORT_FORMATS, "zip"] as const;
 export type ExportJobFormat = (typeof EXPORT_JOB_FORMATS)[number];

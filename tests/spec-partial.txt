@@ -8,4 +8,4 @@ TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálný
 IMP-000	Fakturoid, iDoklad, SuperFaktura, Vyfakturuj a ABRA Flexi jsou ověřené jen z dokumentace	kap. 24
 IMP-005	Ruční přiložení PDF k importovanému dokladu po importu, přiloží se jen PDF z importu	plán 9
 IMP-002	Vestavěné předlohy čekají na reálné soubory Fakturoidu a iDokladu	kap. 24
-EXP-006	Archiv zatím nikdo neobnovuje, použitelnost prokáže obnova	plán 8, Task 9
+TST-019	Chybí upgrade migrací: aplikace prefixů drizzle/ na data a bod vydání tests/fixtures/db/	plán 8, Task 10

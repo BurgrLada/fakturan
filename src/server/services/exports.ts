@@ -1,9 +1,10 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { rmSync, statSync } from "node:fs";
-import { and, desc, eq, inArray, lte, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import { backupFileName } from "@/lib/backup-format";
 import {
+  EXPORT_KINDS,
   EXPORT_MIME_TYPES,
   exportFileName,
   exportInputSchema,
@@ -56,16 +57,18 @@ type Step = "finish" | "fail" | "download" | "purge";
 
 // A backup shares the export machinery but is the account's own entity in the audit (R-38).
 function auditOf(kind: ExportJobKind, step: Step): { action: AuditAction; entity: string } {
-  return kind === "backup"
-    ? { action: `account.backup_${step}`, entity: "account_backup" }
-    : { action: `export.${step}`, entity: "export_job" };
+  if (kind === "backup") return { action: `account.backup_${step}`, entity: "account_backup" };
+  if (kind === "restore") return { action: `account.restore_${step}`, entity: "account_restore" };
+  return { action: `export.${step}`, entity: "export_job" };
 }
 
 type ResultFile = { name: string; mimeType: string };
 
 function resultFile(row: Pick<ExportJob, "kind" | "format" | "createdAt">): ResultFile {
   const day = calendarDateInPrague(row.createdAt);
-  if (row.kind === "backup") return { name: backupFileName(day), mimeType: "application/zip" };
+  if (row.kind === "backup" || row.kind === "restore") {
+    return { name: backupFileName(day), mimeType: "application/zip" };
+  }
   const format = row.format as ExportFormat;
   return { name: exportFileName(row.kind, format, day), mimeType: EXPORT_MIME_TYPES[format] };
 }
@@ -124,14 +127,22 @@ export function createExport(actor: Actor, raw: ExportInput): { id: string } {
 
 type ListedJob = Pick<
   ExportJob,
-  "id" | "status" | "progress" | "progressTotal" | "reason" | "expiresAt" | "createdAt"
+  | "id"
+  | "status"
+  | "progress"
+  | "progressTotal"
+  | "reason"
+  | "expiresAt"
+  | "createdAt"
+  | "finishedAt"
 > & { downloadable: boolean };
 
 export type ExportListRow = ListedJob & { kind: ExportKind; format: ExportFormat };
 export type BackupListRow = ListedJob;
 
 function listed(row: ExportJob, now: number): ListedJob {
-  const expired = row.status === "done" && (row.expiresAt?.getTime() ?? 0) <= now;
+  // A restore finishes without a file to expire.
+  const expired = row.status === "done" && row.expiresAt !== null && row.expiresAt.getTime() <= now;
   return {
     id: row.id,
     status: expired ? "expired" : row.status,
@@ -140,19 +151,16 @@ function listed(row: ExportJob, now: number): ListedJob {
     reason: row.reason,
     expiresAt: row.expiresAt,
     createdAt: row.createdAt,
+    finishedAt: row.finishedAt,
     downloadable: row.status === "done" && row.fileId !== null && !expired,
   };
 }
 
-function listJobs(ownerId: string, backups: boolean): ExportJob[] {
+function listJobs(ownerId: string, kinds: readonly ExportJobKind[]): ExportJob[] {
   return db
     .select()
     .from(exportJob)
-    .where(
-      scoped(ownerId).where(exportJob, (t, { eq: is }) =>
-        backups ? is(t.kind, "backup") : ne(t.kind, "backup"),
-      ),
-    )
+    .where(scoped(ownerId).where(exportJob, (t) => inArray(t.kind, kinds)))
     .orderBy(desc(exportJob.createdAt), desc(exportJob.id))
     .limit(LIST_LIMIT)
     .all();
@@ -160,7 +168,7 @@ function listJobs(ownerId: string, backups: boolean): ExportJob[] {
 
 export function listExports(ownerId: string): ExportListRow[] {
   const now = clock.now().getTime();
-  return listJobs(ownerId, false).map((row) => ({
+  return listJobs(ownerId, EXPORT_KINDS).map((row) => ({
     ...listed(row, now),
     kind: row.kind as ExportKind,
     format: row.format as ExportFormat,
@@ -169,7 +177,12 @@ export function listExports(ownerId: string): ExportListRow[] {
 
 export function listBackups(ownerId: string): BackupListRow[] {
   const now = clock.now().getTime();
-  return listJobs(ownerId, true).map((row) => listed(row, now));
+  return listJobs(ownerId, ["backup"]).map((row) => listed(row, now));
+}
+
+export function latestRestore(ownerId: string): BackupListRow | null {
+  const [row] = listJobs(ownerId, ["restore"]);
+  return row ? listed(row, clock.now().getTime()) : null;
 }
 
 export type OpenedExport = { path: string; size: number; fileName: string; mimeType: string };
@@ -264,7 +277,7 @@ export function finishExport(
           row.kind === "backup"
             ? {}
             : {
-                label: `${TEXTS.exporting.kinds[row.kind]}, ${TEXTS.exporting.formats[row.format as ExportFormat]}`,
+                label: `${TEXTS.exporting.kinds[row.kind as ExportKind]}, ${TEXTS.exporting.formats[row.format as ExportFormat]}`,
               },
         entity: { type: "export", id: row.id },
       });

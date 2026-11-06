@@ -163,12 +163,10 @@ export async function readZipEntries<T>(
 
     const skip =
       name.endsWith("/") || NESTED_NAME.test(name) || (limits.select && !limits.select(name));
+    const named = limits.maxBytesFor?.(name);
+    const ceiling = named ?? Math.max(limits.maxEntryBytes, limits.maxPdfEntryBytes);
     // Skipped entries are never buffered; the archive total and ratio still bound them.
-    if (
-      !skip &&
-      file.originalSize !== undefined &&
-      file.originalSize > Math.max(limits.maxEntryBytes, limits.maxPdfEntryBytes)
-    ) {
+    if (!skip && file.originalSize !== undefined && file.originalSize > ceiling) {
       return fail(new InputRejected("zip_entry_too_large", name));
     }
     if (skip && NESTED_NAME.test(name))
@@ -176,8 +174,8 @@ export async function readZipEntries<T>(
     const parts: Uint8Array[] = [];
     let size = 0;
     // Until the first KiB says whether this is a PDF, the larger limit applies.
-    let limit = Math.max(limits.maxEntryBytes, limits.maxPdfEntryBytes);
-    let decided = skip;
+    let limit = ceiling;
+    let decided = skip || named !== undefined;
     open++;
     file.ondata = (error, chunk, final) => {
       if (failure) return;

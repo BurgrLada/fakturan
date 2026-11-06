@@ -71,6 +71,7 @@ export const NOTIFICATION_KINDS = [
   "advance_final_old_payment",
   "export_ready",
   "backup_ready",
+  "backup_restored",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

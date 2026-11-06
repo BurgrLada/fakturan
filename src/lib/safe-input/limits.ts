@@ -53,6 +53,8 @@ export type ZipLimits = {
   ratioGraceBytes: number;
   chunkBytes: number;
   select?: (name: string) => boolean;
+  // A limit by entry name; it replaces the PDF sniffing for archives whose layout is known.
+  maxBytesFor?: (name: string) => number;
 };
 
 export const ZIP_LIMITS: ZipLimits = {

@@ -1580,6 +1580,8 @@ export const TEXTS = {
       export_ready: (p: Record<string, unknown>) =>
         `Export ${p.label ?? ""} je hotový a 7 dní ke stažení v Nastavení, Export.`,
       backup_ready: () => "Záloha účtu je hotová a 7 dní ke stažení v Nastavení, Záloha.",
+      backup_restored: () =>
+        "Účet je obnovený ze zálohy. Hesla v ní nejsou: zadejte znovu SMTP v Nastavení, Pošta a schránku s avízy v Nastavení, Avíza. Všechny automatiky jsou vypnuté, zapněte je, až data zkontrolujete.",
       notices_over_limit: (p: Record<string, unknown>) =>
         `Dorazilo přes ${p.limit ?? 0} neověřených nebo nerozpoznaných zpráv za den, může jít o podvržené avízo. Další jsou v sekci Platby uložené bez textu, zkontrolujte je.`,
     },
@@ -3338,11 +3340,52 @@ export const TEXTS = {
       empty: "Zatím žádná záloha.",
     },
     interrupted: "Záloha se přerušila. Spusťte ji znovu.",
+    deleteOffer: {
+      last: (date: string) => `Poslední záloha: ${date}.`,
+      none: "Účet zatím nemá žádnou zálohu.",
+      running: "Záloha právě běží.",
+      warning:
+        "Záloha je uložená v účtu a se smazáním zmizí i ona. Pokud ji chcete mít, nejdřív ji stáhněte v Nastavení, Záloha.",
+      create: "Vytvořit zálohu",
+      started: "Záloha běží na pozadí, stáhnete ji v Nastavení, Záloha.",
+    },
     errors: {
       missingFile:
         "V úložišti chybí soubor účtu, záloha se zastavila. Kontaktujte správce instance.",
       tooLarge: "Záloha by byla větší než 1 GB, to tento formát neumí.",
       unexpected: "Záloha se nepodařila kvůli neočekávané chybě. Zkuste ji znovu.",
+    },
+  },
+  restore: {
+    title: "Obnova ze zálohy",
+    intro:
+      "Obnova nahraje celý účet ze souboru zálohy Fakturanu. Jde jen do prázdného účtu, třeba hned po registraci na nové instanci. Po obnově jsou všechny automatiky vypnuté a hesla k poště a avízům je nutné zadat znovu.",
+    file: "Soubor zálohy (ZIP)",
+    start: "Obnovit ze zálohy",
+    uploading: "Nahrávám soubor…",
+    started: "Obnova běží na pozadí.",
+    failed: "Soubor se nepodařilo nahrát. Zkuste to znovu.",
+    status: "Stav obnovy",
+    done: "Účet je obnovený.",
+    interrupted: "Obnova se přerušila. Účet zůstal beze změny, spusťte ji znovu.",
+    errors: {
+      notEmpty:
+        "Obnova jde jen do prázdného účtu. Tento účet už obsahuje data, obnovte zálohu do nového účtu.",
+      tooLarge: "Soubor je větší než 1 GB, to žádná záloha Fakturanu být nemůže.",
+      empty: "Soubor je prázdný.",
+      notFound: "Nahraný soubor už neexistuje. Nahrajte ho znovu.",
+      archive: "Soubor není čitelný archiv zálohy nebo překračuje limity.",
+      manifest: "Archiv nemá na začátku platný popis zálohy Fakturanu.",
+      version: "Záloha pochází z jiné verze formátu, kterou tato instance neumí obnovit.",
+      entry: "Archiv obsahuje položku, která do zálohy nepatří.",
+      duplicate: "Archiv obsahuje stejnou položku dvakrát.",
+      hash: "Obsah archivu neodpovídá kontrolním součtům, soubor je poškozený nebo upravený.",
+      counts: "Počty v archivu nesedí s jeho popisem.",
+      row: (table: string) => `Archiv obsahuje neplatný řádek v tabulce ${table}.`,
+      reference: (table: string) => `Řádek v tabulce ${table} odkazuje na něco, co v archivu není.`,
+      inconsistent:
+        "Data v archivu si odporují (součty nebo platby nesedí). Účet zůstal beze změny.",
+      unexpected: "Obnova se nepodařila kvůli neočekávané chybě. Účet zůstal beze změny.",
     },
   },
 } as const;
