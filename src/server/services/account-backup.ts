@@ -14,6 +14,7 @@ import {
   type BackupManifest,
   type RestoreLimits,
 } from "@/lib/backup-format";
+import { accountRowLimit, type LimitedTable } from "@/lib/account-limits";
 import { TEXTS } from "@/lib/texts";
 import pkg from "../../../package.json";
 import journal from "../../../drizzle/meta/_journal.json";
@@ -244,6 +245,12 @@ export function restorableProblem(
   manifestBytes = 0,
   nodes: NodeStats = { nodes: 0, containers: 0, lineContainers: 0, lineDepth: 0 },
 ): string | null {
+  for (const [table, rows] of Object.entries(counts.tables)) {
+    const limit = accountRowLimit(table);
+    if (limit !== undefined && rows > limit) {
+      return E.tooManyRows(TEXTS.accountLimits.names[table as LimitedTable], limit);
+    }
+  }
   const names = Object.keys(entries);
   // The manifest is one more entry of the ZIP.
   if (names.length + 1 > limits.entries) {
@@ -280,7 +287,7 @@ class NotRestorable extends Error {
 
 function reasonOf(error: unknown): string | null {
   if (error instanceof NotRestorable) return error.reason;
-  if (error instanceof SnapshotTooLarge) return E.notRestorable;
+  if (error instanceof SnapshotTooLarge) return error.reason ?? E.notRestorable;
   if (error instanceof MissingBlob) return E.missingFile;
   if (error instanceof ServiceError) return error.message;
   if (error instanceof ExportTooLarge) return E.tooLarge;

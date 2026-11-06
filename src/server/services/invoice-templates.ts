@@ -13,6 +13,7 @@ import { db } from "../db";
 import { czech } from "../db/collation";
 import { catalogItem, customer, invoiceTemplate } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { assertRowLimit } from "./account-limits";
 import { ServiceError, type Reader } from "./access";
 import { defaultAccountFor, listBankAccounts } from "./bank-accounts";
 import {
@@ -180,6 +181,7 @@ function persist(
         .where(and(eq(invoiceTemplate.id, id), eq(invoiceTemplate.userId, userId)))
         .run();
     } else {
+      assertRowLimit(tx, "invoice_template", invoiceTemplate, userId);
       tx.insert(invoiceTemplate)
         .values({ id, userId, name, customerId, document, createdAt: now, updatedAt: now })
         .run();

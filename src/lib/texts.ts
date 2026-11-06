@@ -3363,9 +3363,36 @@ export const TEXTS = {
       tooLarge: "Záloha by byla větší než 1 GB, to tento formát neumí.",
       notRestorable:
         "Záloha by překročila limity, se kterými jde obnovit, a proto nevznikla. Kontaktujte správce instance.",
+      tooManyRows: (what: string, limit: number) =>
+        `Účet má víc než ${limit} ${what}, tolik jich obnova nepřijme, a proto záloha nevznikla. Nepotřebné smažte a zálohu spusťte znovu.`,
+      documentTooLarge: (what: string) =>
+        `${what} je delší, než záloha unese, a proto nevznikla. Zkraťte ho a zálohu spusťte znovu.`,
       tooManyFiles: (limit: string) =>
         `Účet má víc než ${limit} souborů, tolik jich záloha neunese, a proto nevznikla. Kontaktujte správce instance.`,
       unexpected: "Záloha se nepodařila kvůli neočekávané chybě. Zkuste ji znovu.",
+    },
+    blocking: {
+      template: (name: string) => `Šablona „${name}“`,
+      plan: (name: string) => `Pravidelná faktura „${name}“`,
+      invoice: (number: string) => `Doklad ${number}`,
+      row: (table: string) => `Řádek tabulky ${table}`,
+    },
+  },
+  accountLimits: {
+    tooMany: (what: string, limit: number) =>
+      `Účet už má ${limit} ${what}, víc jich mít nejde. Nepotřebné smažte.`,
+    names: {
+      reminder_rule: "pravidel upomínek",
+      invoice_template: "šablon faktur",
+      recurring_invoice: "pravidelných faktur",
+      dashboard: "nástěnek",
+      dashboard_widget: "widgetů",
+      mapping_preset: "předvoleb importu",
+      unit: "jednotek",
+      number_series: "číselných řad",
+      bank_account: "bankovních účtů",
+      tag: "štítků",
+      email_template: "šablon e-mailů",
     },
   },
   restore: {
@@ -3398,6 +3425,8 @@ export const TEXTS = {
       dataTooLarge: "Data v archivu jsou po rozbalení větší, než obnova dovolí.",
       tooManyNodes: "Data v archivu mají víc položek, než obnova dovolí.",
       filesIndex: "Seznam souborů v archivu není platný.",
+      tooManyRows: (table: string) =>
+        `Archiv má v tabulce ${table} víc řádků, než jeden účet smí mít.`,
       memory: "Obnova archivu by zabrala víc paměti, než instance dovolí. Účet zůstal beze změny.",
       uploadExpired: "Nahrávání trvalo příliš dlouho a bylo zrušeno. Nahrajte zálohu znovu.",
       audit: "Historie změn v archivu není platná.",

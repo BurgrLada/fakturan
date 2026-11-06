@@ -30,6 +30,7 @@ import {
   type RecurringRun,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { assertRowLimit } from "./account-limits";
 import { ServiceError, type Reader } from "./access";
 import { getAutomation } from "./automation";
 import { renderDocumentTexts } from "./invoice-document";
@@ -235,6 +236,7 @@ function persist(actor: Actor, action: AuditAction, raw: RecurringInput): { id: 
         .where(and(eq(recurringInvoice.id, id), eq(recurringInvoice.userId, userId)))
         .run();
     } else {
+      assertRowLimit(tx, "recurring_invoice", recurringInvoice, userId);
       tx.insert(recurringInvoice)
         .values({
           ...fields,
@@ -312,12 +314,15 @@ export type RecurringRow = Omit<RecurringInvoice, "document"> & {
   nextIssueDate: CalendarDate | null;
 };
 
-// A list never needs the documents, and each may take up to STORED_JSON_BYTES.
-const { document: _document, ...planWithoutDocument } = getTableColumns(recurringInvoice);
+// A plan without its document: lists and the hourly planning need only the rule and the state,
+// and each document may take up to STORED_JSON_BYTES (I-3 of plan 9).
+const { document: _document, ...columnsWithoutDocument } = getTableColumns(recurringInvoice);
+export const planHeadColumns = columnsWithoutDocument;
+export type PlanHead = Omit<RecurringInvoice, "document">;
 
 export function listRecurring(ownerId: string): RecurringRow[] {
   return db
-    .select({ plan: planWithoutDocument, customerName: customer.name })
+    .select({ plan: planHeadColumns, customerName: customer.name })
     .from(recurringInvoice)
     .leftJoin(customer, eq(customer.id, recurringInvoice.customerId))
     .where(scoped(ownerId).where(recurringInvoice))

@@ -12,6 +12,8 @@ import {
   type BackupTable,
 } from "@/server/backup/tables";
 import { USER_OWNED_TABLES } from "@/server/services/users";
+import { jsonColumnsWithoutShape } from "@/server/backup/restore-read";
+import { ACCOUNT_ROW_LIMITS } from "@/lib/account-limits";
 import { findUnregisteredOwnedTables } from "../helpers/audit-guard";
 
 const registered = BACKUP_TABLES.map((entry) => entry.name);
@@ -153,6 +155,28 @@ describe("registr zálohy", () => {
         : entry,
     );
     expect(backupColumnsFingerprint(changed)).not.toEqual(fixture(2));
+  });
+
+  test("[SEC-005] každý JSON sloupec zálohované tabulky má strict tvar", () => {
+    // A JSON column without a shape would let any object of the archive into the account.
+    expect(jsonColumnsWithoutShape()).toEqual([]);
+  });
+
+  test("[SEC-005] konfigurační tabulky mají strop řádků na účet", () => {
+    expect(ACCOUNT_ROW_LIMITS).toEqual({
+      reminder_rule: 200,
+      invoice_template: 500,
+      recurring_invoice: 500,
+      dashboard: 50,
+      dashboard_widget: 2_500,
+      mapping_preset: 200,
+      unit: 500,
+      number_series: 200,
+      bank_account: 100,
+      tag: 2_000,
+      email_template: 100,
+    });
+    for (const name of Object.keys(ACCOUNT_ROW_LIMITS)) expect(registered).toContain(name);
   });
 
   test("[EXP-006] pořadí tabulek drží rodiče před dětmi", () => {

@@ -10,12 +10,28 @@ import {
   BACKUP_VERSION,
   backupManifestSchema,
   FILES_INDEX_ENTRY,
+  jsonBytes,
+  STORED_JSON_BYTES,
   MANIFEST_ENTRY,
 } from "@/lib/backup-format";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { eachSpooled, spoolWriter } from "@/server/backup/spool";
 import { setClockForTests } from "@/server/clock";
-import { customer, file, job, schedulerState, user } from "@/server/db/schema";
+import {
+  customer,
+  exportJob,
+  file,
+  invoice,
+  invoiceTemplate,
+  invoiceVersion,
+  job,
+  schedulerState,
+  user,
+} from "@/server/db/schema";
+import { ACCOUNT_ROW_LIMITS } from "@/lib/account-limits";
+import { TEXTS } from "@/lib/texts";
+import { drainHeavy } from "@/server/jobs/worker";
+import { createBackup } from "@/server/services/account-backup";
 import { writeBlob } from "@/server/files/store";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
@@ -250,4 +266,97 @@ describe("dlouhá záloha a obnova", () => {
       expect(lapsed).toBe(0);
     },
   );
+});
+
+describe("záloha účtu s dokumenty a řádky z dřívějška", () => {
+  const BE = TEXTS.backup.errors;
+
+  test("[EXP-006] starší verze dokladu nad 256 KiB zálohu nezablokuje a obnoví se", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const version = db.select().from(invoiceVersion).where(eq(invoiceVersion.userId, source)).get();
+    const invoiceId =
+      version?.invoiceId ?? db.select().from(invoice).where(eq(invoice.userId, source)).get()!.id;
+    const base = version?.document ?? {};
+    // As the form allowed before the caps: 500 long lines frozen in an issued version.
+    const lines = Array.from({ length: 500 }, (_, index) => ({
+      catalogItemId: null,
+      name: `Položka ${index}`,
+      description: "ř".repeat(1_000),
+      quantityMilli: 1000,
+      unit: "ks",
+      unitPriceMinor: 100,
+      discountKind: "none" as const,
+      discountValue: 0,
+      netMinor: 100,
+    }));
+    const document = { ...base, lines } as never;
+    db.insert(invoiceVersion)
+      .values({
+        id: randomUUID(),
+        invoiceId,
+        userId: source,
+        versionNo: 99,
+        document,
+        createdAt: NOW,
+      })
+      .run();
+    expect(jsonBytes(document)).toBeGreaterThan(STORED_JSON_BYTES);
+    const target = emptyAccount();
+    const row = await restoreArchive(db, target, await backupArchive(db, source));
+    expect(row.status).toBe("done");
+    const restored = db
+      .select()
+      .from(invoiceVersion)
+      .where(eq(invoiceVersion.userId, target))
+      .all()
+      .find((item) => item.versionNo === 99)!;
+    expect(restored.document.lines).toHaveLength(500);
+  });
+
+  test("[EXP-006] šablona nad strop a příliš mnoho šablon řeknou, co zálohu blokuje", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const template = db
+      .select()
+      .from(invoiceTemplate)
+      .where(eq(invoiceTemplate.userId, source))
+      .get()!;
+    const long = {
+      ...template.document,
+      note: "ř".repeat(150_000),
+    };
+    db.update(invoiceTemplate)
+      .set({ document: long })
+      .where(eq(invoiceTemplate.id, template.id))
+      .run();
+    const { id } = createBackup({ userId: source, source: "web" });
+    await drainHeavy("w");
+    expect(db.select().from(exportJob).where(eq(exportJob.id, id)).get()).toMatchObject({
+      status: "failed",
+      reason: BE.documentTooLarge(TEXTS.backup.blocking.template(template.name)),
+    });
+
+    db.update(invoiceTemplate)
+      .set({ document: template.document })
+      .where(eq(invoiceTemplate.id, template.id))
+      .run();
+    db.insert(invoiceTemplate)
+      .values(
+        Array.from({ length: ACCOUNT_ROW_LIMITS.invoice_template }, () => ({
+          ...template,
+          id: randomUUID(),
+        })),
+      )
+      .run();
+    const again = createBackup({ userId: source, source: "web" });
+    await drainHeavy("w");
+    expect(db.select().from(exportJob).where(eq(exportJob.id, again.id)).get()).toMatchObject({
+      status: "failed",
+      reason: BE.tooManyRows(
+        TEXTS.accountLimits.names.invoice_template,
+        ACCOUNT_ROW_LIMITS.invoice_template,
+      ),
+    });
+  });
 });

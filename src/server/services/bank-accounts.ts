@@ -9,6 +9,7 @@ import { clock } from "../clock";
 import { db, type Tx } from "../db";
 import { bankAccount, invoice } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { assertRowLimit } from "./account-limits";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
 
@@ -140,6 +141,7 @@ export function saveBankAccount(actor: Actor, raw: BankAccountInput): string {
         .where(and(eq(bankAccount.id, id), eq(bankAccount.userId, userId)))
         .run();
     } else {
+      assertRowLimit(tx, "bank_account", bankAccount, userId);
       tx.insert(bankAccount)
         .values({ id, userId, ...columns, createdAt: now, updatedAt: now })
         .run();

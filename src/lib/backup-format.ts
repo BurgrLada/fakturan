@@ -90,6 +90,10 @@ export const STORED_JSON_BYTES = 256 * KiB;
 // The form checks the lines and texts of a document against this, leaving room for what a version
 // adds around them (snapshots, totals, images).
 export const DOCUMENT_INPUT_BYTES = 224 * KiB;
+// A version freezes an issued document as it was, and before the caps the form let one reach
+// ~2.2 million characters (500 lines of 2 200), at six bytes each when escaped. Versions are read
+// one at a time, so their cap keeps a clear margin over all of that (n-1, n-2 of plan 9).
+export const VERSION_JSON_BYTES = 16 * MiB;
 
 // UTF-8 length without encoding the text; also runs in the browser.
 export function jsonBytes(value: unknown): number {
@@ -134,6 +138,8 @@ export const RESTORE_LIMITS = {
   // snapshots ~150 KiB at most); JSON columns are capped tighter (maxJsonBytes).
   maxRowBytes: 512 * KiB,
   maxJsonBytes: STORED_JSON_BYTES,
+  maxVersionRowBytes: VERSION_JSON_BYTES + 1 * MiB,
+  maxVersionJsonBytes: VERSION_JSON_BYTES,
   // Bytes do not bound the heap: three bytes of `{},` become a whole object. Counted on the bytes
   // before a line is parsed, so the budget holds whatever keys the shapes let through (C-1). A
   // legitimate account of 300 000 rows has about 19.3 M nodes and 0.59 M objects (N-2).
@@ -144,6 +150,16 @@ export const RESTORE_LIMITS = {
 };
 
 export type RestoreLimits = typeof RESTORE_LIMITS;
+
+export function rowBytesFor(table: string, limits: RestoreLimits): number {
+  return table === "invoice_version" ? limits.maxVersionRowBytes : limits.maxRowBytes;
+}
+
+export function jsonBytesFor(table: string, column: string, limits: RestoreLimits): number {
+  return table === "invoice_version" && column === "document"
+    ? limits.maxVersionJsonBytes
+    : limits.maxJsonBytes;
+}
 
 export type JsonShape = { containers: number; nodes: number; depth: number };
 

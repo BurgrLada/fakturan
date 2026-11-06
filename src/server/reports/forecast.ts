@@ -10,7 +10,7 @@ import { scoped } from "../db/scoped";
 import type { Reader } from "../services/access";
 import { resolveRate } from "../services/exchange-rates";
 import { totalsOf } from "../services/invoices";
-import { ruleOf } from "../services/recurring";
+import { planHeadColumns, ruleOf, type PlanHead } from "../services/recurring";
 import type { SnapshotReader } from "./queries";
 import type { Unconverted } from "./types";
 
@@ -36,11 +36,7 @@ function monthKeys(today: CalendarDate, months: number): string[] {
   });
 }
 
-function occurrencesOf(
-  q: Reader,
-  plan: typeof recurringInvoice.$inferSelect,
-  through: CalendarDate,
-): CalendarDate[] {
+function occurrencesOf(q: Reader, plan: PlanHead, through: CalendarDate): CalendarDate[] {
   return occurrencesBetween(ruleOf(q, plan), plan.cursorDate, through).map((o) => o.issueDate);
 }
 
@@ -167,13 +163,20 @@ function forecastIn(
   }
 
   const through = horizonEnd(today, months);
+  // Heads first and each document on its own: a document may take up to STORED_JSON_BYTES and an
+  // account up to ACCOUNT_ROW_LIMITS.recurring_invoice plans (I-3 of plan 9).
   const plans = q
-    .select()
+    .select(planHeadColumns)
     .from(recurringInvoice)
     .where(scoped(ownerId).where(recurringInvoice, (t, { eq }) => eq(t.status, "active")))
     .all();
   for (const plan of plans) {
-    const { document } = plan;
+    const document = q
+      .select({ document: recurringInvoice.document })
+      .from(recurringInvoice)
+      .where(scoped(ownerId).where(recurringInvoice, (t, { eq }) => eq(t.id, plan.id)))
+      .get()?.document;
+    if (!document) continue;
     const amountMinor = totalsOf(document.lines, document).totalMinor;
     const series = document.type === "advance" ? "advances" : "planned";
     for (const occurrence of occurrencesOf(q, plan, through)) {

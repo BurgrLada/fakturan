@@ -11,7 +11,15 @@ import {
 import { join } from "node:path";
 import { and, asc, getTableColumns, gt, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import { jsonBytes, jsonNodes, RESTORE_LIMITS, type RestoreLimits } from "@/lib/backup-format";
+import {
+  jsonBytes,
+  jsonBytesFor,
+  jsonNodes,
+  RESTORE_LIMITS,
+  rowBytesFor,
+  type RestoreLimits,
+} from "@/lib/backup-format";
+import { TEXTS } from "@/lib/texts";
 import { db, type Tx } from "../db";
 import { auditLog, file } from "../db/schema";
 import { scoped } from "../db/scoped";
@@ -37,7 +45,28 @@ export const FILES_DIR = "files";
 export class MissingBlob extends Error {}
 
 // More than a restore accepts; stopped while reading instead of after the archive is written.
-export class SnapshotTooLarge extends Error {}
+// `reason`, when set, names what blocks the backup, so the person can shorten it.
+export class SnapshotTooLarge extends Error {
+  reason: string | null;
+  constructor(reason: string | null = null) {
+    super(reason ?? "SnapshotTooLarge");
+    this.reason = reason;
+  }
+}
+
+// The row a person can find and shorten: a template or plan by name, a document by number.
+function blocking(table: string, row: Record<string, unknown>): string {
+  const B = TEXTS.backup.blocking;
+  const what =
+    table === "invoice_template"
+      ? B.template(String(row.name))
+      : table === "recurring_invoice"
+        ? B.plan(String(row.name))
+        : table === "invoice"
+          ? B.invoice(String(row.number ?? row.id))
+          : B.row(table);
+  return TEXTS.backup.errors.documentTooLarge(what);
+}
 
 type Owned = SQLiteTable & { userId: AnyColumn };
 
@@ -59,8 +88,8 @@ export type NodeStats = {
 type LineStats = { longest: number } & NodeStats;
 
 type Lines = {
-  add(row: Record<string, unknown>): void;
-  addLine(line: string): void;
+  add(row: Record<string, unknown>): number;
+  addLine(line: string): number;
   close(): void;
 };
 
@@ -80,8 +109,7 @@ function lineFile(
   };
   const addLine = (line: string) => {
     const bytes = Buffer.byteLength(line);
-    if (retained) stats.longest = Math.max(stats.longest, bytes);
-    else if (bytes > limits.maxLineBytes) throw new SnapshotTooLarge();
+    if (!retained && bytes > limits.maxLineBytes) throw new SnapshotTooLarge();
     const shape = jsonNodes(line);
     watch(bytes, lineCost(bytes, shape));
     stats.lineContainers = Math.max(stats.lineContainers, shape.containers);
@@ -92,10 +120,11 @@ function lineFile(
     }
     pending += `${line}\n`;
     if (pending.length >= LINE_BUFFER) flush();
+    return bytes;
   };
   return {
     add(row) {
-      addLine(JSON.stringify(row));
+      return addLine(JSON.stringify(row));
     },
     addLine,
     close() {
@@ -226,7 +255,9 @@ export function snapshot(
         .filter(([, column]) => column.columnType === "SQLiteTextJson")
         .map(([name]) => name);
       const pageSize =
-        jsonColumns.length > 0 ? Math.max(1, Math.floor(PAGE_BYTES / limits.maxRowBytes)) : PAGE;
+        jsonColumns.length > 0
+          ? Math.max(4, Math.floor(PAGE_BYTES / rowBytesFor(entry.name, limits)))
+          : PAGE;
       try {
         tables[entry.name] = dumpRows(
           tx,
@@ -235,9 +266,15 @@ export function snapshot(
           columns,
           (row) => {
             for (const name of jsonColumns) {
-              if (jsonBytes(row[name]) > limits.maxJsonBytes) throw new SnapshotTooLarge();
+              if (jsonBytes(row[name]) > jsonBytesFor(entry.name, name, limits)) {
+                throw new SnapshotTooLarge(blocking(entry.name, row));
+              }
             }
-            lines.add(row);
+            const bytes = lines.add(row);
+            if (bytes > rowBytesFor(entry.name, limits)) {
+              throw new SnapshotTooLarge(blocking(entry.name, row));
+            }
+            stats.longest = Math.max(stats.longest, Math.min(bytes, limits.maxRowBytes));
             if (entry.name === "file") files.push(row.id as string);
           },
           pageSize,

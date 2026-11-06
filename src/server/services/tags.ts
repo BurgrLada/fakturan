@@ -10,6 +10,7 @@ import { db } from "../db";
 import { czech } from "../db/collation";
 import { invoice, invoiceTag, tag } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { assertRowLimit } from "./account-limits";
 import { ServiceError, type Reader } from "./access";
 import { mutate } from "./mutation";
 
@@ -95,6 +96,7 @@ export function setInvoiceTags(actor: Actor, id: string, names: string[]): void 
       const idByKey = new Map(existing.map((row) => [row.nameKey, row.id]));
       for (const [nameKey, name] of wanted) {
         if (idByKey.has(nameKey)) continue;
+        assertRowLimit(tx, "tag", tag, userId);
         const tagId = randomUUID();
         tx.insert(tag).values({ id: tagId, userId, name, nameKey }).run();
         idByKey.set(nameKey, tagId);

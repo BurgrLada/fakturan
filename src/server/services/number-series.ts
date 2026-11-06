@@ -21,6 +21,7 @@ import { clock } from "../clock";
 import { db, type Db, type Tx } from "../db";
 import { invoice, numberSeries, numberSeriesCounter } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { assertRowLimit } from "./account-limits";
 import { ServiceError, type Reader } from "./access";
 import { mutate } from "./mutation";
 
@@ -276,6 +277,7 @@ export function saveSeries(actor: Actor, raw: SeriesInput): string {
         .where(and(eq(numberSeries.id, id), eq(numberSeries.userId, userId)))
         .run();
     } else {
+      assertRowLimit(tx, "number_series", numberSeries, userId);
       tx.insert(numberSeries)
         .values({ id, userId, ...columns, createdAt: now, updatedAt: now })
         .run();

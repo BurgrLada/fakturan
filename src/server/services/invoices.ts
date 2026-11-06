@@ -167,8 +167,8 @@ export function checkDocumentSize(
 
 // The last line of defence where a document is stored: whatever path built it, nothing larger than
 // a restore accepts is written (R-35).
-export function assertStoredDocument(document: unknown): void {
-  if (jsonBytes(document) > STORED_JSON_BYTES) throw new ServiceError(V.documentTooLarge);
+export function assertStoredDocument(document: unknown, limit = STORED_JSON_BYTES): void {
+  if (jsonBytes(document) > limit) throw new ServiceError(V.documentTooLarge);
 }
 
 export function checkPriceSign(

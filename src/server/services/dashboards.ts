@@ -30,6 +30,7 @@ import { RATE_RULES } from "../rate-limit";
 import { registerSystemWidgets } from "../reports/system-widgets";
 import { runWidget, type WidgetResult } from "../reports/widget-query";
 import { reportFailure } from "../scheduler/report";
+import { assertRowLimit } from "./account-limits";
 import { enforceRateLimit, ServiceError, type Reader } from "./access";
 import { mutate } from "./mutation";
 
@@ -190,6 +191,7 @@ function insertDashboard(
   name: string,
   isDefault: boolean,
 ): string | undefined {
+  assertRowLimit(tx, "dashboard", dashboard, ownerId);
   const now = clock.now();
   const id = randomUUID();
   const inserted = tx

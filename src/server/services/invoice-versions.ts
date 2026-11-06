@@ -1,4 +1,5 @@
 import "server-only";
+import { VERSION_JSON_BYTES } from "@/lib/backup-format";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, max } from "drizzle-orm";
 import type { InvoiceStatus } from "@/lib/invoice";
@@ -138,7 +139,8 @@ function writeVersion(tx: Tx, ownerId: string, row: Invoice, lines: InvoiceLine[
     .get();
   const versionNo = (last?.versionNo ?? 0) + 1;
   const document = documentOf(row, lines);
-  assertStoredDocument(document);
+  // The frozen document adds snapshots and totals to what the form capped; versions have room.
+  assertStoredDocument(document, VERSION_JSON_BYTES);
   tx.insert(invoiceVersion)
     .values({
       id: randomUUID(),

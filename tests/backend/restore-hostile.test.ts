@@ -15,10 +15,11 @@ import {
 import { createMemoryGuard, HELD_COSTS, MEMORY_LIMITS } from "@/server/backup/memory-guard";
 import { buildIdMap, remapIds } from "@/server/backup/remap";
 import { prescanManifest, scanArchive } from "@/server/backup/restore-read";
+import { ACCOUNT_ROW_LIMITS } from "@/lib/account-limits";
 import { TEXTS } from "@/lib/texts";
 import { BACKUP_TABLES } from "@/server/backup/tables";
 import { setClockForTests } from "@/server/clock";
-import { exportJob, invoice, job, schedulerState, user } from "@/server/db/schema";
+import { exportJob, invoice, job, notification, schedulerState, user } from "@/server/db/schema";
 import { blobPath, tempDir, writeBlob } from "@/server/files/store";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
@@ -54,6 +55,16 @@ beforeAll(async () => {
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   source = seedOwner(db, NOW);
   seedRichAccount(db, source, NOW);
+  db.insert(notification)
+    .values({
+      id: randomUUID(),
+      userId: source,
+      kind: "backup_restored",
+      dedupeKey: `test:${randomUUID()}`,
+      params: { count: 1 },
+      createdAt: NOW,
+    })
+    .run();
   archive = await backupArchive(db, source);
 });
 beforeEach(() => {
@@ -857,5 +868,68 @@ describe("obnova z nepřátelského archivu, meze řádků a tvarů", () => {
     await scanArchive(path, {}, RESTORE_LIMITS, guard);
     expect(files).toBeGreaterThan(0);
     expect(filesHeld).toBeGreaterThanOrEqual(files * HELD_COSTS.file);
+  });
+});
+
+describe("obnova z nepřátelského archivu, tvary všech JSON a stropy řádků", () => {
+  const firstRow = (table: string) => readJsonl(unzipSync(archive)[`data/${table}.jsonl`]!)[0]!;
+
+  test("[SEC-005] pravidlo upomínky s objektem unikátních klíčů je odmítnuté", async () => {
+    const keys: Record<string, number> = {};
+    for (let index = 0; index < 5_000; index++) keys[`r0_${index}`] = 1;
+    await refused(
+      editRows("reminder_rule", (rows) => rows.map((row) => ({ ...row, texts: keys }))),
+      E.row("reminder_rule"),
+    );
+    await refused(
+      editRows("reminder_rule", (rows) =>
+        rows.map((row) => ({ ...row, texts: { cs: { subject: "a", body: "b", x: 1 } } })),
+      ),
+      E.row("reminder_rule"),
+    );
+    await refused(
+      editRows("notification", (rows) => rows.map((row) => ({ ...row, params: { ...keys } }))),
+      E.row("notification"),
+    );
+    await refused(
+      editRows("dashboard_widget", (rows) =>
+        rows.map((row) => ({ ...row, config: { ...(row.config as object), extra: keys } })),
+      ),
+      E.row("dashboard_widget"),
+    );
+  });
+
+  test("[SEC-005] víc pravidel upomínek a šablon, než účet smí mít, je odmítnuté", async () => {
+    const rule = firstRow("reminder_rule");
+    const rules = Array.from({ length: ACCOUNT_ROW_LIMITS.reminder_rule + 1 }, (_, index) => ({
+      ...rule,
+      id: randomUUID(),
+      offset_days: index - 100,
+    }));
+    await refused(
+      editArchive(
+        archive,
+        (entries) => {
+          entries["data/reminder_rule.jsonl"] = jsonl(rules);
+        },
+        (manifest) => (manifest.counts.tables.reminder_rule = rules.length),
+      ),
+      E.tooManyRows("reminder_rule"),
+    );
+    const template = firstRow("invoice_template");
+    const templates = Array.from({ length: ACCOUNT_ROW_LIMITS.invoice_template + 1 }, () => ({
+      ...template,
+      id: randomUUID(),
+    }));
+    await refused(
+      editArchive(
+        archive,
+        (entries) => {
+          entries["data/invoice_template.jsonl"] = jsonl(templates);
+        },
+        (manifest) => (manifest.counts.tables.invoice_template = templates.length),
+      ),
+      E.tooManyRows("invoice_template"),
+    );
   });
 });

@@ -11,6 +11,7 @@ import { clock } from "../clock";
 import { db } from "../db";
 import { mappingPreset } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { assertRowLimit } from "./account-limits";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
 
@@ -84,6 +85,7 @@ export function savePreset(actor: Actor, raw: PresetInput): { id: string } {
         .where(scoped(userId).where(mappingPreset, (t, { eq }) => eq(t.id, id)))
         .run();
     } else {
+      assertRowLimit(tx, "mapping_preset", mappingPreset, userId);
       tx.insert(mappingPreset)
         .values({
           id,

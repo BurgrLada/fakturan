@@ -11,7 +11,9 @@ import {
   FILES_INDEX_ENTRY,
   fileIndexLineSchema,
   jsonBytes,
+  jsonBytesFor,
   jsonNodesOfBytes,
+  rowBytesFor,
   MANIFEST_ENTRY,
   RESTORE_LIMITS,
   type BackupManifest,
@@ -22,6 +24,14 @@ import { INVOICE_STATUSES, INVOICE_TYPES } from "@/lib/invoice";
 import { DISCOUNT_KINDS, ROUNDING_MODES } from "@/lib/invoice-totals";
 import { isCalendarDate } from "@/lib/number-format";
 import { DATE_FORMATS, LANGUAGES, LOGO_POSITIONS, PAYMENT_METHODS } from "@/lib/preferences";
+import { accountRowLimit } from "@/lib/account-limits";
+import { MAX_BODY_CHARS, MAX_SUBJECT_CHARS } from "@/lib/email-template";
+import {
+  DATE_FORMATS as IMPORT_DATE_FORMATS,
+  DECIMAL_SEPARATORS,
+  MAPPING_TARGETS,
+} from "@/lib/import-mapping";
+import { widgetConfigSchema } from "@/lib/widget-config";
 import { InputRejected } from "@/lib/safe-input/limits";
 import { readZipEntries } from "@/lib/safe-input/zip";
 import { TEXTS } from "@/lib/texts";
@@ -62,18 +72,6 @@ export type ArchiveSummary = { manifest: BackupManifest; sha256: string; files: 
 
 const ID = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const MAX_TEXT = 1_000_000;
-const MAX_JSON_DEPTH = 32;
-
-function shallowEnough(value: unknown, depth = 0): boolean {
-  if (depth > MAX_JSON_DEPTH) return false;
-  if (Array.isArray(value)) return value.every((item) => shallowEnough(item, depth + 1));
-  if (value !== null && typeof value === "object") {
-    return Object.values(value).every((item) => shallowEnough(item, depth + 1));
-  }
-  return true;
-}
-
-const json = z.custom<unknown>((value) => value !== undefined && shallowEnough(value));
 
 const text = z.string().max(MAX_TEXT);
 const date = z.string().refine(isCalendarDate);
@@ -235,7 +233,40 @@ const invoiceDocument = z
 
 // JSON and dates that pages, PDF and sending read without a second check; the remaining JSON only
 // has to be shallow.
+// The remaining JSON columns, each as the app writes it: reminder texts, an import mapping, the
+// counts of a finished import, a receipt print, the params of a notice and a widget.
+const mailContent = z.strictObject({
+  subject: z.string().max(MAX_SUBJECT_CHARS),
+  body: z.string().max(MAX_BODY_CHARS),
+});
+const reminderTexts = z.strictObject({ cs: mailContent.optional(), en: mailContent.optional() });
+const MAX_RECORD_KEYS = 64;
+const fewKeys = (value: object) => Object.keys(value).length <= MAX_RECORD_KEYS;
+const importMapping = z.strictObject({
+  target: z.enum(MAPPING_TARGETS),
+  columns: z.record(z.string().max(40), z.string().max(200)).refine(fewKeys),
+  dateFormat: z.enum(IMPORT_DATE_FORMATS),
+  decimal: z.enum(DECIMAL_SEPARATORS),
+  currency: z.enum(CURRENCIES),
+  source: z.string().max(200),
+});
+const importSummary = z.record(z.string().max(40), integer).refine(fewKeys);
+const receiptPrint = z.strictObject({ creditedMinor: integer, paidOn: date, dueMinor: integer });
+const notificationParams = z
+  .record(z.string().max(64), z.union([z.string().max(10_000), z.number(), z.boolean(), z.null()]))
+  .refine(fewKeys);
+
 const KNOWN_SHAPES: Record<string, z.ZodType> = {
+  "reminder_rule.texts": reminderTexts,
+  "mapping_preset.mapping": importMapping,
+  "import_batch.mapping": importMapping,
+  "import_batch.summary": importSummary,
+  "email_log.receipt_print": receiptPrint,
+  "notification.params": notificationParams,
+  // Checked, not parsed into: the schema fills defaults, and the restored row stays as archived.
+  "dashboard_widget.config": z.custom<unknown>(
+    (value) => widgetConfigSchema.safeParse(value).success,
+  ),
   "invoice.appearance": appearance,
   "invoice.supplier_snapshot": supplierSnapshot,
   "invoice.customer_snapshot": customerSnapshot,
@@ -280,8 +311,10 @@ function columnSchema(entry: BackupTable, column: AnyColumn): z.ZodType | null {
   else if (entry.name === "invoice" && column.name === "import_payment_code") {
     schema = z.string().refine((code) => PAYMENT_MEANS_CODES.has(code));
   } else if (shape) schema = shape;
-  else if (column.columnType === "SQLiteTextJson") schema = json;
-  else if (column.columnType === "SQLiteBoolean") schema = z.boolean();
+  else if (column.columnType === "SQLiteTextJson") {
+    // Every JSON column has a shape (backup-registry test); a new one fails here, not silently.
+    throw new Error(`Sloupec ${entry.name}.${column.name} nemá tvar pro obnovu`);
+  } else if (column.columnType === "SQLiteBoolean") schema = z.boolean();
   else if (column.columnType === "SQLiteTimestamp") {
     schema = z.number().int().min(0).max(8_640_000_000_000_000);
   } else if (column.columnType === "SQLiteInteger") schema = z.number().int().safe();
@@ -292,7 +325,8 @@ function columnSchema(entry: BackupTable, column: AnyColumn): z.ZodType | null {
   // The app reads a JSON column whole wherever it reads it, so its size is capped on its own, as the
   // app caps what it writes (STORED_JSON_BYTES).
   if (column.columnType === "SQLiteTextJson") {
-    schema = schema.refine((value) => jsonBytes(value) <= RESTORE_LIMITS.maxJsonBytes);
+    const cap = jsonBytesFor(entry.name, column.name, RESTORE_LIMITS);
+    schema = schema.refine((value) => jsonBytes(value) <= cap);
   }
   return column.notNull ? schema : schema.nullable();
 }
@@ -369,6 +403,7 @@ function eachLine(
   onError: () => RestoreRejected,
   take: (value: unknown) => void,
   kind: LineKind = "rows",
+  rowBytes = budget.limits.maxRowBytes,
 ): number {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let start = 0;
@@ -378,7 +413,7 @@ function eachLine(
     if (end < 0) end = bytes.length;
     // The writer never leaves a blank line; skipping them would let a few bytes of upload carry
     // hundreds of MiB of newlines into the next backup.
-    const maxBytes = kind === "rows" ? budget.limits.maxRowBytes : budget.limits.maxLineBytes;
+    const maxBytes = kind === "rows" ? rowBytes : budget.limits.maxLineBytes;
     if (end === start || end - start > maxBytes) throw onError();
     const shape = jsonNodesOfBytes(bytes, start, end);
     const { containers, nodes, depth } = shape;
@@ -434,21 +469,42 @@ function eachRow(
   const schema = rowSchema(entry);
   const expected = manifest.counts.tables[entry.name] ?? 0;
   const invalid = () => new RestoreRejected(E.row(entry.name));
+  // A configuration table the app reads whole holds no more rows than the app lets an account have.
+  const accountLimit = accountRowLimit(entry.name) ?? Number.POSITIVE_INFINITY;
   let count = 0;
-  eachLine(bytes, budget, budget.limits.maxLinesPerTable, invalid, (line) => {
-    if (count >= expected) throw new RestoreRejected(E.counts);
-    let upgraded: unknown;
-    try {
-      upgraded = upgrade(entry.name, line, manifest.v);
-    } catch {
-      throw invalid();
-    }
-    const parsed = schema.safeParse(upgraded);
-    if (!parsed.success) throw invalid();
-    count += 1;
-    take(parsed.data);
-  });
+  eachLine(
+    bytes,
+    budget,
+    budget.limits.maxLinesPerTable,
+    invalid,
+    (line) => {
+      if (count >= accountLimit) throw new RestoreRejected(E.tooManyRows(entry.name));
+      if (count >= expected) throw new RestoreRejected(E.counts);
+      let upgraded: unknown;
+      try {
+        upgraded = upgrade(entry.name, line, manifest.v);
+      } catch {
+        throw invalid();
+      }
+      const parsed = schema.safeParse(upgraded);
+      if (!parsed.success) throw invalid();
+      count += 1;
+      take(parsed.data);
+    },
+    "rows",
+    rowBytesFor(entry.name, budget.limits),
+  );
   return count;
+}
+
+// For the registry test: every JSON column of a backed-up table must have its strict shape.
+export function jsonColumnsWithoutShape(): string[] {
+  return BACKUP_TABLES.flatMap((entry) =>
+    Object.values(getTableColumns(entry.table))
+      .filter((column) => column.columnType === "SQLiteTextJson")
+      .map((column) => `${entry.name}.${column.name}`)
+      .filter((name) => !Object.hasOwn(KNOWN_SHAPES, name)),
+  );
 }
 
 const auditLine = z.custom<object>(

@@ -11,6 +11,7 @@ import { db, type Tx } from "../db";
 import { czech } from "../db/collation";
 import { catalogItem, unit } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { assertRowLimit } from "./account-limits";
 import { ServiceError, type Reader } from "./access";
 import type { Page } from "./audit-read";
 import { mutate, type Audit } from "./mutation";
@@ -320,6 +321,7 @@ export function saveUnit(actor: Actor, rawName: string): { id: string } {
     if (rows.some((row) => foldText(row.name) === foldText(name))) {
       throw new ServiceError(V.unitExists);
     }
+    assertRowLimit(tx, "unit", unit, userId);
     const id = randomUUID();
     const position = rows.reduce((max, row) => Math.max(max, row.position), -1) + 1;
     tx.insert(unit).values({ id, userId, name, position, createdAt: clock.now() }).run();

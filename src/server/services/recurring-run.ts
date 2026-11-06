@@ -54,7 +54,15 @@ import { mutate, type Audit } from "./mutation";
 import { notify, resolveNotification } from "./notifications";
 import { ensureDefaultSeries } from "./number-series";
 import { getPreferences } from "./preferences";
-import { findPlan, readPlan, ruleOf, runKeyPrefix, sameBilledPeriod } from "./recurring";
+import {
+  findPlan,
+  planHeadColumns,
+  readPlan,
+  ruleOf,
+  runKeyPrefix,
+  sameBilledPeriod,
+  type PlanHead,
+} from "./recurring";
 
 const V = TEXTS.recurring.validation;
 const R = TEXTS.recurring.reasons;
@@ -90,7 +98,7 @@ function occurrenceOf(row: Job): RunOccurrence {
 
 function insertRun(
   tx: Tx,
-  plan: RecurringInvoice,
+  plan: PlanHead,
   occurrence: RunOccurrence,
   status: RunStatus,
   reason: string | null = null,
@@ -132,7 +140,7 @@ function displayDate(ownerId: string, date: CalendarDate): string {
 }
 
 // One notice per plan however many occurrences it covers.
-function noticeMissed(tx: Tx, plan: RecurringInvoice, recorded: RunOccurrence[]): void {
+function noticeMissed(tx: Tx, plan: PlanHead, recorded: RunOccurrence[]): void {
   const last = recorded.at(-1);
   if (!last) return;
   notify(tx, {
@@ -150,7 +158,7 @@ function noticeMissed(tx: Tx, plan: RecurringInvoice, recorded: RunOccurrence[])
 
 // A plan edited under a queued job can bill another period under a key that already has a run.
 // The unique index would drop that occurrence, so somebody has to be told about it.
-function noticeConflict(tx: Tx, plan: RecurringInvoice, occurrence: RunOccurrence): boolean {
+function noticeConflict(tx: Tx, plan: PlanHead, occurrence: RunOccurrence): boolean {
   const { periodKey, issueDate, billedPeriod } = occurrence;
   const taken = tx
     .select()
@@ -175,7 +183,7 @@ function noticeConflict(tx: Tx, plan: RecurringInvoice, occurrence: RunOccurrenc
 
 function recordMissed(
   tx: Tx,
-  plan: RecurringInvoice,
+  plan: PlanHead,
   occurrences: RunOccurrence[],
   reason: string,
 ): number {
@@ -188,12 +196,7 @@ function recordMissed(
   return recorded.length;
 }
 
-function moveCursor(
-  tx: Tx,
-  plan: RecurringInvoice,
-  rule: RecurrenceRule,
-  cursorDate: CalendarDate,
-): void {
+function moveCursor(tx: Tx, plan: PlanHead, rule: RecurrenceRule, cursorDate: CalendarDate): void {
   const finished = nextOccurrences(rule, cursorDate, 1).length === 0;
   // A finished plan goes back to work when its last occurrence has to be planned again.
   const status = finished ? "finished" : plan.status === "finished" ? "active" : plan.status;
@@ -204,9 +207,11 @@ function moveCursor(
 }
 
 // A finished plan may still have its last occurrence waiting in a job that deactivation cancelled.
-export function reviewablePlansOf(q: Reader, ownerId: string): RecurringInvoice[] {
+// Without the document: markMissed needs only the rule, and a plan's document is read where a run
+// builds its invoice, one plan at a time (I-3 of plan 9).
+export function reviewablePlansOf(q: Reader, ownerId: string): PlanHead[] {
   return q
-    .select()
+    .select(planHeadColumns)
     .from(recurringInvoice)
     .where(
       scoped(ownerId).where(recurringInvoice, (t) => inArray(t.status, ["active", "finished"])),
@@ -216,7 +221,7 @@ export function reviewablePlansOf(q: Reader, ownerId: string): RecurringInvoice[
 
 // After a pause or deactivation nothing old may run by itself (REC-005, ADM-005). Jobs that never
 // started are taken back too: they would run the old occurrence, or block today's under their key.
-export function markMissed(tx: Tx, audit: Audit, plan: RecurringInvoice, today: CalendarDate) {
+export function markMissed(tx: Tx, audit: Audit, plan: PlanHead, today: CalendarDate) {
   // Before the jobs go: the limit counts them, and they only become runs further down.
   const rule = ruleOf(tx, plan);
   const idle = takeIdleJobs(tx, plan.userId, runKeyPrefix(plan.id)).map(occurrenceOf);
@@ -287,7 +292,7 @@ export function resumeRecurring(actor: Actor, id: string): void {
 
 function plannablePlans(where?: ReturnType<typeof sql>) {
   return db
-    .select({ plan: recurringInvoice, sendTime: automationSettings.sendTime })
+    .select({ plan: planHeadColumns, sendTime: automationSettings.sendTime })
     .from(recurringInvoice)
     .innerJoin(user, eq(user.id, recurringInvoice.userId))
     .leftJoin(automationSettings, eq(automationSettings.userId, recurringInvoice.userId))
@@ -300,7 +305,7 @@ function sendTimeOf(ownerId: string, sendTime: string | null): string {
   return sendTime ?? getAutomation(ownerId).sendTime;
 }
 
-function planWork(q: Reader, plan: RecurringInvoice, through: CalendarDate) {
+function planWork(q: Reader, plan: PlanHead, through: CalendarDate) {
   const rule = ruleOf(q, plan);
   const due = occurrencesBetween(rule, plan.cursorDate, through);
   const cursorDate = through > plan.cursorDate ? through : plan.cursorDate;
@@ -308,7 +313,7 @@ function planWork(q: Reader, plan: RecurringInvoice, through: CalendarDate) {
   return { rule, due, cursorDate, idle: due.length === 0 && !finished };
 }
 
-function planOne(seen: RecurringInvoice, through: CalendarDate, today: CalendarDate): void {
+function planOne(seen: PlanHead, through: CalendarDate, today: CalendarDate): void {
   if (planWork(db, seen, through).idle) return;
   unlessUnchanged(() =>
     mutate(schedulerActor(seen.userId), "recurring.plan", (tx, audit) => {
@@ -409,7 +414,7 @@ function draftFor(
 }
 
 // The account-wide switch stops issuing as well as sending; recurringSend only concerns sending (R-6).
-function effectiveMode(plan: RecurringInvoice): RecurringInvoice["mode"] {
+function effectiveMode(plan: PlanHead): PlanHead["mode"] {
   if (plan.mode === "draft") return "draft";
   if (getAutomation(plan.userId).paused) return "draft";
   if (plan.mode === "issue") return "issue";
@@ -678,7 +683,7 @@ export function resolveMissed(
   });
 }
 
-function noticePlan(plan: RecurringInvoice, occurrence: Occurrence): void {
+function noticePlan(plan: PlanHead, occurrence: Occurrence): void {
   const key = `notice:${plan.id}:${occurrence.periodKey}`;
   const { userId } = plan;
   unlessUnchanged(() =>
