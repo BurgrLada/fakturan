@@ -51,6 +51,15 @@ export function blobWriter(userId: string, id: string): WriteStream {
   return createWriteStream(filePath(userId, id), { flags: "wx" });
 }
 
+// Inside the account folder, so removeUserDir takes a leftover with the account.
+export function tempDir(userId: string, id: string): string {
+  return join(userDir(userId), segment(`tmp-${id}`));
+}
+
+export function removeTempDir(userId: string, id: string): void {
+  rmSync(tempDir(userId, id), { recursive: true, force: true });
+}
+
 export function readBlob(userId: string, id: string): Buffer {
   return readFileSync(filePath(userId, id));
 }

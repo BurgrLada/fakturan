@@ -1,6 +1,6 @@
 import "server-only";
 import { and, asc, count, eq, gte, inArray, lte, ne, sql, type SQL } from "drizzle-orm";
-import type { ExportFilter, ExportFormat } from "@/lib/export-filter";
+import type { ExportFilter, ExportFormat, ExportKind } from "@/lib/export-filter";
 import { amountDue } from "@/lib/qr-payload";
 import {
   CSV_BOM,
@@ -466,7 +466,10 @@ function templatesJson(run: Run): string {
 }
 
 async function produce(run: Run, path: string): Promise<number> {
-  const { kind, format, filter } = run.row;
+  // runExport never takes a backup, so the stored kind and format are those of the export form.
+  const kind = run.row.kind as ExportKind;
+  const format = run.row.format as ExportFormat;
+  const { filter } = run.row;
   const mtime = clock.now();
   const zipped = format !== "csv" && format !== "json";
   const zip = zipped ? zipFileWriter(path, { mtime }) : null;
@@ -531,6 +534,7 @@ export async function runExport(job: Job): Promise<void> {
   const exportId = job.payload.exportId;
   if (!ownerId || typeof exportId !== "string") throw new Error("Úloha exportu nemá vlastníka");
   const row = findExport(db, ownerId, exportId);
+  if (row?.kind === "backup") throw new Error("Záloha nepatří do úlohy exportu");
   if (!row || !moveExport(ownerId, exportId, ["queued"], { status: "running", progress: 0 })) {
     return;
   }

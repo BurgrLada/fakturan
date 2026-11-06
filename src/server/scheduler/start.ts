@@ -9,6 +9,7 @@ import { env } from "../env";
 import { purgeFinishedJobs } from "../jobs/queue";
 import { registerJob } from "../jobs/registry";
 import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
+import { recoverBackupJob, runBackup } from "../services/account-backup";
 import { purgeNotices } from "../services/bank-notices";
 import { planBankPolls, pollMailbox } from "../services/bank-poll";
 import { deliverDigest, planDigests } from "../services/due-alerts";
@@ -135,6 +136,7 @@ export function startScheduler(): void {
   registerJob("import.parse", { run: runImportParse, recover: recoverImportJob });
   registerJob("import.commit", { run: runImportCommit, recover: recoverImportJob });
   registerJob("export.run", { run: runExport, recover: recoverExportJob });
+  registerJob("backup.run", { run: runBackup, recover: recoverBackupJob });
   registerTickTask(deadMailTask);
   registerTickTask(deadRecurringTask);
   registerTickTask(recurringPlanTask);

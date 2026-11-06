@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
+import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, test, vi } from "vitest";
 import {
   deleteBankAccountAction,
@@ -153,6 +154,8 @@ import { registerJob } from "@/server/jobs/registry";
 import { drainHeavy } from "@/server/jobs/worker";
 import { runExport } from "@/server/services/export-run";
 import { recoverExportJob } from "@/server/services/exports";
+import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
+import { backupListAction, createBackupAction } from "@/app/(app)/nastaveni/zaloha/actions";
 import { RATE_RULES } from "@/server/rate-limit";
 import { rateLimit } from "@/server/db/schema";
 import { writePreview } from "@/server/services/import-batch";
@@ -1088,5 +1091,47 @@ describe("akce exportu", () => {
       .onConflictDoUpdate({ target: rateLimit.key, set: { count: rule.limit } })
       .run();
     expect((await download(created.id)).status).toBe(429);
+  });
+});
+
+describe("akce zálohy", () => {
+  const download = async (id: string) => {
+    const { GET } = await import("@/app/(app)/nastaveni/export/[id]/route");
+    return GET(new Request("http://localhost/"), { params: Promise.resolve({ id }) });
+  };
+
+  test("[SEC-002] záloha, její seznam ani stažení neprojdou s cizím účtem", async () => {
+    registerJob("backup.run", { run: runBackup, recover: recoverBackupJob });
+    const mine = seedOwner(db, new Date());
+    const stranger = seedOwner(db, new Date());
+    const invoiceId = issuedInvoice(mine, seedCustomer(mine));
+
+    session.userId = mine;
+    const created = await createBackupAction();
+    if (!created.ok) throw new Error(created.error);
+    await drainHeavy("w");
+    const listed = await backupListAction();
+    expect(listed.ok && listed.rows).toMatchObject([{ id: created.id, downloadable: true }]);
+    expect(await exportListAction()).toMatchObject({ ok: true, rows: [] });
+    const own = await download(created.id);
+    expect(own.status).toBe(200);
+    expect(own.headers.get("Content-Type")).toBe("application/zip");
+    expect(own.headers.get("Content-Disposition")).toMatch(/^attachment.*fakturan-zaloha-/);
+    expect(own.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(own.headers.get("Cache-Control")).toContain("no-store");
+    const archive = unzipSync(new Uint8Array(await own.arrayBuffer()));
+    expect(strFromU8(archive["data/invoice.jsonl"]!)).toContain(invoiceId);
+
+    session.userId = stranger;
+    expect((await download(created.id)).status).toBe(404);
+    expect(await backupListAction()).toEqual({ ok: true, rows: [] });
+    const theirs = await createBackupAction();
+    if (!theirs.ok) throw new Error(theirs.error);
+    await drainHeavy("w");
+    const foreign = unzipSync(new Uint8Array(await (await download(theirs.id)).arrayBuffer()));
+    for (const bytes of Object.values(foreign)) {
+      expect(strFromU8(bytes)).not.toContain(invoiceId);
+      expect(strFromU8(bytes)).not.toContain(mine);
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { EXPORT_FORMATS, EXPORT_KINDS, type ExportFilter } from "@/lib/export-filter";
+import { EXPORT_JOB_FORMATS, EXPORT_JOB_KINDS, type ExportFilter } from "@/lib/export-filter";
 import { user } from "./auth";
 import { file } from "./file";
 
@@ -21,8 +21,8 @@ export const exportJob = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    kind: text({ enum: EXPORT_KINDS }).notNull(),
-    format: text({ enum: EXPORT_FORMATS }).notNull(),
+    kind: text({ enum: EXPORT_JOB_KINDS }).notNull(),
+    format: text({ enum: EXPORT_JOB_FORMATS }).notNull(),
     filter: text({ mode: "json" }).$type<ExportFilter>().notNull(),
     status: text({ enum: EXPORT_STATUSES }).notNull().default("queued"),
     progress: integer().notNull().default(0),

@@ -17,6 +17,7 @@ const TABS = [
   { href: "/nastaveni/automatizace", label: TEXTS.settings.automation },
   { href: "/nastaveni/import", label: TEXTS.importing.nav },
   { href: "/nastaveni/export", label: TEXTS.exporting.nav },
+  { href: "/nastaveni/zaloha", label: TEXTS.backup.nav },
   { href: "/nastaveni/historie", label: TEXTS.settings.history },
 ];
 

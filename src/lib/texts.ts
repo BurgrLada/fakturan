@@ -1579,6 +1579,7 @@ export const TEXTS = {
         `Nerozpoznaná avíza z banky: ${p.count ?? 0}. Platbu z nich zapište ručně a zprávu zahoďte v sekci Platby.`,
       export_ready: (p: Record<string, unknown>) =>
         `Export ${p.label ?? ""} je hotový a 7 dní ke stažení v Nastavení, Export.`,
+      backup_ready: () => "Záloha účtu je hotová a 7 dní ke stažení v Nastavení, Záloha.",
       notices_over_limit: (p: Record<string, unknown>) =>
         `Dorazilo přes ${p.limit ?? 0} neověřených nebo nerozpoznaných zpráv za den, může jít o podvržené avízo. Další jsou v sekci Platby uložené bez textu, zkontrolujte je.`,
     },
@@ -3320,6 +3321,28 @@ export const TEXTS = {
       invalid: "Neplatné zadání exportu",
       pdfTooLong: (limit: number) =>
         `Přehled má víc než ${limit} řádků, to je na PDF příliš. Stáhněte ho jako Excel nebo CSV.`,
+    },
+  },
+  backup: {
+    title: "Záloha účtu",
+    nav: "Záloha",
+    intro:
+      "Celý účet v jednom archivu ZIP: doklady, platby, zákazníci, ceník, šablony, nastavení, nástěnky, přiložené soubory a historie změn. Záloha běží na pozadí a je ke stažení 7 dní.",
+    secrets:
+      "Hesla k poštovnímu serveru a ke schránce s avízy v záloze nejsou. Po obnově je zadáte znovu.",
+    start: "Vytvořit zálohu",
+    started: "Záloha běží na pozadí. Výsledek najdete níže.",
+    failed: "Zálohu se nepodařilo spustit. Zkuste to znovu.",
+    list: {
+      title: "Zálohy",
+      empty: "Zatím žádná záloha.",
+    },
+    interrupted: "Záloha se přerušila. Spusťte ji znovu.",
+    errors: {
+      missingFile:
+        "V úložišti chybí soubor účtu, záloha se zastavila. Kontaktujte správce instance.",
+      tooLarge: "Záloha by byla větší než 1 GB, to tento formát neumí.",
+      unexpected: "Záloha se nepodařila kvůli neočekávané chybě. Zkuste ji znovu.",
     },
   },
 } as const;

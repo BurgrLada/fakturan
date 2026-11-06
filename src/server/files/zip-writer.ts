@@ -86,7 +86,9 @@ export type EntryStream = { push(chunk: Uint8Array | string): void; end(): void 
 export type ZipFileWriter = {
   addStored(name: string, data: Uint8Array): void;
   addDeflated(name: string, data: Uint8Array | string): void;
-  deflatedEntry(name: string): EntryStream;
+  // Level 0 keeps the bytes as they are but, unlike a stored entry, ends itself: a streaming
+  // reader rejects a stored entry with a data descriptor.
+  deflatedEntry(name: string, level?: 0 | 6): EntryStream;
   close(): number;
   abort(): void;
 };
@@ -113,8 +115,8 @@ export function zipFileWriter(
     if (options.mtime) entry.mtime = options.mtime;
     return entry;
   };
-  const deflatedEntry = (name: string): EntryStream => {
-    const entry = stamp(new ZipDeflate(assertEntryPath(name), { level: 6 }));
+  const deflatedEntry = (name: string, level: 0 | 6 = 6): EntryStream => {
+    const entry = stamp(new ZipDeflate(assertEntryPath(name), { level }));
     zip.add(entry);
     return {
       push(chunk) {

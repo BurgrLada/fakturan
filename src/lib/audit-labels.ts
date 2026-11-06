@@ -1,5 +1,10 @@
 export const ACTION_LABELS: Record<string, string> = {
   "access.denied": "Odmítnutý přístup",
+  "account.backup": "Spuštění zálohy účtu",
+  "account.backup_download": "Stažení zálohy účtu",
+  "account.backup_fail": "Neúspěšná záloha účtu",
+  "account.backup_finish": "Dokončení zálohy účtu",
+  "account.backup_purge": "Smazání vypršelé zálohy účtu",
   "account.link": "Propojení účtu poskytovatele",
   "audit.export": "Export historie",
   "auth.account_link_failed": "Neúspěšné propojení účtu poskytovatele",
