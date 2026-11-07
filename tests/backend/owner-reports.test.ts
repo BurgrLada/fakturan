@@ -22,6 +22,7 @@ import {
   setTaxReminder,
 } from "@/server/services/automation";
 import { savePreferences } from "@/server/services/preferences";
+import { saveMailLook } from "@/server/services/mail-look";
 import { reportSummary } from "@/server/services/reports";
 import {
   deliverOwnerReport,
@@ -209,6 +210,26 @@ describe("obsah souhrnu", () => {
 });
 
 describe("odeslání souhrnu", () => {
+  test("[MAIL-009] souhrn přijde i jako HTML ve zvoleném vzhledu, se stejným textem a bez QR", async () => {
+    const { owner } = november();
+    setPeriodSummary(webActor(owner), "monthly");
+    saveMailLook(webActor(owner), {
+      layout: "b2",
+      intro: "Úvod pro klienty",
+      signature: "",
+      logoMode: "supplier",
+    });
+
+    await tickAt(NOW);
+
+    const [mail] = smtp.messages;
+    expect(mail!.raw).toMatch(/multipart\/alternative/i);
+    expect(plain(mail!.html!)).toContain("Fakturováno: 17 100,00 Kč");
+    expect(mail!.html).not.toContain("Úvod pro klienty");
+    expect(mail!.html).not.toContain("cid:qr@fakturan");
+    expect(mail!.attachments).toEqual([]);
+  });
+
   test("[REM-010] zpráva jde jen na e-mail účtu, bez stálých kopií a bez přílohy", async () => {
     const { owner, email } = november();
     setPeriodSummary(webActor(owner), "monthly");

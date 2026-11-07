@@ -77,6 +77,7 @@ export type BackupRow = Record<string, unknown>;
 // 1 (R-6); the defaults match the migrations that added the columns.
 const V2_DEFAULTS: Record<string, BackupRow> = {
   automation_settings: { period_summary: "off", tax_reminder: false, limit_mail: false },
+  email_log: { html_file_id: null, html_images: null },
 };
 
 // Steps from version n to n + 1, applied to each row of an older archive before it is validated.

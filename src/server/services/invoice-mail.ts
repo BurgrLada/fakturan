@@ -549,7 +549,7 @@ export function listEmailLog(ownerId: string, invoiceId: string) {
     .orderBy(desc(emailLog.createdAt), sql`rowid DESC`)
     .all()
     .map((log) => {
-      const { fileId, ...row } = log;
+      const { fileId, htmlFileId, htmlImages: _images, ...row } = log;
       const resendable =
         RESENDABLE.includes(row.status) &&
         !delivered.has(slot(log)) &&
@@ -559,6 +559,7 @@ export function listEmailLog(ownerId: string, invoiceId: string) {
       return {
         ...row,
         hasArchive: fileId !== null && mayHaveLeft(row),
+        htmlFileId: mayHaveLeft(row) ? htmlFileId : null,
         resendable,
         acknowledgeable: row.status === "unknown" && !row.acknowledgedAt,
       };

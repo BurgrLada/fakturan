@@ -57,6 +57,15 @@
       "web": "copy",
       "zip": "copy"
     },
+    "mail_look": {
+      "intro": "copy",
+      "layout": "copy",
+      "logo_file_id": "ref:file",
+      "logo_mode": "copy",
+      "signature": "copy",
+      "updated_at": "copy",
+      "user_id": "owner"
+    },
     "bank_account": {
       "bank_code": "copy",
       "created_at": "copy",
@@ -375,6 +384,8 @@
       "cc": "copy",
       "created_at": "copy",
       "file_id": "ref:file",
+      "html_file_id": "ref:file",
+      "html_images": "json-ids",
       "id": "id",
       "invoice_id": "ref:invoice",
       "invoice_revision": "copy",

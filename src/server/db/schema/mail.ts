@@ -43,6 +43,8 @@ export const emailTemplate = sqliteTable(
 
 export type ReceiptPrint = { creditedMinor: number; paidOn: string; dueMinor: number };
 
+export type HtmlImage = { cid: string; fileId: string };
+
 export const emailLog = sqliteTable(
   "email_log",
   {
@@ -66,6 +68,9 @@ export const emailLog = sqliteTable(
     // Chosen in the dialog; never set by automation (R-25).
     attachIsdoc: integer("attach_isdoc", { mode: "boolean" }).notNull().default(false),
     isdocFileId: text("isdoc_file_id").references(() => file.id, { onDelete: "set null" }),
+    // The HTML and its inline images as first built; another attempt sends exactly these (R-19).
+    htmlFileId: text("html_file_id").references(() => file.id, { onDelete: "set null" }),
+    htmlImages: text("html_images", { mode: "json" }).$type<HtmlImage[]>(),
     invoiceRevision: integer("invoice_revision").notNull(),
     plannedFor: text("planned_for"),
     automation: text({ enum: AUTOMATION_KEYS }),

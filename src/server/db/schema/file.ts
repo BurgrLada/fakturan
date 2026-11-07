@@ -12,6 +12,9 @@ export const FILE_KINDS = [
   "sent_isdoc",
   "export",
   "audit_archive",
+  "mail_logo",
+  "sent_html",
+  "sent_image",
 ] as const;
 export type FileKind = (typeof FILE_KINDS)[number];
 

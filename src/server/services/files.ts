@@ -6,7 +6,7 @@ import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
 import { db } from "../db";
-import { emailLog, FILE_KINDS, file, invoice, type FileKind } from "../db/schema";
+import { emailLog, FILE_KINDS, file, invoice, type FileKind, type HtmlImage } from "../db/schema";
 import { scoped } from "../db/scoped";
 import { blobPath, readBlob, removeBlob, writeBlob } from "../files/store";
 import { RATE_RULES } from "../rate-limit";
@@ -172,6 +172,9 @@ class AlreadyArchived extends Error {
 
 type SentKind = "sent_pdf" | "sent_isdoc";
 
+// What a message carried stays as it left (MAIL-006); none of it can be deleted on its own.
+const SENT_KINDS: readonly FileKind[] = ["sent_pdf", "sent_isdoc", "sent_html", "sent_image"];
+
 const SENT_ARCHIVES = {
   sent_pdf: { mimeType: "application/pdf", column: "fileId" },
   sent_isdoc: { mimeType: "application/xml", column: "isdocFileId" },
@@ -254,14 +257,96 @@ export function archiveSentIsdoc(
   return archiveSent(actor, logId, "sent_isdoc", data, name);
 }
 
+export type ArchivedHtml = { htmlFileId: string; images: HtmlImage[] };
+
+// Thrown to leave `mutate`, which refuses to commit without an audit row.
+class HtmlAlreadyArchived extends Error {
+  archived: ArchivedHtml;
+
+  constructor(archived: ArchivedHtml) {
+    super("Archiv HTML už existuje");
+    this.archived = archived;
+  }
+}
+
+// The HTML and its images commit with the link in one transaction, like archiveSent: a recovered
+// job and the late attempt it replaced end up with the same, single archive.
+export function archiveSentHtml(
+  actor: Actor,
+  logId: string,
+  html: string,
+  images: { cid: string; png: Buffer }[],
+  name: string,
+): ArchivedHtml {
+  const userId = ownerOf(actor);
+  const htmlFileId = randomUUID();
+  const parts = images.map((image) => ({ ...image, fileId: randomUUID() }));
+  const data = Buffer.from(html, "utf8");
+  const written: string[] = [];
+  try {
+    return mutate(actor, "file.create", (tx, audit) => {
+      const log = tx
+        .select({ htmlFileId: emailLog.htmlFileId, htmlImages: emailLog.htmlImages })
+        .from(emailLog)
+        .where(scoped(userId).where(emailLog, (t, { eq: is }) => is(t.id, logId)))
+        .get();
+      if (!log) throw new ServiceError(E.logNotFound);
+      if (log.htmlFileId) {
+        throw new HtmlAlreadyArchived({ htmlFileId: log.htmlFileId, images: log.htmlImages ?? [] });
+      }
+      const now = clock.now();
+      const store = (
+        id: string,
+        kind: FileKind,
+        mimeType: string,
+        label: string,
+        bytes: Buffer,
+      ) => {
+        tx.insert(file)
+          .values({ id, userId, kind, mimeType, name: label, size: bytes.length, createdAt: now })
+          .run();
+        writeBlob(userId, id, bytes);
+        written.push(id);
+      };
+      for (const part of parts) {
+        store(part.fileId, "sent_image", "image/png", `${part.cid.split("@")[0]}.png`, part.png);
+      }
+      store(htmlFileId, "sent_html", "text/html", displayName(name), data);
+      const linked = parts.map(({ cid, fileId }) => ({ cid, fileId }));
+      tx.update(emailLog)
+        .set({ htmlFileId, htmlImages: linked, updatedAt: now })
+        .where(
+          scoped(userId).where(emailLog, (t, { and, eq: is }) =>
+            and(is(t.id, logId), isNull(t.htmlFileId)),
+          ),
+        )
+        .run();
+      audit({
+        entity: "file",
+        entityId: htmlFileId,
+        ownerId: userId,
+        scope: "user",
+        after: { kind: "sent_html", size: data.length, images: linked.length, logId },
+      });
+      return { htmlFileId, images: linked };
+    });
+  } catch (error) {
+    for (const id of written) removeBlob(userId, id);
+    if (error instanceof HtmlAlreadyArchived) return error.archived;
+    throw error;
+  }
+}
+
 // How /soubory/[id] serves each kind; kinds missing here are not served at all. Images render on
 // every page view, so only the downloads are limited and audited (R-7).
 export const FILE_DISPOSITION: Partial<Record<FileKind, "inline" | "attachment">> = {
   logo: "inline",
   qr_logo: "inline",
   signature: "inline",
+  mail_logo: "inline",
   import_pdf: "attachment",
   audit_archive: "attachment",
+  sent_html: "attachment",
 };
 
 export type OpenedFile = {
@@ -361,7 +446,7 @@ export function deleteFile(actor: Actor, id: string): void {
       .where(scoped(userId).where(file, (t, { eq: is }) => is(t.id, id)))
       .get();
     if (!row) throw new FileNotFoundError();
-    if (row.kind === "sent_pdf" || row.kind === "sent_isdoc") {
+    if (SENT_KINDS.includes(row.kind)) {
       throw new ServiceError(E.archiveLocked);
     }
     tx.delete(file)

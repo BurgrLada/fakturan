@@ -27,6 +27,7 @@ import { DATE_FORMATS, LANGUAGES, LOGO_POSITIONS, PAYMENT_METHODS } from "@/lib/
 import { accountRowLimit, PER_PARENT_LIMITS } from "@/lib/account-limits";
 import { isGeneratedText, textLimit } from "@/lib/text-limits";
 import { MAX_BODY_CHARS, MAX_SUBJECT_CHARS } from "@/lib/email-template";
+import { MAX_HTML_IMAGES } from "@/lib/mail-look";
 import {
   DATE_FORMATS as IMPORT_DATE_FORMATS,
   DECIMAL_SEPARATORS,
@@ -259,6 +260,17 @@ const importMapping = z.strictObject({
 });
 const importSummary = z.record(z.string().max(40), integer).refine(fewKeys);
 const receiptPrint = z.strictObject({ creditedMinor: integer, paidOn: date, dueMinor: integer });
+const htmlImages = z
+  .array(
+    z.strictObject({
+      cid: z
+        .string()
+        .regex(/^[a-z]+@[a-z]+$/)
+        .max(64),
+      fileId: ID,
+    }),
+  )
+  .max(MAX_HTML_IMAGES);
 const notificationParams = z
   .record(z.string().max(64), z.union([z.string().max(10_000), z.number(), z.boolean(), z.null()]))
   .refine(fewKeys);
@@ -269,6 +281,7 @@ const KNOWN_SHAPES: Record<string, z.ZodType> = {
   "import_batch.mapping": importMapping,
   "import_batch.summary": importSummary,
   "email_log.receipt_print": receiptPrint,
+  "email_log.html_images": htmlImages,
   "notification.params": notificationParams,
   // Checked, not parsed into: the schema fills defaults, and the restored row stays as archived.
   "dashboard_widget.config": z.custom<unknown>(
@@ -357,6 +370,9 @@ const MIMES_BY_KIND: Record<string, readonly string[]> = {
   sent_pdf: ["application/pdf"],
   import_pdf: ["application/pdf"],
   sent_isdoc: ["application/xml"],
+  mail_logo: IMAGES,
+  sent_html: ["text/html"],
+  sent_image: ["image/png"],
 };
 
 const rowSchemas = new Map<string, z.ZodType<ArchiveRow>>();

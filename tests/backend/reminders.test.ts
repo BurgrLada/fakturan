@@ -217,7 +217,7 @@ describe("automatické upomínky", () => {
     expect(getInvoice(owner, id)!.status).toBe("sent");
   });
 
-  test("[SEC-011] vlastní text upomínky zůstává prostý text bez HTML části", async () => {
+  test("[SEC-011] vlastní text upomínky je v textu doslova a v HTML jen escapovaný", async () => {
     const { owner, customerId } = reminding();
     rule(owner, 0, { cs: { subject: "Pozor", body: "<script>alert(1)</script>" } });
     sentInvoice(owner, customerId);
@@ -225,7 +225,8 @@ describe("automatické upomínky", () => {
     await tickAt("2026-03-02T09:30:00Z");
 
     expect(smtp.messages[0]!.body).toContain("<script>alert(1)</script>");
-    expect(smtp.messages[0]!.raw).not.toContain("text/html");
+    expect(smtp.messages[0]!.html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(smtp.messages[0]!.html).not.toMatch(/<script/i);
   });
 
   test("zpráva převezme stálé kopie a přiloží aktuální PDF se zbývající částkou", async () => {

@@ -144,6 +144,8 @@ export const TEXT_LIMITS: Record<string, number> = {
   "automation_settings.reminders_open_since": DATE,
   "automation_settings.send_time": 5,
   "limit_mail_sent.threshold": 4,
+  "mail_look.intro": 2_000,
+  "mail_look.signature": 2_000,
   "email_template.subject": 200,
   "email_template.body": 10_000,
   "dashboard.name": 60,

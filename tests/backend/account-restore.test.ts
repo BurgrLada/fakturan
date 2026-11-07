@@ -54,6 +54,11 @@ import {
 } from "@/server/services/data-checks";
 import { ingestNotice } from "@/server/services/bank-notices";
 import { deleteUser } from "@/server/services/users";
+import { getMailLook, saveMailLook, setMailLogo } from "@/server/services/mail-look";
+import { archiveSentHtml, readOwnedFile } from "@/server/services/files";
+import { queueMail } from "@/server/services/invoice-mail";
+import { mutate } from "@/server/services/mutation";
+import { FIXTURE_LOGO_SVG } from "../fixtures/invoices";
 import { planRecurringRuns } from "@/server/services/recurring-run";
 import { latestRestore } from "@/server/services/exports";
 import {
@@ -233,6 +238,72 @@ describe("obnova účtu", () => {
       .get()!;
     expect(notice.dedupeKey).toBe(`recurring:missed:${plan.id}:2026-03`);
     expect(notice).toMatchObject({ entityId: plan.id, params: { planId: plan.id } });
+  });
+
+  test("[EXP-006] mail_look, mail_logo, sent_html a sent_image jsou v záloze a obnova přemapuje html_images", async () => {
+    const source = seedOwner(db, NOW);
+    const invoiceId = issuedInvoice(source);
+    saveMailLook(webActor(source), {
+      layout: "c",
+      intro: "Úvod",
+      signature: "Podpis",
+      logoMode: "supplier",
+    });
+    setMailLogo(webActor(source), FIXTURE_LOGO_SVG, "logo.svg");
+    const logId = mutate(webActor(source), "invoice.send", (tx, audit) =>
+      queueMail(tx, audit, {
+        userId: source,
+        invoiceId,
+        kind: "invoice",
+        trigger: "manual",
+        key: `mail:${randomUUID()}`,
+        message: {
+          to: ["alfa@example.cz"],
+          cc: [],
+          bcc: [],
+          subject: "Faktura",
+          body: "Text",
+        },
+      }),
+    )!.logId;
+    const qr = Buffer.from("png-qr");
+    archiveSentHtml(
+      webActor(source),
+      logId,
+      "<!DOCTYPE html><p>Text</p>",
+      [{ cid: "qr@fakturan", png: qr }],
+      "2026-001.html",
+    );
+    const logo = readBlob(source, getMailLook(source).logoFileId!);
+    const bytes = await backupArchive(db, source);
+    const sourceIds = archiveIds(bytes);
+    deleteUser(webActor(admin()), source, `${source}@example.cz`);
+
+    const target = emptyAccount();
+    expect((await restoreArchive(db, target, bytes)).status).toBe("done");
+
+    const look = getMailLook(target);
+    expect(look).toMatchObject({
+      layout: "c",
+      intro: "Úvod",
+      signature: "Podpis",
+      logoMode: "custom",
+    });
+    expect(sourceIds).not.toContain(look.logoFileId);
+    expect(readOwnedFile(webActor(target), look.logoFileId!)).toMatchObject({ kind: "mail_logo" });
+    expect(readBlob(target, look.logoFileId!).equals(logo)).toBe(true);
+    const log = db.select().from(emailLog).where(eq(emailLog.userId, target)).get()!;
+    const html = readOwnedFile(webActor(target), log.htmlFileId!);
+    expect(html).toMatchObject({ kind: "sent_html", mimeType: "text/html" });
+    expect(html.data.toString()).toBe("<!DOCTYPE html><p>Text</p>");
+    expect(log.htmlImages).toHaveLength(1);
+    const [image] = log.htmlImages!;
+    expect(image!.cid).toBe("qr@fakturan");
+    expect(sourceIds).not.toContain(image!.fileId);
+    const stored = readOwnedFile(webActor(target), image!.fileId);
+    expect(stored).toMatchObject({ kind: "sent_image", mimeType: "image/png" });
+    expect(stored.data.equals(qr)).toBe(true);
+    assertConsistent(db, target);
   });
 
   test("[IMP-010] audit ze zálohy je soubor a v logu je jen account.restore", async () => {

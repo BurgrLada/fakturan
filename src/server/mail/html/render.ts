@@ -17,8 +17,15 @@ import { COLORS, NEUTRAL_BAND, SIZES, TYPE, WIDTH } from "./tokens";
 export const QR_CID = "qr@fakturan";
 export const LOGO_CID = "logo@fakturan";
 
+// The owner's own reports (REM-010 to REM-012) share the frame but are about no single document.
+export type EmailKind = MessageKind | "owner_report";
+
 // Only a message that asks for money carries a code to pay it with.
-const QR_KINDS: readonly MessageKind[] = ["invoice", "advance", "reminder"];
+const QR_KINDS: readonly EmailKind[] = ["invoice", "advance", "reminder"];
+
+export function mayCarryQr(layout: MailLayout, kind: EmailKind): boolean {
+  return LAYOUTS_WITH_QR.includes(layout) && QR_KINDS.includes(kind);
+}
 
 export type EmailSummary = {
   title: string;
@@ -32,7 +39,7 @@ export type EmailSummary = {
 
 export type EmailHtmlInput = {
   layout: MailLayout;
-  kind: MessageKind;
+  kind: EmailKind;
   language: Language;
   body: string;
   intro: string | null;
@@ -133,8 +140,7 @@ export function renderEmailHtml(input: EmailHtmlInput): EmailHtml {
     input.qr !== null &&
     summary !== null &&
     summary.amountDue > 0 &&
-    LAYOUTS_WITH_QR.includes(input.layout) &&
-    QR_KINDS.includes(input.kind);
+    mayCarryQr(input.layout, input.kind);
   if (showQr) images.push({ cid: QR_CID, png: input.qr! });
 
   const dueDate = summary?.dueDate ? escapeHtml(summary.dueDate) : null;

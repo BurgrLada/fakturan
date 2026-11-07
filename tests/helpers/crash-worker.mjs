@@ -24,7 +24,10 @@ registerHooks({
     if (specifier === "nodemailer" && ownSource(context.parentURL)) {
       return { url: MAILER, shortCircuit: true };
     }
-    if (/\/(pdf\/)?(designs|render)$/.test(specifier) && !specifier.startsWith("/")) {
+    if (
+      /(?<!mail\/html)\/(pdf\/)?(designs|render)$/.test(specifier) &&
+      !specifier.startsWith("/")
+    ) {
       return { url: designsStub, shortCircuit: true };
     }
     if (specifier.startsWith("@/")) {

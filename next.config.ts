@@ -31,6 +31,8 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
 ];
 
+const OWN_POLICY = ["soubory/[^/]+", "nastaveni/posta/vzhled/nahled"];
+
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
@@ -50,8 +52,16 @@ const nextConfig: NextConfig = {
       "./node_modules/xmllint-wasm/**/*",
     ],
   },
+  // A config header replaces the one a route sets, so routes with a stricter policy of their own
+  // (sandboxed files and the e-mail preview) get every header but the app's CSP.
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: `/:path((?!${OWN_POLICY.join("|")}).*)`, headers: securityHeaders },
+      {
+        source: `/:path(${OWN_POLICY.join("|")})`,
+        headers: securityHeaders.filter((header) => header.key !== "Content-Security-Policy"),
+      },
+    ];
   },
   turbopack: {
     rules: {

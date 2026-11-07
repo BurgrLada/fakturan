@@ -1,13 +1,13 @@
+import type { MailLayout } from "@/lib/mail-look";
 import { COLORS, SIZES, TYPE } from "./tokens";
 
-export const MAIL_LAYOUTS = ["b1", "b2", "b3", "b4", "b5", "a", "c"] as const;
-export type MailLayout = (typeof MAIL_LAYOUTS)[number];
-export const DEFAULT_MAIL_LAYOUT: MailLayout = "b4";
-export const LAYOUTS_WITH_QR: readonly MailLayout[] = ["b2", "b3", "b5"];
-
-export function isMailLayout(value: string): value is MailLayout {
-  return (MAIL_LAYOUTS as readonly string[]).includes(value);
-}
+export {
+  DEFAULT_MAIL_LAYOUT,
+  isMailLayout,
+  LAYOUTS_WITH_QR,
+  MAIL_LAYOUTS,
+  type MailLayout,
+} from "@/lib/mail-look";
 
 // Every string here is already escaped HTML; layouts only arrange it.
 export type Parts = {

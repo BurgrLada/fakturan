@@ -27,6 +27,7 @@ import {
   automationSettings,
   job,
   limitMailSent,
+  supplier,
   user,
   type Job,
   type JobPayload,
@@ -41,6 +42,8 @@ import type { Unconverted } from "../reports/types";
 import { reportFailure } from "../scheduler/report";
 import { getAutomation } from "./automation";
 import { resolveTransport } from "./mail-settings";
+import { getMailLook, mailLogo } from "./mail-look";
+import { renderEmailHtml } from "../mail/html/render";
 import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
 
@@ -424,6 +427,32 @@ function deliveryOf(userId: string, payload: JobPayload): Delivery | null {
   throw new Error(`Neznámý druh e-mailu pro vlastníka: ${String(report)}`);
 }
 
+// The same frame as the client's mail, without the client's intro and signature and without a
+// document, so there is no amount and no payment code.
+async function ownerReportHtml(userId: string, text: string) {
+  const look = getMailLook(userId);
+  const party = db
+    .select({ name: supplier.name, ico: supplier.ico })
+    .from(supplier)
+    .where(scoped(userId).where(supplier))
+    .get();
+  return renderEmailHtml({
+    layout: look.layout,
+    kind: "owner_report",
+    language: "cs",
+    body: text,
+    intro: null,
+    signature: null,
+    supplierName: party?.name ?? "",
+    supplierIco: party?.ico || null,
+    logo: await mailLogo(userId, look),
+    accent: null,
+    attachment: null,
+    summary: null,
+    qr: null,
+  });
+}
+
 export async function deliverOwnerReport(row: Job): Promise<void> {
   const userId = row.userId;
   if (!userId) throw new Error("E-mail pro vlastníka nemá vlastníka");
@@ -438,6 +467,7 @@ export async function deliverOwnerReport(row: Job): Promise<void> {
   const transport = await resolveTransport(userId);
   if (!transport) throw new RetryLater("E-mail pro vlastníka čeká na nastavení pošty", RETRY_MS);
   const { from, replyTo } = transport.identity;
+  const html = await ownerReportHtml(userId, delivery.text);
   try {
     // Without the account's standing copies: this message is for the owner alone.
     await transport.send({
@@ -446,6 +476,13 @@ export async function deliverOwnerReport(row: Job): Promise<void> {
       to: account.email,
       subject: delivery.subject,
       text: delivery.text,
+      html: html.html,
+      attachments: html.images.map(({ cid, png }) => ({
+        filename: `${cid.split("@")[0]}.png`,
+        content: png,
+        contentType: "image/png",
+        cid,
+      })),
     });
   } catch {
     throw new RetryLater("E-mail pro vlastníka se zopakuje", RETRY_MS);

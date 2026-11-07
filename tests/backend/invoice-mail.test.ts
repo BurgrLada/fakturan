@@ -576,8 +576,10 @@ describe("archiv", () => {
     expect(archiveSentPdf(scheduler, logId, Buffer.from("%PDF-nove"), "x.pdf")).toEqual({
       id: fileId,
     });
-    expect(db.select().from(file).where(eq(file.userId, owner)).all()).toHaveLength(1);
-    expect(() => deleteFile(webActor(owner), fileId)).toThrow(ServiceError);
+    const files = db.select().from(file).where(eq(file.userId, owner)).all();
+    expect(files.map((row) => row.kind).toSorted()).toEqual(["sent_html", "sent_pdf"]);
+    for (const row of files)
+      expect(() => deleteFile(webActor(owner), row.id)).toThrow(ServiceError);
 
     const other = account();
     const { logId: waiting } = sendInvoice(webActor(other.owner), other.invoiceId, input());

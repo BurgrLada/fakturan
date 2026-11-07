@@ -44,6 +44,15 @@ import {
 } from "../helpers/fixtures-mail";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
 import { SEND_TIMEOUTS } from "@/server/mail/transport";
+import { getMailLook, saveMailLook, setMailLogo } from "@/server/services/mail-look";
+import { readOwnedFile } from "@/server/services/files";
+import { loadInvoiceDocument } from "@/server/services/invoice-document";
+import { ownerImageReader } from "@/server/services/invoice-pdf";
+import { documentQrPng, documentTitle } from "@/server/pdf/view";
+import { payment } from "@/server/db/schema";
+import { decodeQr } from "../helpers/pdf";
+import { seedPayment } from "../fixtures/invoices";
+import sharp from "sharp";
 
 import { deadMailTask } from "@/server/scheduler/start";
 import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
@@ -314,12 +323,13 @@ describe("doručení", () => {
     });
   });
 
-  test("[MAIL-007] zpráva je prostý text bez HTML, pixelu a Disposition-Notification-To", async () => {
+  test("[MAIL-007] HTML zprávy nemá pixel ani vzdálený obrázek a chybí Disposition-Notification-To", async () => {
     const { owner, invoiceId } = account();
     send(owner, invoiceId, { body: '<img src="http://x/p.gif"> text' });
     await drainJobs(WORKER);
-    const { raw } = await smtp.waitFor("alfa@example.cz");
-    expect(raw).not.toMatch(/text\/html/i);
+    const { raw, html } = await smtp.waitFor("alfa@example.cz");
+    expect(html).toContain("&lt;img src=&quot;http://x/p.gif&quot;&gt; text");
+    for (const [, src] of html!.matchAll(/<img[^>]*\bsrc="([^"]*)"/g)) expect(src).toMatch(/^cid:/);
     expect(raw).not.toMatch(/Disposition-Notification-To/i);
     expect(raw).not.toMatch(/Return-Receipt-To/i);
     expect(raw).toMatch(/text\/plain/i);
@@ -532,7 +542,8 @@ describe("selhání", () => {
     later(5 * MINUTE);
     await drainJobs(WORKER);
     expect(logOf(id)).toMatchObject({ status: "sent", fileId: archived, attempts: 2 });
-    expect(db.select().from(file).where(eq(file.userId, owner)).all()).toHaveLength(1);
+    const kinds = db.select().from(file).where(eq(file.userId, owner)).all();
+    expect(kinds.map((row) => row.kind).toSorted()).toEqual(["sent_html", "sent_pdf"]);
   });
 
   test("bez dostupného SMTP je failed a nic neodchází", async () => {
@@ -919,7 +930,8 @@ describe("převzetí úlohy za běhu", () => {
     expect(smtp.messages).toHaveLength(1);
     expect(smtp.connections()).toBe(1);
     expect(logOf(id).status).toBe("sent");
-    expect(db.select().from(file).where(eq(file.userId, owner)).all()).toHaveLength(1);
+    const kinds = db.select().from(file).where(eq(file.userId, owner)).all();
+    expect(kinds.map((row) => row.kind).toSorted()).toEqual(["sent_html", "sent_pdf"]);
     assertConsistent(db, owner);
   });
 
@@ -1084,5 +1096,161 @@ describe("výpis", () => {
     await drainJobs(WORKER);
     expect(smtp.connections()).toBe(0);
     expect(db.select().from(emailLog).where(eq(emailLog.userId, owner)).all()).toEqual([]);
+  });
+});
+
+const lookOf = (over: Record<string, unknown> = {}) => ({
+  layout: "b2",
+  intro: "",
+  signature: "",
+  logoMode: "supplier",
+  ...over,
+});
+
+const pngOf = (background: string) =>
+  sharp({ create: { width: 300, height: 100, channels: 3, background } })
+    .png()
+    .toBuffer();
+
+const imageOf = (
+  mail: { attachments: { cid: string | undefined; content: Buffer; contentType: string }[] },
+  cid: string,
+) => mail.attachments.find((entry) => entry.cid === cid);
+
+async function queuedQr(owner: string, invoiceId: string) {
+  const doc = loadInvoiceDocument(owner, invoiceId)!;
+  return documentQrPng(doc, documentTitle(doc, false), ownerImageReader(owner));
+}
+
+describe("HTML e-mail", () => {
+  test("[MAIL-009] SMTP dostane multipart/alternative s textem shodným s historií a HTML", async () => {
+    const { owner, invoiceId } = account();
+    const id = send(owner, invoiceId, { body: "Dobrý den,\n\nposílám <fakturu> & PDF." });
+    await drainJobs(WORKER);
+
+    const mail = await smtp.waitFor("alfa@example.cz");
+    const log = logOf(id);
+    expect(mail.raw).toMatch(/multipart\/alternative/i);
+    expect(mail.raw).toMatch(/text\/plain/i);
+    expect(mail.raw).toMatch(/text\/html/i);
+    expect(mail.body.trimEnd()).toBe(log.body);
+    expect(mail.html).toContain("posílám &lt;fakturu&gt; &amp; PDF.");
+    const archived = readOwnedFile(webActor(owner), log.htmlFileId!);
+    expect(archived.kind).toBe("sent_html");
+    expect(archived.mimeType).toBe("text/html");
+    expect(mail.html).toBe(archived.data.toString("utf8"));
+    expect(listEmailLog(owner, invoiceId)[0]).toMatchObject({ htmlFileId: log.htmlFileId });
+  });
+
+  test("[MAIL-009] výchozí vzhled je B4 a změna na B2 přidá QR jako inline přílohu cid", async () => {
+    const { owner, invoiceId } = account();
+    expect(getMailLook(owner).layout).toBe("b4");
+    send(owner, invoiceId);
+    await drainJobs(WORKER);
+    const plain = await smtp.waitFor("alfa@example.cz");
+    expect(plain.html).toContain("Faktura");
+    expect(imageOf(plain, "qr@fakturan")).toBeUndefined();
+    expect(plain.attachments).toHaveLength(1);
+
+    smtp.reset();
+    saveMailLook(webActor(owner), lookOf());
+    const second = issuedInvoice(owner);
+    send(owner, second);
+    await drainJobs(WORKER);
+    const mail = await smtp.waitFor("alfa@example.cz");
+    const qr = imageOf(mail, "qr@fakturan");
+    expect(qr?.contentType).toBe("image/png");
+    expect(mail.html).toContain('src="cid:qr@fakturan"');
+    expect(decodeQr(qr!.content)).toBe((await queuedQr(owner, second))!.payload);
+  });
+
+  test("[MAIL-006] opakované doručení pošle stejné HTML a QR jako první pokus, i po změně loga a vzhledu", async () => {
+    const { owner, invoiceId } = account();
+    saveMailLook(webActor(owner), lookOf());
+    setMailLogo(webActor(owner), await pngOf("#aa0000"), "prvni.png");
+    const id = send(owner, invoiceId);
+    smtp.rejectNext(421);
+    await drainJobs(WORKER);
+    const first = logOf(id);
+    expect(first.status).toBe("queued");
+    const html = readOwnedFile(webActor(owner), first.htmlFileId!).data.toString("utf8");
+    const images = first.htmlImages!.map(({ cid, fileId }) => ({
+      cid,
+      data: readOwnedFile(webActor(owner), fileId).data,
+    }));
+    expect(images.map((image) => image.cid).toSorted()).toEqual(["logo@fakturan", "qr@fakturan"]);
+
+    setMailLogo(webActor(owner), await pngOf("#00aa00"), "druhe.png");
+    saveMailLook(webActor(owner), lookOf({ layout: "a", logoMode: "custom", intro: "Nový úvod" }));
+    later(6 * MINUTE);
+    await drainJobs(WORKER);
+
+    const mail = await smtp.waitFor("alfa@example.cz");
+    expect(logOf(id).status).toBe("sent");
+    expect(logOf(id).htmlFileId).toBe(first.htmlFileId);
+    expect(mail.html).toBe(html);
+    expect(mail.html).not.toContain("Nový úvod");
+    for (const image of images) {
+      expect(imageOf(mail, image.cid)!.content.equals(image.data), image.cid).toBe(true);
+    }
+  });
+
+  test("[MAIL-010] vlastní úvod a podpis jsou nad a pod textem, prázdný podpis se nepřidá", async () => {
+    const { owner, invoiceId } = account();
+    saveMailLook(
+      webActor(owner),
+      lookOf({ layout: "a", intro: "Úvod <b>", signature: "Podpis účtu" }),
+    );
+    send(owner, invoiceId, { body: "Text zprávy" });
+    await drainJobs(WORKER);
+    const { html, body } = await smtp.waitFor("alfa@example.cz");
+    expect(html!.indexOf("Úvod &lt;b&gt;")).toBeGreaterThan(-1);
+    expect(html!.indexOf("Úvod &lt;b&gt;")).toBeLessThan(html!.indexOf("Text zprávy"));
+    expect(html!.indexOf("Text zprávy")).toBeLessThan(html!.indexOf("Podpis účtu"));
+    expect(body.trimEnd()).toBe("Text zprávy");
+
+    smtp.reset();
+    saveMailLook(webActor(owner), lookOf({ layout: "a", signature: "" }));
+    send(owner, issuedInvoice(owner), { body: "Druhý text" });
+    await drainJobs(WORKER);
+    const second = await smtp.waitFor("alfa@example.cz");
+    expect(second.html).not.toContain("Podpis účtu");
+    expect(second.html!.match(/<p[^>]*font-size:13px[^>]*>/g)).toBeNull();
+  });
+
+  test("[MAIL-009] upomínka nese QR na zbývající částku, potvrzení platby QR nemá", async () => {
+    const { owner, invoiceId } = account();
+    saveMailLook(webActor(owner), lookOf());
+    seedPayment(db, invoiceId, 100_000);
+    const queue = (kind: "reminder" | "payment_receipt", paymentId?: string) =>
+      mutate(webActor(owner), "invoice.send", (tx, audit) =>
+        queueMail(tx, audit, {
+          userId: owner,
+          invoiceId,
+          kind,
+          trigger: "manual",
+          key: `mail:${randomUUID()}`,
+          message: message(),
+          paymentId,
+        }),
+      )!.logId;
+
+    queue("reminder");
+    await drainJobs(WORKER);
+    const reminder = await smtp.waitFor("alfa@example.cz");
+    const due = getInvoice(owner, invoiceId)!;
+    const left = due.totalMinor - due.paidMinor;
+    expect(left).toBeGreaterThan(0);
+    const amount = `AM:${Math.floor(left / 100)}.${String(left % 100).padStart(2, "0")}`;
+    expect(decodeQr(imageOf(reminder, "qr@fakturan")!.content)).toContain(amount);
+
+    smtp.reset();
+    const paymentId = db.select().from(payment).where(eq(payment.invoiceId, invoiceId)).get()!.id;
+    queue("payment_receipt", paymentId);
+    await drainJobs(WORKER);
+    const receipt = await smtp.waitFor("alfa@example.cz");
+    expect(receipt.html).toBeTruthy();
+    expect(imageOf(receipt, "qr@fakturan")).toBeUndefined();
+    expect(receipt.html).not.toContain("cid:qr@fakturan");
   });
 });

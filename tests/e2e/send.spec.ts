@@ -184,6 +184,38 @@ test.describe("se SMTP", () => {
     expect((await page.goto(detail))?.status()).toBe(200);
   });
 
+  test("[MAIL-009] odeslaná faktura dorazí s HTML a textovou verzí", async ({
+    page,
+    freshApp,
+    smtp,
+  }) => {
+    const { baseURL } = freshApp;
+    await connected(page, baseURL, smtp);
+    await issued(page, baseURL);
+
+    await openDialog(page);
+    await dialog(page)
+      .getByLabel("Text", { exact: true })
+      .fill("Dobrý den,\n\nfaktura <v příloze>.");
+    await submit(page).click();
+    await delivered(page);
+
+    const mail = await smtp.waitFor(CLIENT);
+    expect(mail.raw).toMatch(/multipart\/alternative/i);
+    expect(mail.body.trim()).toBe("Dobrý den,\n\nfaktura <v příloze>.");
+    expect(mail.html).toContain("faktura &lt;v příloze&gt;.");
+    expect(mail.html).not.toContain("Fakturan");
+    const link = page.getByRole("link", { name: "Stáhnout HTML" });
+    const archive = await page.request.get(
+      (await link.evaluate((a: HTMLAnchorElement) => a.href)) as string,
+    );
+    expect(archive.status()).toBe(200);
+    expect(archive.headers()["content-disposition"]).toMatch(/^attachment/);
+    expect(archive.headers()["content-security-policy"]).toBe("sandbox");
+    expect(archive.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(await archive.text()).toBe(mail.html);
+  });
+
   test("dialog při nevyřešeném unknown bez potvrzení neodešle, po potvrzení ano", async ({
     page,
     freshApp,

@@ -76,8 +76,13 @@ test("[TST-005] obraz: zkušební zpráva i faktura s PDF projdou skutečným SM
 
   await expect(page.getByTestId("email-history")).toContainText("Odesláno", { timeout: 20_000 });
   const message = await smtp.waitFor(CLIENT);
-  const [attachment] = message.attachments;
-  expect(attachment?.filename).toMatch(/\.pdf$/);
+  const attachment = message.attachments.find((entry) => entry.filename?.endsWith(".pdf"));
+  expect(attachment).toBeDefined();
+  // The supplier's SVG logo reaches the HTML only through sharp in the runtime image.
+  const logo = message.attachments.find((entry) => entry.cid === "logo@fakturan");
+  expect(logo?.contentType).toBe("image/png");
+  expect(logo!.content.subarray(1, 4).toString()).toBe("PNG");
+  expect(message.html).toContain('src="cid:logo@fakturan"');
   const pdf = attachment!.content;
   // Decoding the text with diacritics fails if the fonts did not reach the image.
   expect((await pdfText(pdf)).join("\n")).toContain("Dlouhá 1");

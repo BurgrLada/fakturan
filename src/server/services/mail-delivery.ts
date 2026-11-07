@@ -16,15 +16,32 @@ import { emailLog, job, payment, user, type EmailLog, type Job } from "../db/sch
 import { scoped } from "../db/scoped";
 import { completeJob, retryJob } from "../jobs/queue";
 import { RetryLater } from "../jobs/registry";
-import type { MailAddress, MailMessage, MailTransport, SendResult } from "../mail/transport";
+import type {
+  MailAddress,
+  MailAttachment,
+  MailMessage,
+  MailTransport,
+  SendResult,
+} from "../mail/transport";
+import { emailAccent, emailSummary, mayCarryQr, renderEmailHtml } from "../mail/html/render";
+import { documentQrPng, documentTitle } from "../pdf/view";
 import { reportFailure } from "../scheduler/report";
 import { PdfTooLong } from "./access";
 import { automaticSendAllowed } from "./automation";
 import { getCustomer } from "./customers";
-import { archiveSentIsdoc, archiveSentPdf, readOwnedFile } from "./files";
+import {
+  archiveSentHtml,
+  archiveSentIsdoc,
+  archiveSentPdf,
+  readOwnedFile,
+  type ArchivedHtml,
+} from "./files";
+import { loadInvoiceDocument } from "./invoice-document";
+import { getMailLook, mailLogo } from "./mail-look";
+import { getPreferences } from "./preferences";
 import { applySent } from "./invoice-lifecycle";
 import { assertValidIsdoc, isdocFileFor, IsdocRejected } from "./invoice-isdoc";
-import { invoicePdf } from "./invoice-pdf";
+import { invoicePdf, ownerImageReader } from "./invoice-pdf";
 import { mailNoticeKey as noticeKey, receiptStale, samePayment } from "./invoice-mail";
 import { getInvoice, type InvoiceDetail } from "./invoices";
 import { receiptNoticeKey } from "./mail-hold";
@@ -241,15 +258,62 @@ async function archivedIsdoc(log: EmailLog) {
   return { filename: stored.name, content: stored.data, contentType: stored.mimeType };
 }
 
+// The record's text wrapped in the account's layout, built once like the PDF (R-19).
+async function buildHtml(log: EmailLog, attachment: string) {
+  const doc = loadInvoiceDocument(log.userId, log.invoiceId);
+  if (!doc) throw new Error("Doklad zprávy chybí");
+  const look = getMailLook(log.userId);
+  const qr = mayCarryQr(look.layout, log.kind)
+    ? await documentQrPng(doc, documentTitle(doc, false), ownerImageReader(log.userId))
+    : null;
+  const supplier = doc.snapshot.supplier;
+  return renderEmailHtml({
+    layout: look.layout,
+    kind: log.kind,
+    language: doc.language,
+    body: log.body,
+    intro: look.intro,
+    signature: look.signature,
+    supplierName: supplier?.name ?? "",
+    supplierIco: supplier?.ico || null,
+    logo: await mailLogo(log.userId, look),
+    accent: emailAccent(doc),
+    attachment,
+    summary: emailSummary(doc, doc.dateFormat ?? getPreferences(log.userId).dateFormat),
+    qr: qr?.png ?? null,
+  });
+}
+
+export async function archivedHtml(
+  log: EmailLog,
+  attachment: string,
+): Promise<{ html: string; images: MailAttachment[] }> {
+  const actor = actorOf(log);
+  let archived: ArchivedHtml;
+  if (log.htmlFileId) {
+    archived = { htmlFileId: log.htmlFileId, images: log.htmlImages ?? [] };
+  } else {
+    const built = await buildHtml(log, attachment);
+    const name = `${attachment.replace(/\.pdf$/i, "")}.html`;
+    archived = archiveSentHtml(actor, log.id, built.html, built.images, name);
+  }
+  const html = readOwnedFile(actor, archived.htmlFileId).data.toString("utf8");
+  const images = archived.images.map(({ cid, fileId }) => {
+    const stored = readOwnedFile(actor, fileId);
+    return { filename: stored.name, content: stored.data, contentType: stored.mimeType, cid };
+  });
+  return { html, images };
+}
+
 type Prepared = { transport: MailTransport; message: MailMessage };
 
 async function prepare(log: EmailLog): Promise<Prepared | null> {
-  // One deadline for both files, so the sum of the limits stays under the lease.
-  const [attachment, isdoc] = await withDeadline(
-    async () =>
-      [await archivedAttachment(log), log.attachIsdoc ? await archivedIsdoc(log) : null] as const,
-    limits.pdfMs,
-  );
+  // One deadline for all the files, so the sum of the limits stays under the lease.
+  const [attachment, isdoc, html] = await withDeadline(async () => {
+    const pdf = await archivedAttachment(log);
+    const xml = log.attachIsdoc ? await archivedIsdoc(log) : null;
+    return [pdf, xml, await archivedHtml(log, pdf.filename)] as const;
+  }, limits.pdfMs);
   const transport = await resolveTransport(log.userId);
   if (!transport) return null;
   const { to, cc, bcc, subject, body } = log;
@@ -264,7 +328,8 @@ async function prepare(log: EmailLog): Promise<Prepared | null> {
       bcc,
       subject,
       text: body,
-      attachments: isdoc ? [attachment, isdoc] : [attachment],
+      html: html.html,
+      attachments: [attachment, ...(isdoc ? [isdoc] : []), ...html.images],
     },
   };
 }

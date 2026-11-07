@@ -5,7 +5,13 @@ import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
 export type MailAddress = string | { name: string; address: string };
 
-export type MailAttachment = { filename: string; content: Buffer; contentType?: string };
+// `cid` makes it an inline image the HTML refers to as cid:<cid>.
+export type MailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+  cid?: string;
+};
 
 export type MailMessage = {
   messageId?: string;
@@ -16,6 +22,7 @@ export type MailMessage = {
   bcc?: string[];
   subject: string;
   text: string;
+  html?: string;
   attachments?: MailAttachment[];
 };
 

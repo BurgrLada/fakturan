@@ -93,6 +93,11 @@ export function EmailHistory({
                     {T.history.archive}
                   </a>
                 )}
+                {row.htmlFileId && (
+                  <a href={`/soubory/${row.htmlFileId}`} className="underline underline-offset-4">
+                    {T.history.html}
+                  </a>
+                )}
                 {row.resendable && canResend && (
                   <Button
                     variant="outline"

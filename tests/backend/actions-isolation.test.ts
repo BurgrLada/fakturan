@@ -28,6 +28,12 @@ import {
   saveEmailTemplateAction,
 } from "@/app/(app)/nastaveni/posta/sablony/actions";
 import { savePreferencesAction } from "@/app/(app)/nastaveni/vychozi/actions";
+import {
+  removeMailLogoAction,
+  saveMailLookAction,
+} from "@/app/(app)/nastaveni/posta/vzhled/actions";
+import { clearMailLogo, getMailLook, setMailLogo } from "@/server/services/mail-look";
+import { readOwnedFile } from "@/server/services/files";
 import { createExportAction, exportListAction } from "@/app/(app)/nastaveni/export/actions";
 import {
   confirmBatchAction,
@@ -513,6 +519,22 @@ describe("cizí id přes server actions", () => {
     expect(result).toEqual({ ok: true });
     expect(getMailSettings("m1").senderName).toBe("Jméno m1");
     expect(getMailSettings("m2").senderName).toBeNull();
+  });
+
+  test("[SEC-002] vzhled e-mailu se ukládá jen přihlášenému účtu a cizí id je odmítnuté", async () => {
+    seed("v1");
+    seed("v2");
+    session.userId = "v2";
+    await saveMailLookAction({ layout: "c", intro: "Jen v2", signature: "", logoMode: "none" });
+    session.userId = "v1";
+
+    const look = { layout: "a", intro: "", signature: "", logoMode: "supplier" };
+    expect(await saveMailLookAction({ ...look, userId: "v2" })).toMatchObject({ ok: false });
+    expect(await removeMailLogoAction()).toMatchObject({ ok: false });
+    expect(await saveMailLookAction(look)).toEqual({ ok: true });
+
+    expect(getMailLook("v1").layout).toBe("a");
+    expect(getMailLook("v2")).toMatchObject({ layout: "c", intro: "Jen v2", logoMode: "none" });
   });
 
   test("[SEC-002] akce schránky odmítnou cizí účet a cizí id se ignoruje", async () => {
@@ -1239,6 +1261,38 @@ describe("matice izolace plánů 7 a 8", () => {
     ]) {
       expect(entities).not.toContain(entity);
     }
+  });
+});
+
+describe("matice izolace vzhledu e-mailu", () => {
+  test("[TST-009] cizí uživatel i administrátor nedostanou vzhled ani logo e-mailu", async () => {
+    const logo = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>');
+    for (const [index, other] of ["cizi", "admin"].entries()) {
+      const owner = `vzhled-matice-${index}`;
+      const stranger = `vzhled-matice-${index}-${other}`;
+      seed(stranger);
+      if (other === "admin")
+        db.update(user).set({ role: "admin" }).where(eq(user.id, stranger)).run();
+      await assertIsolated({
+        owners: [owner, stranger],
+        create: (ownerId) => {
+          seed(ownerId);
+          setMailLogo(actor(ownerId), logo, "logo.svg");
+          return getMailLook(ownerId).logoFileId!;
+        },
+        find: (ownerId, id) => {
+          if (getMailLook(ownerId).logoFileId !== id) return null;
+          return readOwnedFile(actor(ownerId), id).kind;
+        },
+      });
+      expect(() => readOwnedFile(actor(stranger), getMailLook(owner).logoFileId!)).toThrow();
+      clearMailLogo(actor(stranger));
+      expect(getMailLook(owner).logoFileId).not.toBeNull();
+    }
+    const entities = listInstanceAudit(actor("vzhled-matice-1-admin"), { pageSize: 500 }).rows.map(
+      (row) => row.entity,
+    );
+    expect(entities).not.toContain("mail_look");
   });
 });
 

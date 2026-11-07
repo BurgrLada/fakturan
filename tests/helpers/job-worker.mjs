@@ -18,7 +18,10 @@ function withExtension(path) {
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "server-only") return { url: stub, shortCircuit: true };
-    if (/\/(pdf\/)?(designs|render)$/.test(specifier) && !specifier.startsWith("/")) {
+    if (
+      /(?<!mail\/html)\/(pdf\/)?(designs|render)$/.test(specifier) &&
+      !specifier.startsWith("/")
+    ) {
       return { url: designsStub, shortCircuit: true };
     }
     if (specifier.startsWith("@/")) {

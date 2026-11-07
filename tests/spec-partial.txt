@@ -7,4 +7,3 @@ TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálný
 IMP-000	Fakturoid, iDoklad, SuperFaktura, Vyfakturuj a ABRA Flexi jsou ověřené jen z dokumentace	kap. 24
 IMP-002	Vestavěné předlohy čekají na reálné soubory Fakturoidu a iDokladu	kap. 24
 TST-020	Skript a test nad smyšlenou fixturou hotové; čeká na porovnání uživatelem proti zdrojovému systému na skutečných dokladech	zadavatel, kap. 24
-MAIL-009	HTML se vykreslí, ale zatím se neposílá a vzhled nejde vybrat v Nastavení	plán 9 Task 10

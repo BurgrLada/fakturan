@@ -145,7 +145,10 @@ describe("registr zálohy", () => {
   test("[TST-019] tabulka, kterou archiv v1 neznal, nese verzi, od které v archivu je", () => {
     const v1 = Object.keys(fixture(1).tables);
     const added = BACKUP_TABLES.filter((entry) => !v1.includes(entry.name));
-    expect(added.map((entry) => [entry.name, entry.since])).toEqual([["limit_mail_sent", 2]]);
+    expect(added.map((entry) => [entry.name, entry.since])).toEqual([
+      ["mail_look", 2],
+      ["limit_mail_sent", 2],
+    ]);
     for (const entry of BACKUP_TABLES.filter((item) => v1.includes(item.name))) {
       expect(entry.since ?? 1).toBe(1);
     }
@@ -157,12 +160,16 @@ describe("registr zálohy", () => {
     expect(current).toEqual(fixture(2));
     // Version 1 is kept for the upgrade path: it lacks only the columns that step 1 fills and the
     // tables added after it, which an older archive simply does not contain.
-    const added = { automation_settings: ["limit_mail", "period_summary", "tax_reminder"] };
+    const added = {
+      automation_settings: ["limit_mail", "period_summary", "tax_reminder"],
+      email_log: ["html_file_id", "html_images"],
+    };
     const v1 = structuredClone(current);
     for (const [table, columns] of Object.entries(added)) {
       for (const column of columns) delete v1.tables[table]![column];
     }
     delete v1.tables.limit_mail_sent;
+    delete v1.tables.mail_look;
     expect(fixture(1)).toEqual({ ...v1, v: 1 });
     const row = { id: "a", name: "b" };
     expect(BACKUP_UPGRADES[1]!("customer", row)).toEqual(row);
@@ -174,6 +181,11 @@ describe("registr zálohy", () => {
       period_summary: "off",
       tax_reminder: false,
       limit_mail: false,
+    });
+    expect(BACKUP_UPGRADES[1]!("email_log", { id: "l" })).toEqual({
+      id: "l",
+      html_file_id: null,
+      html_images: null,
     });
     const changed = BACKUP_TABLES.map((entry) =>
       entry.name === "customer"

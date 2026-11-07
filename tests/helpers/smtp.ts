@@ -1,7 +1,12 @@
 import { simpleParser } from "mailparser";
 import { SMTPServer } from "smtp-server";
 
-export type CapturedAttachment = { filename: string | undefined; content: Buffer };
+export type CapturedAttachment = {
+  filename: string | undefined;
+  content: Buffer;
+  contentType: string;
+  cid: string | undefined;
+};
 
 export type CapturedMail = {
   to: string[];
@@ -9,6 +14,7 @@ export type CapturedMail = {
   text: string;
   subject: string;
   body: string;
+  html: string | null;
   attachments: CapturedAttachment[];
 };
 
@@ -81,14 +87,20 @@ export async function startSmtp(host = "127.0.0.1"): Promise<TestSmtp> {
             return;
           }
           const raw = Buffer.concat(chunks);
-          const parsed = await simpleParser(raw);
+          const parsed = await simpleParser(raw, { keepCidLinks: true });
           messages.push({
             to: session.envelope.rcptTo.map((r) => r.address),
             raw: raw.toString("utf8"),
             text: decodeQuotedPrintable(raw.toString("utf8")),
             subject: parsed.subject ?? "",
             body: parsed.text ?? "",
-            attachments: parsed.attachments.map(({ filename, content }) => ({ filename, content })),
+            html: parsed.html || null,
+            attachments: parsed.attachments.map(({ filename, content, contentType, cid }) => ({
+              filename,
+              content,
+              contentType,
+              cid,
+            })),
           });
           callback();
         })();
