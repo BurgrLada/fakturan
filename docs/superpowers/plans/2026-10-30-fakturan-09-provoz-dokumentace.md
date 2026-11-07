@@ -997,11 +997,13 @@ Doplněno v Task 18. Žádné z nich nemění data účtu ani nevede k tiché ch
 - Blok D: zpráva ve frontě, která ještě neprošla první přípravou, dostane vzhled platný v okamžiku přípravy, ne v okamžiku zařazení.
 - Blok E: fixture Playwrightu ukončuje server jen signálem SIGTERM, bez SIGKILL. Proces, který SIGTERM ignoruje, by přežil, `next start` ho ale respektuje (M-8).
 - Blok E: zkratka ⌘K není ověřená na skutečném macOS, jen simulací platformy.
-- Blok G: když selže i úklid po chybě zakládání ukázky, jeho chyba nahradí původní. Další tick to zkusí znovu.
+- Blok G: když selže i úklid po chybě zakládání ukázky, jeho chyba nahradí původní. Plánovač to zkusí znovu nejdřív za hodinu.
 - Blok G: zamítnutá změna relací účtu ukázky ukáže prázdnou hlášku, pokud server nevrátí text.
 - Blok G: sociální přihlášení s ověřeným e-mailem shodným s `DEMO_EMAIL` by se mohlo připojit k účtu ukázky. README proto radí `DEMO_EMAIL` na doméně `.example` a ukázku bez sociálního přihlášení.
 - Závěrečná revize: denní přehled a e-maily pro vlastníka (souhrn, daňová připomínka, e-mail o limitu) mají jako záznam o doručení převzetí úlohy, zapsané před odesláním. Přerušený pokus se po restartu uzavře a nezopakuje, takže přijde jedna zpráva, nebo žádná. Pád mezi tímto záznamem a předáním zprávy SMTP serveru tu jednu zprávu ztratí.
 - Závěrečná revize: zakládání ukázky po selhání zkusí plánovač znovu nejdřív za hodinu, ne každý tick. Čas selhání drží jen paměť procesu, po restartu tedy může přijít pokus dřív.
+- Závěrečná revize: úloha e-mailu pro vlastníka převzatá těsně před restartem, ještě než se zpráva začala odesílat, se uzavře bez hlášení do monitoringu a ta zpráva nepřijde.
+- Závěrečná revize: když po úspěšném odeslání selže zápis auditu (`mail.owner_report`, `mail.digest`), úloha se zopakuje a zpráva přijde dvakrát.
 
 ## Pro uživatele
 
