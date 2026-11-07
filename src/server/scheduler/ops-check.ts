@@ -152,7 +152,7 @@ function describe(finding: OpsFinding): string {
   return `Provozní kontrola: ${finding.key} ${parts.join(" ")}`;
 }
 
-// Findings carry only a key and numbers, never paths, account IDs or content (MON-004).
+// Findings carry only a key and non-personal values, never paths, account IDs or content (MON-004).
 export function opsCheck(now: Date, probe: StatfsProbe = systemProbe): OpsFinding[] {
   const today = calendarDateInPrague(now);
   const findings = [
@@ -176,8 +176,11 @@ export const opsCheckTask: TickTask = {
   run(now) {
     if (now.getTime() - checkedAt < HOUR_MS) return;
     checkedAt = now.getTime();
-    opsCheck(now);
-    measureFiles(now);
+    try {
+      opsCheck(now);
+    } finally {
+      measureFiles(now);
+    }
   },
 };
 
