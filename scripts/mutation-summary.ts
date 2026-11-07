@@ -62,6 +62,8 @@ function covers(ranges: [number, number][], last: number): boolean {
 // replace its mutants inside their lines; without a full report they must cover the whole file.
 // Null means no valid measurement, which the gate treats as a failure.
 export function combineReports(source: string, entries: ReportEntry[]): Mutant[] | null {
+  // A missing or empty file (such as a CORE entry left behind by a rename) has nothing measured.
+  if (source.trim() === "" || lineCount(source) === 0) return null;
   const valid = entries
     .filter((entry) => entry.source === source)
     .sort((a, b) => a.mtimeMs - b.mtimeMs);
@@ -155,8 +157,8 @@ function main(argv: string[]): number {
   }
   const merged = new Map<string, Mutant[]>();
   for (const file of files) {
-    const current = existsSync(join(root, file)) ? readFileSync(join(root, file), "utf8") : "";
-    const mutants = combineReports(current, byFile.get(file) ?? []);
+    if (!existsSync(join(root, file))) continue;
+    const mutants = combineReports(readFileSync(join(root, file), "utf8"), byFile.get(file) ?? []);
     if (mutants) merged.set(file, mutants);
   }
   const rows = summarize(merged, files);

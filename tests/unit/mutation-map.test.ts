@@ -179,6 +179,14 @@ describe("mutační testy po souborech", () => {
     ]);
 
     expect(summarize(new Map(), ["src/a.ts"])[0]).toMatchObject({ score: null, ok: false });
+
+    // A missing or empty file is unmeasured, even with an empty report claiming that source.
+    for (const empty of ["", "\n", "  \n"]) {
+      expect(combineReports(empty, []), JSON.stringify(empty)).toBeNull();
+      expect(
+        combineReports(empty, [{ range: null, mtimeMs: 1, source: empty, mutants: [] }]),
+      ).toBeNull();
+    }
   });
 
   test("[TST-013] README popisuje běh po souborech, rozsahy, --incremental a bránu jádra", () => {
