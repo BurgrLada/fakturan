@@ -92,16 +92,25 @@ function documentOf(r: DocumentSpec): InvoiceDocument {
 
 const home = (xml: string, name: string) => {
   const total = /<LegalMonetaryTotal>[\s\S]*?<\/LegalMonetaryTotal>/.exec(xml)![0];
-  return decimalToMinor(new RegExp(`<${name}>(-?[\\d.]+)<`).exec(total)![1]!, 2);
+  const found = new RegExp(`<${name}>(-?[\\d.]+)<`).exec(total);
+  return found ? decimalToMinor(found[1]!, 2) : 0;
 };
 
-// The document's own CZK value, as reports and the tax overview compute it (fx.ts).
+const lineHomes = (xml: string) =>
+  [...xml.matchAll(/<LineExtensionAmount>(-?[\d.]+)</g)].map((m) => decimalToMinor(m[1]!, 2));
+
+// The document's own CZK value, as reports and the tax overview compute it (fx.ts): the CZK total
+// with rounding is toCzkMinor(totalMinor), and the lines add up to it to the haléř.
 function expectHomeTotals(doc: InvoiceDocument, xml: string): void {
   const sign = doc.type === "credit_note" ? -1 : 1;
-  const net = doc.totals.totalMinor - doc.totals.roundingMinor;
-  const czk = doc.currency === "CZK" ? net : toCzkMinor(net, doc.exchangeRateMicros!);
-  expect(home(xml, "TaxExclusiveAmount")).toBe(sign * czk || 0);
-  expect(home(xml, "TaxInclusiveAmount")).toBe(sign * czk || 0);
+  const czk = (minor: number) =>
+    doc.currency === "CZK" ? minor : toCzkMinor(minor, doc.exchangeRateMicros!);
+  const total = sign * czk(doc.totals.totalMinor) || 0;
+  const rounding = sign * czk(doc.totals.roundingMinor) || 0;
+  expect(home(xml, "TaxInclusiveAmount") + home(xml, "PayableRoundingAmount")).toBe(total);
+  expect(home(xml, "PayableRoundingAmount")).toBe(rounding);
+  expect(home(xml, "TaxExclusiveAmount")).toBe(total - rounding);
+  expect(lineHomes(xml).reduce((sum, value) => sum + value, 0)).toBe(total - rounding);
 }
 
 describe("ISDOC tam a zpět", () => {
@@ -200,6 +209,38 @@ describe("ISDOC: CZK celek z celku dokladu", () => {
     const xml = exported(doc);
 
     expect(isdocRules(parseXml(encoder.encode(xml), XML_LIMITS))).toEqual([]);
+    expectHomeTotals(doc, xml);
+  });
+
+  test("[TST-015] 250 řádků po 3,00 EUR při kurzu 24,688552 dají řádky v Kč přesně do celku", () => {
+    const doc = documentOf(
+      spec({
+        type: "invoice",
+        lines: Array.from({ length: 250 }, () => ({ quantityMilli: 1_000, unitPriceMinor: 300 })),
+      }),
+    );
+    expect(doc.totals.totalMinor).toBe(75_000);
+    const xml = exported(doc);
+
+    expect(isdocRules(parseXml(encoder.encode(xml), XML_LIMITS))).toEqual([]);
+    expect(home(xml, "TaxInclusiveAmount")).toBe(toCzkMinor(75_000, 24_688_552));
+    expectHomeTotals(doc, xml);
+  });
+
+  test("[TST-015] zaokrouhlení na celé: celek v Kč s haléřovým vyrovnáním = toCzkMinor(celku)", () => {
+    const doc = documentOf(
+      spec({
+        type: "invoice",
+        rounding: "whole",
+        lines: [{ quantityMilli: 1_000, unitPriceMinor: 1_001 }],
+      }),
+    );
+    expect(doc.totals).toMatchObject({ totalMinor: 1_000, roundingMinor: -1 });
+    const xml = exported(doc);
+
+    expect(home(xml, "TaxInclusiveAmount") + home(xml, "PayableRoundingAmount")).toBe(
+      toCzkMinor(1_000, 24_688_552),
+    );
     expectHomeTotals(doc, xml);
   });
 });

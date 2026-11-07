@@ -47,6 +47,7 @@ import {
 } from "./memory-guard";
 import {
   BACKUP_TABLES,
+  tablesOfVersion,
   backupColumnsHash,
   FOLDED_FILES,
   TEMPORARY_FILES,
@@ -808,10 +809,12 @@ export async function scanArchive(
   const found = manifest as BackupManifest | null;
   if (!found) throw new RestoreRejected(E.manifest);
   const missing = Object.keys(found.entries).some((name) => !seen.has(name));
-  const tablesMissing = BACKUP_TABLES.some((entry) => !(entry.name in counted));
+  const expected = tablesOfVersion(found.v);
+  const tablesMissing = expected.some((entry) => !(entry.name in counted));
   const countsDiffer =
-    BACKUP_TABLES.some((entry) => found.counts.tables[entry.name] !== counted[entry.name]) ||
-    Object.keys(found.counts.tables).length !== BACKUP_TABLES.length ||
+    expected.some((entry) => found.counts.tables[entry.name] !== counted[entry.name]) ||
+    Object.keys(counted).length !== expected.length ||
+    Object.keys(found.counts.tables).length !== expected.length ||
     found.counts.files !== files.length ||
     (fileIndex !== null && (fileIndex as FileIndex).size !== files.length) ||
     found.counts.audit !== auditCount ||

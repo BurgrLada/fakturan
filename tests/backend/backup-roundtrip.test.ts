@@ -192,12 +192,34 @@ describe("archiv v2 se seznamem souborů", () => {
     const source = seedOwner(db, NOW);
     seedRichAccount(db, source, NOW);
     const expected = asRestored(canonicalAccount(db, source));
+    // Version 1 had no record of limit mails; the restored account simply has none yet.
+    expected.limit_mail_sent = [];
     const v1 = asVersion1(await backupArchive(db, source));
+    expect(Object.keys(unzipSync(v1))).not.toContain("data/limit_mail_sent.jsonl");
     expect(Object.keys(unzipSync(v1))).not.toContain(FILES_INDEX_ENTRY);
     const target = emptyAccount();
     expect((await restoreArchive(db, target, v1)).status).toBe("done");
     expect(canonicalAccount(db, target)).toEqual(expected);
     assertConsistent(db, target);
+  });
+
+  test("[TST-019] archivu v2 tabulka zavedená ve v2 chybět nesmí", async () => {
+    const source = seedOwner(db, NOW);
+    seedRichAccount(db, source, NOW);
+    const without = editArchive(
+      await backupArchive(db, source),
+      (entries) => {
+        delete entries["data/limit_mail_sent.jsonl"];
+      },
+      (manifest) => {
+        delete manifest.counts.tables.limit_mail_sent;
+      },
+    );
+    const target = emptyAccount();
+    expect(await restoreArchive(db, target, without)).toMatchObject({
+      status: "failed",
+      reason: TEXTS.restore.errors.counts,
+    });
   });
 
   test("[IMP-010] účet s 30 000 soubory se zálohuje i obnoví", { timeout: 160_000 }, async () => {

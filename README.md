@@ -17,6 +17,11 @@ Kontroly: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`,
 `pnpm test:e2e` (potřebuje `pnpm exec playwright install chromium`), `pnpm test:coverage-spec`,
 `pnpm build`.
 
+Formát zálohy v2 ještě nevyšel, takže se jeho otisk sloupců (`tests/fixtures/backup/columns-v2.json`)
+smí měnit. Před vydáním ho zmrazte. Každá další změna sloupců nebo tabulek zálohy pak zvedá
+`BACKUP_VERSION`, přidává `columns-v<n>.json` a krok `BACKUP_UPGRADES`, a nová tabulka nese
+`since` s verzí, od které v archivu je.
+
 ## Konfigurace
 
 Všechno se nastavuje proměnnými prostředí, úplný seznam s popisem je v `.env.example`. Povinné jsou

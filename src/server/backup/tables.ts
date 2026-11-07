@@ -45,6 +45,9 @@ export type BackupTable = {
   columns: Record<string, ColumnRule>;
   // Rows of the account that still do not belong in an archive.
   rows?: () => SQL;
+  // The archive version that first carries the table (default 1); an older archive lacks it and
+  // restores it as empty. Checked against columns-v1.json by backup-registry.test.ts.
+  since?: number;
 };
 
 const C = "copy";
@@ -626,6 +629,7 @@ export const BACKUP_TABLES: BackupTable[] = [
   {
     name: "limit_mail_sent",
     table: limitMailSent,
+    since: 2,
     columns: { id: "id", user_id: "owner", year: C, threshold: C, created_at: C },
   },
   {
@@ -704,4 +708,9 @@ export function backupColumnsHash(tables = BACKUP_TABLES): string {
   return createHash("sha256")
     .update(JSON.stringify(backupColumnsFingerprint(tables)))
     .digest("hex");
+}
+
+// The tables an archive of version `v` holds, every one of them, even when empty.
+export function tablesOfVersion(v: number): BackupTable[] {
+  return BACKUP_TABLES.filter((entry) => (entry.since ?? 1) <= v);
 }

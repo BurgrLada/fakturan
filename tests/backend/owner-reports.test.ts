@@ -8,6 +8,7 @@ import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, emailLog, invoice, job, user } from "@/server/db/schema";
 import { purgeFinishedJobs } from "@/server/jobs/queue";
+import { limitStates } from "@/server/reports/turnover";
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { ownerReportPlanTask } from "@/server/scheduler/start";
@@ -35,6 +36,11 @@ import { createTestDb } from "../helpers/db";
 import { ownSmtp, seedCustomer, seedOwner, webActor } from "../helpers/fixtures-mail";
 import { planDocument, savePlan } from "../helpers/fixtures-recurring";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
+
+vi.mock("@/server/reports/turnover", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/reports/turnover")>();
+  return { ...actual, limitStates: vi.fn(actual.limitStates) };
+});
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -715,6 +721,21 @@ describe("e-mail o limitu DPH", () => {
     expect(smtp.messages.map((message) => message.to)).toEqual([[first.email], [second.email]]);
     expect(sentThresholds(first.owner)).toEqual(["2026:80"]);
     expect(sentThresholds(second.owner)).toEqual(["2026:80"]);
+  });
+
+  test("[REM-012] selhání kontroly limitu se zkusí znovu ještě týž den", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    invoiced(owner, customer, 160_000_000);
+    vi.mocked(limitStates).mockImplementationOnce(() => {
+      throw new Error("databáze je zaneprázdněná");
+    });
+
+    await tickAt(JUNE);
+    expect(smtp.messages).toEqual([]);
+
+    await tickAt(new Date("2026-06-10T09:30:00Z"));
+    expect(smtp.messages).toHaveLength(1);
   });
 
   test("[REM-012] limit se kontroluje jednou denně", async () => {

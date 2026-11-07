@@ -243,8 +243,9 @@ const limitCheckedOn = new Map<string, CalendarDate>();
 
 function planLimit(account: Account, today: CalendarDate): void {
   if (!account.limit || limitCheckedOn.get(account.userId) === today) return;
-  limitCheckedOn.set(account.userId, today);
   for (const year of limitYears(today)) planLimitYear(account.userId, year);
+  // Only a check that went through counts; a failed one is tried again on the next tick.
+  limitCheckedOn.set(account.userId, today);
 }
 
 const PLANNERS = [planSummary, planTax, planLimit];

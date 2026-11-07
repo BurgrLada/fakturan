@@ -121,7 +121,14 @@ export function asVersion1(bytes: Uint8Array): Uint8Array {
   const names = Object.keys(entries);
   const data: Record<string, Uint8Array> = {};
   for (const name of names.filter((key) => key.startsWith("data/"))) {
-    data[name] = withoutV2Columns(name.slice("data/".length, -".jsonl".length), entries[name]!);
+    const table = name.slice("data/".length, -".jsonl".length);
+    // A table added after version 1 was never written by it, not even empty.
+    if (!Object.hasOwn(v1Columns.tables, table)) {
+      delete manifest.entries[name];
+      delete manifest.counts.tables[table];
+      continue;
+    }
+    data[name] = withoutV2Columns(table, entries[name]!);
     manifest.entries[name] = { size: data[name].length, sha256: sha256(data[name]) };
   }
   const ordered: Record<string, Uint8Array> = {

@@ -136,6 +136,32 @@ function party(p: Party, contactName: string): string {
   );
 }
 
+// Largest remainder: each line gets its CZK amount rounded down, and the haléře still missing to
+// `target` go to the lines with the largest remainders, so the lines add up to it exactly. Done
+// on the app's (signed) amounts; toCzkMinor rounds half away from zero, so the sign is symmetric.
+function allocate(nets: number[], rateMicros: number, target: number): number[] {
+  const unit = BigInt(RATE_UNIT);
+  const parts = nets.map((net, index) => {
+    const exact = BigInt(net) * BigInt(rateMicros);
+    let floor = exact / unit;
+    if (exact % unit !== BigInt(0) && exact < BigInt(0)) floor -= BigInt(1);
+    return { index, floor: Number(floor), remainder: exact - floor * unit };
+  });
+  const result = parts.map((part) => part.floor);
+  let missing = target - result.reduce((sum, value) => sum + value, 0);
+  if (parts.length === 0) return result;
+  const order = [...parts].sort((a, b) =>
+    a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1,
+  );
+  for (let step = 0; missing !== 0; step++) {
+    const part =
+      missing > 0 ? order[step % order.length]! : order[order.length - 1 - (step % order.length)]!;
+    result[part.index]! += missing > 0 ? 1 : -1;
+    missing += missing > 0 ? -1 : 1;
+  }
+  return result;
+}
+
 // ISDOC states every amount of a credit note as positive (R-12); the app keeps them negative.
 export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string {
   if (doc.status === "draft" || !doc.number || !doc.issueDate) {
@@ -151,13 +177,25 @@ export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string 
   // Each pair is the domestic amount and, in a foreign currency, its *Curr twin.
   const pair = (minor: number) => ({ curr: sign * minor, home: sign * local(minor) });
 
-  const lines = doc.lines.map((line) => ({
+  const nets = doc.lines.map((line) => line.netMinor);
+  if (doc.totals.discountMinor !== 0) nets.push(-doc.totals.discountMinor);
+  // The CZK total with rounding is the document's own CZK value (toCzkMinor of the total, as the
+  // app shows it), and the lines share what is left after the rounding to the haléř (TST-015).
+  const totalHome = local(doc.totals.totalMinor);
+  const roundingHome = local(doc.totals.roundingMinor);
+  const homes = foreign ? allocate(nets, rate!, totalHome - roundingHome) : nets;
+  const pairOf = (curr: number, homeMinor: number) => ({
+    curr: sign * curr,
+    home: sign * homeMinor,
+  });
+
+  const lines = doc.lines.map((line, index) => ({
     name: line.name,
     description: line.description,
     quantity: milli(line.quantityMilli),
     unit: line.unit,
     unitPrice: sign * local(line.unitPriceMinor),
-    net: pair(line.netMinor),
+    net: pairOf(line.netMinor, homes[index]!),
   }));
   if (doc.totals.discountMinor !== 0) {
     lines.push({
@@ -166,15 +204,12 @@ export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string 
       quantity: "1.000",
       unit: "",
       unitPrice: sign * local(-doc.totals.discountMinor),
-      net: pair(-doc.totals.discountMinor),
+      net: pairOf(-doc.totals.discountMinor, homes.at(-1)!),
     });
   }
   const sumCurr = lines.reduce((sum, line) => sum + line.net.curr, 0);
-  // Converted from the document's total, not summed from lines rounded on their own: the CZK total
-  // then matches what the app reports, and a credit note never turns negative (TST-015 seed
-  // -374271957). The lines may differ from it by a few haléř, which ISDOC readers tolerate.
-  const sumHome = sign * local(sign * sumCurr);
-  const rounding = pair(doc.totals.roundingMinor);
+  const sumHome = sign * (totalHome - roundingHome);
+  const rounding = pairOf(doc.totals.roundingMinor, roundingHome);
   const deposits = pair(doc.totals.advanceMinor + doc.totals.paidMinor);
   // What is left of this document after what was really paid on it. Credit notes travel as their
   // own documents and a replaced advance is still unpaid, so neither may lower PayableAmount: a

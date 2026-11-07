@@ -142,6 +142,15 @@ describe("registr zálohy", () => {
     expect(backupColumnsFingerprint(fewer)).not.toEqual(fixture(BACKUP_VERSION));
   });
 
+  test("[TST-019] tabulka, kterou archiv v1 neznal, nese verzi, od které v archivu je", () => {
+    const v1 = Object.keys(fixture(1).tables);
+    const added = BACKUP_TABLES.filter((entry) => !v1.includes(entry.name));
+    expect(added.map((entry) => [entry.name, entry.since])).toEqual([["limit_mail_sent", 2]]);
+    for (const entry of BACKUP_TABLES.filter((item) => v1.includes(item.name))) {
+      expect(entry.since ?? 1).toBe(1);
+    }
+  });
+
   test("[EXP-006] otisk sloupců v2 sedí s registrem a změna bez nové verze spadne", () => {
     expect(BACKUP_VERSION).toBe(2);
     const current = backupColumnsFingerprint();

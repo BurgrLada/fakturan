@@ -853,6 +853,8 @@ Pravidla. README doplní: **Statistiky a dashboard:** sdílení JSON, cache a ra
 
 Spec a seznamy: **Spec:** IMP-011 dostane strop 200 000 položek a manifest v2. Kap. 24 uzavře, co je hotové (vzorek Fio, poradce a vzorky zůstávají). Navigace v kap. 20 dostane Nápovědu, kterou přidá Task 19. **`pnpm audit`:** výsledek jde do zprávy (SEC-009). **Kontrola seznamů:** v pending zůstane jen `UI-012`. V partial zůstanou jen ID z oddílu Pro uživatele a případně TST-013 podle Task 15.
 
+**Před vydáním zmrazit otisk zálohy v2** (`tests/fixtures/backup/columns-v2.json`): v2 dosud nevyšla, proto se během plánu 9 měnila bez zvýšení `BACKUP_VERSION`. Po vydání každá změna zvedá verzi (fix round 2 bloku C).
+
 - [ ] **Step 1: Ověř** `timeout 170 pnpm run test:coverage-spec` a že `tests/spec-pending.txt` obsahuje jen `UI-012`.
 - [ ] **Step 2: Napiš dokumentaci** a zápisy do spec.
 - [ ] **Step 3: Ověř celé sady:** unit, backend po šesti shardech, `pdf-designs` po `-t`, typecheck, lint, format:check, build, Playwright po souborech (`ls tests/e2e/*.spec.ts`, docker testy s `E2E_DOCKER_IMAGE`), Docker po vrstvách, coverage-spec, `pgrep -af 'next|vitest|playwright|stryker'` a `docker ps` bez zbytků.

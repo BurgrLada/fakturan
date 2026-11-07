@@ -218,3 +218,73 @@ describe("upgrade databáze", () => {
     writeFileSync(join(FIXTURES, `${pkg.version}.sql`), dumpDatabase(db.$client));
   });
 });
+
+describe("doplnění záznamů o e-mailu k limitu", () => {
+  test("[REM-012] migrace převezme odbavené prahy z jobů, aby se po nasazení neposlaly znovu", () => {
+    const db = freshDb();
+    const upTo = journal.entries.findIndex((entry) => entry.tag === "0048_limit_mail_sent") + 1;
+    migrate(db, { migrationsFolder: prefixFolder(upTo) });
+    const insertUser = db.$client.prepare(
+      "INSERT INTO user (id, name, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    );
+    const insertJob = db.$client.prepare(
+      `INSERT INTO job (id, user_id, kind, key, payload, status, run_at, attempts, max_attempts,
+        created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 3, ?, ?)`,
+    );
+    const at = NOW.getTime();
+    for (const id of ["u-a", "u-b"]) insertUser.run(id, id, `${id}@example.cz`, at, at);
+    const jobs: [string, string, string, Record<string, unknown>, string][] = [
+      // Task 8 as committed: numeric threshold, the jumped 80 as a done job of its own.
+      [
+        "u-a",
+        "user.report",
+        "limit:u-a:2026:95",
+        { report: "limit", period: "2026", threshold: 95 },
+        "done",
+      ],
+      [
+        "u-a",
+        "user.report",
+        "limit:u-a:2026:80",
+        { report: "limit", period: "2026", threshold: 80, settled: true },
+        "done",
+      ],
+      // Fix round 1: textual threshold, over without lower jobs.
+      [
+        "u-b",
+        "user.report",
+        "limit:u-b:2025:over",
+        { report: "limit", period: "2025", threshold: "over" },
+        "dead",
+      ],
+      [
+        "u-b",
+        "user.report",
+        "limit:u-b:2026:80",
+        { report: "limit", period: "2026", threshold: "80" },
+        "pending",
+      ],
+      ["u-b", "user.report", "tax:u-b:2025", { report: "tax", period: "2025" }, "done"],
+      ["u-b", "user.digest", "digest:u-b:2026-03-01", { date: "2026-03-01" }, "done"],
+    ];
+    for (const [userId, kind, key, payload, status] of jobs) {
+      insertJob.run(randomUUID(), userId, kind, key, JSON.stringify(payload), status, at, at, at);
+    }
+
+    runMigrations(db);
+
+    const rows = db.$client
+      .prepare("SELECT user_id, year, threshold, id FROM limit_mail_sent ORDER BY 1, 2, 3")
+      .all() as { user_id: string; year: number; threshold: string; id: string }[];
+    expect(rows.map((row) => [row.user_id, row.year, row.threshold])).toEqual([
+      ["u-a", 2026, "80"],
+      ["u-a", 2026, "95"],
+      ["u-b", 2025, "80"],
+      ["u-b", 2025, "95"],
+      ["u-b", 2025, "over"],
+      ["u-b", 2026, "80"],
+    ]);
+    for (const row of rows) expect(row.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    assertSound(db);
+  });
+});
