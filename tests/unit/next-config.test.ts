@@ -10,3 +10,10 @@ describe("limit nahrávání", () => {
     expect(3 * 1024 * 1024).toBeGreaterThan(MAX_FILE_BYTES + 64 * 1024);
   });
 });
+
+describe("cache Next.js", () => {
+  test("[ARC-005] cacheMaxMemorySize je v next.config.ts nastavená výslovně a aspoň 50 MB", () => {
+    expect(nextConfig.cacheMaxMemorySize).toBeTypeOf("number");
+    expect(nextConfig.cacheMaxMemorySize).toBeGreaterThanOrEqual(50 * 1024 * 1024);
+  });
+});

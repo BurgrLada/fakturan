@@ -15,6 +15,7 @@ import {
   reportOwner,
 } from "../fixtures/report-scenario";
 import { createTestDb } from "../helpers/db";
+import { recordStatements } from "../helpers/statements";
 import { setClockForTests } from "@/server/clock";
 
 const cache = vi.hoisted(() => ({ cacheLife: vi.fn(), cacheTag: vi.fn() }));
@@ -76,6 +77,36 @@ describe("razítko dat účtu", () => {
       .run();
     expect(accountStamp(a)).not.toBe(before[0]);
     expect(accountStamp(b)).not.toBe(before[1]);
+  });
+});
+
+describe("razítko nad velkým auditem", () => {
+  test("[ARC-005] accountStamp nad 100 000 záznamy auditu použije index", () => {
+    const owner = reportOwner(db);
+    const other = reportOwner(db);
+    db.$client
+      .prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100000)
+         INSERT INTO audit_log (at, owner_id, source, scope, action, entity)
+         SELECT 1700000000000 + i, CASE WHEN i % 4 = 0 THEN ? ELSE ? END, 'web', 'user',
+                'invoice.update', 'invoice'
+         FROM n`,
+      )
+      .run(other, owner);
+    db.$client.exec("ANALYZE");
+    const { result, statements } = recordStatements(db, () => accountStamp(owner));
+    const auditQuery = statements.find((source) => source.includes('"audit_log"'))!;
+    const plan = db.$client
+      .prepare(`EXPLAIN QUERY PLAN ${auditQuery}`)
+      .all(owner)
+      .map((row) => (row as { detail: string }).detail)
+      .join("\n");
+    expect(plan).toMatch(/USING (COVERING )?INDEX audit_log_owner_id_idx/);
+    expect(plan).not.toMatch(/\bSCAN\b/);
+    const newest = db.$client
+      .prepare("SELECT max(id) AS id FROM audit_log WHERE owner_id = ?")
+      .get(owner) as { id: number };
+    expect(result.startsWith(`${newest.id}:`)).toBe(true);
   });
 });
 

@@ -201,6 +201,34 @@ k obnově) a 25 MB na `POST /nastaveni/import/nahrani`. V nginx `client_max_body
 cestu, v Traefiku middleware `buffering` s `maxRequestBodyBytes`. Nižší limit skončí chybou 413
 z proxy dřív, než požadavek dorazí do aplikace.
 
+## Provoz
+
+### Výkon
+
+`node scripts/perf-measure.ts [--documents 30000]` založí dočasnou databázi s jedním účtem
+(zadaný počet dokladů, dvě platby na doklad, pět záznamů auditu na doklad) a vypíše počet dotazů
+a časy horkých cest a velikost položek cache. Databázi po sobě smaže. Měření ze 7. 11. 2026
+(30 000 dokladů, 60 000 plateb, 150 000 záznamů auditu, medián ze čtyř běhů):
+
+| Krok                                               | Dotazů |             Medián |
+| -------------------------------------------------- | -----: | -----------------: |
+| zvonek                                             |      9 |              69 ms |
+| výhled (`forecast`)                                |      2 |              37 ms |
+| razítko účtu (`accountStamp`)                      |      2 |             0,1 ms |
+| `reportSummary` letos / vše                        |      4 |        72 / 121 ms |
+| `listInvoices` výchozí / podle zákazníka / hledání |      2 |  0,5 / 96 / 2,5 ms |
+| přehledy (`reportBundle`) letos / vše              |     41 |       522 / 864 ms |
+| daňový přehled                                     |      2 |             212 ms |
+| 22 widgetů galerie                                 |     65 | nejpomalejší 85 ms |
+
+Položky cache: přehledy 8 až 21 KiB, daňový přehled 810 KiB (nejvýš 2 000 řádků na tabulku),
+všech 22 widgetů galerie dohromady 1,3 MiB. Jeden takový účet tedy zabere asi 2,1 MiB, a proto
+`cacheMaxMemorySize` v `next.config.ts` zůstává na výchozích 50 MB, nastavených výslovně.
+
+Známá omezení: přehledy účtu s desítkami tisíc dokladů se počítají přes půl sekundy (522 ms za
+letošek, 864 ms za celé období). Výsledek se drží v cache, dokud se data účtu nezmění, takže
+se čeká jen na první zobrazení po změně.
+
 ## Ověření importu proti zdroji (TST-020)
 
 Ruční krok nad skutečnými doklady, vždy mimo repozitář:

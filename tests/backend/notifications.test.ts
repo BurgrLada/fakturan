@@ -10,6 +10,7 @@ import "@/server/services/payment-alerts";
 import { dismissNotice, ingestNotice } from "@/server/services/bank-notices";
 import { seedAccount } from "../helpers/fixtures-bank";
 import {
+  bellState,
   derivedAlerts,
   listNotifications,
   markAllRead,
@@ -22,6 +23,7 @@ import {
 } from "@/server/services/notifications";
 import { deleteUser, USER_OWNED_TABLES } from "@/server/services/users";
 import { createTestDb } from "../helpers/db";
+import { recordStatements } from "../helpers/statements";
 import { assertIsolated } from "../helpers/isolation";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
@@ -117,6 +119,17 @@ describe("zvonek", () => {
     markAllRead(actor(id));
     expect(unreadCount(id)).toBe(0);
     expect(stored(id).every((row) => row.readAt !== null)).toBe(true);
+  });
+
+  test("[UI-011] zvonek čte nepřečtená jedním dotazem a odvozená upozornění jen jednou", () => {
+    const id = seed();
+    add(id);
+    add(id);
+    const derived = recordStatements(db, () => derivedAlerts(id));
+    const bell = recordStatements(db, () => bellState(id));
+    expect(bell.result).toEqual({ unread: 2, alerts: derived.result.length });
+    expect(bell.statements.filter((source) => source.includes('"notification"'))).toHaveLength(1);
+    expect(bell.statements).toHaveLength(derived.statements.length + 1);
   });
 
   test("přečtení jednou přečteného nic nezmění a nic nezapíše", () => {

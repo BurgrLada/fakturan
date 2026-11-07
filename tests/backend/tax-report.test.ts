@@ -10,6 +10,7 @@ import { REPORT_TODAY } from "../fixtures/report-scenario";
 import { seedTaxScenario, TAX_TODAY, type TaxScenario } from "../fixtures/tax-scenario";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
+import { recordStatements } from "../helpers/statements";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
 vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-00");
@@ -175,5 +176,21 @@ describe("daňový přehled", () => {
   test("[TAX-001] unpaidAsOf k dnešku sedí s přehledem a data jsou konzistentní", () => {
     expect(() => assertConsistent(db, s.owner)).not.toThrow();
     expect(() => assertConsistent(db, s.base.owner)).not.toThrow();
+  });
+});
+
+describe("výkon nedoplatků", () => {
+  test("[ARC-005] nedoplatky k datu hledají opravy a platby dokladu po indexu, ne po datu", () => {
+    const owner = s.base.owner;
+    const { statements } = recordStatements(db, () => unpaidAsOf(db, owner, "2026-12-31"));
+    const [source] = statements;
+    const params = Array.from(source!.matchAll(/\?/g), () => null);
+    const plan = db.$client
+      .prepare(`EXPLAIN QUERY PLAN ${source}`)
+      .all(...params)
+      .map((row) => (row as { detail: string }).detail);
+    expect(plan.filter((detail) => detail.includes("invoice_user_related_idx"))).toHaveLength(1);
+    expect(plan.filter((detail) => detail.includes("payment_user_invoice_idx"))).toHaveLength(2);
+    expect(plan.filter((detail) => detail.includes("payment_user_paid_on_idx"))).toEqual([]);
   });
 });

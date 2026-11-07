@@ -5,7 +5,7 @@ import { getCurrentSession } from "@/server/auth/session";
 import "@/server/services/due-alerts";
 import "@/server/services/limit-alerts";
 import "@/server/services/payment-alerts";
-import { unreadCount } from "@/server/services/notifications";
+import { bellState } from "@/server/services/notifications";
 
 export function NotificationBellView({ count }: { count: number }) {
   return (
@@ -27,5 +27,6 @@ export function NotificationBellView({ count }: { count: number }) {
 export async function NotificationBell() {
   const session = await getCurrentSession();
   if (!session) return null;
-  return <NotificationBellView count={unreadCount(session.user.id)} />;
+  const { unread, alerts } = bellState(session.user.id);
+  return <NotificationBellView count={unread + alerts} />;
 }

@@ -39,6 +39,25 @@ const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|
 // Invoice designs carry their own tokens (UI-004), so the picker previews them as they print.
 const DESIGN_TOKENS = [join("src", "components", "settings", "design-picker.tsx")];
 
+const USE_CACHE = /^\s*["']use cache(?::[^"']*)?["'];?\s*$/;
+
+// Every function whose body starts with the directive: its parameters and the body up to the first
+// line that closes it at the indentation of the declaration.
+function cachedFunctions(file: string, text = readFileSync(file, "utf8")) {
+  const lines = text.split("\n");
+  return lines.flatMap((line, index) => {
+    if (!USE_CACHE.test(line)) return [];
+    let start = index;
+    while (start > 0 && !/\bfunction\b|=>\s*\{\s*$/.test(lines[start]!)) start -= 1;
+    const indent = /^\s*/.exec(lines[start]!)![0];
+    let end = index;
+    while (end < lines.length - 1 && lines[end] !== `${indent}}`) end += 1;
+    const signature = lines.slice(start, index).join("\n");
+    const body = lines.slice(index, end + 1).join("\n");
+    return [{ where: `${file}:${index + 1}`, signature, body }];
+  });
+}
+
 describe("strukturní pravidla", () => {
   test("[REM-012] prahy a limit jsou jen v turnover-limits.ts", () => {
     // Bare 80 or 95 outside an unrelated length cap (`.max(80`, a text limit, its message).
@@ -104,5 +123,43 @@ describe("strukturní pravidla", () => {
       join("src", "lib", "safe-input", "pdf-embedded.ts"),
     ];
     expect(offenders(files, CZECH_LITERAL)).toEqual([]);
+  });
+
+  test('[ARC-005] každá funkce s "use cache" má cacheTag(accountTag(userId)) a razítko v parametrech', () => {
+    const sample = (params: string, tag: string) =>
+      [
+        `export async function cachedX(${params}) {`,
+        '  "use cache";',
+        `  cacheTag(${tag});`,
+        "  return 1;",
+        "}",
+      ].join("\n");
+    const ok = (text: string) => {
+      const [found] = cachedFunctions("sample.ts", text);
+      return (
+        /\buserId: string\b/.test(found!.signature) &&
+        /\bstamp: string\b/.test(found!.signature) &&
+        /cacheTag\(accountTag\(userId\)\)/.test(found!.body)
+      );
+    };
+    expect(ok(sample("userId: string, stamp: string", "accountTag(userId)"))).toBe(true);
+    expect(ok(sample("userId: string", "accountTag(userId)"))).toBe(false);
+    expect(ok(sample("ownerId: string, stamp: string", "accountTag(ownerId)"))).toBe(false);
+    expect(ok(sample("userId: string, stamp: string", '"reports"'))).toBe(false);
+
+    const files = sourceFiles("src");
+    const directives = files.flatMap((file) =>
+      readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => USE_CACHE.test(line)),
+    );
+    const cached = files.flatMap((file) => cachedFunctions(file));
+    expect(cached.length).toBeGreaterThan(0);
+    expect(cached).toHaveLength(directives.length);
+    for (const { where, signature, body } of cached) {
+      expect(signature, where).toMatch(/\buserId: string\b/);
+      expect(signature, where).toMatch(/\bstamp: string\b/);
+      expect(body, where).toMatch(/cacheTag\(accountTag\(userId\)\)/);
+    }
   });
 });

@@ -45,8 +45,10 @@ function checkToday(today: CalendarDate): void {
   if (!isCalendarDate(today)) throw new RangeError(`Neplatné datum: ${today}`);
 }
 
+// CZK skips the function call and, for payments, the rate lookup; fx_czk returns a CZK amount as is.
 const documentCzk = (amount: Amount): SQL =>
-  sql`fx_czk(${invoice.currency}, ${amount}, ${invoice.exchangeRateMicros})`;
+  sql`CASE WHEN ${invoice.currency} = 'CZK' THEN ${amount}
+    ELSE fx_czk(${invoice.currency}, ${amount}, ${invoice.exchangeRateMicros}) END`;
 
 // Without a currency filter everything is in CZK; with one, amounts stay in that currency (R-8).
 export const documentMoney = (filter: ReportFilter, amount: Amount): SQL =>
@@ -63,7 +65,8 @@ const paymentRate = sql`coalesce(${payment.rateMicros}, (
 export const paymentMoney = (filter: ReportFilter): SQL =>
   filter.currency
     ? sql`${payment.amountMinor}`
-    : sql`fx_czk(${payment.currency}, ${payment.amountMinor}, ${paymentRate})`;
+    : sql`CASE WHEN ${payment.currency} = 'CZK' THEN ${payment.amountMinor}
+        ELSE fx_czk(${payment.currency}, ${payment.amountMinor}, ${paymentRate}) END`;
 
 const total = (value: SQL): SQL<number> => sql<number>`coalesce(sum(${value}), 0)`;
 const totalWhen = (condition: SQL, value: SQL): SQL<number> =>

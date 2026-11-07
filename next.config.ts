@@ -39,6 +39,9 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   output: "standalone",
+  // The default, set on purpose: at 30 000 documents one account's report, tax page and all gallery
+  // widgets are about 2.1 MiB of cache (README, Výkon), so 50 MB keeps two dozen such accounts.
+  cacheMaxMemorySize: 50 * 1024 * 1024,
   // Above MAX_FILE_BYTES (src/lib/file-limits.ts) plus multipart overhead; Next defaults to 1 MB.
   experimental: { serverActions: { bodySizeLimit: "3mb" } },
   // xmllint-wasm starts its worker and loads its wasm from __dirname, which a bundle would break.

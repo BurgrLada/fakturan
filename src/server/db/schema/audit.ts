@@ -22,6 +22,8 @@ export const auditLog = sqliteTable(
   },
   (t) => [
     index("audit_log_owner_at_idx").on(t.ownerId, t.at),
+    // accountStamp reads max(id) per account on every report request (ARC-005).
+    index("audit_log_owner_id_idx").on(t.ownerId, t.id),
     index("audit_log_entity_idx").on(t.entity, t.entityId),
   ],
 );

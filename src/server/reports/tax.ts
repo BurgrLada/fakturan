@@ -181,19 +181,20 @@ const CREDIT_STATUSES = sql.raw(ACTIVE_CREDIT_STATUSES.map((status) => `'${statu
 
 // R-28: dueSql is today's balance, so the state on a past day is rebuilt from history: payments,
 // corrections and the paid advance up to that day. A later cancellation hides the document, the
-// cancellation itself carries no date.
+// cancellation itself carries no date. The unary + keeps the dates out of index choice: without
+// statistics SQLite would range-scan the whole account by date for every row (plan 9, Task 12).
 export function unpaidAsOf(q: Reader, ownerId: string, date: CalendarDate): UnpaidRow[] {
   if (!isCalendarDate(date)) throw new RangeError(`Neplatné datum: ${date}`);
   const credits = sql<number>`(SELECT coalesce(sum(n.total_minor), 0) FROM invoice AS n
     WHERE n.user_id = ${ownerId} AND n.type = 'credit_note' AND n.related_invoice_id = ${outer("id")}
-      AND n.status IN (${CREDIT_STATUSES}) AND n.issue_date <= ${date})`;
+      AND n.status IN (${CREDIT_STATUSES}) AND +n.issue_date <= ${date})`;
   const paid = sql<number>`(SELECT coalesce(sum(p.credited_minor), 0) FROM payment AS p
-    WHERE p.user_id = ${ownerId} AND p.invoice_id = ${outer("id")} AND p.paid_on <= ${date})`;
+    WHERE p.user_id = ${ownerId} AND p.invoice_id = ${outer("id")} AND +p.paid_on <= ${date})`;
   const advance = sql<number>`CASE WHEN ${outer("type")} = 'invoice' THEN (
     SELECT coalesce(sum(p.credited_minor), 0) FROM payment AS p
     JOIN invoice AS a ON a.id = p.invoice_id AND a.user_id = ${ownerId}
     WHERE p.user_id = ${ownerId} AND a.id = ${outer("related_invoice_id")} AND a.type = 'advance'
-      AND p.paid_on <= ${date}) ELSE 0 END`;
+      AND +p.paid_on <= ${date}) ELSE 0 END`;
   const rows = q
     .select({
       invoiceId: invoice.id,
