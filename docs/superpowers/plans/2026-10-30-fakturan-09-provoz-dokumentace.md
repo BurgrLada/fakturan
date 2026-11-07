@@ -950,6 +950,8 @@ Kontroly plánu:
 - Hlídač paměti eviduje, co obnova drží, podle změřených cen za položku. Pojistka 75 % haldy čte skutečnou haldu, takže souběžná práce jiného účtu může obnovu odmítnout dřív, což je bezpečný směr **[R-3]**.
 - Reset ukázky v 3:30 může na chvíli kolidovat s přihlášeným návštěvníkem. Ten dostane prázdný stav do konce resetu **[R-31]**.
 - E-mail o limitu hlídá jen DPH. Paušální daň zůstává jen na kartě a v centru upozornění **[R-16]**.
+- CSP má `script-src 'unsafe-inline'`, protože Cache Components zatím nepodporují nonce. Ochrana proti XSS tak stojí na escapování Reactu a DOMPurify u SVG. Až Next nonce s Cache Components podpoří, `'unsafe-inline'` se odebere.
+- `GET /api/monitoring` vrací DSN bez přihlášení. Klíč DSN klientského Sentry je veřejný záměrně. Relay pustí nejvýš 1 MB a 120 požadavků za minutu na IP, spam do GlitchTipu hlídá GlitchTip sám.
 
 ## Přenos do dalších plánů
 
