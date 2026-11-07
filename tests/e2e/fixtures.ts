@@ -168,8 +168,11 @@ function assertDataDirConsistent(dataDir: string) {
   }
 }
 
+export const DEMO = { email: "ukazka@fakturan.example", password: "ukazka-fakturan-heslo" };
+
 export const test = base.extend<{
   freshApp: App;
+  demoMode: boolean;
   dockerApp: { baseURL: string; container: string };
   withSmtp: boolean;
   allowPrivateMail: boolean;
@@ -177,6 +180,7 @@ export const test = base.extend<{
   dockerCaFile: string | null;
 }>({
   withSmtp: [false, { option: true }],
+  demoMode: [false, { option: true }],
   allowPrivateMail: [false, { option: true }],
   cnbAvailable: [true, { option: true }],
   // A CA the container trusts on top of the public ones, for a test server with a certificate.
@@ -233,7 +237,7 @@ export const test = base.extend<{
     }
   },
 
-  freshApp: async ({ withSmtp, allowPrivateMail, cnbAvailable }, use) => {
+  freshApp: async ({ withSmtp, allowPrivateMail, cnbAvailable, demoMode }, use) => {
     const ares = await startAresStub();
     const cnb = await startCnbStub(cnbAvailable);
     const smtp = withSmtp ? await startSmtp() : null;
@@ -257,6 +261,11 @@ export const test = base.extend<{
           CNB_BASE_URL: cnb.url,
           SCHEDULER_TICK_SECONDS: "1",
           ...(allowPrivateMail && { ALLOW_PRIVATE_MAIL_HOSTS: "1" }),
+          ...(demoMode && {
+            DEMO_MODE: "1",
+            DEMO_EMAIL: DEMO.email,
+            DEMO_PASSWORD: DEMO.password,
+          }),
           ...(smtp && {
             SMTP_HOST: "127.0.0.1",
             SMTP_PORT: String(smtp.port),

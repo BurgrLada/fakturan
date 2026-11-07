@@ -18,6 +18,13 @@ RUN pnpm exec esbuild scripts/pdf-smoke-entry.ts --bundle --platform=node --form
       --external:sharp --external:@react-pdf/renderer \
       "--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" \
       --outfile=/smoke/pdf-smoke-bundle.mjs
+# Seeds the demo account through the services. Native, PDF and jsdom packages (jsdom reads its own
+# files next to its code) resolve from the runner instead of the bundle.
+RUN pnpm exec esbuild scripts/demo-seed-entry.ts --bundle --platform=node --format=esm \
+      --alias:server-only=./tests/helpers/server-only.ts \
+      --external:better-sqlite3 --external:sharp --external:@react-pdf/renderer --external:jsdom \
+      "--banner:js=import { createRequire as bannerRequire } from 'node:module'; const require = bannerRequire(import.meta.url);" \
+      --outfile=/smoke/demo-seed.mjs
 
 FROM node:24-bookworm-slim AS runner
 ENV NODE_ENV=production \
@@ -32,7 +39,7 @@ COPY --from=build /app/public ./public
 # Tracing keeps only some of the platform prebuilds; the whole package guarantees the native binding.
 COPY --from=deps /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 COPY --from=deps /sharp/ ./node_modules/
-COPY --from=build /smoke/pdf-smoke-bundle.mjs /app/scripts/pdf-smoke.mjs ./scripts/
+COPY --from=build /smoke/pdf-smoke-bundle.mjs /smoke/demo-seed.mjs /app/scripts/pdf-smoke.mjs ./scripts/
 COPY scripts/isdoc-smoke.mjs ./scripts/
 # Fails the build when tracing dropped the XSD, the xmllint worker or its wasm.
 RUN node scripts/isdoc-smoke.mjs

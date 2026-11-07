@@ -70,6 +70,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "dashboard_widget.add": "Přidání widgetu",
   "dashboard_widget.remove": "Odebrání widgetu",
   "dashboard_widget.update": "Úprava widgetu",
+  "demo.seed": "Založení ukázky",
   "email_template.reset": "Vrácení šablony e-mailu na výchozí",
   "email_template.save": "Uložení šablony e-mailu",
   "exchange_rate.fetch": "Stažení kurzů ČNB",

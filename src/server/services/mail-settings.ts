@@ -92,6 +92,7 @@ export function mailAvailability(
   ownerId: string,
   env: Env = defaultEnv,
 ): { available: boolean; source: "user" | "instance" | null } {
+  if (env.DEMO_MODE) return { available: false, source: null };
   const row = readRow(ownerId);
   if (hasOwnServer(row)) {
     return ownAuth(row).ok
@@ -130,6 +131,8 @@ export async function resolveTransport(
   ownerId: string,
   env: Env = defaultEnv,
 ): Promise<MailTransport | null> {
+  // Nothing ever leaves a demo, whatever an account or the instance configured (OPS-007).
+  if (env.DEMO_MODE) return null;
   const row = readRow(ownerId);
   if (hasOwnServer(row)) {
     const { ok, auth } = ownAuth(row);
@@ -175,6 +178,7 @@ export async function saveMailSettings(
   env: Env = defaultEnv,
 ): Promise<void> {
   const userId = ownerOf(actor);
+  if (env.DEMO_MODE) throw new ServiceError(TEXTS.demo.locked);
   enforceRateLimit(actor, RATE_RULES.mailSaveUser);
   const input = parseInput(raw);
   const host = input.smtpHost || null;

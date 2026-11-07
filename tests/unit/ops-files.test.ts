@@ -14,6 +14,20 @@ describe("provozní soubory", () => {
     expect(read("next.config.ts")).toContain('output: "standalone"');
   });
 
+  test("[OPS-007] obraz nese bundle demo-seed a .env.example proměnné ukázky", () => {
+    const dockerfile = read("Dockerfile");
+    expect(dockerfile).toContain("esbuild scripts/demo-seed-entry.ts");
+    expect(dockerfile).toContain("--outfile=/smoke/demo-seed.mjs");
+    expect(dockerfile).toMatch(
+      /COPY --from=build [^\n]*\/smoke\/demo-seed\.mjs[^\n]* \.\/scripts\//,
+    );
+    const example = read(".env.example");
+    for (const name of ["DEMO_MODE", "DEMO_EMAIL", "DEMO_PASSWORD"]) {
+      expect(example).toMatch(new RegExp(`^${name}=`, "m"));
+    }
+    expect(read("README.md")).toContain("node scripts/demo-seed.mjs");
+  });
+
   test("[TST-011] CI spouští všechny kontroly a nic nenasazuje", () => {
     const ci = read(".github/workflows/ci.yml");
     for (const step of [

@@ -3059,6 +3059,13 @@ export const TEXTS = {
     other: "Jiný uživatel",
     nobody: "Systém nebo nepřihlášený",
   },
+  demo: {
+    locked: "V ukázce tohle nejde změnit",
+    login: "Ukázka Fakturanu",
+    loginHint: "Přihlaste se těmito údaji. Data se každou noc vrátí do výchozího stavu.",
+    email: "E-mail",
+    password: "Heslo",
+  },
   instanceStatus: {
     scheduler: {
       not_started: "není spuštěn",

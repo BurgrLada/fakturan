@@ -4,7 +4,9 @@ import { buildTransport, type SmtpTarget } from "./transport";
 
 export type InstanceMail = { to: string; subject: string; text: string };
 
+// A demo never sends, so the auth mails (verification, reset) stay off there too (OPS-007).
 export function isInstanceMailConfigured(env: Env = defaultEnv): boolean {
+  if (env.DEMO_MODE) return false;
   return Boolean(env.SMTP_HOST && env.SMTP_PORT && env.SMTP_FROM);
 }
 

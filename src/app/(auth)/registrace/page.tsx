@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: "Registrace | Fakturan" };
 
 async function RegisterContent() {
   const token = (await cookies()).get(INVITE_COOKIE)?.value;
-  if (isSignupOpen(db, token)) {
+  if (!env.DEMO_MODE && isSignupOpen(db, token)) {
     const invite = token ? inspectInvitation(token) : null;
     return (
       <>

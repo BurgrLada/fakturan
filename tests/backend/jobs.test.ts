@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { job, schedulerState, user, type Job } from "@/server/db/schema";
@@ -486,6 +489,11 @@ describe("účty", () => {
           .run().changes,
     });
 
+    // Deleting an account asks whether it is the demo one, which reads the configuration.
+    vi.stubEnv("DATA_DIR", mkdtempSync(join(tmpdir(), "fakturan-jobs-")));
+    vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
+    vi.stubEnv("BETTER_AUTH_SECRET", "x".repeat(32));
+    vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
     const admin = createUser("admin");
     const leaver = createUser();
     put({ userId: leaver });

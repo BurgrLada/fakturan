@@ -108,6 +108,7 @@ export async function saveBankMailbox(
   env: Env = defaultEnv,
 ): Promise<void> {
   const userId = ownerOf(actor);
+  if (env.DEMO_MODE) throw new ServiceError(TEXTS.demo.locked);
   enforceRateLimit(actor, RATE_RULES.bankSaveUser);
   const parsed = bankMailboxSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? E.invalid);

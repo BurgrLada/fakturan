@@ -569,6 +569,7 @@ Pravidla:
 - **OPS-004** `/api/health` ověřuje databázi a plánovač, bez citlivých údajů.
 - **OPS-005** Denní záloha databáze přes `VACUUM INTO` do podsložky svazku, 14 kopií **[návrh]**. Postup obnovy je v README.
 - **OPS-006** Strukturované logy na stdout.
+- **OPS-007** Volitelný režim ukázky (`DEMO_MODE`): jeden účet se smyšlenými daty, registrace a odesílání pošty vypnuté, účet se každou noc vrátí do výchozího stavu.
 
 ### 19.4 Monitoring chyb (MON)
 
@@ -598,6 +599,9 @@ Pravidla:
 | `ALLOW_PRIVATE_MAIL_HOSTS` | ne | Výjimka ze SEC-007 |
 | `TRUST_PROXY` | ne | Čtení IP z hlavičky reverzní proxy pro rate limiting a audit |
 | `SCHEDULER_TICK_SECONDS` | ne | Interval plánovače v sekundách, 1 až 60, výchozí 60; mění se jen kvůli testům |
+| `DEMO_MODE` | ne | Režim ukázky, OPS-007 |
+| `DEMO_EMAIL` | s `DEMO_MODE` | E-mail účtu ukázky, ukáže se na přihlášení |
+| `DEMO_PASSWORD` | s `DEMO_MODE` | Heslo účtu ukázky, ukáže se na přihlášení |
 
 ## 20. Design a UI (UI)
 

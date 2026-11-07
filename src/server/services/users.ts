@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, count, eq, max, ne, or, sql } from "drizzle-orm";
 import { calendarDateInPrague } from "@/lib/number-format";
+import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { auth } from "../auth";
 import { clock } from "../clock";
@@ -51,6 +52,7 @@ import {
   reminderSent,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { isDemoAccount } from "../demo/mode";
 import { logger } from "../logger";
 import { removeUserDir } from "../files/store";
 import { cancelUserJobs } from "../jobs/queue";
@@ -287,7 +289,12 @@ function removeAccountFiles(userId: string): void {
   }
 }
 
+function assertNotDemo(userId: string): void {
+  if (isDemoAccount(userId)) throw new ServiceError(TEXTS.demo.locked);
+}
+
 export function deleteUser(actor: Actor, userId: string, confirmEmail: string): void {
+  assertNotDemo(userId);
   mutate(actor, "user.delete", (tx, audit) => {
     assertAdmin(tx, actor);
     assertNotSelf(actor, userId);
@@ -342,6 +349,7 @@ export async function deleteOwnAccount(
 ): Promise<void> {
   const userId = actor.userId;
   if (!userId) throw new ServiceError("Na tuto akci nemáte oprávnění");
+  assertNotDemo(userId);
   enforceRateLimit(actor, RATE_RULES.accountDeleteUser);
   await assertReauthenticated(actor, userId, current, password);
   // The closing row outlives the account, so it must not carry the leaver's id, IP or user agent.
@@ -353,6 +361,15 @@ export async function deleteOwnAccount(
       throw new ServiceError("Poslední administrátor nemůže smazat účet, dokud tu jsou jiní");
     }
     purgeAccount(tx, target, audit, true);
+  });
+  removeAccountFiles(userId);
+}
+
+// The nightly demo reset (OPS-007): the purge of an account deletion, without the admin checks.
+export function purgeDemoAccount(actor: Actor, userId: string): void {
+  if (!isDemoAccount(userId)) throw new ServiceError(TEXTS.demo.locked);
+  mutate(actor, "user.delete", (tx, audit) => {
+    purgeAccount(tx, targetUser(tx, userId), audit, false);
   });
   removeAccountFiles(userId);
 }

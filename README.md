@@ -268,6 +268,37 @@ Známá omezení: přehledy účtu s desítkami tisíc dokladů se počítají p
 letošek, 864 ms za celé období). Výsledek se drží v cache, dokud se data účtu nezmění, takže
 se čeká jen na první zobrazení po změně.
 
+## Ukázka
+
+Veřejná ukázka: `https://…` (adresa se doplní po nasazení).
+
+Ukázka je běžná instance s `DEMO_MODE=1` (OPS-007). Má jeden účet se smyšlenými daty za 18 měsíců
+(Zkušební s. r. o., vymyšlená IČO s platným součtem): faktury v CZK i EUR, zálohu s konečnou
+fakturou, opravnou fakturu, platby, fakturu po splatnosti s pravidlem upomínky, pravidelný plán
+a dashboard. Registrace je vypnutá, pošta nikdy neodejde a nastavení pošty ani schránky avíz nejde
+uložit. Heslo, e-mail ani samotný účet ukázky změnit nebo smazat nejde. Každou noc ve 3:30 se účet
+smaže stejnou cestou jako při smazání účtu a založí znovu. Ostatní účty na instanci zůstanou
+netknuté. Přihlašovací údaje se berou z `DEMO_EMAIL` a `DEMO_PASSWORD` a přihlašovací stránka je
+ukáže. Bez nich se aplikace s `DEMO_MODE=1` nespustí.
+
+Nasazení v Coolify (ručně, auto-deploy není):
+
+1. Nová aplikace ze stejného obrazu (Dockerfile) jako ostrá instance, s vlastním svazkem `/data`.
+   Svazek ostré instance nikdy nesdílejte.
+2. Proměnné: `DEMO_MODE=1`, `DEMO_EMAIL`, `DEMO_PASSWORD`, vlastní `BETTER_AUTH_URL`,
+   `BETTER_AUTH_SECRET` a `ENCRYPTION_KEY`, `SENTRY_ENVIRONMENT=demo` (a stejný `SENTRY_DSN`, chcete-li
+   chyby ukázky v GlitchTipu). `SMTP_*` nenastavujte. Ukázka je i tak nepoužije.
+3. Nasaďte ručně tlačítkem Deploy.
+4. Napoprvé založte data hned:
+
+   ```bash
+   docker exec <kontejner> node scripts/demo-seed.mjs
+   ```
+
+   Skript je bundle ze `scripts/demo-seed-entry.ts`. Spustí migrace, založí účet a vypíše počet
+   dokladů. Když účet už existuje, nic nezmění. Bez tohoto kroku založí ukázku plánovač
+   při prvním ticku.
+
 ## Ověření importu proti zdroji (TST-020)
 
 Ruční krok nad skutečnými doklady, vždy mimo repozitář:

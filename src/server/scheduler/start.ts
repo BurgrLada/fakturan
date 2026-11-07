@@ -31,6 +31,7 @@ import {
 } from "../services/recurring-run";
 import { planReminders } from "../services/reminders";
 import { backupTask } from "./backup";
+import { demoResetTask } from "./demo-reset";
 import { releaseLease } from "./lease";
 import { opsCheckTask } from "./ops-check";
 import { reportFailure } from "./report";
@@ -159,6 +160,7 @@ export function startScheduler(): void {
   registerTickTask(exportCleanupTask);
   registerTickTask(backupTask);
   registerTickTask(opsCheckTask);
+  registerTickTask(demoResetTask);
   bindWorker(holder);
   const cron = new Cron(cronPattern(env.SCHEDULER_TICK_SECONDS), { protect: true }, async () => {
     await tick(holder).catch((error) => reportFailure(error, { task: "tick" }));

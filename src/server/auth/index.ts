@@ -4,6 +4,7 @@ import { betterAuth, type GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { admin } from "better-auth/plugins";
+import { TEXTS } from "@/lib/texts";
 import { emailHash } from "../audit/email-hash";
 import type { AuditAction } from "../audit/record";
 import { db } from "../db";
@@ -56,6 +57,17 @@ function inviteRequired(): APIError {
     code: AUTH_ERROR_INVITE_REQUIRED,
     message: "Přístup je jen na pozvánku",
   });
+}
+
+// The demo login is public, so nobody may lock the next visitor out of it (OPS-007).
+const DEMO_LOCKED_PATHS = ["/change-password", "/change-email", "/set-password", "/delete-user"];
+
+function demoLocked(): APIError {
+  return new APIError("FORBIDDEN", { code: "DEMO_LOCKED", message: TEXTS.demo.locked });
+}
+
+function sameAddress(a: string | undefined, b: string | undefined): boolean {
+  return Boolean(a && b && a.toLowerCase() === b.toLowerCase());
 }
 
 const PASSWORD_MESSAGES = {
@@ -117,12 +129,17 @@ function rejectedSignupDetails(email: unknown, env: Env) {
   return { emailHash: valid && emailHash(valid, env) };
 }
 
+// The demo account is seeded directly, so every registration through Better Auth is refused.
 function guardSignup(
   ctx: GenericEndpointContext | null,
   env: Env,
   newUser: { email: string; emailVerified: boolean },
 ) {
   const isSocial = ctx?.path === "/callback/:id";
+  if (env.DEMO_MODE) {
+    if (isSocial) throw ctx.redirect(new URL(SOCIAL_REJECTED_PATH, env.BETTER_AUTH_URL).href);
+    throw inviteRequired();
+  }
   // Chosen here so the invitation and its audit row can name the user before Better Auth inserts it.
   const userId = randomUUID();
   const hashed = { emailHash: emailHash(newUser.email, env) };
@@ -278,8 +295,12 @@ export function createAuth(env: Env) {
         linkRequestHeaders(ctx.headers, ctx.request?.headers);
         const body = (ctx.body ?? {}) as Record<string, unknown>;
         enforceAuthRateLimit(ctx, env);
+        if (env.DEMO_MODE && DEMO_LOCKED_PATHS.includes(ctx.path)) {
+          const current = await getSessionFromCtx(ctx, { disableRefresh: true });
+          if (sameAddress(current?.user.email, env.DEMO_EMAIL)) throw demoLocked();
+        }
         if (ctx.path === "/sign-up/email") {
-          if (!isSignupOpen(db, ctx.getCookie(INVITE_COOKIE) ?? undefined)) {
+          if (env.DEMO_MODE || !isSignupOpen(db, ctx.getCookie(INVITE_COOKIE) ?? undefined)) {
             recordAuthEvent(ctx, env, {
               action: "auth.signup_rejected",
               ownerId: null,
