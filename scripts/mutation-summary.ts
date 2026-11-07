@@ -32,41 +32,60 @@ export type Mutant = {
   status: string;
   location: { start: { line: number; column: number }; end: { line: number; column: number } };
 };
-export type Report = { files: Record<string, { mutants: Mutant[] }> };
+export type Report = { files: Record<string, { source?: string; mutants: Mutant[] }> };
 
 const key = (m: Mutant) =>
   `${m.location.start.line}:${m.location.start.column}-${m.location.end.line}:${m.location.end.column} ${m.mutatorName} ${m.replacement ?? ""}`;
 
-type Entry = { path: string; mtimeMs: number };
+export type ReportEntry = {
+  range: [number, number] | null;
+  mtimeMs: number;
+  source: string | undefined;
+  mutants: Mutant[];
+};
 
-// Per source file either the newest whole-file report, or, when ranges ran after it, only the range
-// reports: their line numbers come from newer code, so the old report's mutants would not match.
-export function pickReports(entries: Entry[]): string[] {
-  const bySource = new Map<string, Entry[]>();
-  for (const entry of entries) {
-    const source = entry.path.replace(/(@\d+-\d+)?\.json$/, "");
-    bySource.set(source, [...(bySource.get(source) ?? []), entry]);
-  }
-  const picked: Entry[] = [];
-  for (const group of bySource.values()) {
-    const whole = group.find((e) => !e.path.includes("@"));
-    const ranges = group.filter((e) => e.path.includes("@") && e.mtimeMs > (whole?.mtimeMs ?? -1));
-    picked.push(...(ranges.length > 0 ? ranges : whole ? [whole] : []));
-  }
-  return picked.sort((a, b) => a.mtimeMs - b.mtimeMs).map((e) => e.path);
+function lineCount(source: string): number {
+  const lines = source.split("\n").length;
+  return source.endsWith("\n") ? lines - 1 : lines;
 }
 
-// Reports in age order: a later run of the same mutant replaces the earlier result.
-export function mergeReports(reports: Report[]): Map<string, Mutant[]> {
-  const files = new Map<string, Map<string, Mutant>>();
-  for (const report of reports) {
-    for (const [file, { mutants }] of Object.entries(report.files)) {
-      const byKey = files.get(file) ?? new Map<string, Mutant>();
-      for (const mutant of mutants) byKey.set(key(mutant), mutant);
-      files.set(file, byKey);
-    }
+function covers(ranges: [number, number][], last: number): boolean {
+  let reached = 0;
+  for (const [from, to] of [...ranges].sort((a, b) => a[0] - b[0])) {
+    if (from > reached + 1) return false;
+    reached = Math.max(reached, to);
   }
-  return new Map([...files].map(([file, byKey]) => [file, [...byKey.values()]]));
+  return reached >= last;
+}
+
+// A report only counts for the source it measured. Range reports newer than the newest full report
+// replace its mutants inside their lines; without a full report they must cover the whole file.
+// Null means no valid measurement, which the gate treats as a failure.
+export function combineReports(source: string, entries: ReportEntry[]): Mutant[] | null {
+  const valid = entries
+    .filter((entry) => entry.source === source)
+    .sort((a, b) => a.mtimeMs - b.mtimeMs);
+  const base = valid.filter((entry) => entry.range === null).at(-1);
+  const ranges = valid.filter(
+    (entry) => entry.range !== null && entry.mtimeMs > (base?.mtimeMs ?? -Infinity),
+  );
+  if (
+    !base &&
+    !covers(
+      ranges.map((entry) => entry.range!),
+      lineCount(source),
+    )
+  )
+    return null;
+  const byKey = new Map((base?.mutants ?? []).map((m) => [key(m), m]));
+  for (const { range, mutants } of ranges) {
+    const [from, to] = range!;
+    for (const [k, m] of byKey) {
+      if (m.location.start.line >= from && m.location.start.line <= to) byKey.delete(k);
+    }
+    for (const m of mutants) byKey.set(key(m), m);
+  }
+  return [...byKey.values()];
 }
 
 export function scoreOf(mutants: Pick<Mutant, "status">[]) {
@@ -114,18 +133,37 @@ function main(argv: string[]): number {
       ? all.filter((file) => args.some((prefix) => file.startsWith(prefix)))
       : all;
   const dir = join(root, "reports/mutation");
-  const entries = existsSync(dir)
-    ? globSync("**/*.ts*.json", { cwd: dir })
-        .filter((p) => !p.endsWith(".incremental.json"))
-        .map((p) => ({ path: p, mtimeMs: statSync(join(dir, p)).mtimeMs }))
+  const byFile = new Map<string, ReportEntry[]>();
+  const paths = existsSync(dir)
+    ? globSync("**/*.ts*.json", { cwd: dir }).filter((p) => !p.endsWith(".incremental.json"))
     : [];
-  const paths = pickReports(entries).map((p) => join(dir, p));
-  const merged = mergeReports(paths.map((p) => JSON.parse(readFileSync(p, "utf8")) as Report));
+  for (const path of paths) {
+    const match = /^(.+\.ts)(?:@(\d+)-(\d+))?\.json$/.exec(path);
+    if (!match) continue;
+    const report = JSON.parse(readFileSync(join(dir, path), "utf8")) as Report;
+    const measured = report.files[match[1]!];
+    if (!measured) continue;
+    byFile.set(match[1]!, [
+      ...(byFile.get(match[1]!) ?? []),
+      {
+        range: match[2] ? [Number(match[2]), Number(match[3])] : null,
+        mtimeMs: statSync(join(dir, path)).mtimeMs,
+        source: measured.source,
+        mutants: measured.mutants,
+      },
+    ]);
+  }
+  const merged = new Map<string, Mutant[]>();
+  for (const file of files) {
+    const current = existsSync(join(root, file)) ? readFileSync(join(root, file), "utf8") : "";
+    const mutants = combineReports(current, byFile.get(file) ?? []);
+    if (mutants) merged.set(file, mutants);
+  }
   const rows = summarize(merged, files);
   const pad = Math.max(...rows.map((r) => r.file.length));
   console.log(`${"soubor".padEnd(pad)}  skóre   zabito  platné  přežilo  bez pokrytí  ignorováno`);
   for (const r of rows) {
-    const score = r.score === null ? "neměřeno" : `${r.score.toFixed(2)} %`;
+    const score = r.score === null ? "neměřeno/zastaralé" : `${r.score.toFixed(2)} %`;
     console.log(
       `${r.file.padEnd(pad)}  ${score.padStart(8)}  ${String(r.detected).padStart(6)}  ${String(r.valid).padStart(6)}  ${String(r.survived).padStart(7)}  ${String(r.noCoverage).padStart(11)}  ${String(r.ignored).padStart(10)}${r.ok ? "" : "  ← pod 90 %"}`,
     );

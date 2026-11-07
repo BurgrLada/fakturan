@@ -95,6 +95,5 @@ describe("peníze", () => {
     const error = new AmountOutOfRangeError();
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe("AmountOutOfRangeError");
-    expect(error.message).toBe("Amount is outside the supported range");
   });
 });

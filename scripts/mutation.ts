@@ -20,6 +20,12 @@ export function reportPath(target: Target): string {
   return `reports/mutation/${target.file}${suffix}.json`;
 }
 
+// Includes the range, so two runs over different lines of one file never share a config.
+export function configName(target: Target): string {
+  const suffix = target.range ? `@${target.range[0]}-${target.range[1]}` : "";
+  return `stryker.${target.file.replaceAll("/", "_")}${suffix}.json`;
+}
+
 type BaseConfig = Record<string, unknown>;
 
 export function strykerConfig(base: BaseConfig, target: Target) {
@@ -56,7 +62,7 @@ function main(argv: string[]): number {
   const config = strykerConfig(base, target);
   const configDir = join(root, ".stryker-tmp");
   mkdirSync(configDir, { recursive: true });
-  const configPath = join(configDir, `stryker.${target.file.replaceAll("/", "_")}.json`);
+  const configPath = join(configDir, configName(target));
   writeFileSync(configPath, JSON.stringify(config, null, 2));
 
   const report = join(root, reportPath(target));

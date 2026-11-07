@@ -193,7 +193,7 @@ describe("ISDOC vložený v PDF", () => {
     expect(message(() => read(broken))).toBe("pdf_unreadable: inflate_corrupt");
   });
 
-  test("[TST-015] jen kořen Invoice ve jmenném prostoru ISDOC je faktura", () => {
+  test("[IMP-003] jen kořen Invoice ve jmenném prostoru ISDOC je faktura", () => {
     const one = (text: string) => {
       const body = encoder.encode(text);
       return read(pdfOf(...attached(`<< /Type /EmbeddedFile /Length ${body.length} >>`, body)));

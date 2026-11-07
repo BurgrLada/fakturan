@@ -49,8 +49,10 @@ pnpm run test:mutation:summary             # všechny soubory z mutate
 ```
 
 Výsledky jsou v `reports/mutation/` (mimo git). Soubor, jehož běh by trval přes tři minuty,
-pusťte po rozsazích řádků, které dohromady pokryjí celý soubor. Souhrn pak vezme rozsahy místo
-starší zprávy celého souboru. `--incremental` znovu použije dřívější výsledky, i u statických
+pusťte po rozsazích řádků, které dohromady pokryjí celý soubor. Souhrn položí novější rozsahy přes
+poslední zprávu celého souboru. Bez ní je musí pokrýt celý soubor, a zpráva jiné verze zdroje
+se nepočítá. Běh po rozsazích vynechá mutanty, které hranici rozsahu překročí, ty změří jen běh
+celého souboru. `--incremental` znovu použije dřívější výsledky, i u statických
 mutantů, u kterých změnu nepozná. Čísla pro zprávu proto berte z plného běhu. Ekvivalentní
 mutant smí mít `// Stryker disable next-line <mutátor>: <důvod>`, vždy s důvodem.
 

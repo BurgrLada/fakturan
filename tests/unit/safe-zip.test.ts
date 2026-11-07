@@ -289,7 +289,7 @@ describe("bezpečné čtení ZIP: hlavičky, bloky a meze", () => {
     }
     const { seen } = await collect(zip);
     expect(seen).toHaveLength(1);
-    expect(seen[0]!.name).not.toBe("č.isdoc");
+    expect(seen[0]!.name).toBe("\u00c4\u008d.isdoc");
   });
 
   test("[SEC-005] archiv přesně na limitu součtu a poměru projde", async () => {
@@ -480,7 +480,11 @@ describe("omezený inflate", () => {
     try {
       expect(() => boundedInflate(bomb, 5 * MiB)).toThrow("inflate_too_large");
       expect(bomb.length).toBeGreaterThan(8 * 4096);
-      expect(push.mock.calls.length).toBeLessThanOrEqual(3);
+      // The limit is crossed within maxBytes / (output per 4 KiB block) blocks, plus the one past it.
+      const blocks = Math.ceil(bomb.length / 4096);
+      const perBlock = (64 * MiB) / blocks;
+      expect(push.mock.calls.length).toBeLessThanOrEqual(Math.ceil((5 * MiB) / perBlock) + 1);
+      expect(push.mock.calls.length).toBeLessThan(blocks);
       for (const [chunk] of push.mock.calls) expect(chunk.length).toBeLessThanOrEqual(4096);
     } finally {
       push.mockRestore();

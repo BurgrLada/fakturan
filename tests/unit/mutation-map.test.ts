@@ -1,14 +1,8 @@
 import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { parseTarget, reportPath, strykerConfig } from "../../scripts/mutation";
-import {
-  CORE,
-  mergeReports,
-  pickReports,
-  scoreOf,
-  summarize,
-} from "../../scripts/mutation-summary";
+import { configName, parseTarget, reportPath, strykerConfig } from "../../scripts/mutation";
+import { combineReports, CORE, scoreOf, summarize } from "../../scripts/mutation-summary";
 
 const root = join(import.meta.dirname, "../..");
 const read = (path: string) => JSON.parse(readFileSync(join(root, path), "utf8"));
@@ -55,6 +49,12 @@ describe("mutační testy po souborech", () => {
     });
     expect(() => parseTarget("src/lib/money.ts:20-10")).toThrow();
     expect(() => parseTarget("src/lib/money.ts:x")).toThrow();
+    expect(configName({ file: "src/lib/money.ts", range: [10, 20] })).not.toBe(
+      configName({ file: "src/lib/money.ts", range: [21, 40] }),
+    );
+    expect(configName({ file: "src/lib/money.ts", range: null })).toBe(
+      "stryker.src_lib_money.ts.json",
+    );
     expect(reportPath({ file: "src/lib/money.ts", range: null })).toBe(
       "reports/mutation/src/lib/money.ts.json",
     );
@@ -96,13 +96,7 @@ describe("mutační testy po souborech", () => {
       ]),
     ).toEqual({ detected: 2, valid: 4, score: 50, survived: 1, noCoverage: 1, ignored: 1 });
 
-    const older = {
-      files: { "src/a.ts": { mutants: [mutant("Survived", 1), mutant("Killed", 2)] } },
-    };
-    const newer = { files: { "src/a.ts": { mutants: [mutant("Killed", 1)] } } };
-    const merged = mergeReports([older, newer]);
-    expect(merged.get("src/a.ts")!.map((m) => m.status)).toEqual(["Killed", "Killed"]);
-
+    const merged = new Map([["src/a.ts", [mutant("Killed", 1), mutant("Killed", 2)]]]);
     const rows = summarize(merged, ["src/a.ts", "src/b.ts"]);
     expect(rows).toEqual([
       expect.objectContaining({ file: "src/a.ts", score: 100, ok: true }),
@@ -114,28 +108,84 @@ describe("mutační testy po souborech", () => {
     expect(low[0]).toMatchObject({ score: 50, ok: false });
   });
 
-  test("[TST-013] rozsahy spuštěné po celém souboru nahradí jeho starou zprávu", () => {
-    const whole = { path: "src/a.ts.json", mtimeMs: 1 };
-    const first = { path: "src/a.ts@1-50.json", mtimeMs: 2 };
-    const second = { path: "src/a.ts@51-99.json", mtimeMs: 3 };
-    const other = { path: "src/b.ts.json", mtimeMs: 0 };
-    expect(pickReports([second, whole, first, other])).toEqual([
-      "src/b.ts.json",
-      "src/a.ts@1-50.json",
-      "src/a.ts@51-99.json",
+  test("[TST-013] souhrn bere jen zprávy aktuálního zdroje a rozsahy jen přes celý soubor", () => {
+    const mutant = (status: string, line: number, replacement = "x") => ({
+      mutatorName: "M",
+      replacement,
+      status,
+      location: { start: { line, column: 1 }, end: { line, column: 2 } },
+    });
+    const source = "a\nb\nc\nd\n";
+    const full = {
+      range: null,
+      mtimeMs: 1,
+      source,
+      mutants: [mutant("Killed", 1), mutant("Survived", 2), mutant("Survived", 4)],
+    };
+    const statuses = (list: ReturnType<typeof combineReports>) =>
+      list?.map((m) => `${m.location.start.line}:${m.status}`).sort();
+
+    // A newer range overlays the full report only inside its lines.
+    const partial = {
+      range: [2, 2] as [number, number],
+      mtimeMs: 2,
+      source,
+      mutants: [mutant("Killed", 2)],
+    };
+    expect(statuses(combineReports(source, [full, partial]))).toEqual([
+      "1:Killed",
+      "2:Killed",
+      "4:Survived",
     ]);
-    expect(pickReports([first, { ...whole, mtimeMs: 4 }])).toEqual(["src/a.ts.json"]);
+
+    // Without a full report, a range that leaves lines out is no measurement at all.
+    expect(combineReports(source, [partial])).toBeNull();
+    const rest = {
+      range: [3, 4] as [number, number],
+      mtimeMs: 3,
+      source,
+      mutants: [mutant("Killed", 4)],
+    };
+    const first = {
+      range: [1, 2] as [number, number],
+      mtimeMs: 2,
+      source,
+      mutants: [mutant("Killed", 1)],
+    };
+    expect(statuses(combineReports(source, [first, rest]))).toEqual(["1:Killed", "4:Killed"]);
+
+    // A report of another source is stale and dropped, with or without a range.
+    const stale = { ...full, source: "a\nb\n" };
+    expect(combineReports(source, [stale])).toBeNull();
+    expect(statuses(combineReports(source, [full, { ...partial, source: "jiný" }]))).toEqual(
+      statuses(combineReports(source, [full])),
+    );
+
+    // An older range never overrides a newer full report; overlapping ranges keep one result each.
+    expect(statuses(combineReports(source, [{ ...partial, mtimeMs: 0 }, full]))).toEqual([
+      "1:Killed",
+      "2:Survived",
+      "4:Survived",
+    ]);
+    const overlap = {
+      range: [1, 3] as [number, number],
+      mtimeMs: 4,
+      source,
+      mutants: [mutant("Killed", 2)],
+    };
+    expect(statuses(combineReports(source, [first, rest, overlap]))).toEqual([
+      "2:Killed",
+      "4:Killed",
+    ]);
+
+    expect(summarize(new Map(), ["src/a.ts"])[0]).toMatchObject({ score: null, ok: false });
   });
 
   test("[TST-013] README popisuje běh po souborech, rozsahy, --incremental a bránu jádra", () => {
     const readme = readFileSync(join(root, "README.md"), "utf8");
-    for (const command of [
-      "pnpm run test:mutation:file -- src/",
-      ".ts:1-232",
-      "--incremental",
-      "pnpm run test:mutation:summary -- --core",
-    ]) {
-      expect(readme).toContain(command);
-    }
+    expect(readme).toMatch(/pnpm run test:mutation:file -- \S+\.ts\n/);
+    expect(readme).toMatch(/pnpm run test:mutation:file -- \S+\.ts:\d+-\d+/);
+    expect(readme).toMatch(/pnpm run test:mutation:file -- \S+ --incremental/);
+    expect(readme).toContain("pnpm run test:mutation:summary -- --core");
   });
 });
