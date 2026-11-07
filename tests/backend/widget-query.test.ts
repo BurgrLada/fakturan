@@ -327,6 +327,38 @@ describe("filtry a období", () => {
     );
   });
 
+  test("[DSH-015] konec měsíce po kratším měsíci páruje dny dál od začátku", () => {
+    for (const [today, previous] of [
+      ["2026-03-30", "2026-02"],
+      ["2026-10-31", "2026-09"],
+    ] as const) {
+      const owner = reportOwner(db);
+      const customer = namedCustomer(owner, "Konec měsíce s.r.o.");
+      const month = today.slice(0, 7);
+      for (let day = 1; day <= 3; day++) {
+        issuedDocument(owner, customer, { issueDate: `${month}-0${day}`, totalMinor: day * 100 });
+        issuedDocument(owner, customer, {
+          issueDate: `${previous}-0${day}`,
+          totalMinor: day * 1_000,
+        });
+      }
+
+      const result = run(
+        { period: "this_month", display: "bar", groupBy: "day", compare: "previous" },
+        owner,
+        { today },
+      );
+      expect(result.compare!.points!.slice(0, 4), today).toEqual([1_000, 2_000, 3_000, 0]);
+
+      const bundle = reportBundle(db, owner, parseReportFilter({ obdobi: "mesic" }, today), today);
+      expect(bundle.anchor, today).toBe("start");
+      expect(
+        alignPrevious(bundle.invoiced, bundle.previousInvoiced, bundle.anchor).slice(0, 4),
+        today,
+      ).toEqual([1_000, 2_000, 3_000, 0]);
+    }
+  });
+
   test("[DSH-015] ukončený měsíc se dál páruje od konce a součet sedí se souhrnem", () => {
     const owner = reportOwner(db);
     const customer = namedCustomer(owner, "Konec s.r.o.");

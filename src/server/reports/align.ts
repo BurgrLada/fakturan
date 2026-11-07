@@ -1,4 +1,10 @@
-import { bucketsBetween, type BucketUnit, type DateRange } from "@/lib/report-period";
+import type { CalendarDate } from "@/lib/number-format";
+import {
+  bucketsBetween,
+  isRunningPeriod,
+  type BucketUnit,
+  type DateRange,
+} from "@/lib/report-period";
 import type { Series } from "./types";
 
 export type AlignAnchor = "start" | "end";
@@ -29,9 +35,9 @@ export function alignPrevious(
   return current.points.map((_, index) => values[index + surplus] ?? 0);
 }
 
-// R-11 of plan 9: a comparison cut short at today pairs day with day from the start.
-export function anchorFor(comparison: DateRange, full: DateRange): AlignAnchor {
-  return comparison.from === full.from && comparison.to === full.to ? "end" : "start";
+// R-11 of plan 9: a running period pairs day with day from the start, a finished one from the end.
+export function anchorFor(range: DateRange, today: CalendarDate): AlignAnchor {
+  return isRunningPeriod(range, today) ? "start" : "end";
 }
 
 // A previous period cut short at today's date gets the buckets of the whole period back as zeros,

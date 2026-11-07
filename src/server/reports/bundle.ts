@@ -87,7 +87,7 @@ export function reportBundle(
         today,
         range: filter.range,
         previousRange: before.range,
-        anchor: anchorFor(before.range, span),
+        anchor: anchorFor(filter.range, today),
         compare,
         unit,
         currency: filter.currency ?? "CZK",

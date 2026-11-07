@@ -503,7 +503,7 @@ function runQuery(
     result.compare.points = alignPrevious(
       asSeries(current.series[0]),
       spanSeries(asSeries(previous.series[0]), span, config.groupBy),
-      anchorFor(before.range, span),
+      anchorFor(range, context.today),
     );
   }
   return result;

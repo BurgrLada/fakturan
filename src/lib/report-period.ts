@@ -135,13 +135,23 @@ export function comparisonRange(
   today: CalendarDate,
 ): DateRange {
   const full = previousRange(range, mode);
-  const months = (Object.keys(ONGOING) as PeriodToken[]).find((token) => {
-    const resolved = resolvePeriod(token, today);
-    return resolved.from === range.from && resolved.to === range.to;
-  });
+  const months = runningToken(range, today);
   if (!months) return full;
   const back = mode === "year" ? 12 : ONGOING[months]!;
   return { from: full.from, to: shiftMonths(today, -back) };
+}
+
+function runningToken(range: DateRange, today: CalendarDate): PeriodToken | undefined {
+  return (Object.keys(ONGOING) as PeriodToken[]).find((token) => {
+    const resolved = resolvePeriod(token, today);
+    return resolved.from === range.from && resolved.to === range.to;
+  });
+}
+
+// A running month, quarter or year: its comparison may end up as long as the whole previous one
+// (30 March against the 28 days of February), so the cut alone does not tell it apart.
+export function isRunningPeriod(range: DateRange, today: CalendarDate): boolean {
+  return runningToken(range, today) !== undefined;
 }
 
 // ISO 8601: the week belongs to the year of its Thursday.
