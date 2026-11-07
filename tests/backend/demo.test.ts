@@ -3,13 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq, inArray, min } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { auth } from "@/server/auth";
+import { auth, createAuth, DEMO_LOCKED_PATHS } from "@/server/auth";
+import { emailHash } from "@/server/audit/email-hash";
 import { setClockForTests } from "@/server/clock";
 import {
   auditLog,
   customer,
   dashboard,
   emailLog,
+  instanceMeta,
   invoice,
   job,
   payment,
@@ -32,8 +34,8 @@ import {
 import { planOwnerReports } from "@/server/services/owner-reports";
 import { planRecurringNotices, planRecurringRuns } from "@/server/services/recurring-run";
 import { planReminders } from "@/server/services/reminders";
-import { deleteOwnAccount, deleteUser } from "@/server/services/users";
-import { Browser, BASE, type Auth } from "../helpers/auth-browser";
+import { deleteOwnAccount, deleteUser, purgeDemoAccount } from "@/server/services/users";
+import { Browser, BASE, fakeGithub, githubLogin, type Auth } from "../helpers/auth-browser";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { issuedInvoice, seedOwner } from "../helpers/fixtures-mail";
@@ -48,6 +50,18 @@ const base = {
   ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
 };
 for (const [key, value] of Object.entries(base)) vi.stubEnv(key, value);
+const failing = vi.hoisted(() => ({ plan: false }));
+vi.mock("@/server/services/recurring", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/services/recurring")>();
+  return {
+    ...actual,
+    saveRecurring: (...args: Parameters<typeof actual.saveRecurring>) => {
+      if (failing.plan) throw new Error("plán selhal");
+      return actual.saveRecurring(...args);
+    },
+  };
+});
+
 vi.stubEnv("DEMO_MODE", "1");
 vi.stubEnv("DEMO_EMAIL", DEMO_EMAIL);
 vi.stubEnv("DEMO_PASSWORD", DEMO_PASSWORD);
@@ -268,5 +282,128 @@ describe("ukázka", () => {
         .all()
         .every((row) => !MAIL_KINDS.includes(row.kind as never)),
     ).toBe(true);
+  });
+});
+
+const SCHEDULER = { userId: null, source: "scheduler" } as const;
+const demoEnv = { ...base, DEMO_MODE: "1", DEMO_EMAIL, DEMO_PASSWORD };
+
+function dropDemo() {
+  const id = demoUserId();
+  if (id) purgeDemoAccount(SCHEDULER, id);
+}
+
+function rejections() {
+  return db
+    .select()
+    .from(auditLog)
+    .all()
+    .filter((row) => row.action === "auth.signup_rejected");
+}
+
+describe("ukázka nezávisle na datu a selhání", () => {
+  test("[OPS-007] seed k 1. lednu má vystavený doklad z dneška, ne po now", async () => {
+    dropDemo();
+    current = new Date("2027-01-01T08:00:00Z");
+
+    const { userId } = await seedDemo(current);
+
+    const today = invoicesOf(userId).filter((row) => row.issueDate === "2027-01-01");
+    expect(today).toHaveLength(1);
+    expect(today[0]).toMatchObject({ type: "invoice", status: "sent" });
+    expect(invoicesOf(userId).every((row) => row.createdAt <= current)).toBe(true);
+    expect(invoicesOf(userId).every((row) => row.issueDate! <= "2027-01-01")).toBe(true);
+    assertConsistent(db, userId);
+  });
+
+  test("[OPS-007] seed, který selže uprostřed, účet ukázky nenechá", async () => {
+    dropDemo();
+    failing.plan = true;
+    try {
+      await expect(seedDemo(NOW)).rejects.toThrow("plán selhal");
+    } finally {
+      failing.plan = false;
+    }
+    expect(demoUserId()).toBeNull();
+    expect(db.select().from(user).where(eq(user.email, DEMO_EMAIL)).all()).toEqual([]);
+
+    const { userId } = await seedDemo(NOW);
+    expect(invoicesOf(userId).length).toBeGreaterThanOrEqual(40);
+  });
+
+  test("[OPS-007] zamčené cesty auth účet ukázky nezmění a ostatní relace neukončí", async () => {
+    await seeded();
+    const other = new Browser(auth as unknown as Auth);
+    expect((await other.signIn(DEMO_EMAIL, DEMO_PASSWORD)).status).toBe(200);
+    const visitor = new Browser(auth as unknown as Auth);
+    expect((await visitor.signIn(DEMO_EMAIL, DEMO_PASSWORD)).status).toBe(200);
+    const bodies: Record<string, unknown> = {
+      "/change-password": { currentPassword: DEMO_PASSWORD, newPassword: "uplne-jine-heslo-123" },
+      "/change-email": { newEmail: "jiny@example.cz" },
+      "/set-password": { newPassword: "uplne-jine-heslo-123" },
+      "/delete-user": { password: DEMO_PASSWORD },
+      "/update-user": { name: "Někdo jiný" },
+      "/link-social": { provider: "github", callbackURL: "/" },
+      "/unlink-account": { providerId: "credential" },
+      "/revoke-session": { token: "cizi" },
+      "/revoke-sessions": {},
+      "/revoke-other-sessions": {},
+    };
+    expect(Object.keys(bodies).sort()).toEqual([...DEMO_LOCKED_PATHS].sort());
+
+    for (const path of DEMO_LOCKED_PATHS) {
+      const res = await visitor.request(path, { body: bodies[path] });
+      // set-password is server-only in Better Auth, so over HTTP it does not exist at all.
+      const expected = path === "/set-password" ? [403, 404] : [403];
+      expect(expected, path).toContain(res.status);
+      if (res.status === 403) {
+        expect(((await res.json()) as { code: string }).code, path).toBe("DEMO_LOCKED");
+      }
+    }
+
+    expect((await other.sessionUser())?.email).toBe(DEMO_EMAIL);
+    expect(db.select().from(user).where(eq(user.email, DEMO_EMAIL)).get()?.name).toBe("Ukázka");
+    expect(
+      (await new Browser(auth as unknown as Auth).signIn(DEMO_EMAIL, DEMO_PASSWORD)).status,
+    ).toBe(200);
+  });
+});
+
+describe("registrace v ukázce", () => {
+  beforeEach(() => {
+    db.delete(user).run();
+    db.delete(instanceMeta).run();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("[OPS-007] ani první účet prázdné instance se v ukázce nezaregistruje", async () => {
+    const before = rejections().length;
+
+    const res = await new Browser(auth as unknown as Auth).signUp("prvni@example.cz");
+
+    expect(res.status).toBe(400);
+    expect(db.select().from(user).all()).toEqual([]);
+    expect(rejections()).toHaveLength(before + 1);
+  });
+
+  test("[OPS-007] sociální registrace se v ukázce odmítne a zapíše do auditu", async () => {
+    const socialAuth = createAuth(
+      parseEnv({ ...demoEnv, GITHUB_CLIENT_ID: "gh-id", GITHUB_CLIENT_SECRET: "gh-secret" }),
+    );
+    fakeGithub("cizi@example.cz");
+    const before = rejections().length;
+
+    const res = await githubLogin(new Browser(socialAuth as unknown as Auth));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${BASE}/prihlaseni?chyba=pozvanka`);
+    expect(db.select().from(user).all()).toEqual([]);
+    expect(rejections()).toHaveLength(before + 1);
+    expect(rejections().at(-1)?.after).toMatchObject({
+      emailHash: emailHash("cizi@example.cz", parseEnv(demoEnv)),
+    });
   });
 });

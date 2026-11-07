@@ -279,7 +279,9 @@ a dashboard. Registrace je vypnutá, pošta nikdy neodejde a nastavení pošty a
 uložit. Heslo, e-mail ani samotný účet ukázky změnit nebo smazat nejde. Každou noc ve 3:30 se účet
 smaže stejnou cestou jako při smazání účtu a založí znovu. Ostatní účty na instanci zůstanou
 netknuté. Přihlašovací údaje se berou z `DEMO_EMAIL` a `DEMO_PASSWORD` a přihlašovací stránka je
-ukáže. Bez nich se aplikace s `DEMO_MODE=1` nespustí.
+ukáže. Bez nich se aplikace s `DEMO_MODE=1` nespustí. `DEMO_PASSWORD` je tím veřejné: zvolte heslo, které
+nikde jinde nepoužíváte, a nikdy nepoužijte heslo ostrého účtu. Odkazy na sociální přihlášení,
+změnu profilu a ukončení cizích relací jsou pro účet ukázky zamčené.
 
 Nasazení v Coolify (ručně, auto-deploy není):
 

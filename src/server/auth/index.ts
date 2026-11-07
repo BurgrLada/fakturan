@@ -59,8 +59,19 @@ function inviteRequired(): APIError {
   });
 }
 
-// The demo login is public, so nobody may lock the next visitor out of it (OPS-007).
-const DEMO_LOCKED_PATHS = ["/change-password", "/change-email", "/set-password", "/delete-user"];
+// The demo login is shared and public: nobody may change it or end other visitors' sessions (OPS-007).
+export const DEMO_LOCKED_PATHS = [
+  "/change-password",
+  "/change-email",
+  "/set-password",
+  "/delete-user",
+  "/update-user",
+  "/link-social",
+  "/unlink-account",
+  "/revoke-session",
+  "/revoke-sessions",
+  "/revoke-other-sessions",
+];
 
 function demoLocked(): APIError {
   return new APIError("FORBIDDEN", { code: "DEMO_LOCKED", message: TEXTS.demo.locked });
@@ -137,6 +148,11 @@ function guardSignup(
 ) {
   const isSocial = ctx?.path === "/callback/:id";
   if (env.DEMO_MODE) {
+    recordAuthEvent(ctx, env, {
+      action: "auth.signup_rejected",
+      ownerId: null,
+      after: { emailHash: emailHash(newUser.email, env) },
+    });
     if (isSocial) throw ctx.redirect(new URL(SOCIAL_REJECTED_PATH, env.BETTER_AUTH_URL).href);
     throw inviteRequired();
   }

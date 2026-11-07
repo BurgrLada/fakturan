@@ -1,5 +1,6 @@
 "use server";
 
+import { APIError } from "better-auth/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -25,6 +26,19 @@ export async function deleteOwnAccountAction(raw: unknown): Promise<{ error: str
 
 type Outcome = { ok: true } | { ok: false; error: string };
 
+// The demo account refuses session changes with an APIError (OPS-007); show it, do not crash.
+async function refusable(run: () => Promise<unknown>): Promise<Outcome> {
+  try {
+    await run();
+  } catch (error) {
+    if (error instanceof APIError && error.body?.code === "DEMO_LOCKED") {
+      return { ok: false, error: error.body.message ?? "" };
+    }
+    throw error;
+  }
+  return { ok: true };
+}
+
 // The session token never reaches the browser: sessions are addressed by id and resolved here.
 export async function revokeSessionAction(raw: unknown): Promise<Outcome> {
   const parsed = z.object({ id: z.string().min(1).max(128) }).safeParse(raw);
@@ -38,12 +52,13 @@ export async function revokeSessionAction(raw: unknown): Promise<Outcome> {
     (row) => row.id === parsed.data.id,
   );
   if (!target) return { ok: false, error: "Relace už neexistuje" };
-  await auth.api.revokeSession({ headers: requestHeaders, body: { token: target.token } });
-  return { ok: true };
+  return refusable(() =>
+    auth.api.revokeSession({ headers: requestHeaders, body: { token: target.token } }),
+  );
 }
 
 export async function revokeOtherSessionsAction(): Promise<Outcome> {
   await requireSession();
-  await auth.api.revokeOtherSessions({ headers: await headers() });
-  return { ok: true };
+  const requestHeaders = await headers();
+  return refusable(() => auth.api.revokeOtherSessions({ headers: requestHeaders }));
 }

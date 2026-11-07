@@ -25,6 +25,7 @@ import { completeOnboarding } from "../services/preferences";
 import { saveRecurring } from "../services/recurring";
 import { saveReminderRule } from "../services/reminders";
 import { saveSupplier } from "../services/supplier";
+import { purgeDemoAccount } from "../services/users";
 import { demoUserId } from "./mode";
 
 // Invented companies; the IČO only have a valid checksum (IMP-013), never a real document's data.
@@ -277,8 +278,24 @@ function seedMonth(seeder: Seeder, offset: number): void {
   }
 }
 
+// Dated today and issued at `now`, so this year's and this month's figures are never empty.
+function seedToday(seeder: Seeder): void {
+  const customerId = seeder.customers[1]!;
+  runAt(seeder.now, () => {
+    const { id, revision } = saveDraft(seeder.actor, {
+      ...newDraftDefaults(seeder.userId, customerId, "invoice"),
+      issueDate: seeder.today,
+      dueDate: addDays(seeder.today, 14),
+      lines: [line("Konzultace", 120_000, 3000, "hod.")],
+    });
+    issueInvoice(seeder.actor, id, { revision });
+    markSent(seeder.actor, id);
+  });
+}
+
 function seedMonths(seeder: Seeder): void {
   for (let offset = -MONTHS_BACK; offset <= 0; offset += 1) seedMonth(seeder, offset);
+  seedToday(seeder);
 }
 
 function withLines(row: NonNullable<ReturnType<typeof getInvoice>>, lines: Line[]): DraftInput {
@@ -406,9 +423,16 @@ export function seedDemoWith(
   if (existing) return { userId: existing, invoices: invoiceCount(existing) };
   const userId = createDemoUser(passwordHash, now);
   const seeder = new Seeder(userId, now);
-  setUp(seeder);
-  seedMonths(seeder);
-  seedPlan(seeder);
+  try {
+    setUp(seeder);
+    seedMonths(seeder);
+    seedPlan(seeder);
+  } catch (error) {
+    // A half-seeded account would count as existing until the next night; drop it so the next
+    // tick seeds again.
+    purgeDemoAccount(SYSTEM, userId);
+    throw error;
+  }
   return { userId, invoices: invoiceCount(userId) };
 }
 

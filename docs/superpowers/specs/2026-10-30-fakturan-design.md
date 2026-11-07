@@ -575,7 +575,7 @@ Pravidla:
 
 - **MON-001** Napojení na službu kompatibilní se Sentry (Sentry, GlitchTip a další) stačí nastavit proměnnou `SENTRY_DSN`. Bez ní se nic neposílá a aplikace funguje stejně.
 - **MON-002** Volitelně `SENTRY_ENVIRONMENT` a `SENTRY_TRACES_SAMPLE_RATE`.
-- **MON-003** Zachytávají se chyby serveru, klienta i plánovaných úloh. Plánovač jednou za hodinu hlásí i provozní stav, každou podmínku nejvýš jednou denně: volné místo na svazku pod 2 GiB nebo pod 10 %, poslední lístek ČNB starší než 3 pracovní dny, těžká úloha běžící déle než 30 minut a selhaná poslední noční záloha. Hlášení nese jen klíč podmínky a čísla.
+- **MON-003** Zachytávají se chyby serveru, klienta i plánovaných úloh. Plánovač jednou za hodinu hlásí i provozní stav, každou podmínku nejvýš jednou denně: volné místo na svazku pod 2 GiB nebo pod 10 %, poslední lístek ČNB starší než 3 pracovní dny, těžká úloha běžící déle než 30 minut a selhaná poslední noční záloha. Hlášení nese jen klíč podmínky a neosobní hodnoty (čísla, datum lístku, druh úlohy).
 - **MON-004** Do události jde jen ID uživatele. E-mail, IP, obsah faktur a tajemství se nepřenášejí, zajišťuje to `beforeSend`, s testem.
 
 ### 19.5 Konfigurace
