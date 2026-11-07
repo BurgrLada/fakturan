@@ -56,10 +56,11 @@ celého souboru. `--incremental` znovu použije dřívější výsledky, i u sta
 mutantů, u kterých změnu nepozná. Čísla pro zprávu proto berte z plného běhu. Ekvivalentní
 mutant smí mít `// Stryker disable next-line <mutátor>: <důvod>`, vždy s důvodem.
 
-Formát zálohy v2 ještě nevyšel, takže se jeho otisk sloupců (`tests/fixtures/backup/columns-v2.json`)
-smí měnit. Před vydáním ho zmrazte. Každá další změna sloupců nebo tabulek zálohy pak zvedá
-`BACKUP_VERSION`, přidává `columns-v<n>.json` a krok `BACKUP_UPGRADES`, a nová tabulka nese
-`since` s verzí, od které v archivu je.
+Otisk sloupců zálohy v2 (`tests/fixtures/backup/columns-v2.json`) je zmrazený. Každá další změna
+sloupců nebo tabulek zálohy zvedá `BACKUP_VERSION`, přidává `columns-v<n>.json` a krok
+`BACKUP_UPGRADES`, a nová tabulka nese `since` s verzí, od které v archivu je. Test
+`[EXP-006] otisk sloupců v2 sedí s registrem` v `tests/backend/backup-registry.test.ts` změnu bez
+nové verze zastaví.
 
 ## Konfigurace
 
@@ -67,6 +68,37 @@ Všechno se nastavuje proměnnými prostředí, úplný seznam s popisem je v `.
 `BETTER_AUTH_URL` (veřejná adresa), `BETTER_AUTH_SECRET` (min. 32 znaků) a `ENCRYPTION_KEY`
 (32 bajtů v base64). Ostatní (SMTP, sociální přihlášení, `SENTRY_DSN`, `TRUST_PROXY`) jsou volitelné.
 Proměnné se čtou za běhu, jeden obraz tedy slouží pro libovolný počet instancí.
+
+### Ukázka nastavení
+
+Instance za reverzní proxy se sdíleným SMTP serverem a hlášením chyb do GlitchTipu:
+
+```bash
+BETTER_AUTH_URL=https://fakturace.example.cz
+BETTER_AUTH_SECRET=<openssl rand -base64 32>
+ENCRYPTION_KEY=<openssl rand -base64 32>
+TRUST_PROXY=1
+
+# Sdílený server pro všechny účty; vlastní server v Nastavení > Pošta má přednost
+SMTP_HOST=smtp.example.cz
+SMTP_PORT=587
+SMTP_USER=fakturace@example.cz
+SMTP_PASSWORD=<heslo>
+SMTP_FROM="Fakturace <fakturace@example.cz>"
+
+SENTRY_DSN=https://<klíč>@monitoring.example.cz/<id projektu>
+SENTRY_ENVIRONMENT=production
+```
+
+`CNB_BASE_URL`, `ARES_BASE_URL` a `VIES_BASE_URL` nechte nenastavené, aplikace pak používá veřejné
+adresy ČNB, ARES a EU. Mění se jen kvůli testům nebo vlastnímu zrcadlu. `TRUST_PROXY=1` patří jen
+za proxy, která `X-Forwarded-For` sama přepisuje (viz Provoz za reverzní proxy).
+
+Schránka avíz se nenastavuje proměnnými, ale v aplikaci v Nastavení > Avíza: server IMAP,
+port 993 s TLS, uživatel, heslo a **server ověření (authserv-id)**. To je název, kterým se poštovní
+server příjemce podepisuje v hlavičce `Authentication-Results`, například `mx.example.cz`. Zkouška
+připojení ho z posledního avíza nabídne. Použijte ho, jen pokud je to opravdu váš server, který
+zprávy přijímá do čtené schránky. Bez něj čeká každé avízo ve frontě na potvrzení.
 
 ## Docker
 
@@ -88,9 +120,24 @@ Všechna data (SQLite databáze a soubory) jsou na svazku `/data`, kontejner bě
 selžou nebo chybí povinná proměnná, proces skončí s chybou. Logy jsou JSON řádky na stdout.
 Stav kontroluje `GET /api/health` (200 a `{"status":"ok"}`, jinak 503), obraz má `HEALTHCHECK`.
 
-Chyby serveru i prohlížeče jdou do služby kompatibilní se Sentry (Sentry, GlitchTip), když nastavíte
-`SENTRY_DSN`. Prohlížeč posílá události přes `/api/monitoring` na stejné adrese, takže se
-Content-Security-Policy nemění. Odesílá se jen ID uživatele, ne e-mail, IP ani obsah faktur.
+### Monitoring
+
+Chyby serveru, prohlížeče i plánovaných úloh jdou do služby kompatibilní se Sentry (Sentry,
+GlitchTip), když nastavíte `SENTRY_DSN`. Pro GlitchTip založte v organizaci projekt a DSN z jeho
+nastavení vložte do `SENTRY_DSN`. `SENTRY_ENVIRONMENT` odliší instance (třeba `production`
+a `demo`), `SENTRY_TRACES_SAMPLE_RATE` (0 až 1, výchozí 0) zapne měření výkonu. Bez DSN se nic
+neposílá a aplikace funguje stejně. Prohlížeč posílá události přes `/api/monitoring` na stejné
+adrese, takže se Content-Security-Policy nemění.
+
+Plánovač jednou za hodinu hlásí i provozní stav, každou podmínku nejvýš jednou denně: volné místo
+na svazku pod 2 GiB nebo pod 10 %, poslední lístek ČNB starší než 3 pracovní dny, těžká úloha
+běžící přes 30 minut a selhaná poslední noční záloha.
+
+Do události jde jen ID uživatele (ID účtu v aplikaci), čas, úroveň, prostředí, zpráva a stack bez
+proměnných, metoda a adresa požadavku bez parametrů, u selhané
+úlohy plánovače její druh a ID. Nikdy se neposílá e-mail, IP adresa, cookies,
+hlavičky, těla požadavků, obsah faktur, tajemství ani odpovědi poštovního serveru. E-mailové adresy
+a tokeny ze zpráv a adres se nahradí zástupným textem dřív, než událost opustí instanci.
 
 ### Záloha a obnova
 
@@ -158,6 +205,23 @@ limity překročila, vůbec nevznikne a řekne to. Mezisoubory potřebují na sv
 jako data archivu a po obnově i po chybě zmizí. Smazání účtu nabídne zálohu, ale nečeká na ni a
 archiv zmizí s účtem, proto ho stáhněte předem.
 
+### Import a export
+
+Import (Nastavení > Import) bere ISDOC, ZIP s ISDOC nebo PDF, PDF s vloženým ISDOC, CSV a Excel do
+25 MB na soubor. Nahraný soubor se uloží do složky dat a zpracuje na pozadí, průběh ukazuje
+stránka importu. Nepotvrzená dávka se po čase uklidí i se souborem. Potvrzení je jedna transakce
+a dávka jde celá vrátit.
+
+Export (Nastavení > Export) běží na pozadí ve frontě těžkých úloh, kde se účty střídají, aby jeden
+velký export nezdržel ostatní. Hotový soubor je ke stažení 7 dní. PDF v ZIPu bere nejvýš 2 000
+dokladů najednou, větší výběr rozdělte filtrem období. Stažení příloh (PDF z importu, archiv
+historie změn, odeslané HTML) má limit 30 za hodinu a zapisuje se do historie změn.
+
+Všechny limity zálohy v2 jsou výše v Záloze a obnově jednoho účtu: archiv 1 GiB, 200 000 položek,
+300 000 řádků a 256 MiB dat. Mezisoubory obnovy leží ve složce obnovy na svazku a po obnově i po
+chybě zmizí. Nahrání zálohy i importu musí pustit reverzní proxy, viz Provoz za reverzní proxy
+(1 GiB, resp. 25 MB).
+
 ## Automatizace a pošta
 
 Plánovač běží uvnitř aplikace, žádná externí úloha není potřeba. Každou minutu zpracuje frontu,
@@ -177,6 +241,26 @@ odeslání není dostupné a PDF se stahuje ručně.
 Adresa vlastního serveru je cizí vstup, proto aplikace odmítne privátní, lokální a metadatové adresy
 a kontroluje je znovu při každém spojení, i po překladu DNS (ochrana SSRF). Na vlastní síti to vypne
 `ALLOW_PRIVATE_MAIL_HOSTS=1` (platí i pro IMAP schránku s avízy z banky), což je vhodné jen tam, kde všem uživatelům instance důvěřujete.
+
+## HTML e-maily
+
+Zprávy klientovi (faktura, záloha, upomínka, potvrzení platby) odcházejí jako HTML s textovou
+alternativou, která je přesně text z historie odeslání. Vzhled se vybírá v Nastavení > Pošta >
+Vzhled e-mailu ze sedmi variant: B1 Základní karta, B2 Karta s QR vedle částky, B3 Platební blok,
+B4 Tmavá hlavička (výchozí), B5 Na střed, A Dopis a C Akcent. QR platba je jen ve vzhledech B2, B3
+a B5 a jen u faktury, zálohy a upomínky. Pás B4 a linka C berou barvu akcentu z designu dokladu.
+Tamtéž jde nastavit úvod, podpis a logo (logo dodavatele, vlastní logo, nebo bez loga).
+
+Zpráva nemá vzdálené obrázky, skripty ani sledovací odkazy: QR a logo jsou přílohy (`cid:`) a každý
+text je escapovaný. HTML se sestaví jednou při první přípravě zprávy a archivuje se. Opakovaný pokus
+pošle tentýž archiv, takže pozdější změna vzhledu zprávu ve frontě nezmění. Historie odeslání
+nabízí stažení HTML.
+
+Vyzkoušení: stránka Vzhled e-mailu ukazuje náhled vybraného vzhledu s ukázkovou fakturou a s vaším
+logem, úvodem a podpisem (po uložení). Jak
+zpráva vypadá ve skutečném klientovi (Gmail, Outlook, Apple Mail), ověříte odesláním faktury
+zákazníkovi s vlastní e-mailovou adresou. Outlook vykresluje HTML jinak než prohlížeč, tabulková
+kostra a inline styly rozdíly jen zmírní.
 
 ## Zahraniční faktury a zálohy
 
@@ -198,6 +282,11 @@ Po úhradě zálohy se řídí Nastavení > Automatizace, volbou „Po úhradě 
 `draft` (výchozí) připraví koncept konečné faktury a `issue` ji vystaví. Odeslat ji může jen zapnutá
 automatika „Odeslání po záloze“ a jen v režimu `issue`. Hlavní vypínač změní `issue` na `draft`.
 Vrácení platby zálohy fakturu nezruší, jen upozorní, že opět chce doplatek.
+
+Výchozí řady `{RRRR}-{NNN}` pro faktury a `Z{RRRR}-{NNN}` pro zálohy dávají stejný variabilní
+symbol (`Z2026-001` i `2026-001` mají VS `2026001`). Řady se kvůli zvyku stávajících účtů nemění.
+Avízo se pak spáruje podle měny, zbývající částky a účtu. Když sedí oba doklady, čeká ve frontě
+na ruční přiřazení. Kdo chce VS oddělit, změní si řadu záloh v Nastavení > Číselné řady.
 
 ## Avíza z banky
 
@@ -226,6 +315,19 @@ ohledu na přepínač. Server ověření musí být ten, který zprávu přijal 
 Česká avíza jsou zatím prozatímní: formát není ověřený na skutečném vzorku, proto se čtou, ale nikdy
 se nepárují automaticky a ve frontě mají štítek „Prozatímní formát“. Automaticky se páruje jen
 anglická varianta.
+
+## Statistiky a dashboard
+
+Statistiky (`/prehledy`) a widgety dashboardu se počítají na serveru z dat účtu. Výsledek se drží
+v cache Next (`"use cache"`, nejvýš hodiny) pod klíčem s ID uživatele a **razítkem účtu**: razítko
+skládá nejvyšší ID záznamu v historii změn účtu a čas posledního staženého kurzu ČNB. Každý zápis
+do účtu, i z plánovače, razítko změní, takže se další zobrazení spočítá znovu a staré číslo se
+neukáže. Cache drží jen paměť procesu (`cacheMaxMemorySize` 50 MB), po restartu je prázdná.
+
+Dashboard i jednotlivý widget jde exportovat jako JSON a importovat do jiného účtu nebo instance.
+Soubor nese jen nastavení widgetů, žádná data, má nejvýš 64 KiB a 50 widgetů. Import ukáže náhled
+nad daty cílového účtu, založí nový dashboard a stávající nezmění. Filtr na zákazníky, které cílový
+účet nemá, se zahodí. Soubor z novější verze aplikace import odmítne s výzvou k aktualizaci.
 
 ## Provoz za reverzní proxy
 
@@ -268,6 +370,49 @@ Známá omezení: přehledy účtu s desítkami tisíc dokladů se počítají p
 letošek, 864 ms za celé období). Výsledek se drží v cache, dokud se data účtu nezmění, takže
 se čeká jen na první zobrazení po změně.
 
+### Paměť kontejneru
+
+Doporučená paměť kontejneru je **aspoň 1,5 GB**. Node odvozuje limit haldy z paměti kontejneru
+(změřeno v obrazu `node:24-bookworm-slim`: 1 GB dá haldu 560 MiB, 1,5 GB dá 864 MiB). Obnova
+a vytvoření zálohy smí držet až 640 MiB (čtená položka archivu do 200 MiB mimo haldu, mapa ID,
+dávka zápisu) a odmítnou se, když halda přesáhne 75 % limitu. Vykreslení dlouhého PDF zabere
+dalších až ~480 MiB (500 položek). S menší pamětí aplikace funguje, jen velkou zálohu odmítne
+a souběh obnovy s PDF může narazit na limit kontejneru.
+
+### Data na svazku a retence
+
+Noční zálohy databáze leží na stejném svazku jako data. Kopírujte je pravidelně i mimo svazek
+(jiný disk, jiný stroj), třeba nočním `docker cp <kontejner>:/data/backups`, jinak ztráta disku
+vezme data i zálohy. Složka `files/` v noční záloze není, kopírujte ji spolu s ní.
+
+Odeslaná PDF, ISDOC a HTML zprávy (`files/`) se nikdy nemažou: tvoří historii odeslání a účetní
+doklad se uchovává 10 let. Kvóta na účet není. Velikost `files/` a volné místo ukazuje Administrace
+a plánovač hlásí volné místo pod 2 GiB nebo pod 10 % do monitoringu. Exporty a zálohy účtů zmizí
+po 7 dnech, nepotvrzené importy a mezisoubory obnovy se uklízejí samy.
+
+## Postup vydání
+
+1. Zvyšte `version` v `package.json`. Verze se ukazuje v Administraci a zapisuje do záloh účtů.
+2. Přidejte bod vydání databáze `tests/fixtures/db/<verze>.sql` (postup v
+   `tests/fixtures/db/README.md`). Starší soubory se nemění.
+3. Změnil se od minulého vydání registr zálohy? Pak zvyšte `BACKUP_VERSION`, přidejte
+   `columns-v<n>.json` a krok `BACKUP_UPGRADES` (viz Vývoj). Otisk v2 je zmrazený.
+4. Projděte všechny kontroly po částech (Vývoj) a mutační bránu jádra
+   `pnpm run test:mutation:summary -- --core`.
+5. `pnpm audit`. Nález v balíčku, který jde do běžícího obrazu, řešte před vydáním. Aktualizace
+   respektuje `minimumReleaseAge` v `pnpm-workspace.yaml`, nikdy ho neobcházejte.
+6. Docker po vrstvách, každý krok zvlášť:
+
+   ```bash
+   docker build --target deps .
+   docker build --target build .
+   docker build -t fakturan-ci .
+   E2E_DOCKER_IMAGE=fakturan-ci pnpm exec playwright test docker-scheduler
+   ```
+
+7. Nasaďte ručně (v Coolify tlačítkem Deploy, auto-deploy není nastavený). Po startu zkontrolujte
+   `/api/health` a Administraci.
+
 ## Ukázka
 
 Veřejná ukázka: `https://…` (adresa se doplní po nasazení).
@@ -283,11 +428,16 @@ ukáže. Bez nich se aplikace s `DEMO_MODE=1` nespustí. `DEMO_PASSWORD` je tím
 nikde jinde nepoužíváte, a nikdy nepoužijte heslo ostrého účtu. Odkazy na sociální přihlášení,
 změnu profilu a ukončení cizích relací jsou pro účet ukázky zamčené.
 
+`DEMO_EMAIL` dejte na doménu, na kterou nikdo nemůže dostat poštu, například
+`ukazka@fakturan.example` (doména `.example` je vyhrazená a neexistuje). Sociální přihlášení
+s ověřeným e-mailem, který se shoduje s `DEMO_EMAIL`, by se jinak mohlo připojit k účtu ukázky.
+Na ukázkové instanci proto sociální přihlášení nenastavujte vůbec.
+
 Nasazení v Coolify (ručně, auto-deploy není):
 
 1. Nová aplikace ze stejného obrazu (Dockerfile) jako ostrá instance, s vlastním svazkem `/data`.
    Svazek ostré instance nikdy nesdílejte.
-2. Proměnné: `DEMO_MODE=1`, `DEMO_EMAIL`, `DEMO_PASSWORD`, vlastní `BETTER_AUTH_URL`,
+2. Proměnné: `DEMO_MODE=1`, `DEMO_EMAIL` (na doméně `.example`), `DEMO_PASSWORD`, vlastní `BETTER_AUTH_URL`,
    `BETTER_AUTH_SECRET` a `ENCRYPTION_KEY`, `SENTRY_ENVIRONMENT=demo` (a stejný `SENTRY_DSN`, chcete-li
    chyby ukázky v GlitchTipu). `SMTP_*` nenastavujte. Ukázka je i tak nepoužije.
 3. Nasaďte ručně tlačítkem Deploy.

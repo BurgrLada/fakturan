@@ -485,7 +485,7 @@ Princip: uživatel si ve Fio nastaví e-mailová oznámení do své schránky a 
 - **IMP-008** Celý import je transakční a jde vrátit zpět podle dávky.
 - **IMP-009** Chybný řádek zastaví potvrzení s přesnou chybou, nebo jde přeskočit.
 - **IMP-010** **[návrh]** Záloha se obnovuje jen do prázdného účtu, i na jiné instanci, s novými ID. Po obnově jsou všechny automatiky vypnuté a SMTP a IMAP je nutné zadat znovu. Audit log ze zálohy se neslučuje: přiloží se jako soubor ke čtení a do nového logu přibude záznam o obnovení.
-- **IMP-011** Importovaný soubor má limit 25 MB **[návrh]**, zpracovává se na pozadí s průběhem. Výjimkou je záloha účtu: má vlastní nahrání s limitem 1 GiB a stejný limit platí už při jejím vytvoření, záloha, kterou by obnova odmítla, vůbec nevznikne. Formát ZIP bez ZIP64 nesmí ani tiše dojít ke 4 GiB. Reverzní proxy musí mít limit těla aspoň 1 GiB.
+- **IMP-011** Importovaný soubor má limit 25 MB **[návrh]**, zpracovává se na pozadí s průběhem. Výjimkou je záloha účtu: má vlastní nahrání s limitem 1 GiB a stejný limit platí už při jejím vytvoření, záloha, kterou by obnova odmítla, vůbec nevznikne. Formát ZIP bez ZIP64 nesmí ani tiše dojít ke 4 GiB. Archiv zálohy (manifest verze 2) má nejvýš 200 000 položek: manifest nese kontrolní součty dat, historie změn a seznamu souborů `files.jsonl` a má nejvýš 1 MiB, seznam souborů s velikostí a kontrolním součtem každého souboru leží hned za ním. Zálohy verze 1 jdou dál obnovit. Reverzní proxy musí mít limit těla aspoň 1 GiB.
 
 ## 17. Export (EXP)
 
@@ -618,7 +618,7 @@ Pravidla:
 - **UI-011** Centrum upozornění v aplikaci: selhání odeslání, faktury po splatnosti, nespárované platby, nerozpoznaná avíza, blížící se limity.
 - **UI-012** Záložka Nápověda s návodem k hlavním úkonům a odpověďmi na časté otázky. Obsah vzniká až po dokončení ostatních funkcí.
 
-Navigace: Přehled, Faktury, Pravidelné, Zákazníci, Ceník, Platby, Statistiky, Nastavení, Administrace.
+Navigace: Přehled, Faktury, Pravidelné, Zákazníci, Ceník, Platby, Statistiky, Nápověda, Nastavení, Administrace.
 
 ## 21. Datový model (přehled)
 
@@ -676,12 +676,16 @@ Kritické e2e toky: první spuštění a onboarding, pozvánka, faktura od nuly 
 8. Import, export, daňový přehled.
 9. Monitoring, provozní doplňky, dokumentace.
 
+Všech devět bodů je hotových. Co zbývá, závisí na zadavateli a daňovém poradci (kap. 24).
+
 ## 24. Otevřené body
 
 | Bod | Dopad | Kdo |
 |---|---|---|
 | Vzorek českého avíza Fio | Bez něj nejde ověřit BNK-005, formát není veřejně popsaný. Staví se proti anglické variantě známé z veřejných zmínek, česká je do dodání vzorku prozatímní. | zadavatel |
-| Vzorky ISDOC a CSV z Fakturoidu a iDokladu | Fakturovač je ověřený na 40 reálných dokladech, ostatní jen z dokumentace | implementace |
+| Vzorky ISDOC a CSV z Fakturoidu a iDokladu | Fakturovač je ověřený na 40 reálných dokladech, ostatní jen z dokumentace. Vestavěné předlohy (IMP-002) a porovnání součtů se zdrojem (TST-020) čekají na skutečné exporty | zadavatel, pak implementace |
 | Znění doložky FOR-006, náležitosti neplátce, TAX-001, použití pevného kurzu FOR-010 | Daňová správnost, zatím z obecné znalosti | daňový poradce |
-| TanStack Charts | Uzavřeno: stabilní řada 1.x, použito přesně `@tanstack/charts@1.1.0` za obalem `Chart`; hydratace, CSP a tmavý režim ověřeny, při budoucím problému obal dostane `recharts@3.10.1` beze změny `ChartSpec` | implementace |
+| Referenční PNG designů faktur | Vizuální regrese (TST-014, PDF-007) hlídá jen první stranu a čeká na schválení | zadavatel |
+
+Uzavřené body: TanStack Charts (stabilní řada 1.x, použito přesně `@tanstack/charts@1.1.0` za obalem `Chart`; hydratace, CSP a tmavý režim ověřeny, při budoucím problému obal dostane `recharts@3.10.1` beze změny `ChartSpec`).
 

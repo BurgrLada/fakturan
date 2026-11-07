@@ -960,6 +960,47 @@ Plán 9 je poslední. Co zůstává, je pro uživatele a do budoucna:
 - **Známá omezení** doplní Task 18. Patří sem zbylé drobnosti plánu 7, které Task 6 neuzavřel: heatmapa, popisky čar, pořadí DOM v editoru (WCAG 2.4.3), globální CSS RGL, `onConflictDoNothing` bez cíle, týdenní klíče `date_bucket`.
   A zbylé drobnosti plánu 8: XLSX se rozbaluje dvakrát, zahozená dávka jako „Selhalo“, číslo v exponentu (`1E-3`) jako neplatné, `XI` bez převodu a zahození dávky během nahrání, které nechá soubor do úklidu.
 
+## Známá omezení
+
+Doplněno v Task 18. Žádné z nich nemění data účtu ani nevede k tiché chybě v částkách.
+
+**Zbylé drobnosti plánu 7:**
+
+- Heatmapa fakturace kreslí záporné hodnoty (dobropisy) stejně jako kladné a políčka mají nízký kontrast.
+- Popisky čar a ploch v grafech nemají strop délky, dlouhý popisek může rozhodit legendu.
+- V editoru dashboardu neodpovídá pořadí prvků v DOM vizuálnímu pořadí widgetů (WCAG 2.4.3). Je to vědomý kompromis, klávesnicové ovládání má vlastní tlačítka posunu.
+- Styly knihovny mřížky (react-grid-layout) se načítají globálně, ne jen na stránkách dashboardu.
+- Založení výchozího dashboardu používá `onConflictDoNothing` bez určeného cíle konfliktu.
+- Týdenní klíče `date_bucket` nejsou testem porovnané s `bucketsBetween`.
+
+**Zbylé drobnosti plánu 8:**
+
+- Soubor XLSX se při importu rozbaluje dvakrát, což stojí čas procesoru navíc.
+- Zahozená dávka importu se do úklidu ukazuje se stavem „Selhalo“.
+- Číslo v exponenciálním zápisu (`1E-3`) tabulkový import odmítne jako neplatné.
+- Kód země `XI` (Severní Irsko) se nepřevádí, zůstane `XI` a řádek dostane varování.
+- Zahození dávky během běžícího nahrání nechá nahraný soubor ležet až do nočního úklidu.
+
+**Odložené drobnosti bloků A až G plánu 9:**
+
+- Blok A: manifest zálohy v2 se parsuje až do 4 MiB a strop 1 MiB se kontroluje až po parsování. Předběžná kontrola struktury to omezuje, takže je to neškodné (m-4).
+- Blok A: dvě interní chybové hlášky obnovy (`spool.ts`, `account-restore.ts`) jsou česky mimo `texts.ts`. Uživatel je nevidí, ukáže se mu obecná chyba (m-6).
+- Blok A: daňový přehled drží řádky celého roku v paměti.
+- Blok A: strop délky textů, které skládá aplikace sama (ne uživatel), je odhad.
+- Blok B: prohlížeč bez Navigation API po Vpřed a Zrušit v editoru dashboardu ukáže jinou adresu, než odpovídá stránce.
+- Blok B: když prohlížeč na návrat `history.go` po zrušeném Zpět nezareaguje, adresa a stránka se mohou rozejít (N-3, řídký případ).
+- Blok B: ruční PDF k importovanému dokladu (až 25 MiB) se zapisuje uvnitř synchronní transakce, takže na okamžik podrží zápis ostatních.
+- Blok B: hlídání odchodu z editoru je ověřené jen v Chromiu, ve Firefoxu reálně ne.
+- Blok C: migrace 0049 započítá i čekající nebo mrtvé úlohy e-mailu o limitu, takže práh, jehož e-mail neodešel, se už znovu nepošle.
+- Blok C: denní značka kontroly limitu (`limitCheckedOn`) je jen v paměti procesu. Po restartu se kontrola téhož dne zopakuje, a když plánování selže, další pokus je až další den.
+- Blok D: vzhled e-mailu dovolí uložit „Vlastní logo“ bez nahraného loga. Zpráva pak ukáže jméno dodavatele, formulář na to upozorní (M-8).
+- Blok D: zpráva ve frontě, která ještě neprošla první přípravou, dostane vzhled platný v okamžiku přípravy, ne v okamžiku zařazení.
+- Blok E: fixture Playwrightu ukončuje server jen signálem SIGTERM, bez SIGKILL. Proces, který SIGTERM ignoruje, by přežil, `next start` ho ale respektuje (M-8).
+- Blok E: zkratka ⌘K není ověřená na skutečném macOS, jen simulací platformy.
+- Blok G: když selže i úklid po chybě zakládání ukázky, jeho chyba nahradí původní. Další tick to zkusí znovu.
+- Blok G: zamítnutá změna relací účtu ukázky ukáže prázdnou hlášku, pokud server nevrátí text.
+- Blok G: sociální přihlášení s ověřeným e-mailem shodným s `DEMO_EMAIL` by se mohlo připojit k účtu ukázky. README proto radí `DEMO_EMAIL` na doméně `.example` a ukázku bez sociálního přihlášení.
+
 ## Pro uživatele
 
 Tyto body nejsou úkoly, protože je musí udělat nebo schválit člověk:
