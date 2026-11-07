@@ -17,7 +17,7 @@
 - **Každý příkaz v popředí běží nejvýš 170 s** (`timeout 170 …`). Na úlohu na pozadí se nikdy nečeká. Brány:
   - `timeout 170 pnpm exec vitest run --project unit`;
   - backend `timeout 170 pnpm exec vitest run --project backend --shard=N/4 --exclude tests/backend/pdf-designs.test.ts` pro N od 1 do 4, od Task 13 `--shard=N/6`. Shard, který se do limitu nevejde, se pustí po souborech podle `pnpm exec vitest list --project backend --shard=N/4 --filesOnly`;
-  - `pdf-designs` po částech: `timeout 170 pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "<describe>"` pro `registr designů`, `vizuální regrese`, `barvy vystaveného dokladu` a `náhled designu`;
+  - `pdf-designs` po částech: `timeout 170 pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "<filtr>"` pro `registr designů`, `vizuální regrese`, `barvy vystaveného dokladu`, `náhled designu`, `^design [a-f]` a `^design [g-z]` (testy po designech, podle prvního písmene ID). Úplnost částí hlídá `tests/unit/ops-files.test.ts`;
   - `timeout 170 pnpm build` vždy před Playwrightem. Playwright jde po souborech: `timeout 170 pnpm exec playwright test <soubor>`;
   - Docker po vrstvách: `timeout 170 docker build --target deps .`, `--target build`, celý obraz `-t fakturan-ci`, pak `E2E_DOCKER_IMAGE=fakturan-ci timeout 170 pnpm exec playwright test docker-scheduler`. Krok, který se nevejde, se zapíše jako „Docker neověřen“ s příkazem;
   - `timeout 170 pnpm typecheck`, `timeout 170 pnpm lint`, `timeout 170 pnpm format:check` a `timeout 170 pnpm run test:coverage-spec` před každým commitem.

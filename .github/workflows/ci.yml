@@ -27,7 +27,8 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm exec vitest run --project unit
-      # R-24: six backend shards, each under 170 s locally; the PDF designs run apart in four parts.
+      # R-24: six backend shards, each under 170 s locally; the PDF designs run apart in six parts,
+      # the per-design blocks split by the first letter of the design id.
       - run: pnpm exec vitest run --project backend --shard=1/6 --exclude tests/backend/pdf-designs.test.ts
       - run: pnpm exec vitest run --project backend --shard=2/6 --exclude tests/backend/pdf-designs.test.ts
       - run: pnpm exec vitest run --project backend --shard=3/6 --exclude tests/backend/pdf-designs.test.ts
@@ -38,6 +39,8 @@ jobs:
       - run: pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "vizuální regrese"
       - run: pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "barvy vystaveného dokladu"
       - run: pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "náhled designu"
+      - run: pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "^design [a-f]"
+      - run: pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "^design [g-z]"
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm run test:e2e
       - run: pnpm run test:coverage-spec

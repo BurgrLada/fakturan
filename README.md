@@ -27,6 +27,8 @@ pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "registr designů"
 pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "vizuální regrese"
 pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "barvy vystaveného dokladu"
 pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "náhled designu"
+pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "^design [a-f]"
+pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "^design [g-z]"
 pnpm build
 pnpm exec playwright test <soubor>
 ```

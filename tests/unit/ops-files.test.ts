@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { DESIGNS } from "@/server/pdf/designs";
 
 const read = (path: string) => readFileSync(join(import.meta.dirname, "../..", path), "utf8");
 
@@ -38,13 +39,43 @@ describe("provozní soubory", () => {
       );
     }
     expect(ci).not.toMatch(/--shard=\d+\/4/);
-    for (const part of [
-      "registr designů",
-      "vizuální regrese",
-      "barvy vystaveného dokladu",
-      "náhled designu",
-    ]) {
-      expect(ci).toContain(`vitest run tests/backend/pdf-designs.test.ts -t "${part}"`);
+  });
+
+  test("[TST-011] části pdf-designs v CI a README pokryjí každý test právě jednou", () => {
+    const filtersIn = (text: string) =>
+      Array.from(
+        text.matchAll(/vitest run tests\/backend\/pdf-designs\.test\.ts -t "([^"]+)"/g),
+        (match) => match[1]!,
+      );
+    const filters = filtersIn(read(".github/workflows/ci.yml"));
+    expect(filters.length).toBeGreaterThan(0);
+    expect(filtersIn(read("README.md"))).toEqual(filters);
+
+    // Vitest matches -t against "<describe> <test>"; describe.each names one block per design.
+    const names: string[] = [];
+    let block = "";
+    for (const line of read("tests/backend/pdf-designs.test.ts").split("\n")) {
+      const opened = /^describe(\.each\(designIds\))?\("([^"]+)"/.exec(line);
+      if (opened) block = opened[2]!;
+      const found = /^\s*test(?:\.each\([^)]*\))?\("((?:[^"\\]|\\.)+)"/.exec(line);
+      if (!found) continue;
+      // A test.each row only fills its own placeholders, which no part filters on.
+      const title = found[1]!.replaceAll("%s", "x");
+      const blocks = block.includes("%s")
+        ? DESIGNS.map((design) => block.replace("%s", design.id))
+        : [block];
+      for (const name of blocks) names.push(`${name} ${title}`);
+    }
+    expect(names.length).toBeGreaterThan(9 * DESIGNS.length);
+    const uncovered = names.filter(
+      (name) => filters.filter((filter) => new RegExp(filter).test(name)).length !== 1,
+    );
+    expect(uncovered).toEqual([]);
+    for (const filter of filters) {
+      expect(
+        names.some((name) => new RegExp(filter).test(name)),
+        filter,
+      ).toBe(true);
     }
   });
 
