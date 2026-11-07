@@ -38,6 +38,12 @@ export function normalizeIp(ip: string): string {
 
 type Check = { rule: RateRule; key: string };
 
+// Every demo visitor signs in with the same published e-mail, so an e-mail bucket would let one
+// visitor lock the demo for everyone; its password is public anyway.
+function isSharedDemoLogin(email: string, env: Env): boolean {
+  return env.DEMO_MODE && email === env.DEMO_EMAIL?.toLowerCase();
+}
+
 // Without TRUST_PROXY every client shares one IP bucket: failing closed beats letting a spoofed
 // header mint a fresh bucket per request.
 function checksFor(ctx: GenericEndpointContext, env: Env): Check[] {
@@ -50,7 +56,7 @@ function checksFor(ctx: GenericEndpointContext, env: Env): Check[] {
     case "/sign-in/email":
       return [
         { rule: RATE_RULES.loginIp, key: ip },
-        ...(email
+        ...(email && !isSharedDemoLogin(email, env)
           ? [
               { rule: RATE_RULES.loginIpEmail, key: `${ip}|${email}` },
               { rule: RATE_RULES.loginEmail, key: email },

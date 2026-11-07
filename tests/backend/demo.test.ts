@@ -15,6 +15,7 @@ import {
   invoice,
   job,
   payment,
+  rateLimit,
   recurringInvoice,
   reminderRule,
   supplier,
@@ -495,5 +496,42 @@ describe("registrace v ukázce", () => {
     expect(rejections().at(-1)?.after).toMatchObject({
       emailHash: emailHash("cizi@example.cz", parseEnv(demoEnv)),
     });
+  });
+});
+
+// Every attempt runs a real scrypt, and the IP limit needs 21 of them.
+describe("limity přihlášení v ukázce", { timeout: 30_000 }, () => {
+  const signIn = (target: Auth, email: string) =>
+    new Browser(target).signIn(email, "špatné-heslo-špatné");
+  const keys = () =>
+    db
+      .select({ key: rateLimit.key })
+      .from(rateLimit)
+      .all()
+      .map((row) => row.key);
+
+  beforeEach(() => {
+    db.delete(rateLimit).run();
+  });
+
+  test("[OPS-007] e-mail ukázky limit na e-mail nemá, limit na IP platí dál", async () => {
+    const demoAuth = createAuth(parseEnv(demoEnv)) as unknown as Auth;
+    for (let i = 0; i < 20; i++) {
+      const email = i % 2 ? DEMO_EMAIL.toUpperCase() : DEMO_EMAIL;
+      expect((await signIn(demoAuth, email)).status, String(i)).not.toBe(429);
+    }
+    expect(keys()).toEqual(["loginIp:unknown"]);
+
+    expect((await signIn(demoAuth, DEMO_EMAIL)).status).toBe(429);
+  });
+
+  test("[SEC-001] mimo ukázku platí limit na e-mail i pro stejnou adresu", async () => {
+    const plainAuth = createAuth(parseEnv(base)) as unknown as Auth;
+    for (let i = 0; i < 5; i++) await signIn(plainAuth, DEMO_EMAIL);
+
+    expect((await signIn(plainAuth, DEMO_EMAIL)).status).toBe(429);
+    expect(keys().sort()).toEqual(
+      [`loginEmail:${DEMO_EMAIL}`, `loginIpEmail:unknown|${DEMO_EMAIL}`, "loginIp:unknown"].sort(),
+    );
   });
 });
