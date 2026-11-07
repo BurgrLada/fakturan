@@ -441,7 +441,9 @@ Nasazení v Coolify (ručně, auto-deploy není):
    Svazek ostré instance nikdy nesdílejte.
 2. Proměnné: `DEMO_MODE=1`, `DEMO_EMAIL` (na doméně `.example`), `DEMO_PASSWORD`, vlastní `BETTER_AUTH_URL`,
    `BETTER_AUTH_SECRET` a `ENCRYPTION_KEY`, `SENTRY_ENVIRONMENT=demo` (a stejný `SENTRY_DSN`, chcete-li
-   chyby ukázky v GlitchTipu). `SMTP_*` nenastavujte. Ukázka je i tak nepoužije.
+   chyby ukázky v GlitchTipu) a `TRUST_PROXY=1`. Ukázka běží za Traefikem a bez `TRUST_PROXY` by
+   všichni návštěvníci sdíleli jeden limit přihlášení podle IP (20 za minutu na celou ukázku).
+   `SMTP_*` nenastavujte. Ukázka je i tak nepoužije.
 3. Nasaďte ručně tlačítkem Deploy.
 4. Napoprvé založte data hned:
 
