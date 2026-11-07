@@ -80,12 +80,12 @@ test("[CUS-001] hledání a filtr přežijí obnovení stránky", async ({ page,
   await expect(page.getByRole("link", { name: "Alfa s.r.o." })).toBeHidden();
 
   await page.getByLabel("Původ").selectOption("");
-  await page.getByLabel("Hledat").fill("ALF");
+  await page.getByRole("searchbox", { name: "Hledat" }).fill("ALF");
   await page.getByRole("button", { name: "Filtrovat" }).click();
   await expect(page).toHaveURL(/q=ALF/);
 
   await page.reload();
-  await expect(page.getByLabel("Hledat")).toHaveValue("ALF");
+  await expect(page.getByRole("searchbox", { name: "Hledat" })).toHaveValue("ALF");
   await expect(page.getByRole("link", { name: "Alfa s.r.o." })).toBeVisible();
   await expect(page.getByRole("link", { name: "Beta GmbH" })).toBeHidden();
 });

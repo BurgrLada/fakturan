@@ -39,7 +39,7 @@ test("[CAT-001] nová položka s cenou 1 234,50 Kč se zobrazí správně", asyn
   await expect(row).toContainText("1 234,50 Kč");
   await expect(row).toContainText("hod.");
 
-  await page.getByLabel("Hledat").fill("konzultace");
+  await page.getByRole("searchbox", { name: "Hledat" }).fill("konzultace");
   await page.getByRole("button", { name: "Filtrovat" }).click();
   await expect(page).toHaveURL(/q=konzultace/);
   await expect(page.getByRole("link", { name: "Konzultace" })).toBeVisible();
