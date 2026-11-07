@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { defaultTaxYear, parseTaxFilter } from "@/lib/report-filter";
 import { setClockForTests } from "@/server/clock";
-import { taxOverview, unpaidAsOf } from "@/server/reports/tax";
+import { taxOverview, taxPage, unpaidAsOf } from "@/server/reports/tax";
 import { getInvoice } from "@/server/services/invoices";
-import { REPORT_TODAY } from "../fixtures/report-scenario";
+import { pay, REPORT_TODAY } from "../fixtures/report-scenario";
 import { seedTaxScenario, TAX_TODAY, type TaxScenario } from "../fixtures/tax-scenario";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
@@ -192,5 +192,58 @@ describe("výkon nedoplatků", () => {
     expect(plan.filter((detail) => detail.includes("invoice_user_related_idx"))).toHaveLength(1);
     expect(plan.filter((detail) => detail.includes("payment_user_invoice_idx"))).toHaveLength(2);
     expect(plan.filter((detail) => detail.includes("payment_user_paid_on_idx"))).toEqual([]);
+  });
+});
+
+describe("okraje daňového přehledu", () => {
+  test("[TAX-001] stránka ukáže jen prvních N řádků a počty všech", () => {
+    const overview = paid(s.owner, 2026);
+    const page = taxPage(overview, 2);
+    expect(page.lines).toEqual(overview.lines.slice(0, 2));
+    expect(page.unpaid).toEqual(overview.unpaid.slice(0, 2));
+    expect(page).toMatchObject({
+      linesCount: overview.lines.length,
+      unpaidCount: overview.unpaid.length,
+      totalCzkMinor: overview.totalCzkMinor,
+    });
+    expect(overview.lines.length).toBeGreaterThan(2);
+    expect(taxPage(overview).lines).toEqual(overview.lines);
+    const y2025 = paid(s.owner, 2025);
+    expect(y2025.unpaid.length).toBeGreaterThan(1);
+    expect(taxPage(y2025, 1).unpaid).toEqual(y2025.unpaid.slice(0, 1));
+  });
+
+  test("[TAX-001] rok mimo 1900 až 9999 a neplatné datum se odmítnou, hranice projdou", () => {
+    for (const year of [1899, 10_000, 2026.5]) {
+      expect(() => paid(s.owner, year), String(year)).toThrow(`Neplatný rok: ${year}`);
+    }
+    expect(paid(s.owner, 1900).lines).toEqual([]);
+    expect(paid(s.owner, 9999)).toMatchObject({ lines: [], asOf: TAX_TODAY, asOfToday: true });
+    expect(() => paid(s.owner, 2026, "2026-02-30")).toThrow("Neplatné datum: 2026-02-30");
+    expect(() => unpaidAsOf(db, s.owner, "2026-13-01")).toThrow("Neplatné datum: 2026-13-01");
+  });
+
+  test("[TAX-001] poslední den roku je ještě přehled k dnešku", () => {
+    expect(paid(s.owner, 2025, "2025-12-31")).toMatchObject({
+      asOf: "2025-12-31",
+      asOfToday: true,
+    });
+  });
+
+  test("[ADV-005] platba konečné faktury nese číslo zálohy, běžná faktura žádný odkaz", () => {
+    expect(
+      paid(s.owner, 2025).lines.find((line) => line.invoiceId === s.ids.k)!.related,
+    ).toBeNull();
+    pay(s.owner, s.ids.iFinal, "2027-01-08", 1_000);
+    const line = paid(s.owner, 2027).lines.find((item) => item.invoiceId === s.ids.iFinal)!;
+    expect(line.number).toBe(numberOf(s.owner, s.ids.iFinal));
+    const issuedLine = issued(s.owner, 2027).lines[0]!;
+    expect(issuedLine.number).toBe(numberOf(s.owner, s.ids.iFinal));
+    const unpaidJ = paid(s.owner, 2025).unpaid.find((row) => row.invoiceId === s.ids.j)!;
+    expect(unpaidJ.number).toBe(numberOf(s.owner, s.ids.j));
+    expect(line.related).toEqual({
+      role: "advance",
+      number: numberOf(s.owner, s.ids.iAdvance),
+    });
   });
 });

@@ -12,7 +12,11 @@ export default defineConfig({
   test: {
     projects: projects.flatMap((project) => {
       const include = files.filter((file) => file.startsWith(`tests/${project.test?.name}/`));
-      return include.length > 0 ? [{ ...project, test: { ...project.test, include } }] : [];
+      // Instrumented code runs several times slower; Stryker's own per-mutant timeout still applies.
+      const testTimeout = Math.max(project.test?.testTimeout ?? 0, 60_000);
+      return include.length > 0
+        ? [{ ...project, test: { ...project.test, include, testTimeout } }]
+        : [];
     }),
   },
 });

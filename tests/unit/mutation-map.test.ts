@@ -126,4 +126,16 @@ describe("mutační testy po souborech", () => {
     ]);
     expect(pickReports([first, { ...whole, mtimeMs: 4 }])).toEqual(["src/a.ts.json"]);
   });
+
+  test("[TST-013] README popisuje běh po souborech, rozsahy, --incremental a bránu jádra", () => {
+    const readme = readFileSync(join(root, "README.md"), "utf8");
+    for (const command of [
+      "pnpm run test:mutation:file -- src/",
+      ".ts:1-232",
+      "--incremental",
+      "pnpm run test:mutation:summary -- --core",
+    ]) {
+      expect(readme).toContain(command);
+    }
+  });
 });

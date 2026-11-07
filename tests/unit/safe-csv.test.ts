@@ -65,6 +65,8 @@ describe("čtení CSV", () => {
     ).toHaveLength(11);
     const wide = Array.from({ length: 201 }, (_, i) => `s${i}`).join(";");
     expect(await rejected(parseCsv(encoder.encode(wide), {}))).toBe("tabular_too_many_columns");
+    const exact = Array.from({ length: 200 }, (_, i) => `s${i}`).join(";");
+    expect((await parseCsv(encoder.encode(exact), {})).headers).toHaveLength(200);
     expect(await rejected(parseCsv(new Uint8Array([0xff, 0xfe, 0x61, 0x00]), {}))).toBe(
       "csv_encoding",
     );
@@ -129,5 +131,68 @@ describe("čtení CSV po blocích", () => {
       rows: whole.rows.slice(0, 2),
       total: 2,
     });
+  });
+
+  test("[SEC-005] UTF-16 se pozná jen podle celého BOM, s důvodem v hlášení", async () => {
+    const message = async (bytes: number[]) =>
+      parseCsv(new Uint8Array(bytes), {}).then(
+        () => "prošlo",
+        (error: InputRejected) => error.message,
+      );
+    expect(await message([0xff, 0xfe, 0x61, 0x00])).toBe("csv_encoding: UTF-16");
+    expect(await message([0xfe, 0xff, 0x00, 0x61])).toBe("csv_encoding: UTF-16");
+    for (const bytes of [
+      [0xff, 0x61],
+      [0x61, 0xfe],
+      [0xfe, 0x61],
+      [0x61, 0xff],
+    ]) {
+      expect(await message(bytes), `${bytes}`).toBe("prošlo");
+    }
+    expect(await message([...encoder.encode('a\n"x')])).toBe("csv_malformed: neuzavřená uvozovka");
+  });
+
+  test("[IMP-001] useknutý znak UTF-8 na konci znamená windows-1250, vynucené UTF-8 ho nahradí", async () => {
+    const bytes = new Uint8Array([...encoder.encode("a\nx"), 0xc3]);
+    expect((await parseCsv(bytes, {})).encoding).toBe("windows-1250");
+    expect((await parseCsv(bytes, { encoding: "utf-8" })).rows).toEqual([["x\ufffd"]]);
+  });
+
+  test("[IMP-001] oddělovač se určí z prvního řádku bez textu v uvozovkách", async () => {
+    const delimiter = async (text: string) => (await parseCsv(encoder.encode(text), {})).delimiter;
+    expect(await delimiter('"x;y\nz";a,b,c\n1,2,3,4')).toBe(",");
+    expect(await delimiter("a,b\r1;2;3;4")).toBe(",");
+    expect(await delimiter('"a,b,c,d";e;f\n1;2;3')).toBe(";");
+  });
+
+  test("[IMP-001] poslední záznam bez konce řádku i s prázdným polem se přečte", async () => {
+    expect((await parseCsv(encoder.encode("a;b\n1;"), {})).rows).toEqual([["1", ""]]);
+  });
+
+  test("[IMP-001] hlavičky se ořežou ve všech třech čteních a krátký řádek dá prázdnou buňku", async () => {
+    const bytes = encoder.encode(" A ; B ;C\n1\n ; \n2;;x\n");
+    expect((await parseCsv(bytes, {})).headers).toEqual(["A", "B", "C"]);
+    expect(await parseCsv(bytes, { pick: () => [2, 0] })).toMatchObject({
+      headers: ["C", "A"],
+      columns: [
+        ["", "", "x"],
+        ["1", " ", "2"],
+      ],
+      rows: 3,
+    });
+    expect(await sampleCsv(bytes, 1)).toEqual({
+      headers: ["A", "B", "C"],
+      rows: [["1"]],
+      total: 2,
+    });
+  });
+
+  test("[IMP-001] prázdný soubor s výběrem i vzorkem nemá hlavičky ani sloupce", async () => {
+    expect(await parseCsv(new Uint8Array(0), { pick: () => [] })).toMatchObject({
+      headers: [],
+      columns: [],
+      rows: 0,
+    });
+    expect(await sampleCsv(new Uint8Array(0), 5)).toEqual({ headers: [], rows: [], total: 0 });
   });
 });

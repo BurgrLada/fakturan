@@ -85,4 +85,27 @@ describe("desetinná čísla z cizích souborů", () => {
     expect(() => decimalToMinor("-90071992547409.92", 2)).toThrow(InputRejected);
     expect(() => decimalToMinor("1", -1)).toThrow(RangeError);
   });
+
+  test("[SEC-005] odmítnutí nese kód a nejvýš 40 znaků vstupu, měřítko má meze 0 až 12", () => {
+    const rejected = (text: string) => {
+      try {
+        decimalToMinor(text, 2);
+      } catch (error) {
+        return error instanceof InputRejected ? error.message : "jiná chyba";
+      }
+      return "prošlo";
+    };
+    const padded = `${" ".repeat(45)}1e3`;
+    expect(rejected("1e3")).toBe("decimal_invalid: 1e3");
+    expect(rejected(padded)).toBe(`decimal_invalid: ${" ".repeat(40)}`);
+    expect(rejected("9".repeat(33))).toBe(`decimal_overflow: ${"9".repeat(33)}`);
+    expect(rejected("9".repeat(50))).toBe(`decimal_overflow: ${"9".repeat(40)}`);
+    expect(rejected(`${" ".repeat(30)}${"9".repeat(20)}`)).toBe(
+      `decimal_overflow: ${" ".repeat(30)}${"9".repeat(10)}`,
+    );
+    expect(decimalToMinor(`0,${"0".repeat(29)}1`, 2)).toBe(0);
+    expect(decimalToMinor("1.5", 12)).toBe(1_500_000_000_000);
+    expect(() => decimalToMinor("1", 13)).toThrow("Neplatné měřítko: 13");
+    expect(() => decimalToMinor("1", 1.5)).toThrow(RangeError);
+  });
 });

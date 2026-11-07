@@ -37,6 +37,23 @@ Playwright spouští `next start` jako přímý potomek (bez `pnpm` a bez `detac
 ukončí. PID běžících serverů zapisuje do `$TMPDIR/fakturan-e2e-pids/`. Když worker spadne,
 `globalTeardown` ukončí jen zapsané procesy, které jsou `next` s datovou složkou `fakturan-e2e-*`.
 
+Mutační testy (Stryker) běží po souborech. Každý soubor z `mutate` ve `stryker.config.json` má
+ve `stryker.map.json` seznam testů, které ho chrání, a běh pouští jen je:
+
+```bash
+pnpm run test:mutation:file -- src/lib/money.ts
+pnpm run test:mutation:file -- src/server/services/number-series.ts:1-232   # po rozsazích řádků
+pnpm run test:mutation:file -- src/lib/money.ts --incremental               # jen změněné mutanty
+pnpm run test:mutation:summary -- --core   # brána jádra: kód 1, když soubor jádra nemá 90 %
+pnpm run test:mutation:summary             # všechny soubory z mutate
+```
+
+Výsledky jsou v `reports/mutation/` (mimo git). Soubor, jehož běh by trval přes tři minuty,
+pusťte po rozsazích řádků, které dohromady pokryjí celý soubor. Souhrn pak vezme rozsahy místo
+starší zprávy celého souboru. `--incremental` znovu použije dřívější výsledky, i u statických
+mutantů, u kterých změnu nepozná. Čísla pro zprávu proto berte z plného běhu. Ekvivalentní
+mutant smí mít `// Stryker disable next-line <mutátor>: <důvod>`, vždy s důvodem.
+
 Formát zálohy v2 ještě nevyšel, takže se jeho otisk sloupců (`tests/fixtures/backup/columns-v2.json`)
 smí měnit. Před vydáním ho zmrazte. Každá další změna sloupců nebo tabulek zálohy pak zvedá
 `BACKUP_VERSION`, přidává `columns-v<n>.json` a krok `BACKUP_UPGRADES`, a nová tabulka nese

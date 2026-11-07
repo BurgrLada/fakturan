@@ -34,6 +34,7 @@
   "src/lib/safe-input/decimal.ts": ["tests/unit/decimal.property.test.ts"],
   "src/lib/safe-input/inflate.ts": ["tests/unit/safe-zip.test.ts"],
   "src/lib/safe-input/limits.ts": [
+    "tests/unit/safe-sniff.test.ts",
     "tests/unit/safe-csv.test.ts",
     "tests/unit/safe-xml.test.ts",
     "tests/unit/safe-zip.test.ts",
@@ -44,9 +45,21 @@
   "src/lib/safe-input/xlsx-reader.ts": ["tests/unit/xlsx-reader.test.ts"],
   "src/lib/safe-input/xml.ts": ["tests/unit/safe-xml.test.ts"],
   "src/lib/safe-input/zip.ts": ["tests/unit/safe-zip.test.ts"],
-  "src/server/backup/remap.ts": ["tests/backend/restore-hostile.test.ts"],
-  "src/server/isdoc/parse.ts": ["tests/unit/isdoc-parse.test.ts"],
-  "src/server/isdoc/rules.ts": ["tests/unit/isdoc-rules.test.ts"],
+  "src/server/backup/remap.ts": ["tests/unit/backup-remap.test.ts"],
+  "src/server/isdoc/parse.ts": [
+    "tests/unit/isdoc-parse.test.ts",
+    "tests/backend/isdoc-build.test.ts",
+    "tests/backend/isdoc-roundtrip.property.test.ts",
+    "tests/backend/isdoc-validate.test.ts",
+    "tests/backend/import-isdoc.test.ts"
+  ],
+  "src/server/isdoc/rules.ts": [
+    "tests/unit/isdoc-rules.test.ts",
+    "tests/backend/isdoc-build.test.ts",
+    "tests/backend/isdoc-roundtrip.property.test.ts",
+    "tests/backend/isdoc-validate.test.ts",
+    "tests/backend/import-isdoc.test.ts"
+  ],
   "src/server/jobs/queue.ts": [
     "tests/backend/jobs.test.ts",
     "tests/backend/heavy-jobs.test.ts",
