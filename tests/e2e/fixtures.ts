@@ -12,7 +12,13 @@ import * as schema from "@/server/db/schema";
 import type { Db } from "@/server/db";
 import { assertConsistent } from "../helpers/consistency";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
-import { forgetProcess, isFakturanNext, recordProcess } from "./process-registry";
+import {
+  currentRun,
+  forgetProcess,
+  isFakturanNext,
+  recordProcess,
+  RUN_ENV,
+} from "./process-registry";
 
 // The name a container reaches a test server on the host by.
 export const DOCKER_HOST_NAME = "host.docker.internal";
@@ -243,6 +249,7 @@ export const test = base.extend<{
         env: {
           ...process.env,
           DATA_DIR: dataDir,
+          [RUN_ENV]: currentRun(),
           BETTER_AUTH_URL: baseURL,
           BETTER_AUTH_SECRET: "e2e-secret-e2e-secret-e2e-secret-00",
           ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),

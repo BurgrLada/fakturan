@@ -7,7 +7,9 @@ import {
   forgetProcess,
   isFakturanNext,
   reapRecorded,
+  reapRun,
   recordProcess,
+  registryDir,
 } from "../e2e/process-registry";
 
 const children: ChildProcess[] = [];
@@ -80,7 +82,7 @@ describe("registr procesů e2e", () => {
     expect(reapRecorded(join(dir, "chybi"), () => true)).toEqual([]);
   });
 
-  test("[TST-004] isFakturanNext chce next v příkazu a DATA_DIR z fixture", () => {
+  test("[TST-004] isFakturanNext chce next v příkazu, DATA_DIR z fixture a tentýž běh", () => {
     const proc = registry();
     const fake = (pid: number, cmdline: string[], environ: string[]) => {
       mkdirSync(join(proc, String(pid)));
@@ -88,16 +90,50 @@ describe("registr procesů e2e", () => {
       writeFileSync(join(proc, String(pid), "environ"), `${environ.join("\0")}\0`);
     };
     const next = ["/usr/bin/node", "/repo/node_modules/next/dist/bin/next", "start"];
-    fake(1, next, ["PATH=/bin", "DATA_DIR=/tmp/fakturan-e2e-abc123"]);
-    fake(2, next, ["DATA_DIR=/srv/fakturan/data"]);
-    fake(3, ["/usr/bin/node", "server.js"], ["DATA_DIR=/tmp/fakturan-e2e-abc123"]);
-    fake(4, next, ["XDATA_DIR=/tmp/fakturan-e2e-x"]);
+    const ours = ["DATA_DIR=/tmp/fakturan-e2e-abc123", "FAKTURAN_E2E_RUN=run-a"];
+    fake(1, next, ["PATH=/bin", ...ours]);
+    fake(2, next, ["DATA_DIR=/srv/fakturan/data", "FAKTURAN_E2E_RUN=run-a"]);
+    fake(3, ["/usr/bin/node", "server.js"], ours);
+    fake(4, next, ["XDATA_DIR=/tmp/fakturan-e2e-x", "FAKTURAN_E2E_RUN=run-a"]);
+    fake(6, ["next-server (v16.4.3)"], ours);
+    fake(7, next, ["DATA_DIR=/tmp/fakturan-e2e-abc123", "FAKTURAN_E2E_RUN=run-b"]);
+    fake(8, next, ["DATA_DIR=/tmp/fakturan-e2e-abc123"]);
 
-    expect(isFakturanNext(1, proc)).toBe(true);
-    expect(isFakturanNext(2, proc)).toBe(false);
-    expect(isFakturanNext(3, proc)).toBe(false);
-    expect(isFakturanNext(4, proc)).toBe(false);
-    expect(isFakturanNext(5, proc)).toBe(false);
-    expect(isFakturanNext(process.pid)).toBe(false);
+    expect(isFakturanNext(1, "run-a", proc)).toBe(true);
+    expect(isFakturanNext(2, "run-a", proc)).toBe(false);
+    expect(isFakturanNext(3, "run-a", proc)).toBe(false);
+    expect(isFakturanNext(4, "run-a", proc)).toBe(false);
+    expect(isFakturanNext(5, "run-a", proc)).toBe(false);
+    expect(isFakturanNext(6, "run-a", proc)).toBe(true);
+    expect(isFakturanNext(7, "run-a", proc)).toBe(false);
+    expect(isFakturanNext(8, "run-a", proc)).toBe(false);
+    expect(isFakturanNext(process.pid, "run-a")).toBe(false);
+  });
+
+  test("[TST-004] úklid jednoho běhu nesáhne na servery souběžného běhu", async () => {
+    const root = registry();
+    const server = (run: string) => {
+      const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "next-server"], {
+        stdio: "ignore",
+        env: { ...process.env, DATA_DIR: join(root, `fakturan-e2e-${run}`), FAKTURAN_E2E_RUN: run },
+      });
+      children.push(child);
+      return child;
+    };
+    const a = server("run-a");
+    const b = server("run-b");
+    recordProcess(a.pid!, registryDir("run-a", root));
+    recordProcess(b.pid!, registryDir("run-b", root));
+    // Even a PID of the other run written into this run's registry stays alive.
+    recordProcess(b.pid!, registryDir("run-a", root));
+
+    expect(reapRun("run-a", root)).toEqual([a.pid]);
+    expect(await exited(a)).toBe("SIGTERM");
+    expect(process.kill(b.pid!, 0)).toBe(true);
+    expect(existsSync(registryDir("run-a", root))).toBe(false);
+    expect(readdirSync(registryDir("run-b", root))).toEqual([String(b.pid)]);
+
+    expect(reapRun("run-b", root)).toEqual([b.pid]);
+    expect(await exited(b)).toBe("SIGTERM");
   });
 });
