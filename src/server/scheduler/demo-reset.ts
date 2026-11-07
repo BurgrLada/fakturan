@@ -25,7 +25,7 @@ export async function resetDemo(now: Date): Promise<{ userId: string; invoices: 
   const hash = await demoPasswordHash();
   const current = demoUserId();
   if (current) purgeDemoAccount(SCHEDULER, current);
-  return seedDemoWith(now, hash);
+  return seedDemoWith(now, hash, "scheduler");
 }
 
 const RETRY_AFTER_MS = 3_600_000;

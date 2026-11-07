@@ -32,7 +32,7 @@ import { demoUserId } from "./mode";
 export const DEMO_ICOS = ["99900017", "99900025", "99900033", "99900041", "99900050"] as const;
 
 const MONTHS_BACK = 18;
-const SYSTEM: Actor = { userId: null, source: "system" };
+type SeedSource = "scheduler" | "system";
 
 type Line = DraftInput["lines"][number];
 type Document = { id: string; customer: string };
@@ -129,10 +129,10 @@ class Seeder {
   readonly today: CalendarDate;
   customers: string[] = [];
 
-  constructor(userId: string, now: Date) {
+  constructor(userId: string, now: Date, source: SeedSource) {
     this.userId = userId;
     this.now = now;
-    this.actor = { userId, source: "system" };
+    this.actor = { userId, source };
     this.today = calendarDateInPrague(now);
   }
 
@@ -375,10 +375,10 @@ function seedPlan(seeder: Seeder): void {
   runAt(seeder.now, () => ensureDashboards(seeder.actor));
 }
 
-function createDemoUser(passwordHash: string, now: Date): string {
+function createDemoUser(passwordHash: string, now: Date, actor: Actor): string {
   const email = env.DEMO_EMAIL!;
   const userId = randomUUID();
-  mutate(SYSTEM, "demo.seed", (tx, audit) => {
+  mutate(actor, "demo.seed", (tx, audit) => {
     tx.insert(user)
       .values({
         id: userId,
@@ -418,11 +418,13 @@ export function demoPasswordHash(): Promise<string> {
 export function seedDemoWith(
   now: Date,
   passwordHash: string,
+  source: SeedSource,
 ): { userId: string; invoices: number } {
   const existing = demoUserId();
   if (existing) return { userId: existing, invoices: invoiceCount(existing) };
-  const userId = createDemoUser(passwordHash, now);
-  const seeder = new Seeder(userId, now);
+  const actor: Actor = { userId: null, source };
+  const userId = createDemoUser(passwordHash, now, actor);
+  const seeder = new Seeder(userId, now, source);
   try {
     setUp(seeder);
     seedMonths(seeder);
@@ -430,7 +432,7 @@ export function seedDemoWith(
   } catch (error) {
     // A half-seeded account would count as existing until the next night; drop it so the next
     // tick seeds again.
-    purgeDemoAccount(SYSTEM, userId);
+    purgeDemoAccount(actor, userId);
     throw error;
   }
   return { userId, invoices: invoiceCount(userId) };
@@ -439,5 +441,5 @@ export function seedDemoWith(
 export async function seedDemo(now: Date): Promise<{ userId: string; invoices: number }> {
   const existing = demoUserId();
   if (existing) return { userId: existing, invoices: invoiceCount(existing) };
-  return seedDemoWith(now, await demoPasswordHash());
+  return seedDemoWith(now, await demoPasswordHash(), "system");
 }

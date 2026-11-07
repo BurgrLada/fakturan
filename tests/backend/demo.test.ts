@@ -393,6 +393,34 @@ describe("ukázka nezávisle na datu a selhání", () => {
     expect(invoicesOf(demoUserId()!).length).toBeGreaterThanOrEqual(40);
   });
 
+  test("[OPS-007] seed z plánovače se audituje jako plánovač, ze skriptu jako systém", async () => {
+    const sourcesOf = (userId: string) =>
+      new Set(
+        db
+          .select({ source: auditLog.source })
+          .from(auditLog)
+          .where(eq(auditLog.entityId, userId))
+          .all()
+          .concat(
+            db
+              .select({ source: auditLog.source })
+              .from(auditLog)
+              .where(eq(auditLog.ownerId, userId))
+              .all(),
+          )
+          .map((row) => row.source),
+      );
+
+    dropDemo();
+    current = new Date("2026-11-04T15:00:00Z");
+    await demoResetTask.run(current);
+    expect(sourcesOf(demoUserId()!)).toEqual(new Set(["scheduler"]));
+
+    dropDemo();
+    const { userId } = await seedDemo(current);
+    expect(sourcesOf(userId)).toEqual(new Set(["system"]));
+  });
+
   test("[OPS-007] zamčené cesty auth účet ukázky nezmění a ostatní relace neukončí", async () => {
     await seeded();
     const other = new Browser(auth as unknown as Auth);
