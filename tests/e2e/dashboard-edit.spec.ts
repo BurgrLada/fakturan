@@ -150,6 +150,52 @@ test("[DSH-001] Zpět v prohlížeči s neuloženými změnami se zeptá a Zruš
   await expect(page.getByTestId("dashboard-grid")).toBeVisible();
 });
 
+test("[DSH-001] bez Navigation API se Zpět s neuloženými změnami také zeptá", async ({
+  page,
+  freshApp,
+}) => {
+  // As in Firefox: no window.navigation, so entries carry no index the guard could read.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "navigation", { value: undefined, configurable: true });
+  });
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openEditor(page, baseURL);
+  expect(await page.evaluate(() => typeof (window as { navigation?: unknown }).navigation)).toBe(
+    "undefined",
+  );
+  const card = editCard(page, "Průměrná doba úhrady");
+  const { column } = await gridStep(page);
+  await dragBy(page, card.locator(".widget-drag"), column, 0);
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+
+  let warning = "";
+  page.once("dialog", (dialog) => {
+    warning = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.evaluate(() => history.back());
+  await expect.poll(() => warning).toBe("Rozložení není uložené. Opravdu odejít bez uložení?");
+  await page.waitForTimeout(500);
+  await expect(page).toHaveURL(/\/upravit$/);
+  await expect(page.getByRole("heading", { name: "Úpravy dashboardu", level: 1 })).toBeVisible();
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+  // Next keeps its own keys in the entry; the guard only adds to them.
+  const state = await page.evaluate(() => Object.keys((history.state as object | null) ?? {}));
+  expect(state).toEqual(expect.arrayContaining(["__NA", "fakturanEditor"]));
+
+  await page.waitForTimeout(1_100);
+  let again = "";
+  page.once("dialog", (dialog) => {
+    again = dialog.message();
+    void dialog.accept();
+  });
+  await page.evaluate(() => history.back());
+  await expect.poll(() => again).toBe("Rozložení není uložené. Opravdu odejít bez uložení?");
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await expect(page.getByTestId("dashboard-grid")).toBeVisible();
+});
+
 test("[DSH-001] Dopředu do editoru se změnami a Zrušit nechá adresu i obsah v souladu", async ({
   page,
   freshApp,

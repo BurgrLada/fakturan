@@ -74,68 +74,95 @@ function fromGrid(layout: Layout): LayoutItem[] {
 }
 
 // Back or Forward reaches the router before popstate: the editor's effects are already cleaned up
-// (the route goes hidden) when the event fires. So the guard lives at module level and remembers
-// the editor for a moment after its cleanup. A cancel steps back to the editor's own history entry,
-// by the distance between that entry and the one the browser moved to, and only the popstate that
-// lands there again is swallowed. The times are browser timing, not business time, so no clock.
+// (the route goes hidden) when the event fires. So the guard is a module listener that remembers
+// the editor for a moment after its cleanup and removes itself once that moment is over. A cancel
+// returns to the editor's own entry and only the popstate of that return trip is swallowed.
+// With the Navigation API the entries have indices, so the return goes the right way. Without it
+// (Firefox) the direction is unknown and Back, by far the usual one, is assumed. The times are
+// browser timing, not business time, so no clock.
 const LEAVE_GRACE_MS = 1_000;
 const RETURN_WAIT_MS = 1_000;
-type BackWatch = { dirty: () => boolean; index: number | null; cleanedAt: number | null };
+type BackWatch = {
+  dirty: () => boolean;
+  key: string;
+  index: number | null;
+  cleanedAt: number | null;
+};
 let backWatch: BackWatch | null = null;
-let returning: { index: number; timer: ReturnType<typeof setTimeout> } | null = null;
-let backGuardInstalled = false;
+let returning: { watch: BackWatch; timer: ReturnType<typeof setTimeout> } | null = null;
+let listening = false;
 
 type NavigationEntry = { index: number };
-function entryIndex(): number | null {
+function navigationIndex(): number | null {
   const navigation = (window as { navigation?: { currentEntry?: NavigationEntry | null } })
     .navigation;
-  const fromNavigation = navigation?.currentEntry?.index;
-  if (typeof fromNavigation === "number" && fromNavigation >= 0) return fromNavigation;
-  const own = (history.state as { fakturanIndex?: unknown } | null)?.fakturanIndex;
-  return typeof own === "number" ? own : null;
+  const index = navigation?.currentEntry?.index;
+  return typeof index === "number" && index >= 0 ? index : null;
 }
 
-// Without the Navigation API the entry carries its own number next to the router's state; a fresh
-// entry is the last one, so the length of the history gives it.
-function markEntry(): number | null {
-  const known = entryIndex();
-  if (known !== null) return known;
-  const index = history.length - 1;
-  history.replaceState({ ...(history.state as object | null), fakturanIndex: index }, "");
-  return index;
+const editorKey = () => (history.state as { fakturanEditor?: unknown } | null)?.fakturanEditor;
+
+// Added to the router's own keys in the entry, never in their place.
+function markEntry(key: string): void {
+  if (editorKey() === key) return;
+  history.replaceState({ ...(history.state as object | null), fakturanEditor: key }, "");
 }
 
-function stopReturning() {
+function listen(): void {
+  if (listening) return;
+  // Capturing on window runs before the router's own popstate listener.
+  window.addEventListener("popstate", guardHistory, true);
+  listening = true;
+}
+
+function release(watch: BackWatch | null): void {
+  if (watch && backWatch === watch) backWatch = null;
+  if (!backWatch && !returning && listening) {
+    window.removeEventListener("popstate", guardHistory, true);
+    listening = false;
+  }
+}
+
+function stopReturning(): void {
   if (!returning) return;
-  clearTimeout(returning.timer);
+  const { watch, timer } = returning;
+  clearTimeout(timer);
   returning = null;
+  if (watch.cleanedAt !== null) release(watch);
 }
 
-function guardHistory(event: PopStateEvent) {
+// Landing on the editor's entry again: by its index, else by the key the entry carries; without
+// either (the router replaced the entry) the first popstate after the step is the return.
+function landsOnEditor(watch: BackWatch): boolean {
+  const index = navigationIndex();
+  if (index !== null && watch.index !== null) return index === watch.index;
+  const key = editorKey();
+  return key === undefined || key === watch.key;
+}
+
+function guardHistory(event: PopStateEvent): void {
   if (returning) {
-    const expected = returning.index;
+    const { watch } = returning;
+    const back = landsOnEditor(watch);
     stopReturning();
-    if (entryIndex() === expected) {
+    if (back) {
       event.stopImmediatePropagation();
       return;
     }
   }
   const watch = backWatch;
-  if (!watch) return;
+  if (!watch) return release(null);
   if (watch.cleanedAt !== null && Date.now() - watch.cleanedAt > LEAVE_GRACE_MS) {
-    backWatch = null;
-    return;
+    return release(watch);
   }
-  const target = entryIndex();
-  if (!watch.dirty() || watch.index === null || target === null || target === watch.index) return;
-  if (window.confirm(T.leaveConfirm)) {
-    backWatch = null;
-    return;
-  }
+  if (!watch.dirty() || editorKey() === watch.key) return;
+  const target = navigationIndex();
+  if (target !== null && target === watch.index) return;
+  if (window.confirm(T.leaveConfirm)) return release(watch);
   event.stopImmediatePropagation();
   // If the browser never answers (no entry that far), nothing is left waiting to swallow.
-  returning = { index: watch.index, timer: setTimeout(stopReturning, RETURN_WAIT_MS) };
-  history.go(watch.index - target);
+  returning = { watch, timer: setTimeout(stopReturning, RETURN_WAIT_MS) };
+  history.go(target !== null && watch.index !== null ? watch.index - target : 1);
 }
 
 function useLeaveWarning(dirty: boolean) {
@@ -144,16 +171,19 @@ function useLeaveWarning(dirty: boolean) {
     dirtyRef.current = dirty;
   });
   useEffect(() => {
-    const watch: BackWatch = { dirty: () => dirtyRef.current, index: markEntry(), cleanedAt: null };
-    backWatch = watch;
-    if (!backGuardInstalled) {
-      // Capturing on window runs before the router's own popstate listener.
-      window.addEventListener("popstate", guardHistory, true);
-      backGuardInstalled = true;
-    }
-    const leave = () => {
-      if (backWatch === watch) backWatch = null;
+    const known = editorKey();
+    // Only tells this entry apart; randomUUID would need a secure context, which HTTP has not.
+    const key = typeof known === "string" ? known : `${Date.now()}-${Math.random()}`;
+    markEntry(key);
+    const watch: BackWatch = {
+      dirty: () => dirtyRef.current,
+      key,
+      index: navigationIndex(),
+      cleanedAt: null,
     };
+    backWatch = watch;
+    listen();
+    const leave = () => release(watch);
     const warn = (event: BeforeUnloadEvent) => {
       if (dirtyRef.current) event.preventDefault();
     };
@@ -180,6 +210,10 @@ function useLeaveWarning(dirty: boolean) {
     document.addEventListener("click", guardLink, true);
     return () => {
       watch.cleanedAt = Date.now();
+      // The listener and the editor's state go once a late Back can no longer belong to it.
+      setTimeout(() => {
+        if (returning?.watch !== watch) release(watch);
+      }, LEAVE_GRACE_MS + 50);
       dropGuard();
       window.removeEventListener("beforeunload", warn);
       document.removeEventListener("click", guardLink, true);
