@@ -88,6 +88,8 @@ Na `[R-n]` se odkazují úkoly a čísla platí jen v tomto plánu. Rozhodnutí 
   - Nová tabulka `mail_look`: `user_id` PK, `layout`, výchozí `'b4'`, `intro` a `signature`, text nejvýš 2 000 znaků nebo `NULL`, `logo_mode` (`'supplier' | 'custom' | 'none'`, výchozí `'supplier'`), `logo_file_id` jako ref na `file`, `updated_at`.
   - `FILE_KINDS` dostane `mail_logo`, `sent_html` a `sent_image`. `email_log` dostane `html_file_id` a `html_images` (JSON `{ cid, fileId }[]`, v registru zálohy `json-ids`).
   - Úvod je odstavec nad textem zprávy, podpis pod ním. Prázdný podpis znamená jméno dodavatele.
+    - *Upřesnění po Task 9 (záměrná odchylka):* prázdný podpis znamená žádný blok podpisu. Výchozí šablony už končí „S pozdravem {{dodavatel}}“, takže doplněné jméno dodavatele by se zdvojilo. Test Task 10 to ověřuje místo původního znění.
+    - Logo v pásu B4 leží na světlé destičce (bílá, odsazení, malé zaoblení), aby tmavé logo nezaniklo na tmavém akcentu.
   - Bez loga se v hlavičce ukáže jméno dodavatele.
   - HTML se postaví jednou při první přípravě zprávy a archivuje jako `sent_html`, QR a logo jako `sent_image`, stejně jako `sent_pdf`. Další pokus čte jen archiv, takže pozdější změna vzhledu nebo loga nezmění zprávu ve frontě. Historie nabídne stažení HTML jako přílohu.
   - Automatické zprávy používají tentýž vzhled.

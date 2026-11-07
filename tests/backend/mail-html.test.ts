@@ -255,6 +255,15 @@ describe("HTML e-mail", () => {
     }
   });
 
+  test("[MAIL-009] logo v pásu B4 leží na světlé destičce", async () => {
+    const { logo } = await images();
+    const { html } = renderEmailHtml(input({ logo, accent: "#111111" }));
+
+    expect(html).toMatch(
+      /<td bgcolor="#ffffff" style="background-color:#ffffff;padding:[^"]*"><img[^>]*src="cid:logo@fakturan"/,
+    );
+  });
+
   test("[TST-015] QR z cid:qr@fakturan dekóduje stejný payload jako QR v PDF", async () => {
     for (const doc of [F.short, F.eur]) {
       const view = await buildInvoiceView(doc, {

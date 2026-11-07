@@ -22,6 +22,7 @@ export const SIZES = {
   tintPadding: "16px",
   radius: "8px",
   logoHeight: 40,
+  plate: { padding: "6px 10px", radius: "6px" },
   logoMaxWidth: 240,
   rule: { width: 56, height: 3 },
   qr: { b2: 112, b3: 104, b5: 132 },

@@ -140,10 +140,17 @@ export function renderEmailHtml(input: EmailHtmlInput): EmailHtml {
   const dueDate = summary?.dueDate ? escapeHtml(summary.dueDate) : null;
   const ico = input.supplierIco ? `${labels.ico} ${escapeHtml(input.supplierIco)}` : null;
   const parts: Parts = {
-    header: (color, gap = 16) =>
-      logoTag
-        ? `<div style="margin-bottom:${gap}px">${logoTag("")}</div>`
-        : `<div style="${TYPE.name};color:${color};margin-bottom:${gap}px">${name}</div>`,
+    header: (color, place = "page") => {
+      const gap = place === "band" ? 0 : 16;
+      if (!logoTag) {
+        return `<div style="${TYPE.name};color:${color};margin-bottom:${gap}px">${name}</div>`;
+      }
+      // A plate keeps a dark logo visible on a dark accent band.
+      if (place === "band") {
+        return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${COLORS.card}" style="background-color:${COLORS.card};padding:${SIZES.plate.padding};border-radius:${SIZES.plate.radius}">${logoTag("")}</td></tr></table>`;
+      }
+      return `<div style="margin-bottom:${gap}px">${logoTag("")}</div>`;
+    },
     centeredHeader: logoTag
       ? `<div style="margin-bottom:16px">${logoTag(";margin:0 auto")}</div>`
       : `<div style="${TYPE.name};color:${COLORS.ink};margin-bottom:16px">${name}</div>`,

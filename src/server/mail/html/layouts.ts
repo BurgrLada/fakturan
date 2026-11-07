@@ -11,7 +11,7 @@ export function isMailLayout(value: string): value is MailLayout {
 
 // Every string here is already escaped HTML; layouts only arrange it.
 export type Parts = {
-  header: (color: string, gap?: number) => string;
+  header: (color: string, place?: "page" | "band") => string;
   centeredHeader: string;
   message: string;
   signature: string;
@@ -134,7 +134,7 @@ function b4(p: Parts): string {
   const title = p.title
     ? `<td align="right" style="text-align:right;vertical-align:middle;color:${text};font-size:15px">${p.title}</td>`
     : "";
-  const band = `<tr><td bgcolor="${background}" style="background-color:${background};color:${text};padding:${SIZES.bandPadding};border-radius:${SIZES.radius} ${SIZES.radius} 0 0"><table ${TABLE} width="100%"><tr><td style="vertical-align:middle;color:${text}">${p.header(text, 0)}</td>${title}</tr></table></td></tr>`;
+  const band = `<tr><td bgcolor="${background}" style="background-color:${background};color:${text};padding:${SIZES.bandPadding};border-radius:${SIZES.radius} ${SIZES.radius} 0 0"><table ${TABLE} width="100%"><tr><td style="vertical-align:middle;color:${text}">${p.header(text, "band")}</td>${title}</tr></table></td></tr>`;
   const under = joinDots(p.dueOn, p.variableSymbol && `${p.labels.vs} ${p.variableSymbol}`);
   const content = [
     p.message,
