@@ -679,6 +679,37 @@ describe("hesla a relace", () => {
     expect(auditRows("auth.session_revoke").length).toBe(revokesBefore + 1);
   });
 
+  test("[AUTH-011] IP relace se odvodí stejně jako v auditu, podvržený začátek hlavičky se nepřevezme", async () => {
+    const proxied = createAuth(testEnv({ TRUST_PROXY: "1" }));
+    await createAdmin(plainAuth);
+    const signIn = (auth: Auth, forwarded: string) =>
+      auth.handler(
+        new Request(`${BASE}/api/auth/sign-in/email`, {
+          method: "POST",
+          headers: {
+            origin: BASE,
+            "content-type": "application/json",
+            "x-forwarded-for": forwarded,
+          },
+          body: JSON.stringify({ email: "admin@example.cz", password: PASSWORD }),
+        }),
+      );
+    const ips = () =>
+      db
+        .select({ ip: session.ipAddress })
+        .from(session)
+        .orderBy(session.createdAt)
+        .all()
+        .map((row) => row.ip);
+    db.delete(session).run();
+
+    expect((await signIn(proxied, "6.6.6.6, 203.0.113.7")).status).toBe(200);
+    expect((await signIn(proxied, "2001:db8:1:2::5")).status).toBe(200);
+    expect((await signIn(plainAuth, "6.6.6.6")).status).toBe(200);
+
+    expect(ips()).toEqual(["203.0.113.7", "2001:db8:1:2::5", ""]);
+  });
+
   test("[AUTH-011] ukončení jedné a všech relací je v auditu po jednom záznamu", async () => {
     const a = await createAdmin(plainAuth);
     const b = new Browser(plainAuth);

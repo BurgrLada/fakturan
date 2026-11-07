@@ -23,7 +23,7 @@ import {
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "./passwords";
 import { enabledProviders, socialProviders } from "./providers";
 import { enforceAuthRateLimit } from "./rate-limits";
-import { linkRequestHeaders, webActor } from "./request-actor";
+import { clientIp, linkRequestHeaders, webActor } from "./request-actor";
 import { canRegister, INVITE_COOKIE, isSignupOpen } from "./signup-guard";
 
 const DAY_SECONDS = 86_400;
@@ -207,9 +207,9 @@ export function createAuth(env: Env) {
     rateLimit: { enabled: false },
     advanced: {
       useSecureCookies: env.BETTER_AUTH_URL.startsWith("https://"),
-      ipAddress: env.TRUST_PROXY
-        ? { ipAddressHeaders: ["x-forwarded-for"] }
-        : { disableIpTracking: true },
+      // Better Auth's own reading (single-hop header only, IPv6 cut to /64) differs from the audit's;
+      // the session.create hook stores clientIp instead.
+      ipAddress: { disableIpTracking: true },
     },
     trustedOrigins: enabledProviders(env).includes("apple") ? ["https://appleid.apple.com"] : [],
     onAPIError: { errorURL: "/prihlaseni" },
@@ -303,6 +303,12 @@ export function createAuth(env: Env) {
         },
       },
       session: {
+        create: {
+          before: async (created, ctx) => {
+            const headers = ctx?.headers ?? ctx?.request?.headers;
+            return { data: { ...created, ipAddress: (headers && clientIp(headers, env)) ?? "" } };
+          },
+        },
         delete: { after: async (deleted, ctx) => auditSessionEnd(ctx, env, deleted) },
       },
     },
