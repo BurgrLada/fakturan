@@ -19,7 +19,7 @@ describe("provozní soubory", () => {
       "format:check",
       "pnpm run lint",
       "pnpm run typecheck",
-      "pnpm test",
+      "vitest run --project unit",
       "playwright install",
       "test:e2e",
       "test:coverage-spec",
@@ -28,6 +28,24 @@ describe("provozní soubory", () => {
       expect(ci).toContain(step);
     }
     expect(ci).not.toMatch(/deploy/i);
+  });
+
+  test("[TST-011] CI pouští backend po šesti shardech bez pdf-designs a pdf-designs po čtyřech částech", () => {
+    const ci = read(".github/workflows/ci.yml");
+    for (let n = 1; n <= 6; n += 1) {
+      expect(ci).toContain(
+        `vitest run --project backend --shard=${n}/6 --exclude tests/backend/pdf-designs.test.ts`,
+      );
+    }
+    expect(ci).not.toMatch(/--shard=\d+\/4/);
+    for (const part of [
+      "registr designů",
+      "vizuální regrese",
+      "barvy vystaveného dokladu",
+      "náhled designu",
+    ]) {
+      expect(ci).toContain(`vitest run tests/backend/pdf-designs.test.ts -t "${part}"`);
+    }
   });
 
   test("[SEC-009] CI hlídá závislosti s vysokou závažností", () => {

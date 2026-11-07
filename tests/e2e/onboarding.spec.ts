@@ -118,3 +118,33 @@ test("[SET-002] nový účet vidí v UI, co doplnit před vystavením", async ({
   await summary.getByRole("link", { name: "Doplňte u dodavatele: IČO" }).click();
   await expect(page.getByText("Před vystavením faktury doplňte:")).toBeVisible();
 });
+
+test("[SET-001] krok 4 Logo jde přeskočit a dodavatel zůstane bez loga", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/pruvodce`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("IČO").fill("27082440");
+  await page.getByRole("button", { name: "Načíst z ARES" }).click();
+  await expect(page.getByLabel("Jméno nebo firma")).toHaveValue("Alza.cz a.s.");
+  await page.getByRole("button", { name: "Uložit a pokračovat" }).click();
+  await expect(page.getByText("Krok 2 z 5")).toBeVisible();
+  await page.getByRole("button", { name: "Přeskočit krok" }).click();
+  await expect(page.getByText("Krok 3 z 5")).toBeVisible();
+  await page.getByRole("button", { name: "Přeskočit krok" }).click();
+
+  await expect(page.getByText("Krok 4 z 5")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Logo", level: 2, exact: true })).toBeVisible();
+  await expect(page.getByLabel("Logo na fakturu")).toBeVisible();
+  await expect(page.getByText("Nenahráno")).toBeVisible();
+  await page.getByRole("button", { name: "Přeskočit krok" }).click();
+  await expect(page.getByText("Krok 5 z 5")).toBeVisible();
+
+  await page.goto(`${freshApp.baseURL}/nastaveni/dodavatel`);
+  await expect(page.getByLabel("Jméno nebo firma")).toHaveValue("Alza.cz a.s.");
+  await expect(page.getByLabel("Logo na fakturu")).toBeVisible();
+  await expect(page.getByRole("img", { name: "Logo na fakturu" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Odebrat" })).toHaveCount(0);
+});

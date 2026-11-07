@@ -12,6 +12,7 @@ import * as schema from "@/server/db/schema";
 import type { Db } from "@/server/db";
 import { assertConsistent } from "../helpers/consistency";
 import { startSmtp, type TestSmtp } from "../helpers/smtp";
+import { forgetProcess, isFakturanNext, recordProcess } from "./process-registry";
 
 // The name a container reaches a test server on the host by.
 export const DOCKER_HOST_NAME = "host.docker.internal";
@@ -47,6 +48,39 @@ async function waitForReady(url: string, child: ChildProcess) {
     await new Promise((r) => setTimeout(r, 200));
   }
   throw new Error(`Aplikace nenaběhla na ${url}`);
+}
+
+// R-23: the server runs as a direct child, so its PID is the server itself and nothing outlives it
+// unnoticed; a crashed worker leaves the PID in the registry for globalTeardown.
+const NEXT_BIN = join(process.cwd(), "node_modules", "next", "dist", "bin", "next");
+const KILL_AFTER_MS = 5_000;
+const servers = new Set<ChildProcess>();
+let signalsHandled = false;
+
+function stopServersOnSignal() {
+  if (signalsHandled) return;
+  signalsHandled = true;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      for (const child of servers) {
+        if (child.pid && isFakturanNext(child.pid)) child.kill("SIGTERM");
+      }
+      // Without another listener, ours would have swallowed the default exit.
+      if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+    });
+  }
+}
+
+async function stopServer(child: ChildProcess) {
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    child.kill("SIGTERM");
+    const timer = setTimeout(() => child.kill("SIGKILL"), KILL_AFTER_MS);
+    await exited;
+    clearTimeout(timer);
+  }
+  servers.delete(child);
+  if (child.pid) forgetProcess(child.pid);
 }
 
 async function waitForContainer(url: string) {
@@ -200,32 +234,38 @@ export const test = base.extend<{
     const dataDir = mkdtempSync(join(tmpdir(), "fakturan-e2e-"));
     const port = await freePort();
     const baseURL = `http://127.0.0.1:${port}`;
-    const child = spawn("pnpm", ["exec", "next", "start", "-p", String(port), "-H", "127.0.0.1"], {
-      stdio: "ignore",
-      detached: true,
-      env: {
-        ...process.env,
-        DATA_DIR: dataDir,
-        BETTER_AUTH_URL: baseURL,
-        BETTER_AUTH_SECRET: "e2e-secret-e2e-secret-e2e-secret-00",
-        ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
-        ARES_BASE_URL: ares.url,
-        CNB_BASE_URL: cnb.url,
-        SCHEDULER_TICK_SECONDS: "1",
-        ...(allowPrivateMail && { ALLOW_PRIVATE_MAIL_HOSTS: "1" }),
-        ...(smtp && {
-          SMTP_HOST: "127.0.0.1",
-          SMTP_PORT: String(smtp.port),
-          SMTP_FROM: "fakturan@example.cz",
-        }),
+    stopServersOnSignal();
+    const child = spawn(
+      process.execPath,
+      [NEXT_BIN, "start", "-p", String(port), "-H", "127.0.0.1"],
+      {
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          DATA_DIR: dataDir,
+          BETTER_AUTH_URL: baseURL,
+          BETTER_AUTH_SECRET: "e2e-secret-e2e-secret-e2e-secret-00",
+          ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+          ARES_BASE_URL: ares.url,
+          CNB_BASE_URL: cnb.url,
+          SCHEDULER_TICK_SECONDS: "1",
+          ...(allowPrivateMail && { ALLOW_PRIVATE_MAIL_HOSTS: "1" }),
+          ...(smtp && {
+            SMTP_HOST: "127.0.0.1",
+            SMTP_PORT: String(smtp.port),
+            SMTP_FROM: "fakturan@example.cz",
+          }),
+        },
       },
-    });
+    );
+    servers.add(child);
+    if (child.pid) recordProcess(child.pid);
     try {
       await waitForReady(baseURL, child);
       await use({ baseURL, dataDir, smtp, cnb });
       assertDataDirConsistent(dataDir);
     } finally {
-      process.kill(-child.pid!, "SIGTERM");
+      await stopServer(child);
       ares.close();
       cnb.close();
       await smtp?.stop();

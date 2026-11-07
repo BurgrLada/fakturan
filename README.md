@@ -17,6 +17,24 @@ Kontroly: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`,
 `pnpm test:e2e` (potřebuje `pnpm exec playwright install chromium`), `pnpm test:coverage-spec`,
 `pnpm build`.
 
+Testy jdou pustit i po částech, každá doběhne do tří minut (stejně jako v CI):
+
+```bash
+pnpm exec vitest run --project unit
+pnpm exec vitest run --project backend --shard=1/6 --exclude tests/backend/pdf-designs.test.ts
+# … až --shard=6/6
+pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "registr designů"
+pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "vizuální regrese"
+pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "barvy vystaveného dokladu"
+pnpm exec vitest run tests/backend/pdf-designs.test.ts -t "náhled designu"
+pnpm build
+pnpm exec playwright test <soubor>
+```
+
+Playwright spouští `next start` jako přímý potomek (bez `pnpm` a bez `detached`) a po testu ho
+ukončí. PID běžících serverů zapisuje do `$TMPDIR/fakturan-e2e-pids/`. Když worker spadne,
+`globalTeardown` ukončí jen zapsané procesy, které jsou `next` s datovou složkou `fakturan-e2e-*`.
+
 Formát zálohy v2 ještě nevyšel, takže se jeho otisk sloupců (`tests/fixtures/backup/columns-v2.json`)
 smí měnit. Před vydáním ho zmrazte. Každá další změna sloupců nebo tabulek zálohy pak zvedá
 `BACKUP_VERSION`, přidává `columns-v<n>.json` a krok `BACKUP_UPGRADES`, a nová tabulka nese
