@@ -53,12 +53,13 @@ const base = {
   ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
 };
 for (const [key, value] of Object.entries(base)) vi.stubEnv(key, value);
-const failing = vi.hoisted(() => ({ plan: false }));
+const failing = vi.hoisted(() => ({ plan: false, attempts: 0 }));
 vi.mock("@/server/services/recurring", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/services/recurring")>();
   return {
     ...actual,
     saveRecurring: (...args: Parameters<typeof actual.saveRecurring>) => {
+      failing.attempts += 1;
       if (failing.plan) throw new Error("plán selhal");
       return actual.saveRecurring(...args);
     },
@@ -358,6 +359,38 @@ describe("ukázka nezávisle na datu a selhání", () => {
 
     const { userId } = await seedDemo(NOW);
     expect(invoicesOf(userId).length).toBeGreaterThanOrEqual(40);
+  });
+
+  test("[OPS-007] po selhání seedu plánovač zkusí ukázku znovu až za hodinu", async () => {
+    dropDemo();
+    const start = new Date("2026-11-04T12:00:00Z");
+    const at = (minutes: number) => new Date(start.getTime() + minutes * 60_000);
+    failing.attempts = 0;
+    failing.plan = true;
+    try {
+      current = start;
+      await expect(demoResetTask.run(current)).rejects.toThrow("plán selhal");
+      for (const minutes of [1, 2, 30, 59]) {
+        current = at(minutes);
+        await expect(demoResetTask.run(current)).resolves.toBeUndefined();
+      }
+      expect(failing.attempts).toBe(1);
+
+      current = at(60);
+      await expect(demoResetTask.run(current)).rejects.toThrow("plán selhal");
+      expect(failing.attempts).toBe(2);
+    } finally {
+      failing.plan = false;
+    }
+
+    current = at(61);
+    await demoResetTask.run(current);
+    expect(failing.attempts).toBe(2);
+    expect(demoUserId()).toBeNull();
+
+    current = at(120);
+    await demoResetTask.run(current);
+    expect(invoicesOf(demoUserId()!).length).toBeGreaterThanOrEqual(40);
   });
 
   test("[OPS-007] zamčené cesty auth účet ukázky nezmění a ostatní relace neukončí", async () => {

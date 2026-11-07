@@ -28,16 +28,29 @@ export async function resetDemo(now: Date): Promise<{ userId: string; invoices: 
   return seedDemoWith(now, hash);
 }
 
+const RETRY_AFTER_MS = 3_600_000;
+
+// Process memory: a seed that fails for a lasting reason is tried and reported once an hour,
+// not on every tick. A restart may try once more early.
+let failedAt: number | null = null;
+
+async function attemptReset(now: Date): Promise<void> {
+  if (failedAt !== null && now.getTime() - failedAt < RETRY_AFTER_MS) return;
+  try {
+    await resetDemo(now);
+    failedAt = null;
+  } catch (error) {
+    failedAt = now.getTime();
+    throw error;
+  }
+}
+
 // A missing demo account is seeded at once, so a fresh demo volume needs no manual step.
 export const demoResetTask: TickTask = {
   name: "demo-reset",
   async run(now) {
     if (!isDemo()) return;
     const current = demoUserId();
-    if (!current) {
-      await resetDemo(now);
-      return;
-    }
-    if (resetDue(now, current)) await resetDemo(now);
+    if (!current || resetDue(now, current)) await attemptReset(now);
   },
 };
