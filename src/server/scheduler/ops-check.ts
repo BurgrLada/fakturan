@@ -1,13 +1,12 @@
 import "server-only";
-import { readdirSync, statfsSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
+import { statfsSync } from "node:fs";
+import { and, asc, count, eq, inArray, sql, sum } from "drizzle-orm";
 import { isWorkingDay } from "@/lib/czech-holidays";
 import { expectedListDate } from "@/lib/fx";
 import { addDays } from "@/lib/invoice";
 import { calendarDateInPrague, type CalendarDate } from "@/lib/number-format";
 import { db } from "../db";
-import { exchangeRate, HEAVY_JOB_KINDS, job, schedulerState } from "../db/schema";
+import { exchangeRate, file, HEAVY_JOB_KINDS, job, schedulerState } from "../db/schema";
 import { env } from "../env";
 import { reportFailure } from "./report";
 import type { TickTask } from "./tick";
@@ -78,26 +77,17 @@ export function heavyQueue(): { queued: number; runningSince: Date | null } {
   return { queued, runningSince: oldestRunningHeavy()?.since ?? null };
 }
 
-function directoryBytes(dir: string): number {
-  let total = 0;
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-  for (const entry of entries) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) total += directoryBytes(path);
-    else if (entry.isFile()) total += statSync(path, { throwIfNoEntry: false })?.size ?? 0;
-  }
-  return total;
-}
-
+// Summed from the file rows, not by walking files/: a walk of a large volume would block the shared
+// process for every request. Blobs without a row (temp folders, orphans) are not counted.
 export function measureFiles(now: Date): number {
   const cached = shared.__fakturanFilesSize;
   if (cached && now.getTime() - cached.at < HOUR_MS) return cached.bytes;
-  const bytes = directoryBytes(join(env.DATA_DIR, "files"));
+  const bytes = Number(
+    db
+      .select({ bytes: sum(file.size) })
+      .from(file)
+      .get()?.bytes ?? 0,
+  );
   shared.__fakturanFilesSize = { bytes, at: now.getTime() };
   return bytes;
 }

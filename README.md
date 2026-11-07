@@ -386,9 +386,11 @@ Noční zálohy databáze leží na stejném svazku jako data. Kopírujte je pra
 vezme data i zálohy. Složka `files/` v noční záloze není, kopírujte ji spolu s ní.
 
 Odeslaná PDF, ISDOC a HTML zprávy (`files/`) se nikdy nemažou: tvoří historii odeslání a účetní
-doklad se uchovává 10 let. Kvóta na účet není. Velikost `files/` a volné místo ukazuje Administrace
-a plánovač hlásí volné místo pod 2 GiB nebo pod 10 % do monitoringu. Exporty a zálohy účtů zmizí
-po 7 dnech, nepotvrzené importy a mezisoubory obnovy se uklízejí samy.
+doklad se uchovává 10 let. Kvóta na účet není. Velikost `files/` a volné místo ukazuje Administrace;
+velikost je součet evidovaných souborů z databáze, přepočítaný nejvýš jednou za hodinu, takže
+mezisoubory rozpracovaných importů a obnov v ní nejsou. Plánovač hlásí volné místo pod 2 GiB nebo
+pod 10 % do monitoringu. Exporty a zálohy účtů zmizí po 7 dnech, nepotvrzené importy a mezisoubory
+obnovy se uklízejí samy.
 
 ## Postup vydání
 

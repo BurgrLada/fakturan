@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
-import { exchangeRate, job, schedulerState, user } from "@/server/db/schema";
+import { exchangeRate, file, job, schedulerState, user } from "@/server/db/schema";
 import { checkHealth } from "@/server/health";
 import {
   measureFiles,
@@ -67,6 +68,20 @@ function heavyJob(id: string, status: "running" | "pending", since: Date, userId
       maxAttempts: 1,
       createdAt: since,
       updatedAt: since,
+    })
+    .run();
+}
+
+function storedFile(userId: string, size: number) {
+  db.insert(file)
+    .values({
+      id: randomUUID(),
+      userId,
+      kind: "sent_pdf",
+      mimeType: "application/pdf",
+      name: "doklad.pdf",
+      size,
+      createdAt: new Date("2026-11-01T00:00:00Z"),
     })
     .run();
 }
@@ -222,10 +237,8 @@ describe("stav instance", () => {
   test("[ADM-008] stav instance ukáže velikost souborů, volné místo, poslední lístek a frontu", () => {
     const now = new Date("2026-11-03T10:00:00Z");
     setClockForTests({ now: () => now });
-    const files = join(dataDir, "files", "u1", "ab");
-    mkdirSync(files, { recursive: true });
-    writeFileSync(join(files, "a.pdf"), Buffer.alloc(3000));
-    writeFileSync(join(dataDir, "files", "u1", "b.pdf"), Buffer.alloc(1000));
+    storedFile(OWNER_ID, 3000);
+    storedFile("adm", 1000);
     seedRate("2026-10-30");
     seedRate("2026-11-02");
     const since = new Date(now.getTime() - 5 * MINUTE);
@@ -246,12 +259,28 @@ describe("stav instance", () => {
 
   test("[ADM-008] velikost souborů se přepočítá nejvýš jednou za hodinu", () => {
     const now = new Date("2026-11-03T10:00:00Z");
-    const dir = join(dataDir, "files", "u2");
-    mkdirSync(dir, { recursive: true });
     const before = measureFiles(now);
-    writeFileSync(join(dir, "c.pdf"), Buffer.alloc(500));
+    storedFile(OWNER_ID, 500);
 
     expect(measureFiles(new Date(now.getTime() + 59 * MINUTE))).toBe(before);
     expect(measureFiles(new Date(now.getTime() + 61 * MINUTE))).toBe(before + 500);
+  });
+
+  test("[ADM-008] velikost souborů se bere z databáze, svazek se neprochází", () => {
+    const now = new Date("2026-11-03T10:00:00Z");
+    const stray = join(dataDir, "files", "cizi");
+    mkdirSync(stray, { recursive: true });
+    writeFileSync(join(stray, "bez-zaznamu.bin"), Buffer.alloc(7000));
+    resetOpsForTests();
+
+    const total = measureFiles(now);
+
+    expect(total).toBe(
+      db
+        .select()
+        .from(file)
+        .all()
+        .reduce((sum, row) => sum + row.size, 0),
+    );
   });
 });
