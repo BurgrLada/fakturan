@@ -182,7 +182,7 @@ const CREDIT_STATUSES = sql.raw(ACTIVE_CREDIT_STATUSES.map((status) => `'${statu
 // R-28: dueSql is today's balance, so the state on a past day is rebuilt from history: payments,
 // corrections and the paid advance up to that day. A later cancellation hides the document, the
 // cancellation itself carries no date. The unary + keeps the dates out of index choice: without
-// statistics SQLite would range-scan the whole account by date for every row (plan 9, Task 12).
+// statistics SQLite would range-scan the whole account by date for every row.
 export function unpaidAsOf(q: Reader, ownerId: string, date: CalendarDate): UnpaidRow[] {
   if (!isCalendarDate(date)) throw new RangeError(`Neplatné datum: ${date}`);
   const credits = sql<number>`(SELECT coalesce(sum(n.total_minor), 0) FROM invoice AS n

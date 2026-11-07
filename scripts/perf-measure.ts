@@ -64,6 +64,9 @@ function argument(name: string, fallback: number): number {
 const documents = argument("documents", 30_000);
 const customers = 200;
 const dir = mkdtempSync(join(tmpdir(), "fakturan-perf-"));
+// The database grows to hundreds of MB: it goes on any exit, a failed or interrupted run included.
+process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => process.exit(130));
 process.env.DATA_DIR = dir;
 process.env.DATABASE_PATH = join(dir, "perf.db");
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
@@ -405,4 +408,3 @@ for (const row of rows) {
 }
 
 sqlite.close();
-rmSync(dir, { recursive: true, force: true });

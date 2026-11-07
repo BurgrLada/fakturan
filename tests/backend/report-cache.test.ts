@@ -93,7 +93,6 @@ describe("razítko nad velkým auditem", () => {
          FROM n`,
       )
       .run(other, owner);
-    db.$client.exec("ANALYZE");
     const { result, statements } = recordStatements(db, () => accountStamp(owner));
     const auditQuery = statements.find((source) => source.includes('"audit_log"'))!;
     const plan = db.$client

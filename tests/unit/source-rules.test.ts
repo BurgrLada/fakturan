@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
 import { describe, expect, test } from "vitest";
 
 function sourceFiles(dir: string): string[] {
@@ -39,22 +40,47 @@ const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|
 // Invoice designs carry their own tokens (UI-004), so the picker previews them as they print.
 const DESIGN_TOKENS = [join("src", "components", "settings", "design-picker.tsx")];
 
-const USE_CACHE = /^\s*["']use cache(?::[^"']*)?["'];?\s*$/;
+const USE_CACHE = /^use cache(:|$)/;
 
-// Every function whose body starts with the directive: its parameters and the body up to the first
-// line that closes it at the indentation of the declaration.
-function cachedFunctions(file: string, text = readFileSync(file, "utf8")) {
-  const lines = text.split("\n");
-  return lines.flatMap((line, index) => {
-    if (!USE_CACHE.test(line)) return [];
-    let start = index;
-    while (start > 0 && !/\bfunction\b|=>\s*\{\s*$/.test(lines[start]!)) start -= 1;
-    const indent = /^\s*/.exec(lines[start]!)![0];
-    let end = index;
-    while (end < lines.length - 1 && lines[end] !== `${indent}}`) end += 1;
-    const signature = lines.slice(start, index).join("\n");
-    const body = lines.slice(index, end + 1).join("\n");
-    return [{ where: `${file}:${index + 1}`, signature, body }];
+type CacheUse = { where: string; fn: ts.SignatureDeclaration | null };
+
+// Every "use cache" directive with the function whose body it opens (null at module level). The
+// AST ties the directive to exactly that function, so no neighbour can lend it a tag or a param.
+function cacheUses(file: string, text: string): CacheUse[] {
+  const kind = file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  const uses: CacheUse[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isExpressionStatement(node) &&
+      ts.isStringLiteral(node.expression) &&
+      USE_CACHE.test(node.expression.text)
+    ) {
+      const block = node.parent;
+      const owner = ts.isBlock(block) ? block.parent : undefined;
+      const first = ts.isBlock(block) && block.statements[0] === node;
+      const line = source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+      uses.push({
+        where: `${file}:${line}`,
+        fn: first && owner && ts.isFunctionLike(owner) ? owner : null,
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return uses;
+}
+
+function cacheViolations(file: string, text: string): string[] {
+  return cacheUses(file, text).flatMap(({ where, fn }) => {
+    if (!fn) return [`${where}: mimo začátek funkce`];
+    const params = fn.parameters.map((param) => param.getText());
+    const body = "body" in fn && fn.body ? fn.body.getText() : "";
+    return [
+      ...(params.includes("userId: string") ? [] : [`${where}: chybí userId: string`]),
+      ...(params.includes("stamp: string") ? [] : [`${where}: chybí stamp: string`]),
+      ...(/cacheTag\(accountTag\(userId\)\)/.test(body) ? [] : [`${where}: chybí tag účtu`]),
+    ];
   });
 }
 
@@ -126,7 +152,7 @@ describe("strukturní pravidla", () => {
   });
 
   test('[ARC-005] každá funkce s "use cache" má cacheTag(accountTag(userId)) a razítko v parametrech', () => {
-    const sample = (params: string, tag: string) =>
+    const declaration = (params: string, tag: string) =>
       [
         `export async function cachedX(${params}) {`,
         '  "use cache";',
@@ -134,32 +160,40 @@ describe("strukturní pravidla", () => {
         "  return 1;",
         "}",
       ].join("\n");
-    const ok = (text: string) => {
-      const [found] = cachedFunctions("sample.ts", text);
-      return (
-        /\buserId: string\b/.test(found!.signature) &&
-        /\bstamp: string\b/.test(found!.signature) &&
-        /cacheTag\(accountTag\(userId\)\)/.test(found!.body)
-      );
-    };
-    expect(ok(sample("userId: string, stamp: string", "accountTag(userId)"))).toBe(true);
-    expect(ok(sample("userId: string", "accountTag(userId)"))).toBe(false);
-    expect(ok(sample("ownerId: string, stamp: string", "accountTag(ownerId)"))).toBe(false);
-    expect(ok(sample("userId: string, stamp: string", '"reports"'))).toBe(false);
+    const tagged = [
+      "export async function other(userId: string, stamp: string) {",
+      "  cacheTag(accountTag(userId));",
+      "}",
+    ].join("\n");
+    const valid = (text: string) => cacheViolations("sample.ts", text).length === 0;
+    expect(valid(declaration("userId: string, stamp: string", "accountTag(userId)"))).toBe(true);
+    expect(valid(declaration("userId: string", "accountTag(userId)"))).toBe(false);
+    expect(valid(declaration("ownerId: string, stamp: string", "accountTag(ownerId)"))).toBe(false);
+    expect(valid(declaration("userId: string, stamp: string", '"reports"'))).toBe(false);
+    // Neither a neighbour's tag nor its parameters may count for the cached function.
+    const arrow = [
+      "export const cachedY = async (userId: string, stamp: string) => {",
+      '  "use cache";',
+      "  return 1;",
+      "};",
+      tagged,
+    ].join("\n");
+    expect(valid(arrow)).toBe(false);
+    const method = [
+      tagged,
+      "class Reports {",
+      "  async cached(userId: string) {",
+      '    "use cache";',
+      "    cacheTag(accountTag(userId));",
+      "  }",
+      "}",
+    ].join("\n");
+    expect(valid(method)).toBe(false);
+    expect(valid(['"use cache";', tagged].join("\n"))).toBe(false);
 
     const files = sourceFiles("src");
-    const directives = files.flatMap((file) =>
-      readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => USE_CACHE.test(line)),
-    );
-    const cached = files.flatMap((file) => cachedFunctions(file));
-    expect(cached.length).toBeGreaterThan(0);
-    expect(cached).toHaveLength(directives.length);
-    for (const { where, signature, body } of cached) {
-      expect(signature, where).toMatch(/\buserId: string\b/);
-      expect(signature, where).toMatch(/\bstamp: string\b/);
-      expect(body, where).toMatch(/cacheTag\(accountTag\(userId\)\)/);
-    }
+    const uses = files.flatMap((file) => cacheUses(file, readFileSync(file, "utf8")));
+    expect(uses.length).toBeGreaterThan(0);
+    expect(files.flatMap((file) => cacheViolations(file, readFileSync(file, "utf8")))).toEqual([]);
   });
 });

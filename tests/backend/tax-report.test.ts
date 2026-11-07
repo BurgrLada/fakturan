@@ -180,7 +180,7 @@ describe("daňový přehled", () => {
 });
 
 describe("výkon nedoplatků", () => {
-  test("[ARC-005] nedoplatky k datu hledají opravy a platby dokladu po indexu, ne po datu", () => {
+  test("[TAX-001] nedoplatky k datu hledají opravy a platby dokladu po indexu, ne po datu", () => {
     const owner = s.base.owner;
     const { statements } = recordStatements(db, () => unpaidAsOf(db, owner, "2026-12-31"));
     const [source] = statements;
