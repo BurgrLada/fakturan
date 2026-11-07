@@ -73,32 +73,69 @@ function fromGrid(layout: Layout): LayoutItem[] {
   return layout.map(({ i, x, y, w, h }) => ({ id: i, x, y, w, h }));
 }
 
-// Back reaches the router before popstate: the editor's effects are already cleaned up (the route
-// goes hidden) when the event fires. So the Back guard lives at module level and remembers the
-// editor for a moment after its cleanup; a cancelled Back steps forward again, and that return trip
-// is swallowed so the router never sees either.
-const BACK_GRACE_MS = 1_000;
-type BackWatch = { dirty: () => boolean; cleanedAt: number | null };
+// Back or Forward reaches the router before popstate: the editor's effects are already cleaned up
+// (the route goes hidden) when the event fires. So the guard lives at module level and remembers
+// the editor for a moment after its cleanup. A cancel steps back to the editor's own history entry,
+// by the distance between that entry and the one the browser moved to, and only the popstate that
+// lands there again is swallowed. The times are browser timing, not business time, so no clock.
+const LEAVE_GRACE_MS = 1_000;
+const RETURN_WAIT_MS = 1_000;
+type BackWatch = { dirty: () => boolean; index: number | null; cleanedAt: number | null };
 let backWatch: BackWatch | null = null;
-let returning = false;
+let returning: { index: number; timer: ReturnType<typeof setTimeout> } | null = null;
 let backGuardInstalled = false;
 
-function guardBack(event: PopStateEvent) {
+type NavigationEntry = { index: number };
+function entryIndex(): number | null {
+  const navigation = (window as { navigation?: { currentEntry?: NavigationEntry | null } })
+    .navigation;
+  const fromNavigation = navigation?.currentEntry?.index;
+  if (typeof fromNavigation === "number" && fromNavigation >= 0) return fromNavigation;
+  const own = (history.state as { fakturanIndex?: unknown } | null)?.fakturanIndex;
+  return typeof own === "number" ? own : null;
+}
+
+// Without the Navigation API the entry carries its own number next to the router's state; a fresh
+// entry is the last one, so the length of the history gives it.
+function markEntry(): number | null {
+  const known = entryIndex();
+  if (known !== null) return known;
+  const index = history.length - 1;
+  history.replaceState({ ...(history.state as object | null), fakturanIndex: index }, "");
+  return index;
+}
+
+function stopReturning() {
+  if (!returning) return;
+  clearTimeout(returning.timer);
+  returning = null;
+}
+
+function guardHistory(event: PopStateEvent) {
   if (returning) {
-    returning = false;
-    event.stopImmediatePropagation();
-    return;
+    const expected = returning.index;
+    stopReturning();
+    if (entryIndex() === expected) {
+      event.stopImmediatePropagation();
+      return;
+    }
   }
   const watch = backWatch;
-  if (!watch || !watch.dirty()) return;
-  if (watch.cleanedAt !== null && Date.now() - watch.cleanedAt > BACK_GRACE_MS) return;
+  if (!watch) return;
+  if (watch.cleanedAt !== null && Date.now() - watch.cleanedAt > LEAVE_GRACE_MS) {
+    backWatch = null;
+    return;
+  }
+  const target = entryIndex();
+  if (!watch.dirty() || watch.index === null || target === null || target === watch.index) return;
   if (window.confirm(T.leaveConfirm)) {
     backWatch = null;
     return;
   }
   event.stopImmediatePropagation();
-  returning = true;
-  history.go(1);
+  // If the browser never answers (no entry that far), nothing is left waiting to swallow.
+  returning = { index: watch.index, timer: setTimeout(stopReturning, RETURN_WAIT_MS) };
+  history.go(watch.index - target);
 }
 
 function useLeaveWarning(dirty: boolean) {
@@ -107,11 +144,11 @@ function useLeaveWarning(dirty: boolean) {
     dirtyRef.current = dirty;
   });
   useEffect(() => {
-    const watch: BackWatch = { dirty: () => dirtyRef.current, cleanedAt: null };
+    const watch: BackWatch = { dirty: () => dirtyRef.current, index: markEntry(), cleanedAt: null };
     backWatch = watch;
     if (!backGuardInstalled) {
       // Capturing on window runs before the router's own popstate listener.
-      window.addEventListener("popstate", guardBack, true);
+      window.addEventListener("popstate", guardHistory, true);
       backGuardInstalled = true;
     }
     const leave = () => {

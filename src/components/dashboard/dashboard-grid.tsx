@@ -33,7 +33,7 @@ export function DashboardGrid({
     reportWidgetFailure(
       widget.id,
       "dashboard.widget",
-      new Error(`Neplatná konfigurace widgetu ${widget.id}`),
+      new Error(`Invalid widget config ${widget.id}`),
       userId,
     );
   }

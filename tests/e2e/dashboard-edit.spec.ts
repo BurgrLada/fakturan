@@ -137,10 +137,86 @@ test("[DSH-001] Zpět v prohlížeči s neuloženými změnami se zeptá a Zruš
   await expect(card).toHaveAttribute("data-box", "9,2,3,2");
   await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
 
+  // The guard works again after a cancel, also once the grace of the first cleanup is over.
+  await page.waitForTimeout(1_100);
+  let again = "";
+  page.once("dialog", (dialog) => {
+    again = dialog.message();
+    void dialog.accept();
+  });
+  await page.evaluate(() => history.back());
+  await expect.poll(() => again).toBe("Rozložení není uložené. Opravdu odejít bez uložení?");
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await expect(page.getByTestId("dashboard-grid")).toBeVisible();
+});
+
+test("[DSH-001] Dopředu do editoru se změnami a Zrušit nechá adresu i obsah v souladu", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openEditor(page, baseURL);
+  const editorUrl = page.url();
+  const card = editCard(page, "Průměrná doba úhrady");
+  const { column } = await gridStep(page);
+  await dragBy(page, card.locator(".widget-drag"), column, 0);
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+
+  // Leave by the link (confirmed), then come back with Back: the editor keeps its changes and the
+  // overview stays ahead of it in the history.
   page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("link", { name: "Zpět na přehled" }).click();
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await page.evaluate(() => history.back());
+  await expect(page).toHaveURL(editorUrl);
+  await expect(page.getByRole("heading", { name: "Úpravy dashboardu", level: 1 })).toBeVisible();
+  if ((await page.getByTestId("layout-state").textContent()) !== "Rozložení má neuložené změny.") {
+    await dragBy(page, card.locator(".widget-drag"), column, 0);
+  }
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+
+  let warning = "";
+  page.once("dialog", (dialog) => {
+    warning = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.evaluate(() => history.forward());
+  await expect.poll(() => warning).toBe("Rozložení není uložené. Opravdu odejít bez uložení?");
+  await page.waitForTimeout(500);
+  await expect(page).toHaveURL(editorUrl);
+  await expect(page.getByRole("heading", { name: "Úpravy dashboardu", level: 1 })).toBeVisible();
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+});
+
+test("[DSH-001] po odchodu z editoru funguje Zpět na jiné stránce normálně", async ({
+  page,
+  freshApp,
+}) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await openEditor(page, baseURL);
+  const card = editCard(page, "Průměrná doba úhrady");
+  const { column } = await gridStep(page);
+  await dragBy(page, card.locator(".widget-drag"), column, 0);
+  await expect(page.getByTestId("layout-state")).toHaveText("Rozložení má neuložené změny.");
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("link", { name: "Zpět na přehled" }).click();
+  await expect(page).toHaveURL(`${baseURL}/`);
+
+  let asked = 0;
+  page.on("dialog", (dialog) => {
+    asked += 1;
+    void dialog.dismiss();
+  });
+  await page.getByRole("link", { name: "Faktury", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/faktury$/);
   await page.evaluate(() => history.back());
   await expect(page).toHaveURL(`${baseURL}/`);
   await expect(page.getByTestId("dashboard-grid")).toBeVisible();
+  await page.evaluate(() => history.forward());
+  await expect(page).toHaveURL(/\/faktury$/);
+  expect(asked).toBe(0);
 });
 
 test("[UI-008] rozložení jde změnit jen klávesnicí a změna se oznámí", async ({

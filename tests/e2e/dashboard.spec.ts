@@ -200,6 +200,19 @@ test("[DSH-004] [UI-007] úzká obrazovka skládá widgety pod sebe podle souřa
   await page.setViewportSize({ width: 390, height: 844 });
   await register(page, baseURL);
   await page.goto(baseURL);
+  await expect(grid(page).getByTestId("widget")).toHaveCount(9);
+  // The first widget written moves to the last row, so the order of writing and the order of the
+  // grid differ and only sorting by coordinates passes.
+  const moved = withDb(freshApp.dataDir, (sqlite) => {
+    const first = sqlite
+      .prepare("SELECT id FROM dashboard_widget ORDER BY rowid LIMIT 1")
+      .get() as {
+      id: string;
+    };
+    sqlite.prepare("UPDATE dashboard_widget SET y = 99 WHERE id = ?").run(first.id);
+    return first.id;
+  });
+  await page.reload();
   await page.waitForLoadState("networkidle");
   const cards = grid(page).getByTestId("widget");
   await expect(cards).toHaveCount(9);
@@ -228,6 +241,7 @@ test("[DSH-004] [UI-007] úzká obrazovka skládá widgety pod sebe podle souřa
   const byGrid = [...boxes].sort((a, b) => a.y - b.y || a.x - b.x).map((box) => box.id);
   expect(new Set(boxes.map((box) => `${box.x},${box.y}`)).size).toBe(boxes.length);
   expect(onScreen).toEqual(byGrid);
+  expect(onScreen.at(-1)).toBe(moved);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(390);
   await expect(page.locator(".react-grid-layout")).toHaveCount(0);
