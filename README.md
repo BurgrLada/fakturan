@@ -268,7 +268,7 @@ Kurzy stahuje plánovač z denního lístku ČNB (`CNB_BASE_URL`, mění se jen 
 od 14:45, dokud lístek nemá. Síť nikdy neběží při vystavení ani při platbě, ty čtou jen uložené kurzy.
 Když ČNB nejde stáhnout, aplikace funguje dál: použije poslední známý kurz a upozorní na to. Kdyby
 žádný neměla, kurz zadá člověk ručně, pravidelná faktura v cizí měně zůstane jako koncept. Výpadek se
-do Sentry nehlásí, teprve lístek starý 5 a více dní.
+do monitoringu nehlásí, teprve když chybí 3 pracovní lístky (viz Monitoring).
 
 Kurz se zamrazí vystavením, pozdější lístek ho nezmění. Na PDF se netiskne: neplátce ho na dokladu
 nepotřebuje a přepočet do CZK slouží jen přehledům.

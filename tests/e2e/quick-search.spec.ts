@@ -48,7 +48,7 @@ test("[UI-007] na telefonu se hledání otevře tlačítkem v hlavičce", async 
   const { baseURL } = freshApp;
   await page.setViewportSize({ width: 390, height: 844 });
   await register(page, baseURL);
-  await page.getByRole("button", { name: "Hledat" }).click();
+  await page.getByRole("button", { name: "Rychlé hledání" }).click();
   const dialog = page.getByRole("dialog", { name: "Rychlé hledání" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("combobox").fill("posta");
@@ -88,7 +88,7 @@ test.describe("na Macu", () => {
     await register(page, baseURL);
     await page.goto(`${baseURL}/zakaznici/novy`);
     await page.waitForLoadState("networkidle");
-    await expect(page.getByRole("button", { name: "Hledat" })).toContainText("⌘K");
+    await expect(page.getByRole("button", { name: "Rychlé hledání" })).toContainText("⌘K");
     const name = page.getByLabel("Název nebo jméno");
     await name.fill("Alfa");
     await page.keyboard.press("Control+k");

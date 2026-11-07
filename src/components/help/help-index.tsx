@@ -28,7 +28,7 @@ export function HelpIndex() {
           aria-labelledby={`${chapter.id}-title`}
           className="flex scroll-mt-6 flex-col gap-3"
         >
-          <h2 id={`${chapter.id}-title`} className="font-brand text-xl">
+          <h2 id={`${chapter.id}-title`} tabIndex={-1} className="font-brand text-xl outline-none">
             {chapter.title}
           </h2>
           {chapter.body.map((paragraph) =>
@@ -46,20 +46,21 @@ export function HelpIndex() {
             ),
           )}
           {chapter.links.length > 0 && (
-            <nav aria-label={`${H.links}: ${chapter.title}`}>
-              <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                {chapter.links.map((link) => (
-                  <li key={link.href}>
-                    <Link
-                      href={link.href}
-                      className="text-primary underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </nav>
+            <ul
+              aria-label={`${H.links}: ${chapter.title}`}
+              className="flex flex-wrap gap-x-4 gap-y-1 text-sm"
+            >
+              {chapter.links.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="text-primary underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       ))}

@@ -589,7 +589,7 @@ export const TEXTS = {
     notificationsUnread: (n: number) => `Upozornění, nepřečtených: ${n}`,
   },
   quickSearch: {
-    open: "Hledat",
+    open: "Rychlé hledání",
     title: "Rychlé hledání",
     input: "Hledat faktury, zákazníky, ceník a stránky",
     placeholder: "Číslo faktury, zákazník, položka…",
