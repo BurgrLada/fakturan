@@ -9,9 +9,12 @@ import {
   claimNext,
   completeJob,
   enqueue,
+  enqueueStandalone,
   failJob,
   purgeFinishedJobs,
+  removeDeadJob,
   retryJob,
+  takeIdleJobs,
 } from "@/server/jobs/queue";
 import { registerJob, RetryLater } from "@/server/jobs/registry";
 import { drainJobs, recoverInterrupted } from "@/server/jobs/worker";
@@ -299,6 +302,91 @@ describe("údržba", () => {
   });
 });
 
+describe("údržba krátkodobých úloh", () => {
+  test("[ARC-007] dotaz banky a stažení kurzů zmizí po 7 dnech v každém koncovém stavu", () => {
+    const day = 86_400_000;
+    const finished = (["bank.poll", "fx.fetch"] as const).flatMap((kind) =>
+      (["done", "dead", "cancelled"] as const).map((status) => {
+        const { id } = put({ kind });
+        db.update(job).set({ status, updatedAt: T0 }).where(eq(job.id, id)).run();
+        return id;
+      }),
+    );
+    const waiting = put({ kind: "bank.poll" });
+    const mail = put();
+    db.update(job).set({ status: "dead", updatedAt: T0 }).where(eq(job.id, mail.id)).run();
+    const ids = () =>
+      db
+        .select({ id: job.id })
+        .from(job)
+        .all()
+        .map((r) => r.id)
+        .sort();
+
+    purgeFinishedJobs(new Date(T0.getTime() + 6 * day));
+    expect(ids()).toEqual([...finished, waiting.id, mail.id].sort());
+    purgeFinishedJobs(new Date(T0.getTime() + 8 * day));
+    expect(ids()).toEqual([waiting.id, mail.id].sort());
+  });
+});
+
+describe("úlohy bez účtu a převzetí čekajících", () => {
+  test("[ARC-007] enqueueStandalone založí úlohu jednou podle klíče", () => {
+    const input = { kind: KIND, key: "hodinove", userId: null, payload: { id: "1" } } as const;
+    expect(enqueueStandalone(input)).toMatchObject({ created: true });
+    expect(enqueueStandalone(input)).toMatchObject({ created: false });
+    expect(db.select().from(job).all()).toMatchObject([{ key: "hodinove", status: "pending" }]);
+  });
+
+  test("[ARC-007] takeIdleJobs odebere jen čekající a zrušené úlohy účtu s prefixem klíče", () => {
+    const owner = createUser();
+    const other = createUser();
+    const at = (key: string, userId = owner) => put({ key, userId }).id;
+    const pending = at("plan:1:a");
+    const cancelled = at("plan:1:b");
+    db.update(job).set({ status: "cancelled" }).where(eq(job.id, cancelled)).run();
+    const running = at("plan:1:c");
+    db.update(job).set({ status: "running" }).where(eq(job.id, running)).run();
+    const dead = at("plan:1:d");
+    db.update(job).set({ status: "dead" }).where(eq(job.id, dead)).run();
+    const otherPrefix = at("plan:2:a");
+    const foreign = at("plan:1:e", other);
+
+    const taken = db.transaction((tx) => takeIdleJobs(tx, owner, "plan:1:"));
+
+    expect(taken.map((r) => r.id).sort()).toEqual([pending, cancelled].sort());
+    expect(taken.find((r) => r.id === pending)).toMatchObject({ key: "plan:1:a", userId: owner });
+    const left = db
+      .select({ id: job.id })
+      .from(job)
+      .all()
+      .map((r) => r.id);
+    expect(left.sort()).toEqual([running, dead, otherPrefix, foreign].sort());
+  });
+
+  test("[ARC-007] removeDeadJob smaže jen mrtvou úlohu vlastního účtu a jen jednou", () => {
+    const owner = createUser();
+    const other = createUser();
+    const dead = put({ userId: owner });
+    const pending = put({ userId: owner });
+    db.update(job).set({ status: "dead" }).where(eq(job.id, dead.id)).run();
+    const remove = (userId: string, id: string) =>
+      db.transaction((tx) => removeDeadJob(tx, userId, id));
+
+    expect(remove(other, dead.id)).toBe(false);
+    expect(remove(owner, pending.id)).toBe(false);
+    expect(remove(owner, dead.id)).toBe(true);
+    expect(remove(owner, dead.id)).toBe(false);
+    expect(
+      db
+        .select({ id: job.id })
+        .from(job)
+        .all()
+        .map((r) => r.id),
+    ).toEqual([pending.id]);
+  });
+});
+
 describe("údržba zrušených běhů", () => {
   test("[ADM-005] zrušený běh pravidelné faktury čištění přežije, reaktivace ho ještě potřebuje", () => {
     const cancelled = put({ kind: "recurring.run" });
@@ -319,7 +407,7 @@ describe("účty", () => {
     const cancelled = put({ userId: owner });
     const other = put({ userId: admin });
     deactivateUser({ userId: admin, source: "web" }, owner);
-    expect(row(cancelled.id).status).toBe("cancelled");
+    expect(row(cancelled.id)).toMatchObject({ status: "cancelled", reason: "deactivated" });
     expect(row(other.id).status).toBe("pending");
   });
 

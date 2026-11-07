@@ -2,9 +2,12 @@ import { describe, expect, test } from "vitest";
 import {
   calendarDateInPrague,
   formatNumber,
+  isCalendarDate,
+  isDailyDue,
   NUMBER_PRESETS,
   periodKey,
   previewNumber,
+  timeInPrague,
   validateSeriesPeriod,
   validateTemplate,
   variableSymbolFrom,
@@ -102,5 +105,27 @@ describe("variabilní symbol", () => {
   test("[NUM-007] 2026-040 dá VS 2026040 a delší číslo se omezí na 10 číslic", () => {
     expect(variableSymbolFrom("2026-040")).toBe("2026040");
     expect(variableSymbolFrom("FV-2026/10-123456")).toBe("2610123456");
+  });
+});
+
+describe("čas a datum v Praze", () => {
+  test("[REC-006] čas v Praze respektuje letní čas a půlnoc je 00:xx", () => {
+    expect(timeInPrague(new Date("2026-07-01T00:30:00Z"))).toBe("02:30");
+    expect(timeInPrague(new Date("2026-01-01T23:05:00Z"))).toBe("00:05");
+  });
+
+  test("[REC-006] denní práce je splatná od zadaného času do konce dne, ne jen v přesnou minutu", () => {
+    expect(isDailyDue(new Date("2026-01-15T07:59:00Z"), "09:00")).toBe(false);
+    expect(isDailyDue(new Date("2026-01-15T08:00:00Z"), "09:00")).toBe(true);
+    expect(isDailyDue(new Date("2026-01-15T17:00:00Z"), "09:00")).toBe(true);
+  });
+
+  test("[NUM-004] kalendářní datum musí existovat a mít tvar RRRR-MM-DD", () => {
+    expect(isCalendarDate("2026-02-28")).toBe(true);
+    expect(isCalendarDate("2024-02-29")).toBe(true);
+    expect(isCalendarDate("2026-02-29")).toBe(false);
+    expect(isCalendarDate("2026-13-01")).toBe(false);
+    expect(isCalendarDate("2026-1-01")).toBe(false);
+    expect(isCalendarDate("")).toBe(false);
   });
 });

@@ -6,13 +6,17 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, numberSeries, numberSeriesCounter, user } from "@/server/db/schema";
 import { mutate } from "@/server/services/mutation";
+import { TEXTS } from "@/lib/texts";
 import {
   allocateNumber,
   defaultSeriesFor,
   deleteSeries,
   ensureDefaultSeries,
+  hasMissingDefaults,
   listSeries,
+  peekNumber,
   saveSeries,
+  seriesInputSchema,
   setDefaultSeries,
   setNextNumber,
   type SeriesInput,
@@ -129,7 +133,7 @@ describe("výchozí řady", () => {
         template: row.template,
         reset: row.reset,
       }),
-    ).toThrow("typ");
+    ).toThrow(TEXTS.numberSeries.errors.typeLocked);
   });
 });
 
@@ -503,5 +507,138 @@ describe("správa řad", () => {
     expect(
       db.select().from(numberSeriesCounter).where(eq(numberSeriesCounter.userId, "s4")).all(),
     ).toEqual([]);
+  });
+});
+
+function auditOf(ownerId: string, action: string) {
+  return db
+    .select()
+    .from(auditLog)
+    .where(eq(auditLog.ownerId, ownerId))
+    .all()
+    .filter((row) => row.action === action);
+}
+
+describe("audit a čtení řad", () => {
+  test("[NUM-003] založení výchozích řad se zaudituje se seznamem typů", () => {
+    seed("d1");
+    expect(hasMissingDefaults("d1")).toBe(true);
+
+    ensureDefaultSeries(actor("d1"));
+
+    expect(hasMissingDefaults("d1")).toBe(false);
+    expect(auditOf("d1", "number_series.ensure_defaults")).toEqual([
+      expect.objectContaining({
+        entity: "number_series",
+        entityId: null,
+        scope: "user",
+        after: { created: ["invoice", "advance", "credit_note"] },
+      }),
+    ]);
+  });
+
+  test("[NUM-003] přepnutí výchozí řady se zaudituje s typem dokladu", () => {
+    const id = newSeries("d2");
+
+    setDefaultSeries(actor("d2"), id);
+
+    expect(auditOf("d2", "number_series.set_default")).toEqual([
+      expect.objectContaining({
+        entity: "number_series",
+        entityId: id,
+        scope: "user",
+        before: { isDefault: false },
+        after: { isDefault: true, documentType: "invoice" },
+      }),
+    ]);
+  });
+
+  test("[NUM-004] audit dalšího čísla nese předchozí i nové číslo a období", () => {
+    const id = newSeries("d3");
+
+    setNextNumber(actor("d3"), id, 12, "2026-03-01");
+    setNextNumber(actor("d3"), id, 20, "2026-03-01");
+
+    expect(auditOf("d3", "number_series.set_next").map((row) => [row.before, row.after])).toEqual([
+      [{ next: 1 }, { next: 12, periodKey: "2026" }],
+      [{ next: 12 }, { next: 20, periodKey: "2026" }],
+    ]);
+  });
+
+  test("[NUM-004] další číslo hlídá jen použitá čísla svého období", () => {
+    const id = newSeries("d4");
+    for (const day of ["2025-03-01", "2025-03-02", "2025-03-03"]) allocate("d4", id, day);
+
+    setNextNumber(actor("d4"), id, 2, "2026-03-01");
+
+    expect(allocate("d4", id, "2026-03-02").number).toBe("VF-2026-002");
+  });
+
+  test("[NUM-003] smazání řady se zaudituje a počítadla jiných řad zůstanou", () => {
+    const kept = newSeries("d5");
+    const removed = newSeries("d5", { template: "X-{RRRR}-{NNN}" });
+    setNextNumber(actor("d5"), kept, 7, "2026-01-01");
+
+    deleteSeries(actor("d5"), removed);
+
+    expect(
+      db.select().from(numberSeriesCounter).where(eq(numberSeriesCounter.userId, "d5")).all(),
+    ).toEqual([expect.objectContaining({ seriesId: kept, next: 7 })]);
+    expect(auditOf("d5", "number_series.delete")).toEqual([
+      expect.objectContaining({ entity: "number_series", entityId: removed, scope: "user" }),
+    ]);
+  });
+
+  test("[NUM-004] změna resetu nepoužité řady nesmaže počítadla jiných řad", () => {
+    setClockForTests({ now: () => new Date("2026-05-10T10:00:00Z") });
+    const kept = newSeries("d6");
+    const changed = newSeries("d6", { template: "{RRRR}{MM}{NNN}" });
+    setNextNumber(actor("d6"), kept, 7);
+
+    saveSeries(actor("d6"), {
+      ...input({ template: "{RRRR}{MM}{NNN}", reset: "monthly" }),
+      id: changed,
+    });
+
+    expect(listSeries("d6").find((row) => row.id === kept)?.next).toBe(7);
+  });
+
+  test("[NUM-003] výpis řad nese další číslo a použití každé řady zvlášť", () => {
+    const used = newSeries("d7");
+    const preset = newSeries("d7", { template: "X-{RRRR}-{NNN}" });
+    const fresh = newSeries("d7", { template: "Y-{RRRR}-{NNN}" });
+    allocate("d7", used, "2026-01-01");
+    setNextNumber(actor("d7"), preset, 10, "2026-01-01");
+
+    const rows = new Map(listSeries("d7", "2026-02-01").map((row) => [row.id, row]));
+
+    expect(rows.get(used)).toMatchObject({ next: 2, used: true });
+    expect(rows.get(preset)).toMatchObject({ next: 10, used: false });
+    expect(rows.get(fresh)).toMatchObject({ next: 1, used: false });
+  });
+
+  test("[NUM-006] náhled čísla čte počítadlo řady a období dokladu", () => {
+    const id = newSeries("d8");
+    const other = newSeries("d8", { template: "X-{RRRR}-{NNN}" });
+    setNextNumber(actor("d8"), id, 40, "2026-01-01");
+    setNextNumber(actor("d8"), other, 90, "2026-01-01");
+    const series = listSeries("d8", "2026-01-01").find((row) => row.id === id)!;
+
+    expect(peekNumber(db, "d8", series, "2026-06-01")).toBe("VF-2026-040");
+    expect(peekNumber(db, "d8", series, "2027-01-01")).toBe("VF-2027-001");
+  });
+
+  test("[NUM-001] chyba šablony patří k poli šablony", () => {
+    const parsed = seriesInputSchema.safeParse(input({ template: "{NNN}" }));
+
+    expect(parsed.error?.issues).toEqual([
+      expect.objectContaining({ code: "custom", path: ["template"] }),
+    ]);
+  });
+
+  test("[NUM-003] akce bez přihlášeného účtu se odmítne", () => {
+    const anonymous = { userId: null, source: "web" as const };
+
+    expect(() => saveSeries(anonymous, input())).toThrow(TEXTS.numberSeries.errors.forbidden);
   });
 });

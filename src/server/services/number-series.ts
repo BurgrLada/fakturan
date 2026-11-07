@@ -227,6 +227,7 @@ export function defaultSeriesFor(ownerId: string, type: DocumentType): NumberSer
 export function saveSeries(actor: Actor, raw: SeriesInput): string {
   const userId = ownerOf(actor);
   const parsed = seriesInputSchema.safeParse(raw);
+  // Stryker disable next-line OptionalChaining: equivalent, a failed parse has at least one issue
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? ERRORS.invalid);
   const { id: existingId, ...columns } = parsed.data;
 
@@ -324,6 +325,7 @@ export function setDefaultSeries(actor: Actor, id: string): void {
 export function setNextNumber(actor: Actor, id: string, next: number, date?: CalendarDate): void {
   const userId = ownerOf(actor);
   const parsed = nextNumberInputSchema.safeParse({ id, next, date });
+  // Stryker disable next-line OptionalChaining: equivalent, a failed parse has at least one issue
   if (!parsed.success) throw new ServiceError(parsed.error.issues[0]?.message ?? ERRORS.invalid);
   const day = date ?? calendarDateInPrague(clock.now());
 

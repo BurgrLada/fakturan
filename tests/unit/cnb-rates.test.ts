@@ -57,6 +57,8 @@ describe("denní lístek ČNB", () => {
     ["tisícový oddělovač", `${TITLE}EMU|euro|1|EUR|1.234,56\n`],
     ["nulové množství", `${TITLE}EMU|euro|0|EUR|24,380\n`],
     ["neplatný kód", `${TITLE}EMU|euro|1|eur|24,380\n`],
+    ["kód o čtyřech písmenech", `${TITLE}EMU|euro|1|EUR|24,380\nUSA|dolar|1|USDX|22,311\n`],
+    ["kód s předponou", `${TITLE}EMU|euro|1|EUR|24,380\nUSA|dolar|1|xUSD|22,311\n`],
     ["prázdná země", `${TITLE}|euro|1|EUR|24,380\n`],
     ["prázdná měna", `${TITLE}EMU||1|EUR|24,380\n`],
     ["zdvojený kód", `${TITLE}EMU|euro|1|EUR|24,380\nEMU|euro|1|EUR|24,381\n`],

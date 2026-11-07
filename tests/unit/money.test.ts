@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
 import { CURRENCIES } from "@/lib/currency";
-import { formatMoney, formatMoneyInput, parseMoney } from "@/lib/money";
+import { AmountOutOfRangeError, formatMoney, formatMoneyInput, parseMoney } from "@/lib/money";
 
 describe("peníze", () => {
   test("[CAT-001] 1 234,50 se přečte na 123450 haléřů", () => {
@@ -37,6 +37,7 @@ describe("peníze", () => {
     expect(formatMoney(5, "EUR").replace(/\s/g, " ")).toBe("0,05 €");
     expect(formatMoneyInput(123450)).toBe("1234,50");
     expect(formatMoneyInput(-5)).toBe("-0,05");
+    expect(formatMoneyInput(0)).toBe("0,00");
   });
 
   test("[CAT-001] vlastnost: zápis do formuláře a zpět dá původní částku", () => {
@@ -88,5 +89,12 @@ describe("peníze", () => {
         },
       ),
     );
+  });
+
+  test("[CAT-001] chyba rozsahu částky je v hlášení rozpoznatelná", () => {
+    const error = new AmountOutOfRangeError();
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe("AmountOutOfRangeError");
+    expect(error.message).toBe("Amount is outside the supported range");
   });
 });

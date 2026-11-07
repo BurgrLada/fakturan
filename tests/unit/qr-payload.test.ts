@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { amountDue, planQr, qrStateOf } from "@/lib/qr-payload";
+import { amountDue, documentQrInput, planQr, qrStateOf } from "@/lib/qr-payload";
 
 const CZ_IBAN = "CZ6508000000192000145399";
 const DE_IBAN = "DE89370400440532013000";
@@ -400,6 +400,29 @@ describe("qrStateOf", () => {
     ).toBe("missing_iban_bic");
     expect(qrStateOf(doc({ snapshot: { account: null, supplier: { name: "Jan Novák" } } }))).toBe(
       "no_account",
+    );
+  });
+
+  test("[QR-001] vstup QR z dokladu bez účtu a dodavatele nic nevymyslí", () => {
+    expect(
+      documentQrInput(doc({ snapshot: { account: null, supplier: null } }), "Faktura"),
+    ).toEqual(
+      expect.objectContaining({
+        iban: null,
+        bic: null,
+        recipient: "",
+        message: "Faktura",
+        enabled: false,
+      }),
+    );
+    expect(documentQrInput(doc(), "")).toEqual(
+      expect.objectContaining({
+        iban: account.iban,
+        bic: account.swift,
+        recipient: "Jan Novák",
+        enabled: true,
+        paid: false,
+      }),
     );
   });
 });

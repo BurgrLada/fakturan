@@ -61,6 +61,7 @@ export function enqueue(tx: Tx, input: EnqueueInput): { id: string; created: boo
 
 // For work that belongs to no account and needs no audit entry, such as hourly planning.
 export function enqueueStandalone(input: EnqueueInput): { created: boolean } {
+  // Stryker disable next-line ObjectLiteral: equivalent, enqueue writes first, so a deferred transaction takes the write lock at once too
   return db.transaction((tx) => enqueue(tx, input), { behavior: "immediate" });
 }
 
@@ -77,6 +78,7 @@ function heavyTurn(): SQL {
     )}) and j2.status <> 'pending') asc nulls first`;
 }
 
+// Stryker disable next-line StringLiteral: equivalent, any lane other than "heavy" or "light" means "any"
 export function claimNext(worker: string, lane: JobLane = "any"): Job | null {
   const now = clock.now();
   const order =

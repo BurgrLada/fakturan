@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   canAmendPayment,
+  canCloseDifference,
   canTakePayment,
   deriveStatus,
   isRefund,
@@ -97,6 +98,39 @@ describe("deriveStatus", () => {
 
   test("zůstatek uzavřený opravou a zálohou zůstává uhrazený, ne dobropisovaný", () => {
     expect(deriveStatus({ ...sent, creditsMinor: -400, advanceMinor: 600 })).toBe("paid");
+  });
+});
+
+describe("canCloseDifference", () => {
+  const rest = {
+    status: "partially_paid" as const,
+    totalMinor: 1000,
+    creditsMinor: 0,
+    advanceMinor: 0,
+    paidMinor: 990,
+    supersededAt: null,
+  };
+
+  test("[PAY-007] zbytek po částečné úhradě jde uzavřít", () => {
+    expect(canCloseDifference(rest)).toBe(true);
+  });
+
+  test("[PAY-007] bez dlužné částky není co uzavírat", () => {
+    expect(canCloseDifference({ ...rest, paidMinor: 1000 })).toBe(false);
+    expect(canCloseDifference({ ...rest, paidMinor: 1010 })).toBe(false);
+  });
+
+  test("[PAY-007] nahrazená záloha se neuzavírá ani s dluhem", () => {
+    expect(canCloseDifference({ ...rest, supersededAt: SENT_AT })).toBe(false);
+  });
+
+  test("[PAY-007] doplatek po záloze jde uzavřít jako částečná úhrada", () => {
+    const afterAdvance = { ...rest, status: "sent" as const, paidMinor: 0, advanceMinor: 990 };
+    expect(canCloseDifference(afterAdvance)).toBe(true);
+    expect(canCloseDifference({ ...afterAdvance, status: "issued" })).toBe(true);
+    expect(canCloseDifference({ ...afterAdvance, advanceMinor: 0 })).toBe(false);
+    expect(canCloseDifference({ ...afterAdvance, status: "draft" })).toBe(false);
+    expect(canCloseDifference({ ...afterAdvance, status: "cancelled" })).toBe(false);
   });
 });
 

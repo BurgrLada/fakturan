@@ -50,7 +50,8 @@ export function deriveStatus(input: {
   if (!canAmendPayment(input.status)) return input.status;
   const due = amountDue({ ...input, supersededAt: null });
   const untouched = input.paidMinor === 0 && input.advanceMinor === 0;
-  if (input.totalMinor > 0 && input.creditsMinor < 0 && due === 0 && untouched) return "credited";
+  // Zero due with nothing paid means credits equal minus the total, so the total is positive too.
+  if (input.creditsMinor < 0 && due === 0 && untouched) return "credited";
   if (input.totalMinor > 0 && due <= 0) return "paid";
   if (input.paidMinor > 0 && due > 0) return "partially_paid";
   return input.sentAt ? "sent" : "issued";

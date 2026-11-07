@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:mutation": "stryker run",
+    "test:mutation:file": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation.ts",
+    "test:mutation:summary": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation-summary.ts",
     "test:e2e": "playwright test",
     "test:coverage-spec": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/spec-coverage.ts"
   },

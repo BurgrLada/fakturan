@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { isDailyDue, timeInPrague } from "@/lib/number-format";
 import { setClockForTests } from "@/server/clock";
 import { job, schedulerState } from "@/server/db/schema";
 import { checkHealth } from "@/server/health";
@@ -90,17 +89,6 @@ describe("hodiny", () => {
       expect(readFileSync(file, "utf8"), file).not.toMatch(/Date\.now\(|new Date\(\s*\)/);
     }
   });
-
-  test("čas v Praze respektuje letní čas a půlnoc je 00:xx", () => {
-    expect(timeInPrague(new Date("2026-07-01T00:30:00Z"))).toBe("02:30");
-    expect(timeInPrague(new Date("2026-01-01T23:05:00Z"))).toBe("00:05");
-  });
-
-  test("denní práce je splatná od zadaného času do konce dne, ne jen v přesnou minutu", () => {
-    expect(isDailyDue(new Date("2026-01-15T07:59:00Z"), "09:00")).toBe(false);
-    expect(isDailyDue(new Date("2026-01-15T08:00:00Z"), "09:00")).toBe(true);
-    expect(isDailyDue(new Date("2026-01-15T17:00:00Z"), "09:00")).toBe(true);
-  });
 });
 
 describe("lease", () => {
@@ -131,6 +119,14 @@ describe("lease", () => {
     await tick("b");
     expect(run).toHaveBeenCalledOnce();
     expect(db.select().from(job).get()?.status).toBe("done");
+  });
+
+  test("[ARC-008] lease platí přesně 120 s, v tu chvíli už ho jiný držitel převezme", () => {
+    expect(acquireLease("a")).toBe("taken_over");
+    advance(2 * MINUTE - 1);
+    expect(acquireLease("b")).toBe("busy");
+    advance(1);
+    expect(acquireLease("b")).toBe("taken_over");
   });
 
   test("acquireLease rozliší držení, převzetí a obsazeno; uvolnění dovolí převzít hned", () => {
@@ -185,7 +181,7 @@ describe("lease", () => {
       },
     });
     registerTickTask({ name: "další", run: next });
-    await tick("a");
+    expect(await tick("a")).toEqual({ ran: true });
     expect(next).not.toHaveBeenCalled();
     expect(state()?.lastOkAt).toBeNull();
 
@@ -200,6 +196,24 @@ describe("lease", () => {
 });
 
 describe("tick", () => {
+  test("[ARC-007] tick spustí těžkou dráhu a nečeká, až doběhne", async () => {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => (open = resolve));
+    const run = vi.fn(() => opened);
+    registerJob("export.run", { run });
+    const { id } = db.transaction((tx) =>
+      enqueue(tx, { kind: "export.run", key: "export:tick", userId: null, payload: {} }),
+    );
+    const status = () => db.select().from(job).where(eq(job.id, id)).get()?.status;
+
+    expect(await tick("a")).toEqual({ ran: true });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    expect(status()).toBe("running");
+
+    open();
+    await vi.waitFor(() => expect(status()).toBe("done"));
+  });
+
   test("zapíše last_tick_at před úlohami a last_ok_at až po frontě", async () => {
     const seen: unknown[] = [];
     registerTickTask({
