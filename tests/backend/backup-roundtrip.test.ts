@@ -18,6 +18,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 import { eachSpooled, spoolWriter } from "@/server/backup/spool";
 import { setClockForTests } from "@/server/clock";
 import {
+  auditLog,
   customer,
   emailLog,
   exportJob,
@@ -42,6 +43,8 @@ import {
   asVersion1,
   asRestored,
   backupArchive,
+  editArchive,
+  jsonl,
   canonicalAccount,
   readJsonl,
   restoreArchive,
@@ -471,5 +474,35 @@ describe("záloha účtu s dokumenty a řádky z dřívějška", () => {
       expect(log.body).toBe("b".repeat(50_000));
       expect(log.reason).toBe("r".repeat(4_000));
     }
+
+    // Never silent: the backup and the restore say how many values they shortened.
+    const sent = logs.length;
+    const finish = db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, "account.backup_finish"))
+      .all()
+      .filter((row) => row.ownerId === source)
+      .at(-1)!;
+    expect(finish.after).toMatchObject({
+      shortened: { "invoice.search_text": 1, "email_log.body": sent, "email_log.reason": sent },
+    });
+    const longer = editArchive(archive, (entries) => {
+      const rows = readJsonl(entries["data/email_log.jsonl"]!).map((row) => ({
+        ...row,
+        subject: "s".repeat(1_001),
+      }));
+      entries["data/email_log.jsonl"] = jsonl(rows);
+    });
+    const again = emptyAccount();
+    expect((await restoreArchive(db, again, longer)).status).toBe("done");
+    const restore = db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, "account.restore"))
+      .all()
+      .filter((row) => row.ownerId === again)
+      .at(-1)!;
+    expect(restore.after).toMatchObject({ shortened: { "email_log.subject": sent } });
   });
 });

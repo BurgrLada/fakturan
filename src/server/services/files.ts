@@ -93,6 +93,9 @@ export class ImportPdfRefused extends ServiceError {
   }
 }
 
+// A download keeps the type a viewer recognises, whatever the browser sent as the name.
+const pdfName = (name: string) => (/\.pdf$/i.test(name) ? name : `${name}.pdf`);
+
 // IMP-005: the PDF of an imported document, attached or replaced after the import (R-12 of plan 9).
 // The old blob goes only after the commit, so a failed replacement keeps the PDF it had.
 export function attachImportPdf(
@@ -116,7 +119,7 @@ export function attachImportPdf(
           userId,
           kind: "import_pdf",
           mimeType: "application/pdf",
-          name: displayName(name),
+          name: pdfName(displayName(name)),
           size: data.length,
           // Undoing the import takes the PDF along with the document.
           importBatchId: row.importBatchId,

@@ -3156,6 +3156,8 @@ export const TEXTS = {
         "Země odběratele je XI (Severní Irsko): kód zůstal, jak je v souboru, zkontrolujte adresu a režim DPH",
       lineNameShortened:
         "Název některé položky byl delší než 200 znaků: zkrátil se a celý je v popisu položky",
+      lineNoteShortened:
+        "Celý název i poznámka položky se do popisu nevejdou (nejvýš 2 000 znaků), konec poznámky se zkrátil",
       ignoredPdf: (name: string) => `PDF ${name} nepatří k žádnému dokladu a nepoužije se`,
       nestedArchive: (name: string) => `Vnořený archiv ${name} se přeskočil`,
       duplicateCustomer: "Zákazník se stejným IČO nebo názvem už je ve Fakturanu nebo v importu",

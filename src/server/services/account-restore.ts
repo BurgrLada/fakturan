@@ -262,6 +262,7 @@ type Prepared = {
   auditBytes: number;
   files: number;
   sha256: string;
+  shortened: Record<string, number>;
 };
 
 function newBlob(ownerId: string, dir: string, id: string, bytes: Uint8Array): void {
@@ -325,6 +326,7 @@ async function prepare(run: Run): Promise<Prepared> {
     auditBytes: 0,
     files: 0,
     sha256: "",
+    shortened: {},
   };
   let done = 0;
   const spool: { writer: SpoolWriter | null } = { writer: null };
@@ -363,6 +365,7 @@ async function prepare(run: Run): Promise<Prepared> {
       run.guard,
     );
     prepared.sha256 = summary.sha256;
+    prepared.shortened = summary.shortened;
   } finally {
     spool.writer?.close();
   }
@@ -452,6 +455,7 @@ function commit(run: Run, prepared: Prepared): void {
         tables: total,
         files: prepared.files,
         sha256: prepared.sha256,
+        ...(Object.keys(prepared.shortened).length > 0 && { shortened: prepared.shortened }),
       },
     });
   });

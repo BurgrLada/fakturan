@@ -69,7 +69,13 @@ export type ArchiveHandlers = {
   audit?: (bytes: Uint8Array) => void | Promise<void>;
 };
 
-export type ArchiveSummary = { manifest: BackupManifest; sha256: string; files: string[] };
+export type ArchiveSummary = {
+  manifest: BackupManifest;
+  sha256: string;
+  files: string[];
+  // App-written text the restore cut to its limit (GENERATED_TEXT), by "table.column".
+  shortened: Record<string, number>;
+};
 
 const ID = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const MAX_TEXT = 1_000_000;
@@ -383,6 +389,7 @@ type LineBudget = {
   guard: MemoryGuard;
   linesSinceCheck: number;
   bytesSinceCheck: number;
+  shortened: Record<string, number>;
 };
 
 function watchMemory(budget: LineBudget, bytes: number): void {
@@ -476,6 +483,7 @@ function eachRow(
   take: (row: ArchiveRow) => void,
 ): number {
   const schema = rowSchema(entry);
+  const generated = generatedColumns(entry);
   const expected = manifest.counts.tables[entry.name] ?? 0;
   const invalid = () => new RestoreRejected(E.row(entry.name));
   // A configuration table the app reads whole holds no more rows than the app lets an account have.
@@ -502,6 +510,13 @@ function eachRow(
       }
       const parsed = schema.safeParse(upgraded);
       if (!parsed.success) throw invalid();
+      for (const [column, limit] of generated) {
+        const value = (upgraded as Record<string, unknown>)[column];
+        if (typeof value === "string" && value.length > limit) {
+          const key = `${entry.name}.${column}`;
+          budget.shortened[key] = (budget.shortened[key] ?? 0) + 1;
+        }
+      }
       if (perParent) {
         const parent = String(parsed.data[perParent.parent]);
         const seen = (children.get(parent) ?? 0) + 1;
@@ -519,6 +534,13 @@ function eachRow(
   );
   budget.guard.hold("children", 0);
   return count;
+}
+
+function generatedColumns(entry: BackupTable): [string, number][] {
+  return Object.keys(entry.columns).flatMap((column) => {
+    const limit = textLimit(entry.name, column);
+    return limit !== undefined && isGeneratedText(entry.name, column) ? [[column, limit]] : [];
+  });
 }
 
 // For the registry test: every free text column of a backed-up table must have its length limit.
@@ -683,6 +705,7 @@ export async function scanArchive(
     guard,
     linesSinceCheck: 0,
     bytesSinceCheck: 0,
+    shortened: {},
   };
   const archiveHash = createHash("sha256");
   const byName = new Map(BACKUP_TABLES.map((entry) => [`data/${entry.name}.jsonl`, entry]));
@@ -797,5 +820,5 @@ export async function scanArchive(
   const blobsDiffer = rowIds.size !== files.length || files.some((id) => !rowIds.has(id));
   if (missing || tablesMissing || countsDiffer || blobsDiffer) throw new RestoreRejected(E.counts);
   guard.hold("files", 0);
-  return { manifest: found, sha256: archiveHash.digest("hex"), files };
+  return { manifest: found, sha256: archiveHash.digest("hex"), files, shortened: budget.shortened };
 }

@@ -170,9 +170,17 @@ const nameTooLong = (line: ImportLine) =>
 
 // A real file may name a line at length (ruling of block A): the name keeps what fits and the
 // description carries the whole of it, ahead of the line's own note.
+const wholeText = (line: ImportLine) =>
+  line.description ? `${line.name}\n${line.description}` : line.name;
+
+// The description cannot hold the whole name and the note together: the end of the note is cut.
+const noteCut = (line: ImportLine) =>
+  nameTooLong(line) &&
+  wholeText(line).length > (textLimit("invoice_line", "description") ?? Number.POSITIVE_INFINITY);
+
 function shortenedName(line: ImportLine): ImportLine {
   if (!nameTooLong(line)) return line;
-  const whole = line.description ? `${line.name}\n${line.description}` : line.name;
+  const whole = wholeText(line);
   return {
     ...line,
     name: fitText("invoice_line", "name", line.name),
@@ -267,6 +275,7 @@ export function analyzeRows(
           row.document = { ...doc, lines: doc.lines.map(shortenedName) };
           status = "warning";
           row.messages.push(R.lineNameShortened);
+          if (doc.lines.some(noteCut)) row.messages.push(R.lineNoteShortened);
         }
         if ((!fileIco || !ownIco) && doc.sourceType !== TABULAR_SOURCE) {
           row.ownConfirmed = decided?.ownConfirmed ?? false;

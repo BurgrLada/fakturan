@@ -294,6 +294,20 @@ describe("import ISDOC", () => {
     assertConsistent(db, owner);
   });
 
+  test("[IMP-001] když se do popisu nevejde celý název i poznámka, řádek varuje zvlášť", async () => {
+    const owner = importOwner(db, NOW);
+    const bytes = editedIsdoc(
+      "faktura-czk.isdoc",
+      "<Item><Description>Konzultace</Description></Item>",
+      `<Note>${"p".repeat(1_800)}</Note><Item><Description>${"n".repeat(500)}</Description></Item>`,
+    );
+    const { rows } = await parsed(owner, [{ name: "x.isdoc", bytes }]);
+    expect(rows[0]).toMatchObject({ status: "warning" });
+    expect(rows[0]!.messages).toEqual(
+      expect.arrayContaining([R.lineNameShortened, R.lineNoteShortened]),
+    );
+  });
+
   test("[IMP-001] šedesát položek s názvem 1 850 znaků se naimportuje v mezích textů", async () => {
     const owner = importOwner(db, NOW);
     const zero = (i: number) =>

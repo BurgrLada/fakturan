@@ -106,8 +106,8 @@ export function queueMail(tx: Tx, audit: Audit, input: QueueInput): { logId: str
   ) {
     return null;
   }
-  // Every caller parses the message, so this guards a new path; never cut silently, a restore
-  // would refuse the row (TEXT_LIMITS).
+  // Every caller parses the message, so this guards a new path. The history keeps what was sent:
+  // a message over TEXT_LIMITS is refused here, not cut later by a backup.
   if (
     message.body.length > textLimit("email_log", "body")! ||
     message.subject.length > textLimit("email_log", "subject")!

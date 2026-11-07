@@ -148,6 +148,8 @@ export type Snapshot = {
   files: string[];
   audit: number;
   longestLine: number;
+  // App-written text cut to its limit (GENERATED_TEXT), by "table.column", for the backup's audit.
+  shortened: Record<string, number>;
   nodes: NodeStats;
 };
 
@@ -317,6 +319,7 @@ export function snapshot(
   };
   return db.transaction((tx) => {
     const tables: Record<string, number> = {};
+    const shortened: Record<string, number> = {};
     const files: string[] = [];
     for (const entry of BACKUP_TABLES) {
       const table = entry.table as Owned;
@@ -342,8 +345,11 @@ export function snapshot(
             for (const [name, limit, generated] of texts) {
               const value = row[name];
               if (typeof value !== "string" || value.length <= limit) continue;
-              if (generated) row[name] = value.slice(0, limit);
-              else throw new SnapshotTooLarge(E.textTooLong(describeRow(tx, entry.name, row)));
+              if (generated) {
+                row[name] = value.slice(0, limit);
+                const key = `${entry.name}.${name}`;
+                shortened[key] = (shortened[key] ?? 0) + 1;
+              } else throw new SnapshotTooLarge(E.textTooLong(describeRow(tx, entry.name, row)));
             }
             for (const name of jsonColumns) {
               if (jsonBytes(row[name]) > jsonBytesFor(entry.name, name, limits)) {
@@ -420,6 +426,7 @@ export function snapshot(
       files,
       audit,
       longestLine: stats.longest,
+      shortened,
       nodes: { nodes, containers, lineContainers, lineDepth },
     };
   });

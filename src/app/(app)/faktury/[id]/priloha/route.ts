@@ -38,7 +38,9 @@ export async function POST(
   try {
     enforceRateLimit(actor, RATE_RULES.importUser);
     const data = await readCapped(request, MAX_UPLOAD_BYTES, READ_TIMEOUT_MS);
-    const { fileId } = attachImportPdf(actor, id, Buffer.from(data), nameOf(request));
+    // A view of the bytes already read, not a second copy of up to 25 MiB.
+    const body = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+    const { fileId } = attachImportPdf(actor, id, body, nameOf(request));
     return reply(200, { fileId });
   } catch (error) {
     await request.body?.cancel().catch(() => {});

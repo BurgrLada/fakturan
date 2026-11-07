@@ -275,7 +275,7 @@ export function finishExport(
   row: ExportJob,
   size: number,
   total: number,
-  counts: Record<string, number> = { count: total },
+  counts: Record<string, unknown> = { count: total },
 ): boolean {
   const ownerId = row.userId;
   const { action, entity } = auditOf(row.kind, "finish");

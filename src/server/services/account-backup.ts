@@ -339,6 +339,7 @@ export async function runBackup(job: Job): Promise<void> {
       tables: Object.values(snap.tables).reduce((sum, n) => sum + n, 0),
       files: snap.files.length,
       audit: snap.audit,
+      ...(Object.keys(snap.shortened).length > 0 && { shortened: snap.shortened }),
     });
   } catch (error) {
     if (!findExport(db, ownerId, exportId)) return;

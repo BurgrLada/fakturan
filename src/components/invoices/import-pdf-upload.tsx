@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, type ChangeEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { MAX_UPLOAD_BYTES } from "@/lib/import-preview";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.importing.imported;
@@ -19,6 +20,10 @@ export function ImportPdfUpload({ id, hasPdf }: { id: string; hasPdf: boolean })
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(T.pdfTooLarge);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {

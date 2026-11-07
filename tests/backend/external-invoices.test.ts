@@ -391,6 +391,18 @@ describe("ruční PDF k importovanému dokladu", () => {
     assertConsistent(db, owner);
   });
 
+  test("[IMP-005] PDF bez jména nebo s jinou příponou se stáhne s příponou .pdf", () => {
+    const owner = seedOwner(db, NOW);
+    const id = externalInvoice(db, owner);
+    const nameOf = (name: string) => {
+      const { fileId } = attachImportPdf(webActor(owner), id, pdf("x"), name);
+      return db.select().from(file).where(eq(file.id, fileId)).get()!.name;
+    };
+    expect(nameOf("")).toBe("soubor.pdf");
+    expect(nameOf("sken")).toBe("sken.pdf");
+    expect(nameOf("Faktura.PDF")).toBe("Faktura.PDF");
+  });
+
   test("[IMP-005] vlastní doklad PDF nepřijme a nic nezapíše", () => {
     const owner = seedOwner(db, NOW);
     const own = issuedInvoice(owner);
