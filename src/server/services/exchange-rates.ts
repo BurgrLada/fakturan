@@ -2,7 +2,6 @@ import "server-only";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES, type Currency } from "@/lib/currency";
-import { daysBetween } from "@/lib/invoice";
 import { convertMinor, expectedListDate, RATE_UNIT } from "@/lib/fx";
 import type { RateResult } from "@/lib/invoice-form";
 import {
@@ -30,7 +29,6 @@ const E = TEXTS.exchangeRates.errors;
 
 const SYSTEM: Actor = { userId: null, source: "system" };
 const FETCH_FROM = "14:45";
-const STALE_AFTER_DAYS = 5;
 
 export type { RateResult };
 
@@ -209,23 +207,6 @@ function hasListFor(expected: CalendarDate): boolean {
   return storedRate(db, "EUR", expected) !== null;
 }
 
-let reportedStaleOn: CalendarDate | null = null;
-
-// An outage is not an error, but a list that stays unreadable for days means the source changed
-// its format, and only the code can fix that.
-function reportStale(expected: CalendarDate, today: CalendarDate): void {
-  const newest = db
-    .select({ listDate: sql<string | null>`max(${exchangeRate.listDate})` })
-    .from(exchangeRate)
-    .where(eq(exchangeRate.currency, "EUR"))
-    .get()?.listDate;
-  if (!newest || reportedStaleOn === today) return;
-  const days = daysBetween(newest, expected);
-  if (days < STALE_AFTER_DAYS) return;
-  reportedStaleOn = today;
-  reportFailure(new Error(`Kurzy ČNB se už ${days} dní nepodařilo načíst`), { task: "fx" });
-}
-
 function tableIsEmpty(): boolean {
   return (
     db
@@ -241,7 +222,6 @@ export function planRateFetch(now: Date): void {
   const today = calendarDateInPrague(now);
   const expected = expectedListDate(today, now);
   if (hasListFor(expected)) return;
-  reportStale(expected, today);
   const waiting = expected === today && timeInPrague(now) < FETCH_FROM;
   if (waiting && !tableIsEmpty()) return;
   const hour = timeInPrague(now).slice(0, 2);

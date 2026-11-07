@@ -117,7 +117,7 @@ Technologie: Better Auth.
 - **ADM-006** Smazání uživatele administrátorem vyžaduje opsání e-mailu a smaže všechna jeho data. UI před tím upozorní, že export si musí udělat sám uživatel; deaktivovaný uživatel se nepřihlásí, takže ho administrátor na export dočasně reaktivuje **[návrh]**.
 - **ADM-009** Uživatel může smazat vlastní účet v nastavení po zadání hesla nebo opětovném přihlášení, s nabídkou zálohy předem. Poslední administrátor to nesmí, pokud na instanci zůstávají jiní uživatelé **[návrh]**.
 - **ADM-007** Administrátor nemá žádnou cestu, jak číst faktury, zákazníky, nastavení ani audit jiného uživatele. Vidí jen metadata účtu z ADM-002 a události instance (AUD-008).
-- **ADM-008** Přehled stavu instance: verze, velikost databáze, stav plánovače, čas poslední zálohy, nastavení SMTP a monitoringu, bez zobrazení tajemství.
+- **ADM-008** Přehled stavu instance: verze, velikost databáze a souborů, volné místo na svazku, stav plánovače, čas poslední zálohy, datum posledního kurzovního lístku ČNB, délka fronty těžkých úloh, nastavení SMTP a monitoringu, bez zobrazení tajemství.
 
 ---
 
@@ -515,6 +515,8 @@ Audit log je základní vlastnost, ne doplněk. Zapisuje se **úplně všechno**
 - **AUD-010** Výchozí retence je neomezená. Smazání uživatele (ADM-006) odstraní jeho záznamy jako jediná povolená výjimka, zůstane jen záznam instance, že účet byl smazán.
 - **AUD-011** Testovací pomůcka ověřuje, že každá servisní mutace vytvoří záznam. Nová mutace bez auditu neprojde testem.
 
+Upřesnění: přečtení upozornění (`notification.read`, `notification.read_all`) je stav zobrazení, ne změna dat účtu, takže ho AUD-001 nevyžaduje. Záznam přesto vzniká, protože každý zápis jde přes mutaci s auditem (AUD-011); jde o vedlejší důsledek, ne o požadavek.
+
 ## 19. Bezpečnost a architektura
 
 ### 19.1 Bezpečnost (SEC)
@@ -572,7 +574,7 @@ Pravidla:
 
 - **MON-001** Napojení na službu kompatibilní se Sentry (Sentry, GlitchTip a další) stačí nastavit proměnnou `SENTRY_DSN`. Bez ní se nic neposílá a aplikace funguje stejně.
 - **MON-002** Volitelně `SENTRY_ENVIRONMENT` a `SENTRY_TRACES_SAMPLE_RATE`.
-- **MON-003** Zachytávají se chyby serveru, klienta i plánovaných úloh.
+- **MON-003** Zachytávají se chyby serveru, klienta i plánovaných úloh. Plánovač jednou za hodinu hlásí i provozní stav, každou podmínku nejvýš jednou denně: volné místo na svazku pod 2 GiB nebo pod 10 %, poslední lístek ČNB starší než 3 pracovní dny, těžká úloha běžící déle než 30 minut a selhaná poslední noční záloha. Hlášení nese jen klíč podmínky a čísla.
 - **MON-004** Do události jde jen ID uživatele. E-mail, IP, obsah faktur a tajemství se nepřenášejí, zajišťuje to `beforeSend`, s testem.
 
 ### 19.5 Konfigurace

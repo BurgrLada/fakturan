@@ -793,19 +793,13 @@ describe("plánování stahování", () => {
     expect(jobs()).toMatchObject([{ payload: { date: "2026-10-30" } }]);
   });
 
-  test("[FOR-004] lístek, který se pět dní nedá načíst, se jednou za den nahlásí", () => {
+  test("[FOR-004] starý lístek hlásí provozní kontrola, ne plánování stahování", () => {
     seedRate("EUR", "2026-10-23", 24_000_000);
 
-    planRateFetch(new Date("2026-10-27T10:00:00Z"));
-    expect(failures.reportFailure).not.toHaveBeenCalled();
-
     planRateFetch(new Date("2026-11-02T10:00:00Z"));
-    planRateFetch(new Date("2026-11-02T11:00:00Z"));
-    expect(failures.reportFailure).toHaveBeenCalledTimes(1);
-    expect(failures.reportFailure).toHaveBeenCalledWith(expect.any(Error), { task: "fx" });
-
     planRateFetch(new Date("2026-11-03T10:00:00Z"));
-    expect(failures.reportFailure).toHaveBeenCalledTimes(2);
+
+    expect(failures.reportFailure).not.toHaveBeenCalled();
   });
 
   test("[FOR-004] prázdná tabulka a čerstvý lístek se nehlásí", () => {

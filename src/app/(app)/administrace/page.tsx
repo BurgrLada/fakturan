@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { PageLoading } from "@/components/page-loading";
 import { z } from "zod";
+import { InstanceStatus } from "@/components/admin/instance-status";
 import { InvitationsPanel } from "@/components/admin/invitations-panel";
 import { UsersTable } from "@/components/admin/users-table";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { auditActionLabel } from "@/lib/audit-labels";
-import { formatBytes, formatDateTime } from "@/lib/format";
-import { TEXTS } from "@/lib/texts";
+import { formatDateTime } from "@/lib/format";
 import { actorFromRequest, requireAdmin } from "@/server/auth/session";
 import { getInstanceStatus } from "@/server/services/instance-status";
 import { listInstanceAudit } from "@/server/services/instance-audit";
@@ -74,39 +74,6 @@ function InstanceEvents({ events }: { events: ReturnType<typeof listInstanceAudi
         )}
       </div>
     </div>
-  );
-}
-
-function InstanceStatus({ status }: { status: ReturnType<typeof getInstanceStatus> }) {
-  const rows: [string, string][] = [
-    ["Verze", status.version],
-    ["Velikost databáze", formatBytes(status.databaseBytes)],
-    ["Plánovač", TEXTS.instanceStatus.scheduler[status.scheduler]],
-    [
-      "Poslední záloha",
-      [
-        status.lastBackupAt ? formatDateTime(status.lastBackupAt) : "žádná",
-        status.lastBackupFailedAt
-          ? `${TEXTS.instanceStatus.backupFailed} (${formatDateTime(status.lastBackupFailedAt)})`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(", "),
-    ],
-    ["SMTP", status.smtpConfigured ? "nastaveno" : "nenastaveno"],
-    ["Monitoring chyb", status.monitoringConfigured ? "nastaveno" : "nenastaveno"],
-  ];
-  return (
-    <Table>
-      <TableBody>
-        {rows.map(([label, value]) => (
-          <TableRow key={label}>
-            <TableHead scope="row">{label}</TableHead>
-            <TableCell>{value}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
   );
 }
 

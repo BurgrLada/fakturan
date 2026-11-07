@@ -43,4 +43,10 @@ test("[ADM-008] administrace ukáže stav instance bez tajemství", async ({ pag
   await expect(page.getByRole("row", { name: /^SMTP nenastaveno/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /^Monitoring chyb nenastaveno/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /^Velikost databáze/ })).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: /^Velikost souborů (zatím nezměřeno|\d[\d,]* (B|KB|MB|GB))/ }),
+  ).toBeVisible();
+  await expect(page.getByRole("row", { name: /^Volné místo na svazku \d/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /^Poslední kurzovní lístek ČNB/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /^Těžké úlohy ve frontě \d/ })).toBeVisible();
 });

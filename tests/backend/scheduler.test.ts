@@ -436,6 +436,12 @@ describe("start", () => {
     expect(tickTasksForTests()).toContain("fx-plan");
   });
 
+  test("[MON-003] start zaregistruje provozní kontrolu", () => {
+    stubEnv();
+    startScheduler();
+    expect(tickTasksForTests()).toContain("ops-check");
+  });
+
   test("[R-5] SIGTERM s běžící úlohou lease neuvolní a nechá ho vypršet", async () => {
     stubEnv();
     let finish = () => {};
