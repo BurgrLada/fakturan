@@ -166,3 +166,28 @@ test("[REM-010] přepínač v Automatizaci má výchozí Vypnuto a uloží Čtvr
   await page.reload();
   await expect(page.getByLabel("Posílat souhrn")).toHaveValue("quarterly");
 });
+
+test("[REM-011] připomínka k daním a e-mail o limitu jsou vypnuté a zapnutí se uloží", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/automatizace`);
+  await page.waitForLoadState("networkidle");
+
+  const tax = page.getByLabel("Posílat lednovou připomínku k daním");
+  const limit = page.getByLabel("Posílat e-mail o blížícím se limitu DPH");
+  await expect(tax).not.toBeChecked();
+  await expect(limit).not.toBeChecked();
+  // Controlled by the saved settings: the box turns once the server has stored the change.
+  await tax.click();
+  await expect(tax).toBeChecked();
+  await expect(tax).toBeEnabled();
+  await limit.click();
+  await expect(limit).toBeChecked();
+  await expect(limit).toBeEnabled();
+
+  await page.reload();
+  await expect(page.getByLabel("Posílat lednovou připomínku k daním")).toBeChecked();
+  await expect(page.getByLabel("Posílat e-mail o blížícím se limitu DPH")).toBeChecked();
+});

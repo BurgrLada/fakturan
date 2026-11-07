@@ -21,8 +21,10 @@ import { registerTickTask, resetTickTasksForTests, tick } from "@/server/schedul
 import {
   setAutomation,
   setDailyDigest,
+  setLimitMail,
   setPaused,
   setPeriodSummary,
+  setTaxReminder,
 } from "@/server/services/automation";
 import { assignNotice, ingestNotice } from "@/server/services/bank-notices";
 import { deliverDigest } from "@/server/services/due-alerts";
@@ -36,6 +38,7 @@ import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
 import { backupArchive, restoreArchive } from "../helpers/backup-compare";
 import { externalInvoice } from "../fixtures/external-invoice";
+import { issuedDocument } from "../fixtures/report-scenario";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import { seedBankAccount, TARGET, VS } from "../helpers/fixtures-bank";
@@ -489,6 +492,60 @@ describe("[TST-016] pravidelný souhrn", () => {
   }, 60_000);
 });
 
+describe("[TST-016] připomínka k daním a limit DPH", () => {
+  // 1 950 000,00 Kč issued on the first day: past both thresholds of the VAT limit from the start.
+  function taxAccount(): string {
+    const owner = seedOwner(db, T0);
+    ownSmtp(db, owner, smtp.port, { cc: ["ucetni@novak.cz"] });
+    issuedDocument(owner, seedCustomer(owner, CLIENT), {
+      issueDate: "2026-03-01",
+      dueDate: "2026-03-15",
+      totalMinor: 195_000_000,
+    });
+    setClockForTests({ now: () => current });
+    return owner;
+  }
+
+  const january = async () => {
+    await tickAt(new Date("2027-01-10T10:00:00Z"));
+    await tickAt(new Date("2027-01-31T10:00:00Z"));
+  };
+
+  test("[TST-016] vypnutá připomínka i limit nepošlou nic ani po doběhu", async () => {
+    const never = taxAccount();
+    const turnedOff = taxAccount();
+    setTaxReminder(webActor(turnedOff), true);
+    setLimitMail(webActor(turnedOff), true);
+    setTaxReminder(webActor(turnedOff), false);
+    setLimitMail(webActor(turnedOff), false);
+
+    await everyDay();
+    await afterOutage();
+    await january();
+
+    expect(smtp.messages).toEqual([]);
+    expect(smtp.connections()).toBe(0);
+    for (const owner of [never, turnedOff]) assertConsistent(db, owner);
+  }, 60_000);
+
+  test("[TST-016] zapnuté pošlou jen vlastníkovi limit jednou a připomínku jednou", async () => {
+    const owner = taxAccount();
+    setTaxReminder(webActor(owner), true);
+    setLimitMail(webActor(owner), true);
+
+    await everyDay();
+    await january();
+
+    const email = db.select({ email: user.email }).from(user).where(eq(user.id, owner)).get()!;
+    expect(smtp.messages.map((message) => message.to)).toEqual([[email.email], [email.email]]);
+    expect(smtp.messages.map((message) => message.subject)).toEqual([
+      "Fakturan: obrat dosáhl 95 % limitu pro registraci k DPH",
+      "Fakturan: podklady k daním za rok 2026",
+    ]);
+    expect(toClient()).toEqual([]);
+  }, 60_000);
+});
+
 describe("[TST-016] ticho po obnově zálohy", () => {
   test("[TST-016] po obnově nic neodejde: plán send, upomínka, potvrzení, záloha, digest", async () => {
     registerJob("backup.run", { run: runBackup, recover: recoverBackupJob });
@@ -497,6 +554,8 @@ describe("[TST-016] ticho po obnově zálohy", () => {
     for (const owner of sources) {
       setDailyDigest(webActor(owner), true);
       setPeriodSummary(webActor(owner), "monthly");
+      setTaxReminder(webActor(owner), true);
+      setLimitMail(webActor(owner), true);
     }
     const archives = [];
     for (const owner of sources) archives.push(await backupArchive(db, owner));

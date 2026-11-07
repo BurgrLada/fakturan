@@ -1,5 +1,6 @@
 import type { CalendarDate } from "./number-format";
 import type { DateRange } from "./report-period";
+import { LIMIT_HIGH_PERCENT, LIMIT_WARN_PERCENT, type LimitLevel } from "./turnover-limits";
 
 export const PERIOD_SUMMARIES = ["off", "monthly", "quarterly"] as const;
 export type PeriodSummaryMode = (typeof PERIOD_SUMMARIES)[number];
@@ -54,4 +55,21 @@ export function periodOfKey(
   if (!quarterly) return null;
   const [year, start] = [Number(quarterly[1]), (Number(quarterly[2]) - 1) * 3];
   return { mode: "quarterly", range: span(year, start, 3), next: span(year, start + 3, 3) };
+}
+
+// January 10 for the previous year, with a catch-up to the end of the month (R-16).
+const TAX_REMINDER_FROM_DAY = 10;
+
+export function taxReminderDue(today: CalendarDate): { year: number } | null {
+  const [year, month, day] = today.split("-").map(Number) as [number, number, number];
+  return month === 1 && day >= TAX_REMINDER_FROM_DAY ? { year: year - 1 } : null;
+}
+
+export type LimitMailThreshold = typeof LIMIT_WARN_PERCENT | typeof LIMIT_HIGH_PERCENT;
+
+// Over the limit is still the high-threshold mail: its text says the limit was crossed.
+export function limitMailThreshold(level: LimitLevel): LimitMailThreshold | null {
+  if (level === "warn") return LIMIT_WARN_PERCENT;
+  if (level === "high" || level === "over") return LIMIT_HIGH_PERCENT;
+  return null;
 }

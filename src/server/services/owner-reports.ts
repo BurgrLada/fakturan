@@ -1,19 +1,23 @@
 import "server-only";
-import { and, count, desc, eq, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, ne, or, sql } from "drizzle-orm";
 import type { Currency } from "@/lib/currency";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague, isDailyDue, type CalendarDate } from "@/lib/number-format";
 import {
   CATCH_UP_DAYS,
   finishedPeriod,
+  limitMailThreshold,
   periodOfKey,
+  taxReminderDue,
   type OwnerReportKind,
 } from "@/lib/owner-reports";
 import type { DateRange } from "@/lib/report-period";
 import { formatCalendarDate } from "@/lib/template-vars";
+import { LIMIT_HIGH_PERCENT, LIMIT_WARN_PERCENT } from "@/lib/turnover-limits";
 import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
 import { db } from "../db";
+import { env } from "../env";
 import { overdueCondition } from "../db/invoice-sql";
 import {
   auditLog,
@@ -29,6 +33,8 @@ import { enqueue } from "../jobs/queue";
 import { RetryLater } from "../jobs/registry";
 import { forecast, FORECAST_SERIES } from "../reports/forecast";
 import { notAdvance, reportSummary, stateFilter } from "../reports/queries";
+import { taxOverview } from "../reports/tax";
+import { limitStates, type LimitState } from "../reports/turnover";
 import type { ReportFilter, Unconverted } from "../reports/types";
 import { reportFailure } from "../scheduler/report";
 import { getAutomation } from "./automation";
@@ -178,14 +184,24 @@ function planned(userId: string, key: string): boolean {
   );
 }
 
+type ReportPayload = JobPayload & { report: OwnerReportKind };
+
 // An existing job with the key means the report was already planned, whatever became of it (R-15).
+// A settled key is recorded as done without a message, like a lower threshold jumped over.
 function planReport(
   userId: string,
   key: string,
-  payload: JobPayload & { report: OwnerReportKind },
+  payload: ReportPayload,
+  settled: { key: string; payload: ReportPayload }[] = [],
 ): void {
   if (planned(userId, key)) return;
   mutate({ userId, source: "scheduler" }, "mail.owner_report_plan", (tx, audit) => {
+    for (const skip of settled) {
+      const { id, created } = enqueue(tx, { kind: "user.report", userId, ...skip });
+      if (created) {
+        tx.update(job).set({ status: "done", updatedAt: clock.now() }).where(eq(job.id, id)).run();
+      }
+    }
     const { created } = enqueue(tx, { kind: "user.report", key, userId, payload });
     if (!created) return;
     audit({
@@ -198,36 +214,95 @@ function planReport(
   });
 }
 
-function summaryAccounts() {
+function reportAccounts() {
   return db
     .select({
       userId: automationSettings.userId,
       sendTime: automationSettings.sendTime,
-      mode: automationSettings.periodSummary,
+      summary: automationSettings.periodSummary,
+      tax: automationSettings.taxReminder,
+      limit: automationSettings.limitMail,
       createdAt: user.createdAt,
     })
     .from(automationSettings)
     .innerJoin(user, eq(user.id, automationSettings.userId))
-    .where(and(ne(automationSettings.periodSummary, "off"), sql`coalesce(${user.banned}, 0) = 0`))
+    .where(
+      and(
+        or(
+          ne(automationSettings.periodSummary, "off"),
+          eq(automationSettings.taxReminder, true),
+          eq(automationSettings.limitMail, true),
+        ),
+        sql`coalesce(${user.banned}, 0) = 0`,
+      ),
+    )
     .all();
 }
+
+type Account = ReturnType<typeof reportAccounts>[number] & { since: CalendarDate };
+
+function planSummary(account: Account, today: CalendarDate): void {
+  if (account.summary === "off") return;
+  const period = finishedPeriod(today, account.summary);
+  if (period.dayOfPeriod > CATCH_UP_DAYS) return;
+  // A period that ended before the account existed has nothing of the account in it.
+  if (account.since > period.range.to) return;
+  planReport(account.userId, `summary:${account.userId}:${period.key}`, {
+    report: "summary",
+    period: period.key,
+  });
+}
+
+function planTax(account: Account, today: CalendarDate): void {
+  const due = taxReminderDue(today);
+  if (!account.tax || !due || account.since > `${due.year}-12-31`) return;
+  planReport(account.userId, `tax:${account.userId}:${due.year}`, {
+    report: "tax",
+    period: String(due.year),
+  });
+}
+
+function vatState(userId: string, year: number): (LimitState & { watched: true }) | null {
+  const state = limitStates(db, userId, year).find((item) => item.key === "vat");
+  return state?.watched ? state : null;
+}
+
+function planLimit(account: Account, today: CalendarDate): void {
+  if (!account.limit) return;
+  const year = Number(today.slice(0, 4));
+  const state = vatState(account.userId, year);
+  const threshold = state && limitMailThreshold(state.level);
+  if (!threshold) return;
+  const keyOf = (value: number) => `limit:${account.userId}:${year}:${value}`;
+  const payloadOf = (value: number): ReportPayload => ({
+    report: "limit",
+    period: String(year),
+    threshold: value,
+  });
+  // Only the highest threshold crossed is sent; the lower one is settled so it never follows.
+  const lower = threshold === LIMIT_HIGH_PERCENT ? [LIMIT_WARN_PERCENT] : [];
+  planReport(
+    account.userId,
+    keyOf(threshold),
+    payloadOf(threshold),
+    lower.map((value) => ({ key: keyOf(value), payload: { ...payloadOf(value), settled: true } })),
+  );
+}
+
+const PLANNERS = [planSummary, planTax, planLimit];
 
 // Runs under the master switch as well: these messages go to the account owner alone (R-15).
 export function planOwnerReports(now: Date): void {
   const today = calendarDateInPrague(now);
-  for (const { userId, sendTime, mode, createdAt } of summaryAccounts()) {
-    if (mode === "off" || !isDailyDue(now, sendTime)) continue;
-    const period = finishedPeriod(today, mode);
-    if (period.dayOfPeriod > CATCH_UP_DAYS) continue;
-    // A period that ended before the account existed has nothing of the account in it.
-    if (calendarDateInPrague(createdAt) > period.range.to) continue;
-    try {
-      planReport(userId, `summary:${userId}:${period.key}`, {
-        report: "summary",
-        period: period.key,
-      });
-    } catch (error) {
-      reportFailure(error, { task: "owner-report-plan", userId });
+  for (const row of reportAccounts()) {
+    if (!isDailyDue(now, row.sendTime)) continue;
+    const account = { ...row, since: calendarDateInPrague(row.createdAt) };
+    for (const plan of PLANNERS) {
+      try {
+        plan(account, today);
+      } catch (error) {
+        reportFailure(error, { task: "owner-report-plan", userId: row.userId });
+      }
     }
   }
 }
@@ -254,6 +329,54 @@ function switchedOnAfter(userId: string, end: CalendarDate): boolean {
   return last !== undefined && calendarDateInPrague(last.at) > end;
 }
 
+// The one place that builds the January reminder, for the HTML layout to wrap.
+export function taxReminderText(ownerId: string, year: number): string {
+  const today = calendarDateInPrague(clock.now());
+  const overview = taxOverview(db, ownerId, { year, basis: "paid" }, today);
+  const { dateFormat } = getPreferences(ownerId);
+  const X = T.tax;
+  const url = new URL(`/prehledy/dane?rok=${year}`, env.BETTER_AUTH_URL).href;
+  return [
+    X.title(year),
+    "",
+    X.income(year, czk(overview.totalCzkMinor)),
+    ...unconvertedLine(overview.unconverted),
+    ...(overview.estimated.count > 0
+      ? [X.estimated(overview.estimated.count, czk(overview.estimated.czkMinor))]
+      : []),
+    X.unpaid(
+      formatCalendarDate(overview.asOf, dateFormat),
+      overview.unpaid.length,
+      czk(overview.unpaidCzkMinor),
+    ),
+    ...unconvertedLine(overview.unpaidUnconverted),
+    "",
+    X.link(url),
+    "",
+    TEXTS.tax.disclaimer,
+  ].join("\n");
+}
+
+// The one place that builds the VAT limit message, for the HTML layout to wrap.
+export function limitMailText(
+  _ownerId: string,
+  state: LimitState & { watched: true },
+  year: number,
+): string {
+  const L = T.limit;
+  const threshold = limitMailThreshold(state.level) ?? LIMIT_WARN_PERCENT;
+  const url = new URL("/prehledy?zalozka=limity", env.BETTER_AUTH_URL).href;
+  return [
+    state.level === "over" ? L.over(year, L.vat) : L.reached(year, threshold, L.vat),
+    L.usage(czk(state.turnoverMinor), czk(state.limitMinor), state.percent),
+    ...unconvertedLine(state.unconverted),
+    "",
+    L.link(url),
+    "",
+    L.note,
+  ].join("\n");
+}
+
 type Delivery = { subject: string; text: string; after: JobPayload };
 
 function summaryDelivery(userId: string, key: string): Delivery | null {
@@ -270,6 +393,46 @@ function summaryDelivery(userId: string, key: string): Delivery | null {
   };
 }
 
+function yearOf(period: unknown): number {
+  const year = Number(period);
+  if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+    throw new Error(`Neznámý rok e-mailu pro vlastníka: ${String(period)}`);
+  }
+  return year;
+}
+
+function taxDelivery(userId: string, period: unknown): Delivery | null {
+  const year = yearOf(period);
+  if (!getAutomation(userId).taxReminder) return null;
+  return {
+    subject: T.tax.subject(year),
+    text: taxReminderText(userId, year),
+    after: { report: "tax", period: String(year) },
+  };
+}
+
+function limitDelivery(userId: string, period: unknown, threshold: unknown): Delivery | null {
+  const year = yearOf(period);
+  if (!getAutomation(userId).limitMail) return null;
+  const state = vatState(userId, year);
+  const reached = state && limitMailThreshold(state.level);
+  if (!state || !reached || reached < Number(threshold)) return null;
+  return {
+    subject: T.limit.subject(reached, T.limit.vat),
+    text: limitMailText(userId, state, year),
+    after: { report: "limit", period: String(year), threshold: reached },
+  };
+}
+
+// Each kind reads its own switch again, so turning it off stops a message already planned.
+function deliveryOf(userId: string, payload: JobPayload): Delivery | null {
+  const { report, period, threshold } = payload;
+  if (report === "summary") return summaryDelivery(userId, String(period));
+  if (report === "tax") return taxDelivery(userId, period);
+  if (report === "limit") return limitDelivery(userId, period, threshold);
+  throw new Error(`Neznámý druh e-mailu pro vlastníka: ${String(report)}`);
+}
+
 export async function deliverOwnerReport(row: Job): Promise<void> {
   const userId = row.userId;
   if (!userId) throw new Error("E-mail pro vlastníka nemá vlastníka");
@@ -279,10 +442,7 @@ export async function deliverOwnerReport(row: Job): Promise<void> {
     .where(eq(user.id, userId))
     .get();
   if (!account || account.banned) return;
-  const { report, period } = row.payload;
-  if (report !== "summary") throw new Error(`Neznámý druh e-mailu pro vlastníka: ${report}`);
-  // The switch is read again: turning the summary off or changing its kind stops a planned one.
-  const delivery = summaryDelivery(userId, String(period));
+  const delivery = deliveryOf(userId, row.payload);
   if (!delivery) return;
   const transport = await resolveTransport(userId);
   if (!transport) return;

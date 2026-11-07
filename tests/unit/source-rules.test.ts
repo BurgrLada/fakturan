@@ -40,6 +40,20 @@ const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|
 const DESIGN_TOKENS = [join("src", "components", "settings", "design-picker.tsx")];
 
 describe("strukturní pravidla", () => {
+  test("[REM-012] prahy a limit jsou jen v turnover-limits.ts", () => {
+    // Bare 80 or 95 outside an unrelated length cap (`.max(80`, a text limit, its message).
+    const THRESHOLD = /200_?000_?000|(?<![\w.-])(?:80|95)(?![\w.])/;
+    const UNRELATED = /\.max\(80\b|": 80,|80 znaků/;
+    expect(THRESHOLD.test("warn: 80,")).toBe(true);
+    expect(THRESHOLD.test("`Nad 95 %`")).toBe(true);
+    expect(THRESHOLD.test("const LIMIT = 200_000_000;")).toBe(true);
+    expect(THRESHOLD.test("max: 800, id: 9500, v1.80")).toBe(false);
+
+    const dirs = [join("src", "server"), join("src", "lib")];
+    const allowed = [join("src", "lib", "turnover-limits.ts")];
+    expect(offenders(dirs, THRESHOLD, allowed).filter((line) => !UNRELATED.test(line))).toEqual([]);
+  });
+
   test("[ARC-001] služby a jádro přehledů neimportují next", () => {
     expect(NEXT_IMPORT.test('import { cookies } from "next/headers";')).toBe(true);
     expect(NEXT_IMPORT.test('const m = await import("next/cache");')).toBe(true);

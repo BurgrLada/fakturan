@@ -31,6 +31,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "auth.signup_rejected": "Odmítnutá registrace",
   "automation.daily_digest": "Změna denního přehledu",
   "automation.period_summary": "Změna pravidelného souhrnu",
+  "automation.tax_reminder": "Změna lednové připomínky k daním",
+  "automation.limit_mail": "Změna e-mailu o limitu DPH",
   "automation.disable": "Vypnutí automatiky",
   "automation.enable": "Zapnutí automatiky",
   "automation.pause": "Pozastavení automatiky",

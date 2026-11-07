@@ -10,8 +10,10 @@ import { ServiceError } from "@/server/services/access";
 import {
   setAutomation,
   setDailyDigest,
+  setLimitMail,
   setPaused,
   setPeriodSummary,
+  setTaxReminder,
   setSendTime,
 } from "@/server/services/automation";
 import { savePreferences } from "@/server/services/preferences";
@@ -66,6 +68,16 @@ export async function setPeriodSummaryAction(raw: unknown): Promise<Outcome> {
   const parsed = z.enum(PERIOD_SUMMARIES).safeParse(raw);
   if (!parsed.success) return { ok: false, error: "Neplatný požadavek" };
   return guarded((actor) => setPeriodSummary(actor, parsed.data));
+}
+
+export async function setTaxReminderAction(enabled: boolean): Promise<Outcome> {
+  await requireSession();
+  return guarded((actor) => setTaxReminder(actor, enabled === true));
+}
+
+export async function setLimitMailAction(enabled: boolean): Promise<Outcome> {
+  await requireSession();
+  return guarded((actor) => setLimitMail(actor, enabled === true));
 }
 
 export async function setAdvanceFinalModeAction(raw: unknown): Promise<Outcome> {

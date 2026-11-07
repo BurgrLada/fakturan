@@ -5,9 +5,11 @@ import {
   setAdvanceFinalModeAction,
   setAutomationAction,
   setDailyDigestAction,
+  setLimitMailAction,
   setPausedAction,
   setPeriodSummaryAction,
   setSendTimeAction,
+  setTaxReminderAction,
 } from "@/app/(app)/nastaveni/automatizace/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -294,6 +296,29 @@ export function AutomationPanel({
             ))}
           </NativeSelect>
         </div>
+      </section>
+
+      <section className="flex flex-col gap-2 rounded-lg border p-4">
+        <h2 className="text-base">{T.ownerMail.title}</h2>
+        <p className="text-sm text-muted-foreground">{T.ownerMail.body}</p>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.taxReminder}
+            disabled={pending}
+            onChange={(event) => perform(() => setTaxReminderAction(event.target.checked))}
+          />
+          {T.ownerMail.tax}
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.limitMail}
+            disabled={pending}
+            onChange={(event) => perform(() => setLimitMailAction(event.target.checked))}
+          />
+          {T.ownerMail.limit}
+        </label>
       </section>
     </div>
   );

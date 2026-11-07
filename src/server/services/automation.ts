@@ -237,3 +237,20 @@ export function setPeriodSummary(actor: Actor, mode: PeriodSummaryMode): void {
         },
   );
 }
+
+function setOwnerMail(actor: Actor, key: "taxReminder" | "limitMail", enabled: boolean): void {
+  const action = key === "taxReminder" ? "automation.tax_reminder" : "automation.limit_mail";
+  apply(actor, (before) =>
+    before[key] === enabled
+      ? null
+      : { action, patch: { [key]: enabled }, after: { [key]: enabled } },
+  );
+}
+
+export function setTaxReminder(actor: Actor, enabled: boolean): void {
+  setOwnerMail(actor, "taxReminder", enabled);
+}
+
+export function setLimitMail(actor: Actor, enabled: boolean): void {
+  setOwnerMail(actor, "limitMail", enabled);
+}

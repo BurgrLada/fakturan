@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { finishedPeriod } from "@/lib/owner-reports";
+import { finishedPeriod, taxReminderDue } from "@/lib/owner-reports";
+import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, emailLog, invoice, job, user } from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
@@ -11,13 +12,21 @@ import { drainJobs } from "@/server/jobs/worker";
 import { ownerReportPlanTask } from "@/server/scheduler/start";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
-import { getAutomation, setPaused, setPeriodSummary } from "@/server/services/automation";
+import {
+  getAutomation,
+  setLimitMail,
+  setPaused,
+  setPeriodSummary,
+  setTaxReminder,
+} from "@/server/services/automation";
+import { savePreferences } from "@/server/services/preferences";
 import { reportSummary } from "@/server/services/reports";
 import {
   deliverOwnerReport,
   periodSummary,
   planOwnerReports,
   summaryText,
+  taxReminderText,
 } from "@/server/services/owner-reports";
 import { issuedDocument, line, pay } from "../fixtures/report-scenario";
 import { backupArchive, restoreArchive } from "../helpers/backup-compare";
@@ -387,5 +396,192 @@ describe("obnova", () => {
     });
     await tickAt(new Date("2027-01-01T10:00:00Z"));
     expect(jobsOf(target)).toEqual([]);
+  });
+});
+
+describe("lednová připomínka k daním", () => {
+  const JAN_10 = new Date("2027-01-10T08:30:00Z");
+
+  test("[REM-011] 10. 1. 2027 přijde přehled za 2026 s příjmy, neuhrazenými k 31. 12. a odkazem", async () => {
+    const { owner, email } = november();
+    setTaxReminder(webActor(owner), true);
+
+    await tickAt(JAN_10);
+
+    expect(smtp.messages.map((message) => message.to)).toEqual([[email]]);
+    expect(smtp.messages[0]!.attachments).toEqual([]);
+    expect(smtp.messages[0]!.subject).toBe("Fakturan: podklady k daním za rok 2026");
+    const text = plain(smtp.messages[0]!.body);
+    expect(text).toContain("Příjmy podle data úhrady za rok 2026: 12 100,00 Kč");
+    expect(text).toContain("Neuhrazené k 31. 12. 2026: 1 faktura, 5 000,00 Kč");
+    expect(text).toContain("http://localhost:3000/prehledy/dane?rok=2026");
+    expect(plain(taxReminderText(owner, 2026))).toBe(text.trimEnd());
+    expect(jobsOf(owner)).toMatchObject([
+      { key: `tax:${owner}:2026`, payload: { report: "tax", period: "2026" } },
+    ]);
+  });
+
+  test("[REM-011] připomínka nese upozornění TEXTS.tax.disclaimer", () => {
+    const { owner } = november();
+    resume(JAN_10);
+
+    expect(taxReminderText(owner, 2026)).toContain(TEXTS.tax.disclaimer);
+  });
+
+  test("[REM-011] 9. 1. nic, 31. 1. doběh, 1. 2. nic a druhý běh v roce nic", async () => {
+    expect(taxReminderDue("2027-01-09")).toBeNull();
+    expect(taxReminderDue("2027-01-10")).toEqual({ year: 2026 });
+    expect(taxReminderDue("2027-01-31")).toEqual({ year: 2026 });
+    expect(taxReminderDue("2027-02-01")).toBeNull();
+    expect(taxReminderDue("2026-12-10")).toBeNull();
+
+    const late = november();
+    const missed = november();
+    setTaxReminder(webActor(late.owner), true);
+    setTaxReminder(webActor(missed.owner), true);
+    db.update(user).set({ banned: true }).where(eq(user.id, missed.owner)).run();
+
+    await tickAt(new Date("2027-01-09T22:00:00Z"));
+    expect(smtp.messages).toEqual([]);
+
+    await tickAt(new Date("2027-01-31T10:00:00Z"));
+    await tickAt(new Date("2027-01-31T20:00:00Z"));
+    expect(smtp.messages.map((message) => message.to)).toEqual([[late.email]]);
+
+    db.update(user).set({ banned: false }).where(eq(user.id, missed.owner)).run();
+    await tickAt(new Date("2027-02-01T10:00:00Z"));
+    await tickAt(new Date("2027-12-31T10:00:00Z"));
+    expect(smtp.messages).toHaveLength(1);
+    expect(jobsOf(missed.owner)).toEqual([]);
+  });
+
+  test("[REM-011] vypnutí před odesláním zprávu zastaví", async () => {
+    const { owner } = november();
+    setTaxReminder(webActor(owner), true);
+    current = JAN_10;
+    planOwnerReports(JAN_10);
+    setTaxReminder(webActor(owner), false);
+    await drainJobs("w");
+
+    expect(smtp.messages).toEqual([]);
+  });
+});
+
+describe("e-mail o limitu DPH", () => {
+  const JUNE = new Date("2026-06-10T08:30:00Z");
+
+  function turnoverAccount(): { owner: string; email: string; customer: string } {
+    const owner = seedOwner(db, new Date("2026-01-01T10:00:00Z"));
+    ownSmtp(db, owner, smtp.port, { cc: ["ucetni@novak.cz"] });
+    const customer = seedCustomer(owner, CLIENT);
+    resume(JUNE);
+    const { email } = db.select({ email: user.email }).from(user).where(eq(user.id, owner)).get()!;
+    return { owner, email, customer };
+  }
+
+  function invoiced(owner: string, customer: string, totalMinor: number, issueDate = "2026-06-01") {
+    issuedDocument(owner, customer, { issueDate, dueDate: "2026-07-01", totalMinor });
+    resume(current);
+  }
+
+  const thresholds = (owner: string) =>
+    jobsOf(owner)
+      .map((row) => [row.key.split(":").at(-1), row.status])
+      .sort();
+
+  test("[REM-012] obrat 1 600 000,00 Kč pošle 80 %, 1 900 000,00 Kč pošle 95 %", async () => {
+    const { owner, email, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    invoiced(owner, customer, 159_999_999);
+    await tickAt(JUNE);
+    expect(smtp.messages).toEqual([]);
+
+    invoiced(owner, customer, 1);
+    await tickAt(JUNE);
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+    expect(smtp.messages.map((message) => message.to)).toEqual([[email]]);
+    expect(smtp.messages[0]!.subject).toBe(
+      "Fakturan: obrat dosáhl 80 % limitu pro registraci k DPH",
+    );
+    expect(plain(smtp.messages[0]!.body)).toContain("1 600 000,00 Kč z 2 000 000,00 Kč");
+
+    invoiced(owner, customer, 30_000_000);
+    await tickAt(new Date("2026-06-12T08:30:00Z"));
+    expect(smtp.messages).toHaveLength(2);
+    expect(smtp.messages[1]!.subject).toContain("95 %");
+    expect(plain(smtp.messages[1]!.body)).toContain("1 900 000,00 Kč z 2 000 000,00 Kč");
+    expect(jobsOf(owner).map((row) => row.key)).toEqual([
+      `limit:${owner}:2026:80`,
+      `limit:${owner}:2026:95`,
+    ]);
+  });
+
+  test("[REM-012] skok z 0 na 1 950 000,00 Kč pošle jen 95 %", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    invoiced(owner, customer, 195_000_000);
+
+    await tickAt(JUNE);
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+
+    expect(smtp.messages.map((message) => message.subject)).toEqual([
+      "Fakturan: obrat dosáhl 95 % limitu pro registraci k DPH",
+    ]);
+    expect(thresholds(owner)).toEqual([
+      ["80", "done"],
+      ["95", "done"],
+    ]);
+  });
+
+  test("[REM-012] překročený limit pošle 95 % s textem o překročení a pokles obratu nic nevrátí", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    invoiced(owner, customer, 210_000_000);
+
+    await tickAt(JUNE);
+    expect(plain(smtp.messages[0]!.body)).toContain("překročil");
+
+    savePreferences(webActor(owner), { turnoverVatLimitMinor: 400_000_000 });
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+    savePreferences(webActor(owner), { turnoverVatLimitMinor: null });
+    await tickAt(new Date("2026-06-12T08:30:00Z"));
+    expect(smtp.messages).toHaveLength(1);
+  });
+
+  test("[REM-012] vypnuté hlídání limitu nebo limit_mail nepošle nic", async () => {
+    const unwatched = turnoverAccount();
+    setLimitMail(webActor(unwatched.owner), true);
+    savePreferences(webActor(unwatched.owner), { turnoverVatWatch: false });
+    invoiced(unwatched.owner, unwatched.customer, 195_000_000);
+    const off = turnoverAccount();
+    invoiced(off.owner, off.customer, 195_000_000);
+    const offLater = turnoverAccount();
+    setLimitMail(webActor(offLater.owner), true);
+    invoiced(offLater.owner, offLater.customer, 195_000_000);
+
+    planOwnerReports(JUNE);
+    setLimitMail(webActor(offLater.owner), false);
+    await drainJobs("w");
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+
+    expect(smtp.messages).toEqual([]);
+    expect(jobsOf(unwatched.owner)).toEqual([]);
+    expect(jobsOf(off.owner)).toEqual([]);
+  });
+
+  test("[REM-012] vlastní limit 1 000 000,00 Kč posune práh 80 % na 800 000,00 Kč", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    savePreferences(webActor(owner), { turnoverVatLimitMinor: 100_000_000 });
+    invoiced(owner, customer, 79_999_999);
+    await tickAt(JUNE);
+    expect(smtp.messages).toEqual([]);
+
+    invoiced(owner, customer, 1);
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+    expect(smtp.messages.map((message) => message.subject)).toEqual([
+      "Fakturan: obrat dosáhl 80 % limitu pro registraci k DPH",
+    ]);
+    expect(plain(smtp.messages[0]!.body)).toContain("800 000,00 Kč z 1 000 000,00 Kč");
   });
 });

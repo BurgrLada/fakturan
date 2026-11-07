@@ -1,3 +1,5 @@
+import { LIMIT_HIGH_PERCENT, LIMIT_WARN_PERCENT } from "./turnover-limits";
+
 const rateOrigin = (p: Record<string, unknown>) =>
   p.plan ? `Faktura z plánu „${p.plan}“` : `Faktura ${p.invoice ?? ""}`;
 
@@ -200,8 +202,8 @@ export const TEXTS = {
       basisLine: (basis: string) => `Základ obratu: ${basis}`,
       levels: {
         ok: "V pořádku",
-        warn: "Nad 80 %",
-        high: "Nad 95 %",
+        warn: `Nad ${LIMIT_WARN_PERCENT} %`,
+        high: `Nad ${LIMIT_HIGH_PERCENT} %`,
         over: "Překročeno",
       },
       unwatched: "Nehlídá se",
@@ -1540,6 +1542,12 @@ export const TEXTS = {
       label: "Posílat souhrn",
       options: { off: "Vypnuto", monthly: "Měsíčně", quarterly: "Čtvrtletně" },
     },
+    ownerMail: {
+      title: "Daně a limit DPH",
+      body: `E-maily jen pro vás, ne pro klienty, a hlavní vypínač se jich netýká. Připomínka přijde 10. ledna s podklady za předchozí rok. Upozornění na limit přijde jednou při ${LIMIT_WARN_PERCENT} % a jednou při ${LIMIT_HIGH_PERCENT} % limitu pro registraci k DPH, pokud ho v Nastavení hlídáte.`,
+      tax: "Posílat lednovou připomínku k daním",
+      limit: "Posílat e-mail o blížícím se limitu DPH",
+    },
     saved: "Uloženo.",
   },
   notifications: {
@@ -1966,6 +1974,29 @@ export const TEXTS = {
       unconverted: (count: number, amounts: string) =>
         `  bez kurzu a mimo součet: ${count} (${amounts})`,
       note: "Částky jsou v Kč. Pohledávky a faktury po splatnosti jsou k dnešku. Výhled sčítá očekávané úhrady příštího období: neuhrazené faktury včetně těch po splatnosti, zálohy a pravidelné faktury.",
+    },
+    tax: {
+      subject: (year: number) => `Fakturan: podklady k daním za rok ${year}`,
+      title: (year: number) => `Podklady k daňovému přiznání za rok ${year}`,
+      income: (year: number, amount: string) =>
+        `Příjmy podle data úhrady za rok ${year}: ${amount}`,
+      estimated: (count: number, amount: string) =>
+        `  z toho s odhadnutým datem úhrady z importu: ${count} (${amount})`,
+      unpaid: (date: string, count: number, amount: string) =>
+        `Neuhrazené k ${date}: ${count} ${count === 1 ? "faktura" : count >= 2 && count <= 4 ? "faktury" : "faktur"}, ${amount}`,
+      link: (url: string) => `Podrobný přehled a export: ${url}`,
+    },
+    limit: {
+      vat: "pro registraci k DPH",
+      subject: (percent: number, limit: string) =>
+        `Fakturan: obrat dosáhl ${percent} % limitu ${limit}`,
+      reached: (year: number, percent: number, limit: string) =>
+        `Obrat za rok ${year} dosáhl ${percent} % limitu ${limit}.`,
+      over: (year: number, limit: string) => `Obrat za rok ${year} překročil limit ${limit}.`,
+      usage: (turnover: string, limitAmount: string, percent: number) =>
+        `${turnover} z ${limitAmount} (${percent} %)`,
+      link: (url: string) => `Přehled limitů: ${url}`,
+      note: "Jde o podklad pro vlastní orientaci, ne o daňové poradenství. Hranice a výpočet ověřte s daňovým poradcem.",
     },
   },
   invoiceMail: {
