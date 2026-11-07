@@ -170,7 +170,10 @@ export function buildIsdoc(doc: InvoiceDocument, context: IsdocContext): string 
     });
   }
   const sumCurr = lines.reduce((sum, line) => sum + line.net.curr, 0);
-  const sumHome = lines.reduce((sum, line) => sum + line.net.home, 0);
+  // Converted from the document's total, not summed from lines rounded on their own: the CZK total
+  // then matches what the app reports, and a credit note never turns negative (TST-015 seed
+  // -374271957). The lines may differ from it by a few haléř, which ISDOC readers tolerate.
+  const sumHome = sign * local(sign * sumCurr);
   const rounding = pair(doc.totals.roundingMinor);
   const deposits = pair(doc.totals.advanceMinor + doc.totals.paidMinor);
   // What is left of this document after what was really paid on it. Credit notes travel as their
