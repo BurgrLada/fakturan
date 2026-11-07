@@ -12,6 +12,7 @@ import { ownerReportPlanTask } from "@/server/scheduler/start";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
 import { getAutomation, setPaused, setPeriodSummary } from "@/server/services/automation";
+import { reportSummary } from "@/server/services/reports";
 import {
   deliverOwnerReport,
   periodSummary,
@@ -142,6 +143,25 @@ describe("obsah souhrnu", () => {
     expect(text).toContain("Po splatnosti: 1 faktura, 5 000,00 Kč");
     expect(text).toContain("Výhled na prosinec 2026: 7 000,00 Kč");
     expect(text).not.toContain("bez kurzu");
+  });
+
+  test("[REM-010] po splatnosti počítá jako přehledy, bez zálohy", () => {
+    const { owner } = november();
+    const customer = seedCustomer(owner, CLIENT);
+    issuedDocument(owner, customer, {
+      issueDate: "2026-11-06",
+      dueDate: "2026-11-20",
+      totalMinor: 300_000,
+      type: "advance",
+    });
+    resume();
+    const { range, next } = finishedPeriod(TODAY, "monthly");
+
+    const summary = periodSummary(owner, range, next, TODAY);
+    const app = reportSummary(owner, { range, includeExternal: true }, TODAY);
+
+    expect(summary.overdue).toMatchObject({ count: 1, minor: 500_000 });
+    expect(summary.overdue.minor).toBe(app.overdueMinor);
   });
 
   test("[REM-010] doklad v cizí měně bez kurzu jde na samostatný řádek s počtem", () => {
@@ -279,6 +299,52 @@ describe("odeslání souhrnu", () => {
 
     expect(smtp.messages).toEqual([]);
     expect(smtp.connections()).toBe(0);
+  });
+
+  test("[REM-010] období skončené před založením účtu se nepošle", async () => {
+    const owner = seedOwner(db, NOW);
+    ownSmtp(db, owner, smtp.port);
+    issuedDocument(owner, seedCustomer(owner, CLIENT), {
+      issueDate: TODAY,
+      dueDate: "2026-12-15",
+      totalMinor: 100_000,
+    });
+    resume();
+    setPeriodSummary(webActor(owner), "monthly");
+
+    await tickAt(NOW);
+    await tickAt(new Date("2026-12-02T10:00:00Z"));
+
+    expect(smtp.messages).toEqual([]);
+    expect(jobsOf(owner)).toEqual([]);
+  });
+
+  test("[REM-010] první doběh hned po zapnutí se samými nulami se nepošle", async () => {
+    const empty = () => {
+      const owner = seedOwner(db, new Date("2026-10-01T10:00:00Z"));
+      ownSmtp(db, owner, smtp.port);
+      const { email } = db
+        .select({ email: user.email })
+        .from(user)
+        .where(eq(user.id, owner))
+        .get()!;
+      return { owner, email };
+    };
+    const lateOn = empty();
+    const earlyOn = empty();
+    resume(new Date("2026-11-15T10:00:00Z"));
+    setPeriodSummary(webActor(earlyOn.owner), "monthly");
+    resume(new Date("2026-12-02T08:00:00Z"));
+    setPeriodSummary(webActor(lateOn.owner), "monthly");
+
+    await tickAt(new Date("2026-12-02T10:00:00Z"));
+
+    // Turned on before November ended, the zero summary is what the owner asked for.
+    expect(smtp.messages.map((message) => message.to)).toEqual([[earlyOn.email]]);
+    expect(jobsOf(lateOn.owner)).toHaveLength(1);
+
+    await tickAt(new Date("2026-12-03T10:00:00Z"));
+    expect(smtp.messages).toHaveLength(1);
   });
 
   test("[REM-010] deaktivovaný účet nic nedostane", async () => {

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, ne, sql } from "drizzle-orm";
 import type { Currency } from "@/lib/currency";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague, isDailyDue, type CalendarDate } from "@/lib/number-format";
@@ -10,21 +10,28 @@ import {
   type OwnerReportKind,
 } from "@/lib/owner-reports";
 import type { DateRange } from "@/lib/report-period";
-import { fxCzk } from "@/lib/sql-functions";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
 import { db } from "../db";
-import { automationSettings, job, user, type Job, type JobPayload } from "../db/schema";
+import { overdueCondition } from "../db/invoice-sql";
+import {
+  auditLog,
+  automationSettings,
+  invoice,
+  job,
+  user,
+  type Job,
+  type JobPayload,
+} from "../db/schema";
 import { scoped } from "../db/scoped";
 import { enqueue } from "../jobs/queue";
 import { RetryLater } from "../jobs/registry";
 import { forecast, FORECAST_SERIES } from "../reports/forecast";
-import { reportSummary } from "../reports/queries";
-import type { Unconverted } from "../reports/types";
+import { notAdvance, reportSummary, stateFilter } from "../reports/queries";
+import type { ReportFilter, Unconverted } from "../reports/types";
 import { reportFailure } from "../scheduler/report";
 import { getAutomation } from "./automation";
-import { dueAlerts } from "./due-alerts";
 import { resolveTransport } from "./mail-settings";
 import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
@@ -55,10 +62,6 @@ class Missing {
     for (const { currency, amountMinor } of unconverted.byCurrency) {
       this.byCurrency.set(currency, (this.byCurrency.get(currency) ?? 0) + amountMinor);
     }
-  }
-
-  one(currency: Currency, amountMinor: number): void {
-    this.add({ count: 1, byCurrency: [{ currency, amountMinor }] });
   }
 
   get value(): Unconverted {
@@ -94,16 +97,10 @@ function outlookOf(ownerId: string, next: DateRange, today: CalendarDate): Money
   return { minor, unconverted: missing.value };
 }
 
-function overdueOf(ownerId: string, today: CalendarDate): Money & { count: number } {
-  const { overdue } = dueAlerts(ownerId, today);
-  const missing = new Missing();
-  let minor = 0;
-  for (const row of overdue) {
-    const czk = fxCzk(row.currency, row.amountDueMinor, row.rateMicros);
-    if (czk === null) missing.one(row.currency, row.amountDueMinor);
-    else minor += Number(czk);
-  }
-  return { count: overdue.length, minor, unconverted: missing.value };
+// Counted like the overdue amount of reportSummary and the dashboard: advances stay out.
+function overdueCount(ownerId: string, filter: ReportFilter, today: CalendarDate): number {
+  const where = and(stateFilter(db, ownerId, filter), overdueCondition(today), notAdvance);
+  return db.select({ n: count() }).from(invoice).where(where).get()?.n ?? 0;
 }
 
 // Flows follow the finished period; balances and the outlook are as of today (R-16).
@@ -113,7 +110,8 @@ export function periodSummary(
   next: DateRange,
   today: CalendarDate,
 ): PeriodSummary {
-  const summary = reportSummary(db, ownerId, { range, includeExternal: true }, today);
+  const filter: ReportFilter = { range, includeExternal: true };
+  const summary = reportSummary(db, ownerId, filter, today);
   return {
     range,
     next,
@@ -124,7 +122,11 @@ export function periodSummary(
       minor: summary.outstandingMinor,
       unconverted: summary.unconverted.outstanding,
     },
-    overdue: overdueOf(ownerId, today),
+    overdue: {
+      count: overdueCount(ownerId, filter, today),
+      minor: summary.overdueMinor,
+      unconverted: summary.unconverted.overdue,
+    },
     outlook: outlookOf(ownerId, next, today),
   };
 }
@@ -202,6 +204,7 @@ function summaryAccounts() {
       userId: automationSettings.userId,
       sendTime: automationSettings.sendTime,
       mode: automationSettings.periodSummary,
+      createdAt: user.createdAt,
     })
     .from(automationSettings)
     .innerJoin(user, eq(user.id, automationSettings.userId))
@@ -212,10 +215,12 @@ function summaryAccounts() {
 // Runs under the master switch as well: these messages go to the account owner alone (R-15).
 export function planOwnerReports(now: Date): void {
   const today = calendarDateInPrague(now);
-  for (const { userId, sendTime, mode } of summaryAccounts()) {
+  for (const { userId, sendTime, mode, createdAt } of summaryAccounts()) {
     if (mode === "off" || !isDailyDue(now, sendTime)) continue;
     const period = finishedPeriod(today, mode);
     if (period.dayOfPeriod > CATCH_UP_DAYS) continue;
+    // A period that ended before the account existed has nothing of the account in it.
+    if (calendarDateInPrague(createdAt) > period.range.to) continue;
     try {
       planReport(userId, `summary:${userId}:${period.key}`, {
         report: "summary",
@@ -227,6 +232,28 @@ export function planOwnerReports(now: Date): void {
   }
 }
 
+function isEmpty(summary: PeriodSummary): boolean {
+  const money = [summary.invoiced, summary.income, summary.outstanding, summary.overdue];
+  return (
+    summary.overdue.count === 0 &&
+    [...money, summary.outlook].every((m) => m.minor === 0 && m.unconverted.count === 0)
+  );
+}
+
+// Turned on (or changed) only after the period ended: the catch-up is the first summary it sends.
+function switchedOnAfter(userId: string, end: CalendarDate): boolean {
+  const last = db
+    .select({ at: auditLog.at })
+    .from(auditLog)
+    .where(
+      scoped(userId).where(auditLog, (t, ops) => ops.eq(t.action, "automation.period_summary")),
+    )
+    .orderBy(desc(auditLog.id))
+    .limit(1)
+    .get();
+  return last !== undefined && calendarDateInPrague(last.at) > end;
+}
+
 type Delivery = { subject: string; text: string; after: JobPayload };
 
 function summaryDelivery(userId: string, key: string): Delivery | null {
@@ -235,6 +262,7 @@ function summaryDelivery(userId: string, key: string): Delivery | null {
   if (getAutomation(userId).periodSummary !== period.mode) return null;
   const today = calendarDateInPrague(clock.now());
   const summary = periodSummary(userId, period.range, period.next, today);
+  if (isEmpty(summary) && switchedOnAfter(userId, period.range.to)) return null;
   return {
     subject: T.summary.subject(periodLabel(period.range)),
     text: summaryText(userId, summary),

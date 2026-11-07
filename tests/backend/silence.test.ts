@@ -473,17 +473,16 @@ describe("[TST-016] pravidelný souhrn", () => {
     60_000,
   );
 
-  // Turned on 1 March, the first tick on the 2nd still catches February; 1 April brings March.
-  test("[TST-016] zapnutý souhrn pošle za každý měsíc jednu zprávu jen vlastníkovi", async () => {
+  // The account was created on 1 March, so February is skipped and 1 April brings March.
+  test("[TST-016] zapnutý souhrn pošle za březen jednu zprávu jen vlastníkovi", async () => {
     const owner = summaryAccount();
     setPeriodSummary(webActor(owner), "monthly");
 
     await everyDay();
 
     const email = db.select({ email: user.email }).from(user).where(eq(user.id, owner)).get()!;
-    expect(smtp.messages.map((message) => message.to)).toEqual([[email.email], [email.email]]);
+    expect(smtp.messages.map((message) => message.to)).toEqual([[email.email]]);
     expect(smtp.messages.map((message) => message.subject)).toEqual([
-      "Fakturan: souhrn za únor 2026",
       "Fakturan: souhrn za březen 2026",
     ]);
     expect(toClient()).toEqual([]);
