@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { invoice, invoiceLine, user } from "@/server/db/schema";
+import { auditLog, invoice, invoiceLine, user } from "@/server/db/schema";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { saveCatalogItem } from "@/server/services/catalog";
 import { saveCustomer } from "@/server/services/customers";
@@ -11,6 +12,7 @@ import {
   deleteDraft,
   duplicateInvoice,
   getInvoice,
+  isFreeDraftId,
   newDraftDefaults,
   saveDraft,
   type DraftInput,
@@ -175,5 +177,31 @@ describe("izolace faktur", () => {
       expect(() => saveDraft(actor("a"), draft("a", over))).toThrow("neexistuje");
     }
     expect(linesOfA()).toBe(linesBefore);
+  });
+});
+
+describe("id dokladu z cizího účtu", () => {
+  test("[SEC-002] cizí id se chová jako nepoužité a zápis pod ním nic nepřepíše", () => {
+    seed("m1-a");
+    seed("m1-b");
+    const foreign = saveDraft(actor("m1-a"), draft("m1-a", { note: "cizí" })).id;
+    const unused = randomUUID();
+    const snapshot = () =>
+      JSON.stringify([
+        db.select().from(invoice).where(eq(invoice.id, foreign)).all(),
+        db.select().from(invoiceLine).where(eq(invoiceLine.invoiceId, foreign)).all(),
+        db.select().from(auditLog).where(eq(auditLog.entityId, foreign)).all(),
+      ]);
+    const before = snapshot();
+
+    expect(isFreeDraftId("m1-b", foreign)).toBe(isFreeDraftId("m1-b", unused));
+    expect(isFreeDraftId("m1-b", foreign)).toBe(true);
+    expect(isFreeDraftId("m1-a", foreign)).toBe(false);
+    expect(() =>
+      saveDraft(actor("m1-b"), draft("m1-b", { clientId: foreign, note: "útok" })),
+    ).toThrow("Doklad neexistuje");
+
+    expect(snapshot()).toBe(before);
+    expect(db.select().from(invoice).where(eq(invoice.userId, "m1-b")).all()).toEqual([]);
   });
 });

@@ -56,7 +56,7 @@ async function EditContent({ params, searchParams }: PageProps<"/faktury/[id]/up
   const { typ } = await searchParams;
   const { user } = await requireSession();
   const row = getInvoice(user.id, id);
-  if (!row && !isFreeDraftId(id)) notFound();
+  if (!row && !isFreeDraftId(user.id, id)) notFound();
   const isDraft = !row || row.status === "draft";
   if (row && !isDraft && !EDITABLE_STATUSES.has(row.status)) redirect(`/faktury/${id}`);
 

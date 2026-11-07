@@ -325,9 +325,10 @@ export function getInvoice(ownerId: string, id: string): InvoiceDetail | null {
 }
 
 // A form opens under an id chosen in advance, so the address stays valid before the first save.
-export function isFreeDraftId(id: string): boolean {
+// Only the own account is consulted: an id taken elsewhere must look unused (see createDraftIn).
+export function isFreeDraftId(ownerId: string, id: string): boolean {
   if (!z.uuid().safeParse(id).success) return false;
-  return !db.select({ id: invoice.id }).from(invoice).where(eq(invoice.id, id)).get();
+  return !readOwned(db, ownerId, id);
 }
 
 export function newDraftDefaults(
@@ -429,12 +430,8 @@ export function assertReferencesOwned(
   if (found.length !== itemIds.length) throw new ServiceError(V.catalogItemNotFound);
 }
 
-function draftWithClientId(tx: Tx, ownerId: string, clientId: string): Invoice | null {
-  const own = readOwned(tx, ownerId, clientId);
-  if (own) return own;
-  const taken = tx.select({ id: invoice.id }).from(invoice).where(eq(invoice.id, clientId)).get();
-  if (taken) throw new ServiceError(V.notFound);
-  return null;
+function isPrimaryKeyClash(error: unknown): boolean {
+  return (error as { code?: string }).code === "SQLITE_CONSTRAINT_PRIMARYKEY";
 }
 
 function customerNameOf(tx: Tx, ownerId: string, customerId: string | null): string {
@@ -588,21 +585,27 @@ export function createDraftIn(
   const customerName = customerNameOf(tx, userId, fields.customerId);
   const id = clientId ?? randomUUID();
   const now = clock.now();
-  tx.insert(invoice)
-    .values({
-      id,
-      userId,
-      ...fields,
-      ...normalizedRate(fields, null, fields.exchangeRateSource),
-      ...origin,
-      ...sumsOf(totals),
-      customerName,
-      searchText: searchTextOf({ customerName, lines: rows }),
-      revision: 1,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
+  try {
+    tx.insert(invoice)
+      .values({
+        id,
+        userId,
+        ...fields,
+        ...normalizedRate(fields, null, fields.exchangeRateSource),
+        ...origin,
+        ...sumsOf(totals),
+        customerName,
+        searchText: searchTextOf({ customerName, lines: rows }),
+        revision: 1,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  } catch (error) {
+    // A client-chosen id that another account already holds: same answer as any missing document.
+    if (clientId && isPrimaryKeyClash(error)) throw new ServiceError(V.notFound);
+    throw error;
+  }
   insertLines(tx, userId, id, rows);
   const changes = diffLines([], rows);
   audit({
@@ -637,7 +640,7 @@ export function saveDraft(
       const before = existingId
         ? findOwned(tx, userId, existingId)
         : clientId
-          ? draftWithClientId(tx, userId, clientId)
+          ? readOwned(tx, userId, clientId)
           : null;
       if (!before) return createDraftIn(tx, audit, userId, input, undefined, auditNote);
       if (before.status !== "draft") throw new ServiceError(TEXTS.invoices.stale);

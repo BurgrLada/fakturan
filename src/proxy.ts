@@ -80,7 +80,7 @@ export async function proxy(request: NextRequest) {
     } catch {
       return notFound();
     }
-    const unsavedForm = pathname.endsWith("/upravit") && isFreeDraftId(key);
+    const unsavedForm = pathname.endsWith("/upravit") && isFreeDraftId(session.user.id, key);
     if (!FINDERS[section](session.user.id, key) && !unsavedForm) return notFound();
   }
   return NextResponse.next();

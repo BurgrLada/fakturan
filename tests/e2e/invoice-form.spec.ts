@@ -1011,7 +1011,11 @@ test("[INV-017] vypršená relace v panelu zákazníka nezahodí formulář", as
   await expect(page.getByLabel("Poznámka")).toHaveValue("rozepsáno");
 });
 
-test("[SEC-002] cizí nebo neznámý doklad vrátí 404", async ({ page, browser, freshApp }) => {
+test("[SEC-002] cizí doklad se chová jako neznámý: detail 404, formulář prázdný", async ({
+  page,
+  browser,
+  freshApp,
+}) => {
   const { baseURL } = freshApp;
   await register(page, baseURL);
   await openForm(page, baseURL);
@@ -1029,7 +1033,11 @@ test("[SEC-002] cizí nebo neznámý doklad vrátí 404", async ({ page, browser
   await expect(guest.getByText("host@example.cz", { exact: true })).toBeVisible();
 
   const form = await guest.goto(foreign);
-  expect(form?.status()).toBe(404);
+  expect(form?.status()).toBe(200);
+  await expect(guest.getByLabel("Poznámka")).toHaveValue("");
+  const unused = await guest.goto(`${baseURL}/faktury/${crypto.randomUUID()}/upravit`);
+  expect(unused?.status()).toBe(200);
+  await expect(guest.getByLabel("Poznámka")).toHaveValue("");
   const detail = await guest.goto(foreign.replace(/\/upravit$/, ""));
   expect(detail?.status()).toBe(404);
   const unknown = await guest.goto(`${baseURL}/faktury/neexistuje/upravit`);
