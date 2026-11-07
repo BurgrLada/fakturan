@@ -456,12 +456,15 @@
     "automation_settings": {
       "advance_invoice": "copy",
       "daily_digest": "copy",
+      "limit_mail": "copy",
       "paused": "copy",
       "payment_receipt": "copy",
+      "period_summary": "copy",
       "recurring_send": "copy",
       "reminders": "copy",
       "reminders_open_since": "copy",
       "send_time": "copy",
+      "tax_reminder": "copy",
       "updated_at": "copy",
       "user_id": "owner"
     },

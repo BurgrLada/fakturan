@@ -218,6 +218,9 @@ function silenced(table: string, row: ArchiveRow): ArchiveRow {
       payment_receipt: false,
       advance_invoice: false,
       daily_digest: false,
+      period_summary: "off",
+      tax_reminder: false,
+      limit_mail: false,
       paused: false,
       reminders_open_since: null,
     });

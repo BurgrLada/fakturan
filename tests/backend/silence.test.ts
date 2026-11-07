@@ -12,15 +12,22 @@ import {
   deadMailTask,
   deadRecurringTask,
   digestPlanTask,
+  ownerReportPlanTask,
   recurringNoticeTask,
   recurringPlanTask,
   reminderPlanTask,
 } from "@/server/scheduler/start";
 import { registerTickTask, resetTickTasksForTests, tick } from "@/server/scheduler/tick";
-import { setAutomation, setDailyDigest, setPaused } from "@/server/services/automation";
+import {
+  setAutomation,
+  setDailyDigest,
+  setPaused,
+  setPeriodSummary,
+} from "@/server/services/automation";
 import { assignNotice, ingestNotice } from "@/server/services/bank-notices";
 import { deliverDigest } from "@/server/services/due-alerts";
 import { deliverMail, recoverMail } from "@/server/services/mail-delivery";
+import { deliverOwnerReport } from "@/server/services/owner-reports";
 import { savePreferences } from "@/server/services/preferences";
 import { deliverUserNotice, runRecurringJob } from "@/server/services/recurring-run";
 import { saveReminderRule, snoozeReminders } from "@/server/services/reminders";
@@ -87,6 +94,7 @@ beforeEach(() => {
   registerJob("recurring.run", { run: runRecurringJob });
   registerJob("user.notice", { run: deliverUserNotice });
   registerJob("user.digest", { run: deliverDigest });
+  registerJob("user.report", { run: deliverOwnerReport });
   for (const task of [
     deadMailTask,
     deadRecurringTask,
@@ -94,6 +102,7 @@ beforeEach(() => {
     recurringNoticeTask,
     reminderPlanTask,
     digestPlanTask,
+    ownerReportPlanTask,
   ]) {
     registerTickTask(task);
   }
@@ -435,6 +444,52 @@ describe("bez kliknutí", () => {
   }, 60_000);
 });
 
+// The summary goes to the owner, never to a client, so its silence is about the owner's mailbox.
+describe("[TST-016] pravidelný souhrn", () => {
+  function summaryAccount(): string {
+    const owner = seedOwner(db, T0);
+    ownSmtp(db, owner, smtp.port, { cc: ["ucetni@novak.cz"] });
+    issuedInvoice(owner, seedCustomer(owner, CLIENT));
+    return owner;
+  }
+
+  test.each([
+    ["každý den", everyDay],
+    ["doběh po výpadku", afterOutage],
+  ] as const)(
+    "[TST-016] vypnutý souhrn nepošle nic ani po doběhu (%s)",
+    async (_name, pass) => {
+      const never = summaryAccount();
+      const turnedOff = summaryAccount();
+      setPeriodSummary(webActor(turnedOff), "monthly");
+      setPeriodSummary(webActor(turnedOff), "off");
+
+      await pass();
+
+      expect(smtp.messages).toEqual([]);
+      expect(smtp.connections()).toBe(0);
+      for (const owner of [never, turnedOff]) assertConsistent(db, owner);
+    },
+    60_000,
+  );
+
+  // Turned on 1 March, the first tick on the 2nd still catches February; 1 April brings March.
+  test("[TST-016] zapnutý souhrn pošle za každý měsíc jednu zprávu jen vlastníkovi", async () => {
+    const owner = summaryAccount();
+    setPeriodSummary(webActor(owner), "monthly");
+
+    await everyDay();
+
+    const email = db.select({ email: user.email }).from(user).where(eq(user.id, owner)).get()!;
+    expect(smtp.messages.map((message) => message.to)).toEqual([[email.email], [email.email]]);
+    expect(smtp.messages.map((message) => message.subject)).toEqual([
+      "Fakturan: souhrn za únor 2026",
+      "Fakturan: souhrn za březen 2026",
+    ]);
+    expect(toClient()).toEqual([]);
+  }, 60_000);
+});
+
 describe("[TST-016] ticho po obnově zálohy", () => {
   test("[TST-016] po obnově nic neodejde: plán send, upomínka, potvrzení, záloha, digest", async () => {
     registerJob("backup.run", { run: runBackup, recover: recoverBackupJob });
@@ -442,6 +497,7 @@ describe("[TST-016] ticho po obnově zálohy", () => {
     const sources = available.map((key) => armed(key));
     for (const owner of sources) {
       setDailyDigest(webActor(owner), true);
+      setPeriodSummary(webActor(owner), "monthly");
     }
     const archives = [];
     for (const owner of sources) archives.push(await backupArchive(db, owner));

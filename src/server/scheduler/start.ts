@@ -20,6 +20,7 @@ import { purgeExpiredExports, recoverExportJob } from "../services/exports";
 import { purgeStaleBatches, recoverImportJob } from "../services/import-batch";
 import { runImportCommit } from "../services/import-commit";
 import { runImportParse } from "../services/import-parse";
+import { deliverOwnerReport, planOwnerReports } from "../services/owner-reports";
 import { deliverMail, recoverMail, settleDeadMail } from "../services/mail-delivery";
 import {
   deliverUserNotice,
@@ -97,6 +98,8 @@ export const reminderPlanTask: TickTask = { name: "reminder-plan", run: planRemi
 
 export const digestPlanTask: TickTask = { name: "digest-plan", run: planDigests };
 
+export const ownerReportPlanTask: TickTask = { name: "owner-report-plan", run: planOwnerReports };
+
 export const fxPlanTask: TickTask = { name: "fx-plan", run: planRateFetch };
 
 export const bankPollTask: TickTask = { name: "bank-poll", run: planBankPolls };
@@ -133,6 +136,7 @@ export function startScheduler(): void {
   registerJob("recurring.run", { run: runRecurringJob });
   registerJob("user.notice", { run: deliverUserNotice });
   registerJob("user.digest", { run: deliverDigest });
+  registerJob("user.report", { run: deliverOwnerReport });
   registerJob("bank.poll", { run: pollMailbox });
   registerJob("fx.fetch", { run: runRateFetch });
   registerJob("import.parse", { run: runImportParse, recover: recoverImportJob });
@@ -146,6 +150,7 @@ export function startScheduler(): void {
   registerTickTask(recurringNoticeTask);
   registerTickTask(reminderPlanTask);
   registerTickTask(digestPlanTask);
+  registerTickTask(ownerReportPlanTask);
   registerTickTask(bankPollTask);
   registerTickTask(fxPlanTask);
   registerTickTask(jobCleanupTask);

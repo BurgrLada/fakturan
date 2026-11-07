@@ -1,3 +1,5 @@
+import type { PeriodSummaryMode } from "./owner-reports";
+
 export const AUTOMATION_KEYS = [
   "recurringSend",
   "reminders",
@@ -22,6 +24,9 @@ export type AutomationSettings = Record<AutomationKey, boolean> & {
   remindersOpenSince: string | null;
   sendTime: string;
   dailyDigest: boolean;
+  periodSummary: PeriodSummaryMode;
+  taxReminder: boolean;
+  limitMail: boolean;
 };
 
 export const DEFAULT_AUTOMATION: AutomationSettings = {
@@ -33,6 +38,9 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
   remindersOpenSince: null,
   sendTime: DEFAULT_SEND_TIME,
   dailyDigest: false,
+  periodSummary: "off",
+  taxReminder: false,
+  limitMail: false,
 };
 
 export const NOTIFICATION_KINDS = [

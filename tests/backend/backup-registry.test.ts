@@ -146,10 +146,24 @@ describe("registr zálohy", () => {
     expect(BACKUP_VERSION).toBe(2);
     const current = backupColumnsFingerprint();
     expect(current).toEqual(fixture(2));
-    // Version 1 is kept for the upgrade path; until a column is added the registry is the same.
-    expect(fixture(1)).toEqual({ ...current, v: 1 });
+    // Version 1 is kept for the upgrade path: it lacks only the columns that step 1 fills.
+    const added = { automation_settings: ["limit_mail", "period_summary", "tax_reminder"] };
+    const v1 = structuredClone(current);
+    for (const [table, columns] of Object.entries(added)) {
+      for (const column of columns) delete v1.tables[table]![column];
+    }
+    expect(fixture(1)).toEqual({ ...v1, v: 1 });
     const row = { id: "a", name: "b" };
     expect(BACKUP_UPGRADES[1]!("customer", row)).toEqual(row);
+    expect(
+      BACKUP_UPGRADES[1]!("automation_settings", { user_id: "u", daily_digest: true }),
+    ).toEqual({
+      user_id: "u",
+      daily_digest: true,
+      period_summary: "off",
+      tax_reminder: false,
+      limit_mail: false,
+    });
     const changed = BACKUP_TABLES.map((entry) =>
       entry.name === "customer"
         ? { ...entry, columns: { ...entry.columns, note: "omit" as const } }

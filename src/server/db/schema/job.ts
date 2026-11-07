@@ -6,6 +6,7 @@ export const JOB_KINDS = [
   "recurring.run",
   "user.notice",
   "user.digest",
+  "user.report",
   "bank.poll",
   "fx.fetch",
   "import.parse",

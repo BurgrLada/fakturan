@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AUTOMATION_KEYS } from "@/lib/automation";
+import { PERIOD_SUMMARIES } from "@/lib/owner-reports";
 import { ADVANCE_FINAL_MODES } from "@/lib/preferences";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
@@ -10,6 +11,7 @@ import {
   setAutomation,
   setDailyDigest,
   setPaused,
+  setPeriodSummary,
   setSendTime,
 } from "@/server/services/automation";
 import { savePreferences } from "@/server/services/preferences";
@@ -57,6 +59,13 @@ export async function setSendTimeAction(value: string): Promise<Outcome> {
 export async function setDailyDigestAction(enabled: boolean): Promise<Outcome> {
   await requireSession();
   return guarded((actor) => setDailyDigest(actor, enabled === true));
+}
+
+export async function setPeriodSummaryAction(raw: unknown): Promise<Outcome> {
+  await requireSession();
+  const parsed = z.enum(PERIOD_SUMMARIES).safeParse(raw);
+  if (!parsed.success) return { ok: false, error: "Neplatný požadavek" };
+  return guarded((actor) => setPeriodSummary(actor, parsed.data));
 }
 
 export async function setAdvanceFinalModeAction(raw: unknown): Promise<Outcome> {

@@ -8,6 +8,7 @@ import {
   type AutomationSettings,
 } from "@/lib/automation";
 import { calendarDateInPrague } from "@/lib/number-format";
+import { PERIOD_SUMMARIES, type PeriodSummaryMode } from "@/lib/owner-reports";
 import { REMINDABLE_TYPES } from "@/lib/reminders";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -45,6 +46,9 @@ function toSettings(row: typeof automationSettings.$inferSelect | undefined): Au
     remindersOpenSince: row.remindersOpenSince,
     sendTime: row.sendTime,
     dailyDigest: row.dailyDigest,
+    periodSummary: row.periodSummary,
+    taxReminder: row.taxReminder,
+    limitMail: row.limitMail,
   };
 }
 
@@ -217,6 +221,19 @@ export function setDailyDigest(actor: Actor, enabled: boolean): void {
           action: "automation.daily_digest",
           patch: { dailyDigest: enabled },
           after: { dailyDigest: enabled },
+        },
+  );
+}
+
+export function setPeriodSummary(actor: Actor, mode: PeriodSummaryMode): void {
+  if (!PERIOD_SUMMARIES.includes(mode)) throw new ServiceError(T.unknown);
+  apply(actor, (before) =>
+    before.periodSummary === mode
+      ? null
+      : {
+          action: "automation.period_summary",
+          patch: { periodSummary: mode },
+          after: { periodSummary: mode },
         },
   );
 }

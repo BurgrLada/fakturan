@@ -6,6 +6,7 @@ import {
   setAutomationAction,
   setDailyDigestAction,
   setPausedAction,
+  setPeriodSummaryAction,
   setSendTimeAction,
 } from "@/app/(app)/nastaveni/automatizace/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -25,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { AUTOMATIONS, type AutomationKey, type AutomationSettings } from "@/lib/automation";
+import { PERIOD_SUMMARIES } from "@/lib/owner-reports";
 import { ADVANCE_FINAL_MODES, type AdvanceFinalMode } from "@/lib/preferences";
 import { TEXTS } from "@/lib/texts";
 import type { AutomationImpact } from "@/server/services/automation";
@@ -269,6 +271,29 @@ export function AutomationPanel({
           />
           {T.digest.label}
         </label>
+      </section>
+
+      <section className="flex flex-col gap-2 rounded-lg border p-4">
+        <h2 className="text-base">{T.periodSummary.title}</h2>
+        <p className="text-sm text-muted-foreground">{T.periodSummary.body}</p>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="automation-period-summary">{T.periodSummary.label}</Label>
+          <NativeSelect
+            id="automation-period-summary"
+            value={settings.periodSummary}
+            disabled={pending}
+            onChange={(event) => {
+              const mode = event.target.value;
+              perform(() => setPeriodSummaryAction(mode), T.saved);
+            }}
+          >
+            {PERIOD_SUMMARIES.map((mode) => (
+              <option key={mode} value={mode}>
+                {T.periodSummary.options[mode]}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
       </section>
     </div>
   );

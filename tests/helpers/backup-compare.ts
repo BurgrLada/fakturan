@@ -19,7 +19,7 @@ import { startRestore } from "@/server/services/account-restore";
 import { AUTOMATIONS } from "@/lib/automation";
 import { encryptSecret } from "@/server/crypto";
 import { emailLog, file, mailSettings, supplier } from "@/server/db/schema";
-import { setAutomation } from "@/server/services/automation";
+import { setAutomation, setPeriodSummary } from "@/server/services/automation";
 import { createCreditNote } from "@/server/services/credit-notes";
 import { ensureDashboards } from "@/server/services/dashboards";
 import { archiveSentPdf } from "@/server/services/files";
@@ -93,6 +93,17 @@ export function editArchive(
 }
 
 // What version 1 wrote: no file index, every blob named in the manifest, files before the audit.
+// Columns added after version 1 were never written by it.
+function withoutV2Columns(table: string, bytes: Uint8Array): Uint8Array {
+  const known = (v1Columns.tables as Record<string, Record<string, string>>)[table];
+  if (!known) return bytes;
+  const rows = readJsonl(bytes);
+  for (const row of rows) {
+    for (const column of Object.keys(row)) if (!Object.hasOwn(known, column)) delete row[column];
+  }
+  return jsonl(rows);
+}
+
 export function asVersion1(bytes: Uint8Array): Uint8Array {
   const entries = unzipSync(bytes);
   const manifest = JSON.parse(strFromU8(entries[MANIFEST_ENTRY]!)) as BackupManifest;
@@ -107,11 +118,16 @@ export function asVersion1(bytes: Uint8Array): Uint8Array {
   }
   manifest.v = 1;
   manifest.columns = sha256(strToU8(JSON.stringify(v1Columns)));
+  const names = Object.keys(entries);
+  const data: Record<string, Uint8Array> = {};
+  for (const name of names.filter((key) => key.startsWith("data/"))) {
+    data[name] = withoutV2Columns(name.slice("data/".length, -".jsonl".length), entries[name]!);
+    manifest.entries[name] = { size: data[name].length, sha256: sha256(data[name]) };
+  }
   const ordered: Record<string, Uint8Array> = {
     [MANIFEST_ENTRY]: strToU8(JSON.stringify(manifest)),
+    ...data,
   };
-  const names = Object.keys(entries);
-  for (const name of names.filter((key) => key.startsWith("data/"))) ordered[name] = entries[name]!;
   for (const name of names.filter((key) => key.startsWith("files/")))
     ordered[name] = entries[name]!;
   ordered[AUDIT_ENTRY] = entries[AUDIT_ENTRY]!;
@@ -217,6 +233,7 @@ export function seedRichAccount(db: Db, owner: string, now: Date) {
   for (const key of AUTOMATIONS.filter((item) => item.available).map((item) => item.key)) {
     setAutomation(web, key, true, { confirmed: true });
   }
+  setPeriodSummary(web, "monthly");
   const planId = savePlan(owner, customerId, { mode: "send", confirmSend: true });
   saveReminderRule(web, { offsetDays: 7, texts: null });
   savePreferences(web, { advanceFinalMode: "issue" });
@@ -304,6 +321,9 @@ export function asRestored(account: Canonical): Canonical {
       row[key] = 0;
     }
     row.reminders_open_since = null;
+    row.period_summary = "off";
+    row.tax_reminder = 0;
+    row.limit_mail = 0;
   });
   edit("preferences", (row) => (row.advance_final_mode = "draft"));
   edit("recurring_invoice", (row) => {

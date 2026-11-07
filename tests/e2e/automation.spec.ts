@@ -148,3 +148,21 @@ test("[SET-042] chybu hlásí role alert, úspěch role status", async ({ page, 
   await page.getByRole("button", { name: "Uložit čas" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Uloženo." })).toBeVisible();
 });
+
+test("[REM-010] přepínač v Automatizaci má výchozí Vypnuto a uloží Čtvrtletně", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/automatizace`);
+  await page.waitForLoadState("networkidle");
+
+  const summary = page.getByLabel("Posílat souhrn");
+  await expect(summary).toHaveValue("off");
+  await expect(summary.locator("option:checked")).toHaveText("Vypnuto");
+  await summary.selectOption({ label: "Čtvrtletně" });
+  await expect(page.getByRole("status").filter({ hasText: "Uloženo." })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByLabel("Posílat souhrn")).toHaveValue("quarterly");
+});

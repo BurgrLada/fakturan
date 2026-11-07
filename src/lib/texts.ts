@@ -1534,6 +1534,12 @@ export const TEXTS = {
       body: "Jednou denně vám přijde e-mail s tím, co se nepovedlo. Hlavní vypínač se ho netýká.",
       label: "Posílat denní přehled",
     },
+    periodSummary: {
+      title: "Pravidelný souhrn",
+      body: "První den nového měsíce nebo čtvrtletí vám přijde e-mail se souhrnem za skončené období: fakturováno, přijato, pohledávky, faktury po splatnosti a výhled na další období. Jde jen vám, ne klientům, a hlavní vypínač se ho netýká.",
+      label: "Posílat souhrn",
+      options: { off: "Vypnuto", monthly: "Měsíčně", quarterly: "Čtvrtletně" },
+    },
     saved: "Uloženo.",
   },
   notifications: {
@@ -1930,6 +1936,36 @@ export const TEXTS = {
       subject: "Fakturan: přehled splatnosti",
       overdue: "Po splatnosti:",
       dueSoon: "Blíží se splatnost:",
+    },
+  },
+  ownerReports: {
+    months: [
+      "leden",
+      "únor",
+      "březen",
+      "duben",
+      "květen",
+      "červen",
+      "červenec",
+      "srpen",
+      "září",
+      "říjen",
+      "listopad",
+      "prosinec",
+    ],
+    quarter: (quarter: number, year: number) => `${quarter}. čtvrtletí ${year}`,
+    summary: {
+      subject: (period: string) => `Fakturan: souhrn za ${period}`,
+      title: (period: string, from: string, to: string) => `Souhrn za ${period} (${from} – ${to})`,
+      invoiced: (amount: string) => `Fakturováno: ${amount}`,
+      income: (amount: string) => `Přijato: ${amount}`,
+      outstanding: (date: string, amount: string) => `Pohledávky k ${date}: ${amount}`,
+      overdue: (count: number, amount: string) =>
+        `Po splatnosti: ${count} ${count === 1 ? "faktura" : count >= 2 && count <= 4 ? "faktury" : "faktur"}, ${amount}`,
+      outlook: (period: string, amount: string) => `Výhled na ${period}: ${amount}`,
+      unconverted: (count: number, amounts: string) =>
+        `  bez kurzu a mimo součet: ${count} (${amounts})`,
+      note: "Částky jsou v Kč. Pohledávky a faktury po splatnosti jsou k dnešku. Výhled sčítá očekávané úhrady příštího období: neuhrazené faktury včetně těch po splatnosti, zálohy a pravidelné faktury.",
     },
   },
   invoiceMail: {

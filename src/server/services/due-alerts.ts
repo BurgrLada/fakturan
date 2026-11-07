@@ -33,6 +33,7 @@ export type AlertRow = {
   dueDate: CalendarDate;
   amountDueMinor: number;
   currency: typeof invoice.$inferSelect.currency;
+  rateMicros: number | null;
 };
 
 export function dueAlerts(
@@ -48,6 +49,7 @@ export function dueAlerts(
       customerName: invoice.customerName,
       dueDate: invoice.dueDate,
       currency: invoice.currency,
+      rateMicros: invoice.exchangeRateMicros,
       totalMinor: invoice.totalMinor,
       paidMinor: invoice.paidMinor,
       creditsMinor: invoice.creditsMinor,
@@ -71,6 +73,7 @@ export function dueAlerts(
     dueDate: row.dueDate!,
     amountDueMinor: amountDue(row),
     currency: row.currency,
+    rateMicros: row.rateMicros,
   });
   const limit = addDays(today, DUE_SOON_DAYS);
   return {

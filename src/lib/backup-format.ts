@@ -73,11 +73,22 @@ export const fileIndexLineSchema = z.strictObject({
 
 export type BackupRow = Record<string, unknown>;
 
+// Version 2 also moved the file hashes into files.jsonl. A plan 9 column fills its default in step
+// 1 (R-6); the defaults match the migrations that added the columns.
+const V2_DEFAULTS: Record<string, BackupRow> = {
+  automation_settings: { period_summary: "off", tax_reminder: false, limit_mail: false },
+};
+
 // Steps from version n to n + 1, applied to each row of an older archive before it is validated.
-// Version 2 only moved the file hashes into files.jsonl; a task of plan 9 that adds a column fills
-// its default in step 1 (R-6).
 export const BACKUP_UPGRADES: Record<number, (table: string, row: BackupRow) => BackupRow> = {
-  1: (_table, row) => row,
+  1: (table, row) => {
+    const defaults = V2_DEFAULTS[table];
+    if (!defaults) return row;
+    for (const [column, value] of Object.entries(defaults)) {
+      if (!Object.hasOwn(row, column)) row[column] = value;
+    }
+    return row;
+  },
 };
 
 const KiB = 1024;
