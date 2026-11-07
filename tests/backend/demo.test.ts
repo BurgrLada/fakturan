@@ -24,7 +24,8 @@ import { DEMO_ICOS, seedDemo } from "@/server/demo/seed";
 import { demoUserId, isDemoAccount } from "@/server/demo/mode";
 import { parseEnv } from "@/server/env";
 import { demoResetTask } from "@/server/scheduler/demo-reset";
-import { saveBankMailbox } from "@/server/services/bank-mailbox";
+import { saveBankMailbox, testBankMailbox } from "@/server/services/bank-mailbox";
+import { checkMailboxNow, planBankPolls, pollMailbox } from "@/server/services/bank-poll";
 import { planDigests } from "@/server/services/due-alerts";
 import {
   mailAvailability,
@@ -38,7 +39,9 @@ import { deleteOwnAccount, deleteUser, purgeDemoAccount } from "@/server/service
 import { Browser, BASE, fakeGithub, githubLogin, type Auth } from "../helpers/auth-browser";
 import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
+import { pollJob, seedMailbox } from "../helpers/fixtures-bank";
 import { issuedInvoice, seedOwner } from "../helpers/fixtures-mail";
+import { startImap } from "../helpers/imap";
 
 const DEMO_EMAIL = "ukazka@fakturan.example";
 const DEMO_PASSWORD = "ukazka-fakturan-heslo";
@@ -218,6 +221,32 @@ describe("ukázka", () => {
     await expect(
       saveBankMailbox(actor, { host: "imap.example.cz", port: 993 }, withSmtp),
     ).rejects.toThrow("V ukázce");
+  });
+
+  test("[OPS-007] v režimu ukázky se k uložené schránce s avízy nikdo nepřipojí", async () => {
+    const imap = await startImap();
+    try {
+      const owner = seedOwner(db, NOW);
+      seedMailbox(db, owner, imap.port, NOW);
+      const demoImap = parseEnv({ ...demoEnv, ALLOW_PRIVATE_MAIL_HOSTS: "true" });
+      const actor = { userId: owner, source: "web" as const };
+
+      planBankPolls(current);
+      await pollMailbox(pollJob(owner, current), { env: demoImap });
+      await expect(testBankMailbox(actor, demoImap)).rejects.toThrow("V ukázce");
+      expect(() => checkMailboxNow(actor, "pozadavek-1")).toThrow("V ukázce");
+
+      expect(
+        db
+          .select()
+          .from(job)
+          .where(and(eq(job.kind, "bank.poll"), eq(job.userId, owner)))
+          .all(),
+      ).toEqual([]);
+      expect(imap.connections()).toBe(0);
+    } finally {
+      await imap.close();
+    }
   });
 
   test("[OPS-007] registrace, změna hesla a smazání účtu ukázky jsou odmítnuté", async () => {

@@ -5,6 +5,7 @@ import { clock } from "../clock";
 import { db } from "../db";
 import { bankMailbox, job, notification, user } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { env } from "../env";
 import { enqueue } from "../jobs/queue";
 import { notify, resolveNotificationsOf } from "../services/notifications";
 
@@ -98,7 +99,9 @@ function jobKey(userId: string, now: Date): string {
 }
 
 // A poll still waiting already covers this slot, so a long stall cannot queue up a run per slot.
+// A demo instance never logs into a mailbox left over from before DEMO_MODE was switched on.
 export function enqueueDuePolls(now: Date): void {
+  if (env.DEMO_MODE) return;
   const busy = db
     .select({ userId: job.userId })
     .from(job)

@@ -278,6 +278,7 @@ export async function pollMailbox(job: Job, options: PollOptions = {}): Promise<
     parsers = BANK_PARSERS,
     closeGraceMs = CLOSE_GRACE_MS,
   } = options;
+  if (env.DEMO_MODE) return;
   const mailbox = job.userId ? loadMailbox(job.userId) : undefined;
   if (!mailbox?.enabled || mailbox.banned) return;
 
@@ -321,6 +322,7 @@ export function planBankPolls(now: Date): void {
 export function checkMailboxNow(actor: Actor, requestId: string): void {
   const userId = actor.userId;
   if (!userId) throw new ServiceError(E.forbidden);
+  if (defaultEnv.DEMO_MODE) throw new ServiceError(TEXTS.demo.locked);
   enforceRateLimit(actor, RATE_RULES.bankCheckUser);
   const row = db.select().from(bankMailbox).where(scoped(userId).where(bankMailbox)).get();
   if (!row) throw new ServiceError(E.notConfigured);

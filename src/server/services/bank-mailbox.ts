@@ -258,6 +258,7 @@ export async function testBankMailbox(
   env: Env = defaultEnv,
 ): Promise<{ suggestedAuthServId: string | null }> {
   const userId = ownerOf(actor);
+  if (env.DEMO_MODE) throw new ServiceError(TEXTS.demo.locked);
   enforceRateLimit(actor, RATE_RULES.bankTestUser);
   const row = readRow(userId);
   if (!row) throw new ServiceError(E.notConfigured);
