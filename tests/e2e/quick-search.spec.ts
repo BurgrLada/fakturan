@@ -58,3 +58,44 @@ test("[UI-007] na telefonu se hledání otevře tlačítkem v hlavičce", async 
     .click();
   await expect(page).toHaveURL(`${baseURL}/nastaveni/posta`);
 });
+
+test("[UI-010] Ctrl+K otevře hledání i z textového pole", async ({ page, freshApp }) => {
+  const { baseURL } = freshApp;
+  await register(page, baseURL);
+  await page.goto(`${baseURL}/zakaznici/novy`);
+  await page.waitForLoadState("networkidle");
+  const name = page.getByLabel("Název nebo jméno");
+  await name.fill("Alfa");
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog", { name: "Rychlé hledání" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue("Alfa");
+});
+
+test.describe("na Macu", () => {
+  test.use({
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  });
+
+  test("[UI-010] [UI-008] ⌘K otevře hledání a Ctrl+K zůstane textovému poli", async ({
+    page,
+    freshApp,
+  }) => {
+    const { baseURL } = freshApp;
+    await register(page, baseURL);
+    await page.goto(`${baseURL}/zakaznici/novy`);
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("button", { name: "Hledat" })).toContainText("⌘K");
+    const name = page.getByLabel("Název nebo jméno");
+    await name.fill("Alfa");
+    await page.keyboard.press("Control+k");
+    const dialog = page.getByRole("dialog", { name: "Rychlé hledání" });
+    await expect(dialog).toBeHidden();
+    await expect(name).toBeFocused();
+    await page.keyboard.press("Meta+k");
+    await expect(dialog).toBeVisible();
+  });
+});

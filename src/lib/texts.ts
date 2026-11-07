@@ -589,7 +589,7 @@ export const TEXTS = {
     input: "Hledat faktury, zákazníky, ceník a stránky",
     placeholder: "Číslo faktury, zákazník, položka…",
     results: "Výsledky hledání",
-    tooShort: "Napište aspoň 2 znaky.",
+    tooShort: (n: number) => `Napište aspoň ${n} znaky.`,
     searching: "Hledám…",
     empty: "Nic nenalezeno.",
     found: (n: number) => `Nalezeno: ${n}`,

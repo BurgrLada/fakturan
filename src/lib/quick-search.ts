@@ -41,3 +41,22 @@ export function staticHits(q: string, role: string | null): SearchHit[] {
   ];
   return pages.filter((hit) => foldText(hit.label).includes(term)).slice(0, PER_GROUP);
 }
+
+export type ShortcutEvent = Pick<
+  KeyboardEvent,
+  "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing"
+>;
+
+// On Apple Ctrl+K deletes to the end of the line in text fields, so only ⌘K is ours there.
+export function isQuickSearchShortcut(event: ShortcutEvent, apple: boolean): boolean {
+  const modifier = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  return (
+    modifier &&
+    !event.isComposing &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === "k"
+  );
+}
+
+export const isApplePlatform = (userAgent: string) => /Mac|iPhone|iPad|iPod/.test(userAgent);

@@ -19,6 +19,8 @@ import {
 import { quickSearch } from "@/app/(app)/hledani-actions";
 import { Button } from "@/components/ui/button";
 import {
+  isApplePlatform,
+  isQuickSearchShortcut,
   MAX_QUERY_LENGTH,
   MIN_QUERY_LENGTH,
   SEARCH_DELAY_MS,
@@ -45,14 +47,9 @@ function useQuickSearch(): QuickSearchState {
   return state;
 }
 
-function isShortcut(event: globalThis.KeyboardEvent): boolean {
-  return (
-    (event.ctrlKey || event.metaKey) &&
-    !event.altKey &&
-    !event.shiftKey &&
-    event.key.toLowerCase() === "k"
-  );
-}
+// Another modal (a confirmation, a form dialog) keeps the keyboard; search would stack on top.
+const otherModalOpen = () =>
+  document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"]') !== null;
 
 export function QuickSearchProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -60,7 +57,8 @@ export function QuickSearchProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (!isShortcut(event)) return;
+      if (!isQuickSearchShortcut(event, isApplePlatform(navigator.userAgent))) return;
+      if (!open && otherModalOpen()) return;
       event.preventDefault();
       if (open) return;
       returnTo.current =
@@ -78,7 +76,7 @@ export function QuickSearchProvider({ children }: { children: ReactNode }) {
 }
 
 const noSubscription = () => () => {};
-const onApple = () => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
+const onApple = () => isApplePlatform(navigator.userAgent);
 
 export function QuickSearchTrigger({ compact = false }: { compact?: boolean }) {
   const { setOpen, returnTo } = useQuickSearch();
@@ -90,7 +88,7 @@ export function QuickSearchTrigger({ compact = false }: { compact?: boolean }) {
       size={compact ? "icon" : "default"}
       aria-label={T.open}
       aria-haspopup="dialog"
-      aria-keyshortcuts="Control+K Meta+K"
+      aria-keyshortcuts={apple ? "Meta+K" : "Control+K"}
       className={compact ? undefined : "w-full justify-start text-muted-foreground"}
       onClick={(event) => {
         returnTo.current = event.currentTarget;
@@ -207,7 +205,7 @@ function SearchPanel({
   }
 
   const status = !ready
-    ? T.tooShort
+    ? T.tooShort(MIN_QUERY_LENGTH)
     : answered?.limited
       ? T.limited
       : answered?.failed
