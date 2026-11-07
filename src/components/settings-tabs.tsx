@@ -2,24 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SETTINGS_TABS } from "@/lib/nav";
 import { TEXTS } from "@/lib/texts";
 import { cn } from "@/lib/utils";
-
-const TABS = [
-  { href: "/nastaveni/ucet", label: TEXTS.settings.account },
-  { href: "/nastaveni/dodavatel", label: TEXTS.settings.supplier },
-  { href: "/nastaveni/ucty", label: TEXTS.settings.bankAccounts },
-  { href: "/nastaveni/rady", label: TEXTS.settings.numberSeries },
-  { href: "/nastaveni/vychozi", label: TEXTS.settings.defaults },
-  { href: "/nastaveni/designy", label: TEXTS.settings.designs },
-  { href: "/nastaveni/posta", label: TEXTS.settings.mail },
-  { href: "/nastaveni/aviza", label: TEXTS.settings.bankMailbox },
-  { href: "/nastaveni/automatizace", label: TEXTS.settings.automation },
-  { href: "/nastaveni/import", label: TEXTS.importing.nav },
-  { href: "/nastaveni/export", label: TEXTS.exporting.nav },
-  { href: "/nastaveni/zaloha", label: TEXTS.backup.nav },
-  { href: "/nastaveni/historie", label: TEXTS.settings.history },
-];
 
 export function SettingsTabs() {
   return <SettingsTabsView pathname={usePathname()} />;
@@ -28,7 +13,7 @@ export function SettingsTabs() {
 export function SettingsTabsView({ pathname }: { pathname: string | null }) {
   return (
     <nav aria-label={TEXTS.settings.nav} className="flex gap-1 overflow-x-auto border-b">
-      {TABS.map((tab) => {
+      {SETTINGS_TABS.map((tab) => {
         const active = pathname !== null && pathname.startsWith(tab.href);
         return (
           <Link

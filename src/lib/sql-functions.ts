@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { czechSortKey } from "./czech-sort";
+import { foldText } from "./fold-text";
 import { toCzkMinor } from "./fx";
 import { calendarDateInPrague } from "./number-format";
 import { bucketKey, type BucketUnit } from "./report-period";
@@ -39,6 +40,9 @@ export function medianMinor(values: number[]): bigint | null {
 export function registerSqlFunctions(sqlite: Database.Database): void {
   sqlite.function("czech_key", { deterministic: true }, (text) =>
     typeof text === "string" ? czechSortKey(text) : null,
+  );
+  sqlite.function("fold_text", { deterministic: true }, (text) =>
+    typeof text === "string" ? foldText(text) : null,
   );
   sqlite.function("fx_czk", { deterministic: true }, fxCzk);
   sqlite.function("date_bucket", { deterministic: true }, (date, unit) =>

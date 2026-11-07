@@ -10,57 +10,40 @@ import {
   Tag,
   Users,
 } from "lucide-react";
-import { TEXTS } from "@/lib/texts";
+import {
+  isVisible,
+  NAV_ROUTES,
+  SHOW_PLANNED_SECTIONS,
+  type NavKey,
+  type NavRoute,
+} from "@/lib/nav";
 
-// Release switch: false hides every section that is still only a "Připravujeme" placeholder.
-export const SHOW_PLANNED_SECTIONS = true;
+export { SHOW_PLANNED_SECTIONS, type NavKey };
 
-export type NavKey = keyof typeof TEXTS.nav;
+export type NavItem = NavRoute & { icon: LucideIcon };
 
-export type NavItem = {
-  key: NavKey;
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  planned: boolean;
-  adminOnly: boolean;
+const ICONS: Record<NavKey, LucideIcon> = {
+  overview: LayoutDashboard,
+  invoices: FileText,
+  recurring: Repeat,
+  customers: Users,
+  catalog: Tag,
+  payments: CreditCard,
+  reports: PieChart,
+  settings: Settings,
+  admin: Shield,
 };
 
-function item(
-  key: NavKey,
-  href: string,
-  icon: LucideIcon,
-  flags: { planned?: boolean; adminOnly?: boolean } = {},
-): NavItem {
-  return {
-    key,
-    label: TEXTS.nav[key],
-    href,
-    icon,
-    planned: flags.planned ?? false,
-    adminOnly: flags.adminOnly ?? false,
-  };
-}
-
-export const NAV_ITEMS: readonly NavItem[] = [
-  item("overview", "/", LayoutDashboard),
-  item("invoices", "/faktury", FileText),
-  item("recurring", "/pravidelne", Repeat),
-  item("customers", "/zakaznici", Users),
-  item("catalog", "/cenik", Tag),
-  item("payments", "/platby", CreditCard),
-  item("reports", "/prehledy", PieChart),
-  item("settings", "/nastaveni/ucet", Settings),
-  item("admin", "/administrace", Shield, { adminOnly: true }),
-];
+export const NAV_ITEMS: readonly NavItem[] = NAV_ROUTES.map((entry) => ({
+  ...entry,
+  icon: ICONS[entry.key],
+}));
 
 export function visibleNavItems(
   role: string | null | undefined,
   showPlanned: boolean = SHOW_PLANNED_SECTIONS,
 ): NavItem[] {
-  return NAV_ITEMS.filter(
-    (entry) => (showPlanned || !entry.planned) && (!entry.adminOnly || role === "admin"),
-  );
+  return NAV_ITEMS.filter((entry) => isVisible(entry, role, showPlanned));
 }
 
 export function isActive(entry: NavItem, pathname: string): boolean {

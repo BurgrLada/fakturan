@@ -1325,3 +1325,20 @@ describe("ruční PDF k cizímu dokladu", () => {
     expect(getInvoice(mine, id)!.importPdfFileId).toBeNull();
   });
 });
+
+describe("rychlé hledání cizího účtu", () => {
+  test("[SEC-002] quickSearch nevrátí doklad ani zákazníka jiného účtu", async () => {
+    const { quickSearch } = await import("@/app/(app)/hledani-actions");
+    const mine = seedOwner(db, new Date());
+    const stranger = seedOwner(db, new Date());
+    const id = issuedInvoice(mine);
+    session.userId = mine;
+    const own = await quickSearch("Alfa s.r.o.");
+    expect(own.hits.map((hit) => hit.id)).toContain(id);
+
+    session.userId = stranger;
+    expect(await quickSearch("Alfa s.r.o.")).toEqual({ hits: [], limited: false });
+    const number = getInvoice(mine, id)!.number!;
+    expect(await quickSearch(number)).toEqual({ hits: [], limited: false });
+  });
+});

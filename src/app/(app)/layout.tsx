@@ -6,7 +6,12 @@ import {
   NotificationBellView,
 } from "@/components/notifications/notification-bell";
 import { NavLinksView } from "@/components/nav-links";
-import { AccountMenu, defaultNavKeys, SessionNav } from "@/components/session-nav";
+import {
+  AccountMenu,
+  defaultNavKeys,
+  SessionNav,
+  SessionQuickSearch,
+} from "@/components/session-nav";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -24,6 +29,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       account={
         <Suspense>
           <AccountMenu />
+        </Suspense>
+      }
+      search={
+        <Suspense>
+          <SessionQuickSearch />
         </Suspense>
       }
     >

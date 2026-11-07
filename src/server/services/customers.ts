@@ -169,12 +169,17 @@ export function getCustomer(ownerId: string, id: string): Customer | null {
   return readOwned(db, ownerId, id);
 }
 
-export function searchCustomers(ownerId: string, q: string, limit: number): Customer[] {
+export function searchCustomers(
+  ownerId: string,
+  q: string,
+  limit: number,
+  status: CustomerStatus = "active",
+): Customer[] {
   const term = q.trim();
   return db
     .select()
     .from(customer)
-    .where(conditions(ownerId, { q: term || undefined }))
+    .where(conditions(ownerId, { q: term || undefined, status }))
     .orderBy(asc(czech(customer.name)), asc(customer.id))
     .limit(Math.min(MAX_PAGE_SIZE, Math.max(1, limit)))
     .all();

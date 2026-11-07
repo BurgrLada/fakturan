@@ -48,6 +48,7 @@ export const RATE_RULES = {
   pdfUser: rule("pdfUser", 120, 60),
   pdfPreviewUser: rule("pdfPreviewUser", 600, 60),
   widgetPreviewUser: rule("widgetPreviewUser", 120, 60),
+  searchUser: rule("searchUser", 120, 60),
 } as const satisfies Record<string, RateRule>;
 
 // Fixed window. Denied attempts are not counted, so hammering a blocked key does not extend it.
