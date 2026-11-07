@@ -21,7 +21,7 @@ export const money = (minor: number, currency: Currency): Cell => ({
 });
 export const count = (value: number): Cell => ({ kind: "number", value });
 
-// A leading apostrophe makes spreadsheets read the cell as text (EXP-008).
+// A leading apostrophe makes spreadsheets read a CSV cell as text (EXP-008); XLSX types its cells.
 export function neutralizeCsvCell(value: string): string {
   return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }

@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from "fflate";
-import { decimalMinor, neutralizeCsvCell, type Cell, type Sheet } from "./tabular";
+import { decimalMinor, type Cell, type Sheet } from "./tabular";
 
 // The smallest SpreadsheetML workbook Excel and LibreOffice open: inline strings and built-in
 // number formats 4 (#,##0.00) and 14 (date), so no shared strings or custom formats.
@@ -26,6 +26,7 @@ function columnName(index: number): string {
   return name;
 }
 
+// An inlineStr cell is text by type and never evaluates, so it needs no CSV apostrophe (EXP-008).
 function inline(ref: string, value: string, style?: number): string {
   const s = style === undefined ? "" : ` s="${style}"`;
   return `<c r="${ref}" t="inlineStr"${s}><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
@@ -35,7 +36,7 @@ function cellXml(ref: string, cell: Cell): string {
   if (cell === null) return "";
   switch (cell.kind) {
     case "text":
-      return inline(ref, neutralizeCsvCell(cell.value));
+      return inline(ref, cell.value);
     case "money":
       return `<c r="${ref}" s="${STYLE.money}"><v>${decimalMinor(cell.minor, ".")}</v></c>`;
     case "number":
@@ -62,9 +63,7 @@ const WORKSHEET_CLOSE = "</sheetData></worksheet>";
 
 function headerRow(columns: string[]): string {
   return `<row r="1">${columns
-    .map((column, index) =>
-      inline(`${columnName(index)}1`, neutralizeCsvCell(column), STYLE.header),
-    )
+    .map((column, index) => inline(`${columnName(index)}1`, column, STYLE.header))
     .join("")}</row>`;
 }
 

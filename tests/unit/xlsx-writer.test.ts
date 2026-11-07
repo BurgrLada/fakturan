@@ -186,7 +186,7 @@ describe("XLSX více listů proudově", () => {
     expect(first.rows[450]).toEqual(["Doklad 449", "-500.00"]);
 
     const second = strFromU8(files["xl/worksheets/sheet2.xml"]!);
-    expect(second).toContain('<t xml:space="preserve">\'=1+1</t>');
+    expect(second).toContain('t="inlineStr"><is><t xml:space="preserve">=1+1</t>');
     expect(second.endsWith("</sheetData></worksheet>")).toBe(true);
   });
 
@@ -198,5 +198,17 @@ describe("XLSX více listů proudově", () => {
     for (const name of Object.keys(whole)) {
       expect(strFromU8(streamed[name]!), name).toBe(strFromU8(whole[name]!));
     }
+  });
+
+  test("[EXP-008] text „- dodatek“ je v XLSX beze změny, apostrof dostane jen CSV", () => {
+    const data: Sheet = { name: "Poznámky", columns: ["-Sloupec"], rows: [[text("- dodatek")]] };
+
+    const xml = strFromU8(unzipSync(toXlsx(data))["xl/worksheets/sheet1.xml"]!);
+
+    expect(xml).toContain('t="inlineStr" s="3"><is><t xml:space="preserve">-Sloupec</t>');
+    expect(xml).toContain('t="inlineStr"><is><t xml:space="preserve">- dodatek</t>');
+    expect(xml).not.toContain("'");
+    expect(xml).not.toContain("<f>");
+    expect(toCsv(data)).toContain("'- dodatek");
   });
 });

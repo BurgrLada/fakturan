@@ -480,7 +480,7 @@ describe("import CSV a Excelu", () => {
     expect(rows.map((row) => row.status)).toContain("error");
   });
 
-  test("hodnota =HYPERLINK se uloží jako text a v exportu je neutralizovaná", async () => {
+  test("hodnota =HYPERLINK se uloží jako text a v exportu zůstane textem", async () => {
     const owner = importOwner(db, NOW);
     const id = await tabularUploaded(owner, "zakaznici.csv", fixture("zakaznici.csv"));
     await tabularMapped(owner, id, { ...customersMapping, columns: { name: "Název" } });
@@ -492,7 +492,7 @@ describe("import CSV a Excelu", () => {
     const sheet = { name: "Zákazníci", columns: ["Název"], rows: [[text(stored!.name)]] };
     expect(toCsv(sheet)).toContain(`"'=HYPERLINK(""http://example.test"",""klik"")"`);
     const xml = strFromU8(unzipSync(toXlsx(sheet))["xl/worksheets/sheet1.xml"]!);
-    expect(xml).toContain("'=HYPERLINK");
+    expect(xml).toContain('t="inlineStr"><is><t xml:space="preserve">=HYPERLINK');
     expect(xml).not.toContain("<f>");
   });
   test("[IMP-008] zákazník založený mezi náhledem a potvrzením se nepřepíše ani nezdvojí", async () => {

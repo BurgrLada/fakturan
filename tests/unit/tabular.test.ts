@@ -39,7 +39,7 @@ describe("CSV", () => {
     expect(lines.at(-1)).toBe("");
   });
 
-  test("[REP-004] text =1+1, +cmd, -2+3 a @SUM se neutralizuje v CSV i XLSX, záporná částka ne", () => {
+  test("[REP-004] text =1+1, +cmd, -2+3 a @SUM je v CSV neutralizovaný a v XLSX textovou buňkou, záporná částka ne", () => {
     const dangerous = ["=1+1", "+cmd", "-2+3", "@SUM(A1)"];
     const data = sheet(dangerous.map((value) => [text(value), money(-100, "CZK")]));
     const csv = toCsv(data);
@@ -48,7 +48,9 @@ describe("CSV", () => {
 
     const files = unzipSync(toXlsx(data));
     const xml = strFromU8(files["xl/worksheets/sheet1.xml"]!);
-    for (const value of dangerous) expect(xml).toContain(`<t xml:space="preserve">'${value}</t>`);
+    for (const value of dangerous) {
+      expect(xml).toContain(`t="inlineStr"><is><t xml:space="preserve">${value}</t>`);
+    }
     expect(xml).toContain("<v>-1.00</v>");
     expect(xml).not.toContain("<f>");
   });

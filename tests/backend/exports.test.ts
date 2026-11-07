@@ -344,9 +344,12 @@ describe("hromadný export", () => {
     const xlsx = await exported(owner, { kind: "invoices", format: "xlsx" });
     const files = unzipSync(bytesOf(owner, xlsx.id));
     const documents = strFromU8(files["xl/worksheets/sheet1.xml"]!);
-    expect(documents).toContain('<t xml:space="preserve">\'=1+1</t>');
+    expect(documents).toContain('t="inlineStr"><is><t xml:space="preserve">=1+1</t>');
     expect(documents).toContain("<v>-500.00</v>");
-    expect(strFromU8(files["xl/worksheets/sheet2.xml"]!)).toContain("'@SUM(A1)");
+    expect(strFromU8(files["xl/worksheets/sheet2.xml"]!)).toContain(
+      't="inlineStr"><is><t xml:space="preserve">@SUM(A1)</t>',
+    );
+    expect(documents).not.toContain("<f>");
 
     const customers = await exported(owner, { kind: "customers", format: "csv" });
     expect(csvLines(owner, customers.id)[1]!.startsWith("'=1+1")).toBe(true);
