@@ -35,6 +35,7 @@ export const NAV_ROUTES: readonly NavRoute[] = [
   route("catalog", "/cenik"),
   route("payments", "/platby"),
   route("reports", "/prehledy"),
+  route("help", "/napoveda"),
   route("settings", "/nastaveni/ucet"),
   route("admin", "/administrace", { adminOnly: true }),
 ];

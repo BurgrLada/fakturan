@@ -1,4 +1,5 @@
 import {
+  CircleHelp,
   CreditCard,
   FileText,
   LayoutDashboard,
@@ -30,6 +31,7 @@ const ICONS: Record<NavKey, LucideIcon> = {
   catalog: Tag,
   payments: CreditCard,
   reports: PieChart,
+  help: CircleHelp,
   settings: Settings,
   admin: Shield,
 };

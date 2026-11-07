@@ -39,6 +39,10 @@ const BACKUP_TABLE_LABELS: Record<string, string> = {
 };
 const tableLabel = (table: string) => BACKUP_TABLE_LABELS[table] ?? "data účtu";
 
+// Shared by the tax overview and every help chapter that touches taxes (UI-012).
+const TAX_DISCLAIMER =
+  "Podklad z údajů ve Fakturanu. Nejde o daňové poradenství, před podáním přiznání údaje ověřte u daňového poradce.";
+
 export const TEXTS = {
   appName: "Fakturan",
   nav: {
@@ -49,6 +53,7 @@ export const TEXTS = {
     catalog: "Ceník",
     payments: "Platby",
     reports: "Statistiky",
+    help: "Nápověda",
     settings: "Nastavení",
     admin: "Administrace",
   },
@@ -600,6 +605,7 @@ export const TEXTS = {
     archived: "Archivovaný",
     settings: "Nastavení",
     section: "Sekce",
+    help: "Nápověda",
     groups: {
       invoice: "Faktury",
       customer: "Zákazníci",
@@ -3578,8 +3584,7 @@ export const TEXTS = {
       `Zobrazeno prvních ${shown} z ${total} řádků, součty platí pro všechny. Celý seznam je v exportu do Excelu nebo CSV.`,
     tab: "Daňový podklad",
     intro: "Roční souhrn příjmů a neuhrazených faktur jako podklad k přiznání.",
-    disclaimer:
-      "Podklad z údajů ve Fakturanu. Nejde o daňové poradenství, před podáním přiznání údaje ověřte u daňového poradce.",
+    disclaimer: TAX_DISCLAIMER,
     reviewPending: "text čeká na ověření",
     year: "Rok",
     basis: "Základ",
@@ -3758,5 +3763,271 @@ export const TEXTS = {
         "Data v archivu si odporují (součty nebo platby nesedí). Účet zůstal beze změny.",
       unexpected: "Obnova se nepodařila kvůli neočekávané chybě. Účet zůstal beze změny.",
     },
+  },
+  help: {
+    title: "Nápověda",
+    intro:
+      "Návod k hlavním úkonům a odpovědi na časté otázky. Kapitolu najdete i přes rychlé hledání (Ctrl+K, na Macu ⌘K).",
+    contents: "Obsah nápovědy",
+    links: "Kam dál",
+    faqTitle: "Časté otázky",
+    chapters: [
+      {
+        id: "prvni-spusteni",
+        title: "První spuštění a průvodce",
+        body: [
+          "Po registraci vás provede průvodce nastavením v pěti krocích: dodavatel, bankovní účet, číselná řada, logo a nakonec jazyk a design faktury. Každý krok jde přeskočit a vrátit se k němu později v Nastavení.",
+          "U dodavatele stačí zadat IČO a údaje se předvyplní z registru ARES. Před uložením je můžete upravit.",
+          "První registrovaný účet na instanci je správce. Další uživatelé vznikají jen pozvánkou ze správy.",
+        ],
+        links: [
+          { label: "Průvodce nastavením", href: "/pruvodce" },
+          { label: "Dodavatel", href: "/nastaveni/dodavatel" },
+          { label: "Bankovní účty", href: "/nastaveni/ucty" },
+        ],
+      },
+      {
+        id: "faktura",
+        title: "Faktura od konceptu po úhradu",
+        body: [
+          "Novou fakturu založíte v sekci Faktury tlačítkem Nová faktura. Formulář se předvyplní z výchozích hodnot a z údajů zákazníka. Koncept se ukládá sám, nemá číslo a do přehledů se nepočítá.",
+          "Vystavením dostane faktura číslo z číselné řady. Vystavenou fakturu nejde smazat, jen stornovat. Číslo zůstane obsazené a storno jde vrátit zpět.",
+          "Vystavenou fakturu jde dál upravit včetně čísla. Každá změna vytvoří verzi, kterou si prohlédnete a případně obnovíte. U odeslané faktury se po uložení nabídne nové odeslání, samo nic neodejde.",
+          "Úhradu zapíšete na detailu faktury: Označit jako uhrazené zapíše celou částku s dnešním datem, které jde změnit, Přidat platbu zapíše dílčí platbu. Stav se odvodí ze součtu plateb. Malý rozdíl z kurzu nebo poplatku uzavřete akcí Uzavřít jako uhrazené.",
+          "Po splatnosti není uložený stav. Aplikace ho dopočítá z data splatnosti a z částky, která zbývá uhradit.",
+        ],
+        links: [
+          { label: "Faktury", href: "/faktury" },
+          { label: "Nová faktura", href: "/faktury/nova" },
+          { label: "Číselné řady", href: "/nastaveni/rady" },
+        ],
+      },
+      {
+        id: "odeslani",
+        title: "Odeslání e-mailem a vzhled zprávy",
+        body: [
+          "Na detailu vystavené faktury je tlačítko Odeslat klientovi. V dialogu upravíte příjemce, kopie, předmět a text. PDF jde v příloze, přiložit jde i ISDOC pro účetní program klienta.",
+          "Předmět a text se předvyplní ze šablon e-mailů v jazyce faktury. Šablony upravíte v Nastavení, Pošta.",
+          "Zpráva odchází jako HTML i jako prostý text. Vzhled vyberete ze sedmi variant na stránce Vzhled e-mailu, kde je i náhled. Výchozí je B4 Tmavá hlavička. Tamtéž nastavíte úvod, podpis a logo. QR platbu mají jen vzhledy B2, B3 a B5.",
+          "Bez nastaveného SMTP serveru odeslání není dostupné, PDF pak stáhnete a pošlete sami. Vlastní server si nastavíte v Nastavení, Pošta, a má přednost před serverem instance.",
+          "Výsledek každého odeslání a odeslané PDF najdete v historii na detailu faktury. Když nejde poznat, zda zpráva odešla, aplikace ji sama znovu neposílá a rozhodnutí nechá na vás.",
+        ],
+        links: [
+          { label: "Pošta", href: "/nastaveni/posta" },
+          { label: "Šablony e-mailů", href: "/nastaveni/posta/sablony" },
+          { label: "Vzhled e-mailu", href: "/nastaveni/posta/vzhled" },
+        ],
+      },
+      {
+        id: "platby",
+        title: "Platby a avíza Fio",
+        body: [
+          "Platby zapisujete ručně na detailu faktury, nebo je Fakturan páruje z e-mailových avíz Fio banky. Schránku s avízy nastavíte v Nastavení, Avíza, kde je i návod, jak avíza zapnout v internetbankingu Fio.",
+          "Schránka se kontroluje každých 5 minut a jen se čte, nic se v ní nemaže. Sama se uhradí jen faktura, se kterou avízo přesně sedí: variabilní symbol, měna, částka i účet. Ostatní avíza čekají v sekci Platby ve frontě nespárovaných plateb, kde je přiřadíte ručně.",
+          "Česká avíza mají zatím prozatímní formát. Čtou se, ale nikdy se nepárují automaticky a ve frontě mají štítek Prozatímní formát. Automaticky se páruje jen anglická varianta avíza.",
+          "Volba Vyžadovat potvrzení je ve výchozím stavu zapnutá a pošle do fronty avízo, u kterého váš poštovní server neověřil odesílatele. Bez vyplněného serveru ověření (authserv-id) čeká ve frontě každé avízo.",
+          "Spárování z avíza jde vrátit. Klientovi nic neodejde, pokud nezapnete automatiku Potvrzení o přijaté platbě.",
+        ],
+        links: [
+          { label: "Platby", href: "/platby" },
+          { label: "Avíza z banky", href: "/nastaveni/aviza" },
+        ],
+      },
+      {
+        id: "upominky",
+        title: "Upomínky a souhrny",
+        body: [
+          "Automatické upomínky jsou vypnuté, dokud je nezapnete v Nastavení, Automatizace. Tam nastavíte stupně: počet dnů od splatnosti (záporné číslo znamená před splatností) a případně vlastní text. Bez vlastního textu se použije šablona upomínky.",
+          "Upomínky odcházejí po nastaveném čase odeslání, výchozí je 9:00. Stejný stupeň k faktuře neodejde dvakrát. Staré dluhy z doby před zapnutím se nerozesílají a stupně starší než 3 dny čekají ke kontrole.",
+          "Na detailu faktury upomínku pošlete ručně, odložíte nejvýš o 30 dní, nebo ji pro tuto fakturu vypnete. Upomínku jde poslat až po odeslání faktury.",
+          "Pro sebe si můžete zapnout denní přehled toho, co se nepovedlo, a pravidelný měsíční nebo čtvrtletní souhrn: fakturováno, přijato, pohledávky, faktury po splatnosti a výhled. Tyto zprávy chodí jen vám, nikdy klientům, a hlavní vypínač se jich netýká.",
+          "Hlavní vypínač v Automatizaci zastaví veškeré automatické odesílání klientům najednou. Co se za pozastavení zadrželo, se po obnovení samo neodešle.",
+        ],
+        links: [
+          { label: "Automatizace", href: "/nastaveni/automatizace" },
+          { label: "Upozornění", href: "/upozorneni" },
+        ],
+      },
+      {
+        id: "pravidelne",
+        title: "Pravidelné faktury",
+        body: [
+          "Plán pravidelné faktury založíte v sekci Pravidelné: četnost, den vystavení, začátek a konec. Náhled ukáže nejbližších 12 termínů i s vygenerovanými popisy.",
+          "Do položek, poznámek a předmětu e-mailu můžete vložit proměnné jako {{mesic_nazev}}, {{ctvrtleti}} nebo {{rok}}. Hodnoty se počítají z data vystavení podle plánu, takže i opožděný běh dá správné období.",
+          "Plán má tři režimy: vytvořit koncept (výchozí), vystavit, nebo vystavit a odeslat. Poslední funguje jen se zapnutou automatikou Pravidelné faktury: vystavit a odeslat. Když je automatika vypnutá nebo pozastavená, vznikne jen koncept a upozornění.",
+          "Plán jde pozastavit a obnovit. Termíny zmeškané během pozastavení se po obnovení samy nevytvoří, zobrazí se ke kontrole. Po výpadku aplikace se doženou jen termíny staré nejvýš 3 dny.",
+        ],
+        links: [
+          { label: "Pravidelné faktury", href: "/pravidelne" },
+          { label: "Nový plán", href: "/pravidelne/nova" },
+          { label: "Automatizace", href: "/nastaveni/automatizace" },
+        ],
+      },
+      {
+        id: "zalohy",
+        title: "Zálohy a konečná faktura",
+        body: [
+          "Zálohovou fakturu založíte v sekci Faktury tlačítkem Nová záloha. Má vlastní číselnou řadu, výchozí Z{RRRR}-{NNN}, a na dokladu nese text „Toto není daňový doklad.“, který jde upravit.",
+          "Co se stane po úhradě zálohy, určuje v Nastavení, Automatizace volba Po úhradě zálohy: nevytvářet fakturu, založit koncept (výchozí), nebo vystavit. Konečnou fakturu vytvoříte i ručně na detailu zálohy tlačítkem Vytvořit konečnou fakturu, kdykoli i před úhradou.",
+          "Konečná faktura odkazuje na zálohu a uhrazenou zálohu odečte z částky k úhradě. Platba zůstává na záloze a do příjmů se počítá jednou, k datu úhrady.",
+          "Výchozí řady faktur a záloh dávají stejný variabilní symbol: Z2026-001 i 2026-001 mají 2026001. Avízo se pak spáruje podle měny, zbývající částky a účtu. Když sedí oba doklady, čeká ve frontě na ruční přiřazení. Kdo chce symboly oddělit, změní si řadu záloh v Nastavení, Číselné řady.",
+          TAX_DISCLAIMER,
+        ],
+        links: [
+          { label: "Faktury", href: "/faktury" },
+          { label: "Automatizace", href: "/nastaveni/automatizace" },
+          { label: "Číselné řady", href: "/nastaveni/rady" },
+        ],
+      },
+      {
+        id: "opravne-faktury",
+        title: "Opravné faktury, stav dobropisovaná a přeplatek",
+        body: [
+          "Opravnou fakturu vytvoříte na detailu vystavené faktury tlačítkem Vytvořit opravnou fakturu. Položky se předvyplní se zápornou hodnotou a opravit jde celou fakturu i jen část. Oprava má vlastní číselnou řadu a po vystavení hned sníží zůstatek původní faktury.",
+          "Zbývá uhradit je částka faktury plus její opravné faktury (záporné) minus platby. Z této částky vychází stav, QR platba, upomínky i pohledávky.",
+          "Faktura, kterou oprava úplně vynuluje a která nemá platby, má stav Dobropisovaná. Nemá QR platbu a upomínka na ni nejde.",
+          "Když zákazník zaplatil víc, než zbývá, faktura je uhrazená a ukáže Přeplatek k vrácení. Vrácené peníze zapíšete tlačítkem Vrátit peníze, v seznamu plateb se ukážou jako záporná platba. Kredit zákazníka se neeviduje.",
+          "Fakturu s opravnou fakturou nejde stornovat. Nejdřív stornujte opravu.",
+        ],
+        links: [{ label: "Faktury", href: "/faktury" }],
+      },
+      {
+        id: "zahranicni",
+        title: "Zahraniční faktury a kurzy ČNB",
+        body: [
+          "Přepínač Zahraniční faktura ve formuláři odkryje měnu, kurz a doložky. Předvyplní se podle státu zákazníka.",
+          "Kurz se načte z denního kurzovního lístku ČNB k rozhodnému dni, výchozí je datum vystavení. V konceptu se při změně data nebo měny načte znovu, ručně zadaný kurz ale přepíšete jen vy. Vystavením se kurz zamrazí a pozdější lístek ho nezmění.",
+          "Když lístek ČNB není k dispozici, použije se poslední známý kurz a aplikace na to upozorní. Kdyby žádný nebyl, zadáte kurz ručně. Pro každou měnu jde ve Výchozích hodnotách zapnout pevný kurz.",
+          "Kurz se na PDF netiskne, přepočet do korun slouží přehledům. QR platba je jen pro CZK a EUR.",
+          "Doložka o přenesení daňové povinnosti je předvyplněný návrh pro identifikovanou osobu a zákazníka s DIČ z EU a jde upravit. Aplikace nepozná službu od zboží.",
+          TAX_DISCLAIMER,
+        ],
+        links: [
+          { label: "Výchozí hodnoty", href: "/nastaveni/vychozi" },
+          { label: "Bankovní účty", href: "/nastaveni/ucty" },
+        ],
+      },
+      {
+        id: "statistiky",
+        title: "Statistiky, dashboard a limity",
+        body: [
+          "Statistiky ukazují fakturaci, úhrady a pohledávky účtu. Částky v cizí měně jsou přepočtené na koruny kurzem faktury, pokud nevyberete měnu.",
+          "Přehled je dashboard z widgetů. Dashboardů můžete mít víc a jeden je výchozí. V úpravě dashboardu widgety přesouváte a měníte jejich velikost myší i tlačítky. Dashboard má nejvýš 50 widgetů.",
+          "Dashboard i jednotlivý widget jde exportovat jako JSON a importovat do jiného účtu. Soubor má nejvýš 64 KiB a nese jen nastavení widgetů, žádná data. Import ukáže náhled a založí nový dashboard, stávající nezmění.",
+          "Spočítané výsledky si aplikace pamatuje, dokud se data účtu nezmění. U účtu s desítkami tisíc dokladů tak déle trvá jen první zobrazení po změně.",
+          "Karta limitů ve Statistikách ukazuje roční obrat vůči limitu pro registraci k DPH a limitu paušální daně. Hlídání a základ obratu nastavíte ve Výchozích hodnotách.",
+          TAX_DISCLAIMER,
+        ],
+        links: [
+          { label: "Přehled", href: "/" },
+          { label: "Statistiky", href: "/prehledy" },
+          { label: "Výchozí hodnoty", href: "/nastaveni/vychozi" },
+        ],
+      },
+      {
+        id: "dane",
+        title: "Daňový přehled",
+        body: [
+          "Daňový podklad ve Statistikách je roční souhrn příjmů a neuhrazených faktur. Počítá se podle data úhrady, nebo podle data vystavení.",
+          "Platby, u kterých je datum úhrady jen odhadnuté z importu, přehled označí. Ověřte je podle výpisu z banky.",
+          "Přehled stáhnete jako PDF, Excel nebo CSV. Na stránce se ukáže nejvýš 2 000 řádků na tabulku, součty platí pro všechny a celý seznam je v exportu.",
+          "Na přání vám 10. ledna přijde e-mail s podklady za předchozí rok a upozornění, když se obrat blíží limitu pro registraci k DPH. Obojí zapnete v Nastavení, Automatizace.",
+          TAX_DISCLAIMER,
+        ],
+        links: [
+          { label: "Daňový podklad", href: "/prehledy/dane" },
+          { label: "Automatizace", href: "/nastaveni/automatizace" },
+        ],
+      },
+      {
+        id: "import-export",
+        title: "Import, export, záloha a obnova",
+        body: [
+          "Import přijme ISDOC, ZIP s ISDOC, PDF s vloženým ISDOC, CSV a Excel do 25 MB. Před potvrzením ukáže náhled a chyby. Importované faktury mají štítek Vytvořeno jinde, zachovají původní číslo a nespouštějí žádnou automatiku. Dokončený import jde celý vrátit.",
+          "Export připraví PDF v ZIPu, ISDOC, CSV nebo Excel podle filtru. Běží na pozadí a soubor je ke stažení 7 dní. PDF v ZIPu bere nejvýš 2 000 dokladů najednou.",
+          "Záloha účtu vytvoří ZIP s celým účtem včetně souborů. Hesla SMTP a schránky avíz v ní nejsou. Archiv není šifrovaný a obsahuje osobní údaje, uložte ho bezpečně.",
+          "Obnova jde jen do prázdného účtu, třeba hned po registraci na jiné instanci. Po obnově jsou automatiky vypnuté, pravidelné faktury pozastavené a SMTP i schránku avíz je nutné zadat znovu.",
+        ],
+        links: [
+          { label: "Import", href: "/nastaveni/import" },
+          { label: "Export", href: "/nastaveni/export" },
+          { label: "Záloha účtu", href: "/nastaveni/zaloha" },
+        ],
+      },
+      {
+        id: "klavesnice",
+        title: "Klávesové zkratky",
+        body: [
+          "Ctrl+K, na Macu ⌘K, otevře rychlé hledání faktur, zákazníků, ceníku, pravidelných plánů, stránek a kapitol nápovědy. Šipkami vyberete, Enter otevře, Esc zavře.",
+          "V našeptávačích zákazníka a položek z ceníku se pohybujete šipkami, Enter vybere a Esc nabídku zavře.",
+          "Štítek faktury přidáte Enterem nebo čárkou. Backspace v prázdném poli odebere poslední štítek.",
+          "Pořadí položek faktury změníte i klávesnicí: na úchytu položky stiskněte mezerník, šipkami ji posuňte a mezerníkem pusťte. Esc přesun zruší.",
+          "V úpravě dashboardu má každý widget tlačítka pro posun a změnu velikosti, takže myš není potřeba.",
+        ],
+        links: [],
+      },
+    ],
+    faq: [
+      {
+        q: "Odejde něco klientovi samo, bez mého kliknutí?",
+        a: "Ne. Dokud v Nastavení, Automatizace nezapnete konkrétní automatiku, klientovi nic neodejde. Každé zapnutí potvrzujete a hlavní vypínač zastaví všechno najednou.",
+      },
+      {
+        q: "Jak změním číslo vystavené faktury?",
+        a: "Otevřete fakturu a zvolte Upravit. Číslo jde změnit, aplikace hlídá, aby se v účtu neopakovalo. Změna se uloží jako nová verze.",
+      },
+      {
+        q: "Proč nejde vystavenou fakturu smazat?",
+        a: "Číslo vystaveného dokladu musí zůstat obsazené. Fakturu proto jen stornujete a storno jde vrátit. Smazat jde jen koncept.",
+      },
+      {
+        q: "Proč se platba z avíza nespárovala sama?",
+        a: "Sama se spáruje jen platba, která přesně sedí na jeden doklad: variabilní symbol, měna, částka a účet. Do fronty jde i avízo s neověřeným odesílatelem, avízo v prozatímním českém formátu a platba k importované faktuře. Ve frontě v sekci Platby ji přiřadíte ručně.",
+      },
+      {
+        q: "Proč má záloha stejný variabilní symbol jako faktura?",
+        a: "Výchozí řady Z{RRRR}-{NNN} a {RRRR}-{NNN} se liší jen písmenem, které variabilní symbol nenese. Avízo se proto páruje i podle částky a účtu. Chcete-li symboly oddělit, upravte řadu záloh v Nastavení, Číselné řady.",
+      },
+      {
+        q: "Zákazník zaplatil víc, co teď?",
+        a: "Faktura je uhrazená a na detailu ukáže Přeplatek k vrácení. Když peníze vrátíte, zapište to tlačítkem Vrátit peníze.",
+      },
+      {
+        q: "Co když ČNB kurz nevydá?",
+        a: "Použije se poslední známý kurz a aplikace na to upozorní. Když žádný není, kurz zadáte ručně a pravidelná faktura v cizí měně zůstane jako koncept.",
+      },
+      {
+        q: "Kde zjistím, že se něco nepovedlo?",
+        a: "V Upozorněních, kam vede ikona zvonku: neodeslané e-maily, faktury po splatnosti, nespárované platby a další. Volitelně vám jednou denně přijde i e-mailový přehled.",
+      },
+      {
+        q: "Jak vrátím import, který se nepovedl?",
+        a: "V Nastavení, Import otevřete dávku a zvolte Vrátit import. Nejde to, když na importované doklady mezitím navázala ručně zapsaná platba nebo jiný doklad.",
+      },
+      {
+        q: "Jak přenesu účet na jinou instanci?",
+        a: "V Nastavení, Záloha vytvořte zálohu účtu a stáhněte ji. Na nové instanci se zaregistrujte a v prázdném účtu ji obnovte. Pak znovu zadejte SMTP a schránku avíz a zapněte potřebné automatiky.",
+      },
+      {
+        q: "Proč faktura nemá QR platbu?",
+        a: "QR platba je jen u platby převodem, v CZK nebo EUR, s bankovním účtem, který má IBAN (u EUR i BIC), a jen když zbývá něco uhradit. Ve vzhledu dokladu jde také vypnout. Detail faktury napíše konkrétní důvod.",
+      },
+      {
+        q: "Je daňový podklad totéž co daňové přiznání?",
+        a: `Ne. ${TAX_DISCLAIMER}`,
+      },
+      {
+        q: "Proč u staršího dokladu nejde stáhnout PDF?",
+        a: "PDF vznikne nejvýš z 200 000 znaků textu. Formulář delší doklad neuloží, ale starší doklad nad touto mezí PDF nemá a aplikace řekne proč. Koncept zkrátíte, k vystavenému dokladu vystavíte opravnou fakturu, nebo ho stornujete a vystavíte kratší.",
+      },
+      {
+        q: "Proč e-mail v Outlooku vypadá jinak než v náhledu?",
+        a: "Outlook vykresluje HTML jinak než prohlížeč. Zprávy mají jednoduchou tabulkovou kostru, která rozdíly zmírní, a vždy i verzi v prostém textu.",
+      },
+      {
+        q: "Jak dlouho je export ke stažení?",
+        a: "Hotový export i záloha účtu jsou ke stažení 7 dní, potom se smažou. Stáhněte si je včas.",
+      },
+    ],
   },
 } as const;

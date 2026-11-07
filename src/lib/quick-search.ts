@@ -38,6 +38,13 @@ export function staticHits(q: string, role: string | null): SearchHit[] {
       detail: T.settings,
       href: tab.href,
     })),
+    ...TEXTS.help.chapters.map((chapter) => ({
+      group: "page" as const,
+      id: `help:${chapter.id}`,
+      label: chapter.title,
+      detail: T.help,
+      href: `/napoveda#${chapter.id}`,
+    })),
   ];
   return pages.filter((hit) => foldText(hit.label).includes(term)).slice(0, PER_GROUP);
 }

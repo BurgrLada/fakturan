@@ -12,6 +12,7 @@ describe("navigace", () => {
       "Ceník",
       "Platby",
       "Statistiky",
+      "Nápověda",
       "Nastavení",
       "Administrace",
     ]);
