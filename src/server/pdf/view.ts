@@ -243,19 +243,37 @@ function paymentRows(doc: InvoiceDocument, labels: DocumentLabels): LabeledValue
   return rows.filter((row) => row.value);
 }
 
+export function documentTitle(doc: InvoiceDocument, draft: boolean): string {
+  const number = draft ? "" : (doc.number ?? "");
+  return [LABELS[doc.language].documentTypes[doc.type], number].filter(Boolean).join(" ");
+}
+
+// The one source of the payment code: the PDF and the e-mail must never disagree on it.
+export async function documentQrPng(
+  doc: InvoiceDocument,
+  title: string,
+  readImage: ViewOptions["readImage"],
+): Promise<{ png: Buffer; payload: string } | null> {
+  // A draft has neither number nor variable symbol, so a code made now could not be matched.
+  if (doc.status === "draft") return null;
+  const plan = planQr(documentQrInput(doc, title));
+  if (plan.kind === "none") return null;
+  const logo = doc.appearance.showQrLogo
+    ? await loadImage(doc.images.qrLogoFileId, readImage)
+    : null;
+  return { png: await qrPng(plan.payload, logo, plan.kind), payload: plan.payload };
+}
+
 async function paymentQr(
   doc: InvoiceDocument,
   title: string,
   opts: ViewOptions,
 ): Promise<{ qr: Buffer | null; qrPending: boolean }> {
-  const plan = planQr(documentQrInput(doc, title));
-  if (plan.kind === "none") return { qr: null, qrPending: false };
-  // A draft has neither number nor variable symbol, so a code printed now could not be matched.
-  if (opts.draft) return { qr: null, qrPending: true };
-  const logo = doc.appearance.showQrLogo
-    ? await loadImage(doc.images.qrLogoFileId, opts.readImage)
-    : null;
-  return { qr: await qrPng(plan.payload, logo, plan.kind), qrPending: false };
+  if (opts.draft) {
+    return { qr: null, qrPending: planQr(documentQrInput(doc, title)).kind !== "none" };
+  }
+  const qr = await documentQrPng(doc, title, opts.readImage);
+  return { qr: qr?.png ?? null, qrPending: false };
 }
 
 async function loadImage(
@@ -277,7 +295,7 @@ export async function buildInvoiceView(
   const supplier = snapshot.supplier;
   const documentType = labels.documentTypes[doc.type];
   const number = opts.draft ? "" : (doc.number ?? "");
-  const title = [documentType, number].filter(Boolean).join(" ");
+  const title = documentTitle(doc, opts.draft);
   const showLogo = appearance.showLogo && appearance.logoPosition !== "none";
   const [logo, signature, qr] = await Promise.all([
     showLogo ? loadImage(doc.images.logoFileId, opts.readImage) : null,

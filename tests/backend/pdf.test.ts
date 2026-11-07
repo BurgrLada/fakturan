@@ -11,7 +11,7 @@ import { auditLog, user } from "@/server/db/schema";
 import { FONT_FAMILIES, registerFonts } from "@/server/pdf/fonts";
 import { DESIGNS, getDesign, isDesignId } from "@/server/pdf/designs";
 import { RenderTimeoutError, renderInvoicePdf, serializeRender } from "@/server/pdf/render";
-import { buildInvoiceView } from "@/server/pdf/view";
+import { buildInvoiceView, documentQrPng, documentTitle } from "@/server/pdf/view";
 import { checkRateLimit, RATE_RULES } from "@/server/rate-limit";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { saveCustomer } from "@/server/services/customers";
@@ -572,6 +572,16 @@ describe("QR na dokladu", () => {
     const payload = decodeQr(view.payment.qr!);
     expect(payload).toContain("AM:2000.00");
     expect(payload).toContain("X-VS:2026001");
+  });
+
+  test("[TST-015] PDF a e-mail berou QR z jedné funkce se stejným obsahem", async () => {
+    for (const doc of [F.short, F.eur]) {
+      const view = await viewOf(doc);
+      const shared = await documentQrPng(doc, documentTitle(doc, false), readLogo);
+
+      expect(view.payment.qr!.equals(shared!.png)).toBe(true);
+      expect(decodeQr(view.payment.qr!)).toBe(shared!.payload);
+    }
   });
 
   test("[QR-002] EUR doklad má EPC", async () => {
