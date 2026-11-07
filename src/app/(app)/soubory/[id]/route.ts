@@ -22,7 +22,7 @@ function headersOf(opened: FileHead): HeadersInit {
     "Content-Length": String(opened.size),
     "Content-Disposition": contentDisposition(FILE_DISPOSITION[opened.kind]!, opened.name),
     "X-Content-Type-Options": "nosniff",
-    "Content-Security-Policy": "sandbox",
+    "Content-Security-Policy": "sandbox; frame-ancestors 'self'",
     "Cache-Control": "private, no-store",
   };
 }

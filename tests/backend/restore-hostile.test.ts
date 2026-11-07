@@ -144,6 +144,16 @@ describe("obnova z nepřátelského archivu", () => {
     expect(mine.map((row) => row.id)).not.toContain(theirs.paid);
   });
 
+  test("[SEC-002] obrázek HTML zprávy mimo archiv je odmítnutý jako ref", async () => {
+    await refused(
+      editRows("email_log", (rows) => [
+        { ...rows[0]!, html_images: [{ cid: "qr@invoice", fileId: randomUUID() }] },
+        ...rows.slice(1),
+      ]),
+      E.reference("email_log"),
+    );
+  });
+
   test("[SEC-002] ref mimo archiv je odmítnutý", async () => {
     await refused(
       editRows("invoice_line", (rows) => [

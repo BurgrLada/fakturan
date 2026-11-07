@@ -15,6 +15,31 @@ test("[SEC-004] odpověď má bezpečnostní hlavičky", async ({ freshApp }) =>
   }
 });
 
+test("[SEC-004] cesty podobné souborům a náhledu e-mailu mají celou CSP i ostatní hlavičky", async ({
+  freshApp,
+}) => {
+  for (const path of [
+    "/soubory/abc/x",
+    "/soubory/x/y",
+    "/Soubory/abc",
+    "/SOUBORY/abc",
+    "/nastaveni/posta/vzhled/nahledx",
+    "/nastaveni/posta/vzhled/nahled/x",
+    "/Nastaveni/posta/vzhled/nahled",
+  ]) {
+    const res = await fetch(`${freshApp.baseURL}${path}`, { redirect: "manual" });
+    const csp = res.headers.get("content-security-policy") ?? "";
+
+    expect(csp, path).toContain("frame-ancestors 'self'");
+    expect(csp, path).toContain("script-src 'self' 'unsafe-inline'");
+    expect(csp, path).not.toContain("sandbox");
+    expect(res.headers.get("strict-transport-security"), path).toMatch(/max-age=\d+/);
+    expect(res.headers.get("x-content-type-options"), path).toBe("nosniff");
+    expect(res.headers.get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
+    expect(res.headers.get("permissions-policy"), path).toContain("camera=()");
+  }
+});
+
 test("[SEC-004] stránka s CSP se vykreslí a hydratuje", async ({ page, freshApp }) => {
   const violations: string[] = [];
   page.on("console", (m) => {

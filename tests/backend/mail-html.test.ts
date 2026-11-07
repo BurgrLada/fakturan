@@ -68,7 +68,7 @@ function input(over: Partial<EmailHtmlInput> = {}): EmailHtmlInput {
 
 const srcs = (html: string) => [...html.matchAll(/\bsrc="([^"]*)"/g)].map((m) => m[1]);
 const hasQr = (out: ReturnType<typeof renderEmailHtml>) =>
-  out.html.includes("cid:qr@fakturan") || out.images.some((image) => image.cid === "qr@fakturan");
+  out.html.includes("cid:qr@invoice") || out.images.some((image) => image.cid === "qr@invoice");
 
 describe("HTML e-mail", () => {
   test("[SEC-011] jméno, číslo, úvod, podpis a text s </td> se v HTML neobjeví jako značka", async () => {
@@ -196,7 +196,7 @@ describe("HTML e-mail", () => {
     };
     const body = "posíláme fakturu za říjen.";
     const amount = "12&nbsp;100,00&nbsp;Kč";
-    const qrSrc = "cid:qr@fakturan";
+    const qrSrc = "cid:qr@invoice";
 
     const b1 = renderEmailHtml(input({ layout: "b1" })).html;
     expect(at(b1, body)).toBeLessThan(at(b1, amount));
@@ -240,15 +240,15 @@ describe("HTML e-mail", () => {
     expect(html).toContain('lang="en"');
   });
 
-  test("[MAIL-009] logo jde jako cid:logo@fakturan, bez loga je v hlavičce jméno dodavatele", async () => {
+  test("[MAIL-009] logo jde jako cid:logo@invoice, bez loga je v hlavičce jméno dodavatele", async () => {
     const { logo } = await images();
     for (const layout of MAIL_LAYOUTS) {
       const withLogo = renderEmailHtml(input({ layout, logo }));
       const without = renderEmailHtml(input({ layout, supplierName: "Ateliér Nový" }));
 
-      expect(withLogo.images.find((image) => image.cid === "logo@fakturan")?.png).toBe(logo);
+      expect(withLogo.images.find((image) => image.cid === "logo@invoice")?.png).toBe(logo);
       expect(withLogo.html, layout).toMatch(
-        /<img[^>]*src="cid:logo@fakturan"[^>]*alt="Studio Příklad"/,
+        /<img[^>]*src="cid:logo@invoice"[^>]*alt="Studio Příklad"/,
       );
       expect(without.images, layout).toEqual([]);
       expect(without.html, layout).toContain("Ateliér Nový");
@@ -260,11 +260,11 @@ describe("HTML e-mail", () => {
     const { html } = renderEmailHtml(input({ logo, accent: "#111111" }));
 
     expect(html).toMatch(
-      /<td bgcolor="#ffffff" style="background-color:#ffffff;padding:[^"]*"><img[^>]*src="cid:logo@fakturan"/,
+      /<td bgcolor="#ffffff" style="background-color:#ffffff;padding:[^"]*"><img[^>]*src="cid:logo@invoice"/,
     );
   });
 
-  test("[TST-015] QR z cid:qr@fakturan dekóduje stejný payload jako QR v PDF", async () => {
+  test("[TST-015] QR z cid:qr@invoice dekóduje stejný payload jako QR v PDF", async () => {
     for (const doc of [F.short, F.eur]) {
       const view = await buildInvoiceView(doc, {
         today: "2026-03-10",
@@ -277,7 +277,7 @@ describe("HTML e-mail", () => {
         const out = renderEmailHtml(
           input({ layout, summary: emailSummary(doc), qr: qr!.png, language: doc.language }),
         );
-        const image = out.images.find((entry) => entry.cid === "qr@fakturan");
+        const image = out.images.find((entry) => entry.cid === "qr@invoice");
 
         expect(decodeQr(image!.png)).toBe(qr!.payload);
         expect(decodeQr(image!.png)).toBe(decodeQr(view.payment.qr!));

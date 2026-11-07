@@ -271,7 +271,7 @@ describe("obnova účtu", () => {
       webActor(source),
       logId,
       "<!DOCTYPE html><p>Text</p>",
-      [{ cid: "qr@fakturan", png: qr }],
+      [{ cid: "qr@invoice", png: qr }],
       "2026-001.html",
     );
     const logo = readBlob(source, getMailLook(source).logoFileId!);
@@ -298,7 +298,7 @@ describe("obnova účtu", () => {
     expect(html.data.toString()).toBe("<!DOCTYPE html><p>Text</p>");
     expect(log.htmlImages).toHaveLength(1);
     const [image] = log.htmlImages!;
-    expect(image!.cid).toBe("qr@fakturan");
+    expect(image!.cid).toBe("qr@invoice");
     expect(sourceIds).not.toContain(image!.fileId);
     const stored = readOwnedFile(webActor(target), image!.fileId);
     expect(stored).toMatchObject({ kind: "sent_image", mimeType: "image/png" });

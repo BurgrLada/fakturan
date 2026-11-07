@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
@@ -22,7 +22,9 @@ import {
   setTaxReminder,
 } from "@/server/services/automation";
 import { savePreferences } from "@/server/services/preferences";
-import { saveMailLook } from "@/server/services/mail-look";
+import { getMailLook, saveMailLook, setMailLogo } from "@/server/services/mail-look";
+import { blobPath } from "@/server/files/store";
+import { FIXTURE_LOGO_SVG } from "../fixtures/invoices";
 import { reportSummary } from "@/server/services/reports";
 import {
   deliverOwnerReport,
@@ -210,7 +212,7 @@ describe("obsah souhrnu", () => {
 });
 
 describe("odeslání souhrnu", () => {
-  test("[MAIL-009] souhrn přijde i jako HTML ve zvoleném vzhledu, se stejným textem a bez QR", async () => {
+  test("[REM-010] souhrn přijde i jako HTML ve zvoleném vzhledu, se stejným textem a bez QR", async () => {
     const { owner } = november();
     setPeriodSummary(webActor(owner), "monthly");
     saveMailLook(webActor(owner), {
@@ -226,8 +228,24 @@ describe("odeslání souhrnu", () => {
     expect(mail!.raw).toMatch(/multipart\/alternative/i);
     expect(plain(mail!.html!)).toContain("Fakturováno: 17 100,00 Kč");
     expect(mail!.html).not.toContain("Úvod pro klienty");
-    expect(mail!.html).not.toContain("cid:qr@fakturan");
+    expect(mail!.html).not.toContain("cid:qr@invoice");
     expect(mail!.attachments).toEqual([]);
+  });
+
+  test("[REM-010] chyba při skládání HTML nic neodešle a souhrn se zopakuje později", async () => {
+    const { owner } = november();
+    setPeriodSummary(webActor(owner), "monthly");
+    setMailLogo(webActor(owner), FIXTURE_LOGO_SVG, "logo.svg");
+    const blob = blobPath(owner, getMailLook(owner).logoFileId!);
+    rmSync(blob);
+    mkdirSync(blob);
+
+    await tickAt(NOW);
+
+    expect(smtp.messages).toEqual([]);
+    expect(jobsOf(owner)).toMatchObject([
+      { status: "pending", attempts: 1, reason: "E-mail pro vlastníka se zopakuje" },
+    ]);
   });
 
   test("[REM-010] zpráva jde jen na e-mail účtu, bez stálých kopií a bez přílohy", async () => {

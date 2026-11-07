@@ -31,7 +31,9 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
 ];
 
-const OWN_POLICY = ["soubory/[^/]+", "nastaveni/posta/vzhled/nahled"];
+// Anchored and case sensitive (Next matches headers without case): any other path, such as a
+// not-found page under one of these, keeps the full set.
+const OWN_POLICY = "(?-i:soubory/[^/]+|nastaveni/posta/vzhled/nahled)";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -56,9 +58,9 @@ const nextConfig: NextConfig = {
   // (sandboxed files and the e-mail preview) get every header but the app's CSP.
   async headers() {
     return [
-      { source: `/:path((?!${OWN_POLICY.join("|")}).*)`, headers: securityHeaders },
+      { source: `/:path((?!${OWN_POLICY}$).*)`, headers: securityHeaders },
       {
-        source: `/:path(${OWN_POLICY.join("|")})`,
+        source: `/:path(${OWN_POLICY})`,
         headers: securityHeaders.filter((header) => header.key !== "Content-Security-Policy"),
       },
     ];

@@ -211,7 +211,7 @@ test.describe("se SMTP", () => {
     );
     expect(archive.status()).toBe(200);
     expect(archive.headers()["content-disposition"]).toMatch(/^attachment/);
-    expect(archive.headers()["content-security-policy"]).toBe("sandbox");
+    expect(archive.headers()["content-security-policy"]).toBe("sandbox; frame-ancestors 'self'");
     expect(archive.headers()["x-content-type-options"]).toBe("nosniff");
     expect(await archive.text()).toBe(mail.html);
   });

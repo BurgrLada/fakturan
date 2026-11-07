@@ -2220,7 +2220,8 @@ export const TEXTS = {
     defaultBadge: "výchozí",
     introLabel: "Úvod nad textem zprávy",
     signatureLabel: "Podpis pod textem zprávy",
-    textHint: "Nepovinné, nejvýš 2 000 znaků. Prázdné pole se do zprávy nepřidá.",
+    textHint:
+      "Nepovinné, nejvýš 2 000 znaků. Prázdné pole se do zprávy nepřidá. Proměnné jako {{dodavatel}} se tu nedosazují, text se vloží doslova.",
     logo: "Logo v hlavičce",
     logoModes: {
       supplier: "Logo dodavatele",

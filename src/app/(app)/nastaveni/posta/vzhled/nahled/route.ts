@@ -11,7 +11,7 @@ const reply = (status: number) =>
 const HEADERS = {
   "Content-Type": "text/html; charset=utf-8",
   "Content-Security-Policy":
-    "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+    "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; frame-ancestors 'self'",
   "X-Content-Type-Options": "nosniff",
   "Cache-Control": "no-store",
 };

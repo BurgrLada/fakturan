@@ -14,8 +14,8 @@ import { escapeHtml, paragraphs } from "./escape";
 import { LAYOUTS, LAYOUTS_WITH_QR, type MailLayout, type Parts } from "./layouts";
 import { COLORS, NEUTRAL_BAND, SIZES, TYPE, WIDTH } from "./tokens";
 
-export const QR_CID = "qr@fakturan";
-export const LOGO_CID = "logo@fakturan";
+export const QR_CID = "qr@invoice";
+export const LOGO_CID = "logo@invoice";
 
 // The owner's own reports (REM-010 to REM-012) share the frame but are about no single document.
 export type EmailKind = MessageKind | "owner_report";

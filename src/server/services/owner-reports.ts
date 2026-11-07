@@ -467,8 +467,8 @@ export async function deliverOwnerReport(row: Job): Promise<void> {
   const transport = await resolveTransport(userId);
   if (!transport) throw new RetryLater("E-mail pro vlastníka čeká na nastavení pošty", RETRY_MS);
   const { from, replyTo } = transport.identity;
-  const html = await ownerReportHtml(userId, delivery.text);
   try {
+    const html = await ownerReportHtml(userId, delivery.text);
     // Without the account's standing copies: this message is for the owner alone.
     await transport.send({
       from,

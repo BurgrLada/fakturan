@@ -49,6 +49,9 @@ export type BackupTable = {
   // The archive version that first carries the table (default 1); an older archive lacks it and
   // restores it as empty. Checked against columns-v1.json by backup-registry.test.ts.
   since?: number;
+  // json-ids columns whose array items name a row of another table under `key`: each must be in
+  // the archive, as a ref: column must.
+  jsonRefs?: Record<string, { table: string; key: string }>;
 };
 
 const C = "copy";
@@ -511,6 +514,7 @@ export const BACKUP_TABLES: BackupTable[] = [
   {
     name: "email_log",
     table: emailLog,
+    jsonRefs: { html_images: { table: "file", key: "fileId" } },
     columns: {
       id: "id",
       user_id: "owner",

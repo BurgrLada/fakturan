@@ -81,6 +81,14 @@ export function remapIds(row: ArchiveRow, table: BackupTable, idMap: IdMap): Arc
       if (!target) throw new RestoreRejected(E.reference(table.name));
       row[column] = target;
     } else if (rule === "json-ids") {
+      const refs = table.jsonRefs?.[column];
+      if (refs && Array.isArray(value)) {
+        const known = idMap.tables.get(refs.table);
+        for (const item of value as Record<string, unknown>[]) {
+          if (!known?.has(item[refs.key] as string))
+            throw new RestoreRejected(E.reference(table.name));
+        }
+      }
       row[column] = replaceIds(value, idMap.all);
     }
   }

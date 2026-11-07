@@ -20,6 +20,8 @@ test("[MAIL-010] výběr vzhledu, náhled a vlastní podpis v Nastavení", async
   const preview = page.locator("iframe");
   await expect(preview).toHaveAttribute("sandbox", "");
   await expect(preview).toHaveAttribute("src", /layout=b4/);
+  // frame-ancestors 'self' must still let the settings page show it.
+  await expect(page.frameLocator("iframe").getByText("Faktura 2026-040")).toBeVisible();
 
   await page.getByRole("radio", { name: /B2 Karta s QR/ }).check();
   await expect(preview).toHaveAttribute("src", /layout=b2/);
@@ -30,7 +32,7 @@ test("[MAIL-010] výběr vzhledu, náhled a vlastní podpis v Nastavení", async
   const response = await page.request.get(`${baseURL}/nastaveni/posta/vzhled/nahled?layout=b2`);
   expect(response.status()).toBe(200);
   expect(response.headers()["content-security-policy"]).toBe(
-    "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+    "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; frame-ancestors 'self'",
   );
   expect(response.headers()["x-content-type-options"]).toBe("nosniff");
   const html = await response.text();
