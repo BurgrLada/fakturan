@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, like, lt, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
 import { db, type Tx } from "../db";
 import { HEAVY_JOB_KINDS, job, user, type Job, type JobKind, type JobPayload } from "../db/schema";
@@ -147,6 +148,13 @@ export function retryJob(id: string, worker: string, input: { runAt: Date; reaso
 
 export function failJob(id: string, worker: string, reason: string): void {
   finishRunning(id, worker, { status: "dead", reason });
+}
+
+// Recovery for a job that sends one message with no log of its own. The claim that set it running is
+// the record written before the send: an interrupted attempt may have reached the server, so it is
+// settled, never repeated. One message or none; a crash before the send loses that one message.
+export function abandonInterruptedSend(row: Job): void {
+  failJob(row.id, row.lockedBy!, TEXTS.jobs.interrupted);
 }
 
 // A running attempt is left alone: it cannot be taken back (R-21).

@@ -7,10 +7,10 @@ import { finishedPeriod, taxReminderDue } from "@/lib/owner-reports";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, emailLog, invoice, job, user } from "@/server/db/schema";
-import { purgeFinishedJobs } from "@/server/jobs/queue";
+import { claimNext, purgeFinishedJobs } from "@/server/jobs/queue";
 import { limitStates } from "@/server/reports/turnover";
 import { registerJob } from "@/server/jobs/registry";
-import { drainJobs } from "@/server/jobs/worker";
+import { drainJobs, recoverInterrupted } from "@/server/jobs/worker";
 import { ownerReportPlanTask } from "@/server/scheduler/start";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
@@ -28,6 +28,7 @@ import { FIXTURE_LOGO_SVG } from "../fixtures/invoices";
 import { reportSummary } from "@/server/services/reports";
 import {
   deliverOwnerReport,
+  ownerReportJob,
   periodSummary,
   planOwnerReports,
   summaryText,
@@ -294,6 +295,22 @@ describe("odeslání souhrnu", () => {
 
     expect(smtp.messages).toHaveLength(1);
     expect(jobsOf(owner)).toHaveLength(1);
+  });
+
+  test("[REM-010] pád po odeslání a zotavení po restartu nepošle druhý souhrn", async () => {
+    registerJob("user.report", ownerReportJob);
+    const { owner } = november();
+    setPeriodSummary(webActor(owner), "monthly");
+    ownerReportPlanTask.run(NOW);
+
+    const claimed = claimNext("pred-padem", "light")!;
+    await ownerReportJob.run(claimed);
+    recoverInterrupted("w");
+    await drainJobs("w");
+    await tickAt(new Date("2026-12-02T10:00:00Z"));
+
+    expect(smtp.messages).toHaveLength(1);
+    expect(jobsOf(owner)).toEqual([expect.objectContaining({ status: "dead" })]);
   });
 
   test("[REM-010] neběží před časem odeslání, ale běží pod hlavním vypínačem", async () => {

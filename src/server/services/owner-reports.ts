@@ -33,8 +33,8 @@ import {
   type JobPayload,
 } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { enqueue } from "../jobs/queue";
-import { RetryLater } from "../jobs/registry";
+import { abandonInterruptedSend, enqueue } from "../jobs/queue";
+import { RetryLater, type JobDefinition } from "../jobs/registry";
 import { periodSnapshot, type Money, type PeriodSummary } from "../reports/period-summary";
 import { taxOverview, type TaxOverview } from "../reports/tax";
 import { limitStates, type LimitState } from "../reports/turnover";
@@ -497,3 +497,8 @@ export async function deliverOwnerReport(row: Job): Promise<void> {
     }),
   );
 }
+
+export const ownerReportJob: JobDefinition = {
+  run: deliverOwnerReport,
+  recover: abandonInterruptedSend,
+};

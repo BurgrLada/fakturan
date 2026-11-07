@@ -13,14 +13,14 @@ import { recoverBackupJob, runBackup } from "../services/account-backup";
 import { purgeStaleRestores, recoverRestore, runRestore } from "../services/account-restore";
 import { purgeNotices } from "../services/bank-notices";
 import { planBankPolls, pollMailbox } from "../services/bank-poll";
-import { deliverDigest, planDigests } from "../services/due-alerts";
+import { digestJob, planDigests } from "../services/due-alerts";
 import { planRateFetch, runRateFetch } from "../services/exchange-rates";
 import { runExport } from "../services/export-run";
 import { purgeExpiredExports, recoverExportJob } from "../services/exports";
 import { purgeStaleBatches, recoverImportJob } from "../services/import-batch";
 import { runImportCommit } from "../services/import-commit";
 import { runImportParse } from "../services/import-parse";
-import { deliverOwnerReport, planOwnerReports } from "../services/owner-reports";
+import { ownerReportJob, planOwnerReports } from "../services/owner-reports";
 import { deliverMail, recoverMail, settleDeadMail } from "../services/mail-delivery";
 import {
   deliverUserNotice,
@@ -137,8 +137,8 @@ export function startScheduler(): void {
   registerJob("mail.send", { run: deliverMail, recover: recoverMail });
   registerJob("recurring.run", { run: runRecurringJob });
   registerJob("user.notice", { run: deliverUserNotice });
-  registerJob("user.digest", { run: deliverDigest });
-  registerJob("user.report", { run: deliverOwnerReport });
+  registerJob("user.digest", digestJob);
+  registerJob("user.report", ownerReportJob);
   registerJob("bank.poll", { run: pollMailbox });
   registerJob("fx.fetch", { run: runRateFetch });
   registerJob("import.parse", { run: runImportParse, recover: recoverImportJob });

@@ -5,10 +5,17 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, automationSettings, emailLog, invoice, job, user } from "@/server/db/schema";
+import { claimNext } from "@/server/jobs/queue";
 import { registerJob } from "@/server/jobs/registry";
-import { drainJobs } from "@/server/jobs/worker";
+import { drainJobs, recoverInterrupted } from "@/server/jobs/worker";
 import { setDailyDigest, setPaused } from "@/server/services/automation";
-import { deliverDigest, dueAlerts, DUE_SOON_DAYS, planDigests } from "@/server/services/due-alerts";
+import {
+  deliverDigest,
+  digestJob,
+  dueAlerts,
+  DUE_SOON_DAYS,
+  planDigests,
+} from "@/server/services/due-alerts";
 import { derivedAlerts } from "@/server/services/notifications";
 import { createTestDb } from "../helpers/db";
 import {
@@ -126,6 +133,26 @@ describe("denní přehled", () => {
     });
     const audits = db.select().from(auditLog).where(eq(auditLog.ownerId, owner)).all();
     expect(audits.map((row) => row.action)).toContain("mail.digest");
+  });
+
+  test("[REM-009] pád po odeslání a zotavení po restartu nepošle druhý přehled", async () => {
+    registerJob("user.digest", digestJob);
+    const { owner, customerId } = account();
+    due(owner, customerId, "2026-03-01");
+    setDailyDigest(webActor(owner), true);
+    planDigests(NOW);
+
+    const claimed = claimNext("pred-padem", "light")!;
+    await digestJob.run(claimed);
+    recoverInterrupted("w");
+    await drainJobs("w");
+    planDigests(NOW);
+    await drainJobs("w");
+
+    expect(smtp.messages).toHaveLength(1);
+    expect(db.select().from(job).where(eq(job.userId, owner)).all()).toEqual([
+      expect.objectContaining({ status: "dead" }),
+    ]);
   });
 
   test("prázdný den nic neodešle a vypnutí před během zprávu zastaví", async () => {

@@ -11,8 +11,8 @@ import { db } from "../db";
 import type { Reader } from "./access";
 import { automationSettings, invoice, job, user, type Job } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { enqueue } from "../jobs/queue";
-import { RetryLater } from "../jobs/registry";
+import { abandonInterruptedSend, enqueue } from "../jobs/queue";
+import { RetryLater, type JobDefinition } from "../jobs/registry";
 import { reportFailure } from "../scheduler/report";
 import { resolveTransport } from "./mail-settings";
 import { mutate } from "./mutation";
@@ -207,3 +207,5 @@ export async function deliverDigest(row: Job): Promise<void> {
     }),
   );
 }
+
+export const digestJob: JobDefinition = { run: deliverDigest, recover: abandonInterruptedSend };
