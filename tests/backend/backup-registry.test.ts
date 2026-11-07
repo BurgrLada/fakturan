@@ -146,12 +146,14 @@ describe("registr zálohy", () => {
     expect(BACKUP_VERSION).toBe(2);
     const current = backupColumnsFingerprint();
     expect(current).toEqual(fixture(2));
-    // Version 1 is kept for the upgrade path: it lacks only the columns that step 1 fills.
+    // Version 1 is kept for the upgrade path: it lacks only the columns that step 1 fills and the
+    // tables added after it, which an older archive simply does not contain.
     const added = { automation_settings: ["limit_mail", "period_summary", "tax_reminder"] };
     const v1 = structuredClone(current);
     for (const [table, columns] of Object.entries(added)) {
       for (const column of columns) delete v1.tables[table]![column];
     }
+    delete v1.tables.limit_mail_sent;
     expect(fixture(1)).toEqual({ ...v1, v: 1 });
     const row = { id: "a", name: "b" };
     expect(BACKUP_UPGRADES[1]!("customer", row)).toEqual(row);

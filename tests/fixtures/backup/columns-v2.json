@@ -498,6 +498,13 @@
       "w": "copy",
       "x": "copy",
       "y": "copy"
+    },
+    "limit_mail_sent": {
+      "created_at": "copy",
+      "id": "id",
+      "threshold": "copy",
+      "user_id": "owner",
+      "year": "copy"
     }
   }
 }

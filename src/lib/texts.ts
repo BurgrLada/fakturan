@@ -1544,9 +1544,11 @@ export const TEXTS = {
     },
     ownerMail: {
       title: "Daně a limit DPH",
-      body: `E-maily jen pro vás, ne pro klienty, a hlavní vypínač se jich netýká. Připomínka přijde 10. ledna s podklady za předchozí rok. Upozornění na limit přijde jednou při ${LIMIT_WARN_PERCENT} % a jednou při ${LIMIT_HIGH_PERCENT} % limitu pro registraci k DPH, pokud ho v Nastavení hlídáte.`,
+      body: `E-maily jen pro vás, ne pro klienty, a hlavní vypínač se jich netýká. Připomínka přijde 10. ledna s podklady za předchozí rok. Upozornění na limit pro registraci k DPH přijde jednou při ${LIMIT_WARN_PERCENT} %, jednou při ${LIMIT_HIGH_PERCENT} % a jednou při jeho překročení, pokud ho v Nastavení hlídáte. V lednu se ohlásí i loňský rok, když ho zvedne pozdě zapsaný doklad.`,
       tax: "Posílat lednovou připomínku k daním",
       limit: "Posílat e-mail o blížícím se limitu DPH",
+      unwatched:
+        "Hlídání limitu pro registraci k DPH je vypnuté ve Výchozích hodnotách, e-mail o limitu by proto nepřišel.",
     },
     saved: "Uloženo.",
   },
@@ -1993,6 +1995,9 @@ export const TEXTS = {
       reached: (year: number, percent: number, limit: string) =>
         `Obrat za rok ${year} dosáhl ${percent} % limitu ${limit}.`,
       over: (year: number, limit: string) => `Obrat za rok ${year} překročil limit ${limit}.`,
+      overSubject: (limit: string) => `Fakturan: obrat překročil limit ${limit}`,
+      registration:
+        "Překročení limitu obratu zakládá povinnost registrovat se k DPH. Lhůtu pro přihlášku a další postup ověřte s daňovým poradcem.",
       usage: (turnover: string, limitAmount: string, percent: number) =>
         `${turnover} z ${limitAmount} (${percent} %)`,
       link: (url: string) => `Přehled limitů: ${url}`,

@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { DEFAULT_SEND_TIME } from "@/lib/automation";
 import { PERIOD_SUMMARIES } from "@/lib/owner-reports";
 import { user } from "./auth";
@@ -23,3 +23,19 @@ export const automationSettings = sqliteTable("automation_settings", {
   limitMail: flag("limit_mail"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+// The lasting record that a VAT limit threshold of a year was handled, sent or jumped over. Job rows
+// expire after their retention, this does not, so a threshold never repeats (C-1 of block C).
+export const limitMailSent = sqliteTable(
+  "limit_mail_sent",
+  {
+    id: text().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    year: integer().notNull(),
+    threshold: text().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [uniqueIndex("limit_mail_sent_user_year_idx").on(t.userId, t.year, t.threshold)],
+);

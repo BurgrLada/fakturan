@@ -191,3 +191,21 @@ test("[REM-011] připomínka k daním a e-mail o limitu jsou vypnuté a zapnutí
   await expect(page.getByLabel("Posílat lednovou připomínku k daním")).toBeChecked();
   await expect(page.getByLabel("Posílat e-mail o blížícím se limitu DPH")).toBeChecked();
 });
+
+test("[REM-012] e-mail o limitu nejde zapnout, když hlídání limitu DPH v Nastavení chybí", async ({
+  page,
+  freshApp,
+}) => {
+  await register(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}/nastaveni/vychozi`);
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Hlídat limit pro registraci k DPH").uncheck();
+  await page.getByRole("button", { name: "Uložit" }).click();
+  await expect(page.getByText("Uloženo.")).toBeVisible();
+
+  await page.goto(`${freshApp.baseURL}/nastaveni/automatizace`);
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByLabel("Posílat e-mail o blížícím se limitu DPH")).toBeDisabled();
+  await expect(page.getByText("Hlídání limitu pro registraci k DPH je vypnuté")).toBeVisible();
+  await expect(page.getByLabel("Posílat lednovou připomínku k daním")).toBeEnabled();
+});

@@ -7,6 +7,7 @@ import { finishedPeriod, taxReminderDue } from "@/lib/owner-reports";
 import { TEXTS } from "@/lib/texts";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, emailLog, invoice, job, user } from "@/server/db/schema";
+import { purgeFinishedJobs } from "@/server/jobs/queue";
 import { registerJob } from "@/server/jobs/registry";
 import { drainJobs } from "@/server/jobs/worker";
 import { ownerReportPlanTask } from "@/server/scheduler/start";
@@ -356,6 +357,18 @@ describe("odeslání souhrnu", () => {
     expect(smtp.messages).toHaveLength(1);
   });
 
+  test("[REM-010] souhrn doručovaný až v dalším období se zahodí", async () => {
+    const { owner } = november();
+    setPeriodSummary(webActor(owner), "monthly");
+    planOwnerReports(NOW);
+
+    current = new Date("2027-01-02T10:00:00Z");
+    await drainJobs("w");
+
+    expect(smtp.messages).toEqual([]);
+    expect(jobsOf(owner)).toMatchObject([{ status: "done" }]);
+  });
+
   test("[REM-010] deaktivovaný účet nic nedostane", async () => {
     const { owner } = november();
     setPeriodSummary(webActor(owner), "monthly");
@@ -455,6 +468,48 @@ describe("lednová připomínka k daním", () => {
     expect(jobsOf(missed.owner)).toEqual([]);
   });
 
+  test("[REM-011] účet založený v lednu s doklady za loňský rok připomínku dostane, prázdný ne", async () => {
+    const created = new Date("2027-01-05T10:00:00Z");
+    const moved = seedOwner(db, created);
+    ownSmtp(db, moved, smtp.port);
+    const customer = seedCustomer(moved, CLIENT);
+    issuedDocument(moved, customer, {
+      issueDate: "2026-11-05",
+      dueDate: "2026-11-19",
+      totalMinor: 500_000,
+    });
+    const empty = seedOwner(db, created);
+    ownSmtp(db, empty, smtp.port);
+    resume(JAN_10);
+    setTaxReminder(webActor(moved), true);
+    setTaxReminder(webActor(empty), true);
+
+    await tickAt(JAN_10);
+
+    const { email } = db.select({ email: user.email }).from(user).where(eq(user.id, moved)).get()!;
+    expect(smtp.messages.map((message) => message.to)).toEqual([[email]]);
+    expect(plain(smtp.messages[0]!.body)).toContain("Neuhrazené k 31. 12. 2026: 1 faktura");
+  });
+
+  test("[REM-011] bez nastavené pošty připomínka počká na další pokus a neztratí se", async () => {
+    const owner = seedOwner(db, new Date("2026-10-01T10:00:00Z"));
+    const customer = seedCustomer(owner, CLIENT);
+    issuedDocument(owner, customer, {
+      issueDate: "2026-11-05",
+      dueDate: "2026-11-19",
+      totalMinor: 500_000,
+    });
+    resume(JAN_10);
+    setTaxReminder(webActor(owner), true);
+
+    await tickAt(JAN_10);
+    expect(jobsOf(owner)).toMatchObject([{ status: "pending", attempts: 1 }]);
+
+    ownSmtp(db, owner, smtp.port);
+    await tickAt(new Date(JAN_10.getTime() + 31 * 60_000));
+    expect(smtp.messages).toHaveLength(1);
+  });
+
   test("[REM-011] vypnutí před odesláním zprávu zastaví", async () => {
     const { owner } = november();
     setTaxReminder(webActor(owner), true);
@@ -480,13 +535,18 @@ describe("e-mail o limitu DPH", () => {
   }
 
   function invoiced(owner: string, customer: string, totalMinor: number, issueDate = "2026-06-01") {
-    issuedDocument(owner, customer, { issueDate, dueDate: "2026-07-01", totalMinor });
+    issuedDocument(owner, customer, { issueDate, totalMinor });
     resume(current);
   }
 
-  const thresholds = (owner: string) =>
-    jobsOf(owner)
-      .map((row) => [row.key.split(":").at(-1), row.status])
+  // Raw SQL on purpose: the record must hold whatever the service module exports.
+  const sentThresholds = (owner: string) =>
+    (
+      db.$client
+        .prepare("SELECT year, threshold FROM limit_mail_sent WHERE user_id = ?")
+        .all(owner) as { year: number; threshold: string }[]
+    )
+      .map((row) => `${row.year}:${row.threshold}`)
       .sort();
 
   test("[REM-012] obrat 1 600 000,00 Kč pošle 80 %, 1 900 000,00 Kč pošle 95 %", async () => {
@@ -527,24 +587,145 @@ describe("e-mail o limitu DPH", () => {
     expect(smtp.messages.map((message) => message.subject)).toEqual([
       "Fakturan: obrat dosáhl 95 % limitu pro registraci k DPH",
     ]);
-    expect(thresholds(owner)).toEqual([
-      ["80", "done"],
-      ["95", "done"],
-    ]);
+    expect(sentThresholds(owner)).toEqual(["2026:80", "2026:95"]);
+    expect(jobsOf(owner).map((row) => row.key)).toEqual([`limit:${owner}:2026:95`]);
   });
 
-  test("[REM-012] překročený limit pošle 95 % s textem o překročení a pokles obratu nic nevrátí", async () => {
-    const { owner, customer } = turnoverAccount();
+  test("[REM-012] skok rovnou přes 100 % pošle jen e-mail o překročení a pokles nic nevrátí", async () => {
+    const { owner, email, customer } = turnoverAccount();
     setLimitMail(webActor(owner), true);
     invoiced(owner, customer, 210_000_000);
 
     await tickAt(JUNE);
-    expect(plain(smtp.messages[0]!.body)).toContain("překročil");
+    expect(smtp.messages.map((message) => message.to)).toEqual([[email]]);
+    expect(smtp.messages[0]!.subject).toBe("Fakturan: obrat překročil limit pro registraci k DPH");
+    const body = plain(smtp.messages[0]!.body);
+    expect(body).toContain("Obrat za rok 2026 překročil limit pro registraci k DPH.");
+    expect(body).toContain("povinnost registrovat se k DPH");
+    expect(body).toContain(TEXTS.tax.reviewPending);
+    expect(sentThresholds(owner)).toEqual(["2026:80", "2026:95", "2026:over"]);
 
     savePreferences(webActor(owner), { turnoverVatLimitMinor: 400_000_000 });
     await tickAt(new Date("2026-06-11T08:30:00Z"));
     savePreferences(webActor(owner), { turnoverVatLimitMinor: null });
     await tickAt(new Date("2026-06-12T08:30:00Z"));
+    expect(smtp.messages).toHaveLength(1);
+  });
+
+  test("[REM-012] po 95 % přijde při překročení samostatný e-mail o překročení", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    invoiced(owner, customer, 195_000_000);
+    await tickAt(JUNE);
+
+    invoiced(owner, customer, 10_000_000);
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+
+    expect(smtp.messages.map((message) => message.subject)).toEqual([
+      "Fakturan: obrat dosáhl 95 % limitu pro registraci k DPH",
+      "Fakturan: obrat překročil limit pro registraci k DPH",
+    ]);
+    expect(jobsOf(owner).map((row) => row.key.split(":").at(-1))).toEqual(["95", "over"]);
+  });
+
+  test("[REM-012] úklid hotových jobů po 91, 181 a 271 dnech nepošle druhý e-mail", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    const FEB = new Date("2026-02-10T08:30:00Z");
+    resume(FEB);
+    invoiced(owner, customer, 160_000_000, "2026-02-01");
+    await tickAt(FEB);
+    expect(smtp.messages).toHaveLength(1);
+
+    for (const days of [91, 181, 271]) {
+      const later = new Date(FEB.getTime() + days * 86_400_000);
+      purgeFinishedJobs(later);
+      await tickAt(later);
+    }
+    await tickAt(new Date("2027-01-10T08:30:00Z"));
+
+    expect(jobsOf(owner)).toEqual([]);
+    expect(smtp.messages).toHaveLength(1);
+  });
+
+  test("[REM-012] v lednu ohlásí loňský rok: DUZP 30. 12. zadané 4. 1. pošle překročení za 2026", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    const DEC = new Date("2026-12-21T08:30:00Z");
+    resume(DEC);
+    invoiced(owner, customer, 185_000_000, "2026-12-20");
+    await tickAt(DEC);
+    expect(smtp.messages.map((message) => message.subject)).toEqual([
+      "Fakturan: obrat dosáhl 80 % limitu pro registraci k DPH",
+    ]);
+
+    const JAN_4 = new Date("2027-01-04T08:30:00Z");
+    resume(JAN_4);
+    issuedDocument(owner, customer, {
+      issueDate: "2027-01-04",
+      dueDate: "2027-01-18",
+      totalMinor: 20_000_000,
+      over: { taxableDate: "2026-12-30" },
+    });
+    resume(JAN_4);
+    await tickAt(JAN_4);
+
+    expect(smtp.messages).toHaveLength(2);
+    expect(smtp.messages[1]!.subject).toBe("Fakturan: obrat překročil limit pro registraci k DPH");
+    expect(plain(smtp.messages[1]!.body)).toContain("Obrat za rok 2026 překročil");
+    expect(sentThresholds(owner)).toEqual(["2026:80", "2026:95", "2026:over"]);
+
+    // From February only the running year is watched.
+    resume(new Date("2027-02-01T08:30:00Z"));
+    issuedDocument(owner, customer, {
+      issueDate: "2027-02-01",
+      dueDate: "2027-02-15",
+      totalMinor: 1_000,
+      over: { taxableDate: "2026-12-31" },
+    });
+    await tickAt(new Date("2027-02-01T08:30:00Z"));
+    expect(smtp.messages).toHaveLength(2);
+  });
+
+  test("[REM-012] job 80 % doručený po růstu obratu pošle znění 80 % a 95 % přijde zvlášť", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    invoiced(owner, customer, 160_000_000);
+    planOwnerReports(JUNE);
+    invoiced(owner, customer, 30_000_000);
+    await drainJobs("w");
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+
+    expect(smtp.messages.map((message) => message.subject)).toEqual([
+      "Fakturan: obrat dosáhl 80 % limitu pro registraci k DPH",
+      "Fakturan: obrat dosáhl 95 % limitu pro registraci k DPH",
+    ]);
+  });
+
+  test("[TST-009] záznam o odeslání jednoho účtu nezastaví e-mail jiného", async () => {
+    const first = turnoverAccount();
+    const second = turnoverAccount();
+    setLimitMail(webActor(first.owner), true);
+    invoiced(first.owner, first.customer, 160_000_000);
+    await tickAt(JUNE);
+    setLimitMail(webActor(second.owner), true);
+    invoiced(second.owner, second.customer, 160_000_000);
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
+
+    expect(smtp.messages.map((message) => message.to)).toEqual([[first.email], [second.email]]);
+    expect(sentThresholds(first.owner)).toEqual(["2026:80"]);
+    expect(sentThresholds(second.owner)).toEqual(["2026:80"]);
+  });
+
+  test("[REM-012] limit se kontroluje jednou denně", async () => {
+    const { owner, customer } = turnoverAccount();
+    setLimitMail(webActor(owner), true);
+    await tickAt(JUNE);
+    invoiced(owner, customer, 160_000_000);
+    await tickAt(new Date("2026-06-10T20:00:00Z"));
+    expect(smtp.messages).toEqual([]);
+
+    await tickAt(new Date("2026-06-11T08:30:00Z"));
     expect(smtp.messages).toHaveLength(1);
   });
 

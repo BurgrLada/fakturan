@@ -31,6 +31,7 @@ import {
   recurringRun,
   reminderRule,
   reminderSent,
+  limitMailSent,
   supplier,
   tag,
   unit,
@@ -621,6 +622,11 @@ export const BACKUP_TABLES: BackupTable[] = [
       limit_mail: C,
       updated_at: C,
     },
+  },
+  {
+    name: "limit_mail_sent",
+    table: limitMailSent,
+    columns: { id: "id", user_id: "owner", year: C, threshold: C, created_at: C },
   },
   {
     name: "email_template",

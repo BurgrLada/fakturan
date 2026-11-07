@@ -18,7 +18,7 @@ import { createBackup } from "@/server/services/account-backup";
 import { startRestore } from "@/server/services/account-restore";
 import { AUTOMATIONS } from "@/lib/automation";
 import { encryptSecret } from "@/server/crypto";
-import { emailLog, file, mailSettings, supplier } from "@/server/db/schema";
+import { emailLog, file, limitMailSent, mailSettings, supplier } from "@/server/db/schema";
 import { setAutomation, setPeriodSummary } from "@/server/services/automation";
 import { createCreditNote } from "@/server/services/credit-notes";
 import { ensureDashboards } from "@/server/services/dashboards";
@@ -237,6 +237,9 @@ export function seedRichAccount(db: Db, owner: string, now: Date) {
   const planId = savePlan(owner, customerId, { mode: "send", confirmSend: true });
   saveReminderRule(web, { offsetDays: 7, texts: null });
   savePreferences(web, { advanceFinalMode: "issue" });
+  db.insert(limitMailSent)
+    .values({ id: randomUUID(), userId: owner, year: 2025, threshold: "over", createdAt: now })
+    .run();
   const logoId = randomUUID();
   db.insert(file)
     .values({

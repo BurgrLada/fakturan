@@ -16,13 +16,14 @@ export const metadata: Metadata = { title: `${TEXTS.automation.title} | ${TEXTS.
 async function AutomationContent() {
   const { user } = await requireSession();
   const today = calendarDateInPrague(clock.now());
-  const { advanceFinalMode, dateFormat } = getPreferences(user.id);
+  const { advanceFinalMode, dateFormat, turnoverVatWatch } = getPreferences(user.id);
   return (
     <>
       <AutomationPanel
         settings={getAutomation(user.id)}
         impact={automationImpact(user.id)}
         advanceFinalMode={advanceFinalMode}
+        vatWatch={turnoverVatWatch}
       />
       <ReminderRules rules={listReminderRules(user.id)} />
       <ReminderReview rows={remindersForReview(user.id, today)} dateFormat={dateFormat} />

@@ -65,11 +65,25 @@ export function taxReminderDue(today: CalendarDate): { year: number } | null {
   return month === 1 && day >= TAX_REMINDER_FROM_DAY ? { year: year - 1 } : null;
 }
 
-export type LimitMailThreshold = typeof LIMIT_WARN_PERCENT | typeof LIMIT_HIGH_PERCENT;
+// In rising order; a job key and the lasting record end with the threshold (R-15, M-1 of block C).
+export const LIMIT_MAIL_THRESHOLDS = [LIMIT_WARN_PERCENT, LIMIT_HIGH_PERCENT, "over"] as const;
+export type LimitMailThreshold = (typeof LIMIT_MAIL_THRESHOLDS)[number];
 
-// Over the limit is still the high-threshold mail: its text says the limit was crossed.
 export function limitMailThreshold(level: LimitLevel): LimitMailThreshold | null {
   if (level === "warn") return LIMIT_WARN_PERCENT;
-  if (level === "high" || level === "over") return LIMIT_HIGH_PERCENT;
+  if (level === "high") return LIMIT_HIGH_PERCENT;
+  if (level === "over") return "over";
   return null;
+}
+
+// The thresholds a crossing of `threshold` settles without a message of their own.
+export function lowerThresholds(threshold: LimitMailThreshold): LimitMailThreshold[] {
+  return LIMIT_MAIL_THRESHOLDS.slice(0, LIMIT_MAIL_THRESHOLDS.indexOf(threshold));
+}
+
+// A late document with a December date of supply, or a payment recorded late, still moves the
+// previous year, so January looks at both (I-1 of block C).
+export function limitYears(today: CalendarDate): number[] {
+  const [year, month] = today.split("-").map(Number) as [number, number];
+  return month === 1 ? [year, year - 1] : [year];
 }

@@ -1,29 +1,32 @@
 import "server-only";
-import { and, count, desc, eq, ne, or, sql } from "drizzle-orm";
-import type { Currency } from "@/lib/currency";
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, ne, or, sql } from "drizzle-orm";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague, isDailyDue, type CalendarDate } from "@/lib/number-format";
 import {
   CATCH_UP_DAYS,
   finishedPeriod,
+  LIMIT_MAIL_THRESHOLDS,
   limitMailThreshold,
+  limitYears,
+  lowerThresholds,
   periodOfKey,
   taxReminderDue,
+  type LimitMailThreshold,
   type OwnerReportKind,
 } from "@/lib/owner-reports";
 import type { DateRange } from "@/lib/report-period";
 import { formatCalendarDate } from "@/lib/template-vars";
-import { LIMIT_HIGH_PERCENT, LIMIT_WARN_PERCENT } from "@/lib/turnover-limits";
+import { TAX_TEXT_REVIEWED } from "@/lib/tax-text";
 import { TEXTS } from "@/lib/texts";
 import { clock } from "../clock";
-import { db } from "../db";
+import { db, type Tx } from "../db";
 import { env } from "../env";
-import { overdueCondition } from "../db/invoice-sql";
 import {
   auditLog,
   automationSettings,
-  invoice,
   job,
+  limitMailSent,
   user,
   type Job,
   type JobPayload,
@@ -31,11 +34,10 @@ import {
 import { scoped } from "../db/scoped";
 import { enqueue } from "../jobs/queue";
 import { RetryLater } from "../jobs/registry";
-import { forecast, FORECAST_SERIES } from "../reports/forecast";
-import { notAdvance, reportSummary, stateFilter } from "../reports/queries";
-import { taxOverview } from "../reports/tax";
+import { periodSnapshot, type Money, type PeriodSummary } from "../reports/period-summary";
+import { taxOverview, type TaxOverview } from "../reports/tax";
 import { limitStates, type LimitState } from "../reports/turnover";
-import type { ReportFilter, Unconverted } from "../reports/types";
+import type { Unconverted } from "../reports/types";
 import { reportFailure } from "../scheduler/report";
 import { getAutomation } from "./automation";
 import { resolveTransport } from "./mail-settings";
@@ -43,71 +45,13 @@ import { mutate } from "./mutation";
 import { getPreferences } from "./preferences";
 
 const RETRY_MS = 30 * 60_000;
+// Each of these goes out once a period, year or threshold, so a missing or failing mail server is
+// waited out for half a day before the message is given up (M-3 of block C).
+const ATTEMPTS = 24;
 
 const T = TEXTS.ownerReports;
 
-export type Money = { minor: number; unconverted: Unconverted };
-
-export type PeriodSummary = {
-  range: DateRange;
-  next: DateRange;
-  today: CalendarDate;
-  invoiced: Money;
-  income: Money;
-  outstanding: Money;
-  overdue: Money & { count: number };
-  outlook: Money;
-};
-
-class Missing {
-  private byCurrency = new Map<Currency, number>();
-  private count = 0;
-
-  add(unconverted: Unconverted): void {
-    this.count += unconverted.count;
-    for (const { currency, amountMinor } of unconverted.byCurrency) {
-      this.byCurrency.set(currency, (this.byCurrency.get(currency) ?? 0) + amountMinor);
-    }
-  }
-
-  get value(): Unconverted {
-    return {
-      count: this.count,
-      byCurrency: [...this.byCurrency]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([currency, amountMinor]) => ({ currency, amountMinor })),
-    };
-  }
-}
-
-function monthIndex(month: string): number {
-  const [year, number] = month.split("-").map(Number) as [number, number];
-  return year * 12 + number - 1;
-}
-
-// Every series of the forecast for the months of the next period. On the first days of a period
-// today's month is its first month, so the forecast starts exactly there.
-function outlookOf(ownerId: string, next: DateRange, today: CalendarDate): Money {
-  const first = next.from.slice(0, 7);
-  const last = next.to.slice(0, 7);
-  const months = Math.max(1, monthIndex(last) - monthIndex(today.slice(0, 7)) + 1);
-  const missing = new Missing();
-  let minor = 0;
-  for (const month of forecast(db, ownerId, today, months)) {
-    if (month.month < first || month.month > last) continue;
-    for (const series of FORECAST_SERIES) {
-      minor += month[series];
-      missing.add(month.unconverted[series]);
-    }
-  }
-  return { minor, unconverted: missing.value };
-}
-
-// Counted like the overdue amount of reportSummary and the dashboard: advances stay out.
-function overdueCount(ownerId: string, filter: ReportFilter, today: CalendarDate): number {
-  const where = and(stateFilter(db, ownerId, filter), overdueCondition(today), notAdvance);
-  return db.select({ n: count() }).from(invoice).where(where).get()?.n ?? 0;
-}
+export type { Money, PeriodSummary };
 
 // Flows follow the finished period; balances and the outlook are as of today (R-16).
 export function periodSummary(
@@ -116,25 +60,7 @@ export function periodSummary(
   next: DateRange,
   today: CalendarDate,
 ): PeriodSummary {
-  const filter: ReportFilter = { range, includeExternal: true };
-  const summary = reportSummary(db, ownerId, filter, today);
-  return {
-    range,
-    next,
-    today,
-    invoiced: { minor: summary.invoicedMinor, unconverted: summary.unconverted.invoiced },
-    income: { minor: summary.incomeMinor, unconverted: summary.unconverted.income },
-    outstanding: {
-      minor: summary.outstandingMinor,
-      unconverted: summary.unconverted.outstanding,
-    },
-    overdue: {
-      count: overdueCount(ownerId, filter, today),
-      minor: summary.overdueMinor,
-      unconverted: summary.unconverted.overdue,
-    },
-    outlook: outlookOf(ownerId, next, today),
-  };
+  return periodSnapshot(db, ownerId, range, next, today);
 }
 
 export function periodLabel(range: DateRange): string {
@@ -186,32 +112,31 @@ function planned(userId: string, key: string): boolean {
 
 type ReportPayload = JobPayload & { report: OwnerReportKind };
 
-// An existing job with the key means the report was already planned, whatever became of it (R-15).
-// A settled key is recorded as done without a message, like a lower threshold jumped over.
-function planReport(
+function enqueueReport(
+  tx: Tx,
+  audit: Parameters<Parameters<typeof mutate>[2]>[1],
   userId: string,
   key: string,
   payload: ReportPayload,
-  settled: { key: string; payload: ReportPayload }[] = [],
 ): void {
-  if (planned(userId, key)) return;
-  mutate({ userId, source: "scheduler" }, "mail.owner_report_plan", (tx, audit) => {
-    for (const skip of settled) {
-      const { id, created } = enqueue(tx, { kind: "user.report", userId, ...skip });
-      if (created) {
-        tx.update(job).set({ status: "done", updatedAt: clock.now() }).where(eq(job.id, id)).run();
-      }
-    }
-    const { created } = enqueue(tx, { kind: "user.report", key, userId, payload });
-    if (!created) return;
-    audit({
-      entity: "automation",
-      entityId: userId,
-      ownerId: userId,
-      scope: "user",
-      after: payload,
-    });
+  const { created } = enqueue(tx, {
+    kind: "user.report",
+    key,
+    userId,
+    payload,
+    maxAttempts: ATTEMPTS,
   });
+  if (!created) return;
+  audit({ entity: "automation", entityId: userId, ownerId: userId, scope: "user", after: payload });
+}
+
+// An existing job with the key means the report was already planned, whatever became of it (R-15).
+// The job outlives the window in which the summary and the reminder are planned.
+function planReport(userId: string, key: string, payload: ReportPayload): void {
+  if (planned(userId, key)) return;
+  mutate({ userId, source: "scheduler" }, "mail.owner_report_plan", (tx, audit) =>
+    enqueueReport(tx, audit, userId, key, payload),
+  );
 }
 
 function reportAccounts() {
@@ -241,6 +166,10 @@ function reportAccounts() {
 
 type Account = ReturnType<typeof reportAccounts>[number] & { since: CalendarDate };
 
+const MAIL_THRESHOLDS = new Map<string, LimitMailThreshold>(
+  LIMIT_MAIL_THRESHOLDS.map((value) => [String(value), value]),
+);
+
 function planSummary(account: Account, today: CalendarDate): void {
   if (account.summary === "off") return;
   const period = finishedPeriod(today, account.summary);
@@ -253,9 +182,11 @@ function planSummary(account: Account, today: CalendarDate): void {
   });
 }
 
+// Whether the year holds anything is decided when the reminder is built, not by the account's age:
+// an account opened in January may carry the previous year from an import or a restore.
 function planTax(account: Account, today: CalendarDate): void {
   const due = taxReminderDue(today);
-  if (!account.tax || !due || account.since > `${due.year}-12-31`) return;
+  if (!account.tax || !due) return;
   planReport(account.userId, `tax:${account.userId}:${due.year}`, {
     report: "tax",
     period: String(due.year),
@@ -267,26 +198,53 @@ function vatState(userId: string, year: number): (LimitState & { watched: true }
   return state?.watched ? state : null;
 }
 
-function planLimit(account: Account, today: CalendarDate): void {
-  if (!account.limit) return;
-  const year = Number(today.slice(0, 4));
-  const state = vatState(account.userId, year);
-  const threshold = state && limitMailThreshold(state.level);
-  if (!threshold) return;
-  const keyOf = (value: number) => `limit:${account.userId}:${year}:${value}`;
-  const payloadOf = (value: number): ReportPayload => ({
-    report: "limit",
-    period: String(year),
-    threshold: value,
-  });
-  // Only the highest threshold crossed is sent; the lower one is settled so it never follows.
-  const lower = threshold === LIMIT_HIGH_PERCENT ? [LIMIT_WARN_PERCENT] : [];
-  planReport(
-    account.userId,
-    keyOf(threshold),
-    payloadOf(threshold),
-    lower.map((value) => ({ key: keyOf(value), payload: { ...payloadOf(value), settled: true } })),
+function sentThresholds(userId: string, year: number): Set<string> {
+  return new Set(
+    db
+      .select({ threshold: limitMailSent.threshold })
+      .from(limitMailSent)
+      .where(scoped(userId).where(limitMailSent, (t, ops) => ops.eq(t.year, year)))
+      .all()
+      .map((row) => row.threshold),
   );
+}
+
+// The lasting record, not the job, keeps a threshold from repeating once the job is purged (C-1).
+// Only the highest threshold crossed is sent; the lower ones are recorded with it.
+function planLimitYear(userId: string, year: number): void {
+  const sent = sentThresholds(userId, year);
+  if (sent.has("over")) return;
+  const state = vatState(userId, year);
+  const threshold = state && limitMailThreshold(state.level);
+  if (!threshold || sent.has(String(threshold))) return;
+  mutate({ userId, source: "scheduler" }, "mail.owner_report_plan", (tx, audit) => {
+    for (const value of [...lowerThresholds(threshold), threshold]) {
+      tx.insert(limitMailSent)
+        .values({
+          id: randomUUID(),
+          userId,
+          year,
+          threshold: String(value),
+          createdAt: clock.now(),
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+    enqueueReport(tx, audit, userId, `limit:${userId}:${year}:${threshold}`, {
+      report: "limit",
+      period: String(year),
+      threshold: String(threshold),
+    });
+  });
+}
+
+// A daily check (R-16): the year's turnover is summed once a day per account, not on every tick.
+const limitCheckedOn = new Map<string, CalendarDate>();
+
+function planLimit(account: Account, today: CalendarDate): void {
+  if (!account.limit || limitCheckedOn.get(account.userId) === today) return;
+  limitCheckedOn.set(account.userId, today);
+  for (const year of limitYears(today)) planLimitYear(account.userId, year);
 }
 
 const PLANNERS = [planSummary, planTax, planLimit];
@@ -329,10 +287,14 @@ function switchedOnAfter(userId: string, end: CalendarDate): boolean {
   return last !== undefined && calendarDateInPrague(last.at) > end;
 }
 
-// The one place that builds the January reminder, for the HTML layout to wrap.
-export function taxReminderText(ownerId: string, year: number): string {
+const REVIEW = TAX_TEXT_REVIEWED ? [] : [`(${TEXTS.tax.reviewPending})`];
+
+function yearOverview(ownerId: string, year: number): TaxOverview {
   const today = calendarDateInPrague(clock.now());
-  const overview = taxOverview(db, ownerId, { year, basis: "paid" }, today);
+  return taxOverview(db, ownerId, { year, basis: "paid" }, today);
+}
+
+function taxText(ownerId: string, year: number, overview: TaxOverview): string {
   const { dateFormat } = getPreferences(ownerId);
   const X = T.tax;
   const url = new URL(`/prehledy/dane?rok=${year}`, env.BETTER_AUTH_URL).href;
@@ -354,20 +316,31 @@ export function taxReminderText(ownerId: string, year: number): string {
     X.link(url),
     "",
     TEXTS.tax.disclaimer,
+    ...REVIEW,
   ].join("\n");
 }
 
-// The one place that builds the VAT limit message, for the HTML layout to wrap.
+// The one place that builds the January reminder, for the HTML layout to wrap.
+export function taxReminderText(ownerId: string, year: number): string {
+  return taxText(ownerId, year, yearOverview(ownerId, year));
+}
+
+// The one place that builds the VAT limit message, for the HTML layout to wrap. The wording follows
+// the threshold of the job, so a later rise is left to the job of its own threshold (M-2).
 export function limitMailText(
   _ownerId: string,
   state: LimitState & { watched: true },
   year: number,
+  threshold: LimitMailThreshold = limitMailThreshold(state.level) ?? LIMIT_MAIL_THRESHOLDS[0],
 ): string {
   const L = T.limit;
-  const threshold = limitMailThreshold(state.level) ?? LIMIT_WARN_PERCENT;
   const url = new URL("/prehledy?zalozka=limity", env.BETTER_AUTH_URL).href;
+  const headline =
+    threshold === "over"
+      ? [L.over(year, L.vat), L.registration, ...REVIEW]
+      : [L.reached(year, threshold, L.vat)];
   return [
-    state.level === "over" ? L.over(year, L.vat) : L.reached(year, threshold, L.vat),
+    ...headline,
     L.usage(czk(state.turnoverMinor), czk(state.limitMinor), state.percent),
     ...unconvertedLine(state.unconverted),
     "",
@@ -382,8 +355,12 @@ type Delivery = { subject: string; text: string; after: JobPayload };
 function summaryDelivery(userId: string, key: string): Delivery | null {
   const period = periodOfKey(key);
   if (!period) throw new Error(`Neznámé období souhrnu: ${key}`);
+  // Changing the kind and back within days 1–3 leaves this period without a summary: the planned
+  // job used its key (M-8 of block C).
   if (getAutomation(userId).periodSummary !== period.mode) return null;
   const today = calendarDateInPrague(clock.now());
+  // Held up past its own period, the outlook would start after the period it describes (M-7).
+  if (finishedPeriod(today, period.mode).key !== key) return null;
   const summary = periodSummary(userId, period.range, period.next, today);
   if (isEmpty(summary) && switchedOnAfter(userId, period.range.to)) return null;
   return {
@@ -404,23 +381,36 @@ function yearOf(period: unknown): number {
 function taxDelivery(userId: string, period: unknown): Delivery | null {
   const year = yearOf(period);
   if (!getAutomation(userId).taxReminder) return null;
+  const overview = yearOverview(userId, year);
+  // A reminder with nothing in it is skipped, an account with data from a later import is not (I-2).
+  const empty =
+    overview.totalCzkMinor === 0 &&
+    overview.unconverted.count === 0 &&
+    overview.unpaid.length === 0;
+  if (empty) return null;
   return {
     subject: T.tax.subject(year),
-    text: taxReminderText(userId, year),
+    text: taxText(userId, year, overview),
     after: { report: "tax", period: String(year) },
   };
 }
 
-function limitDelivery(userId: string, period: unknown, threshold: unknown): Delivery | null {
+function limitDelivery(userId: string, period: unknown, value: unknown): Delivery | null {
   const year = yearOf(period);
+  const threshold = MAIL_THRESHOLDS.get(String(value));
+  if (!threshold) throw new Error(`Neznámý práh limitu: ${String(value)}`);
   if (!getAutomation(userId).limitMail) return null;
   const state = vatState(userId, year);
   const reached = state && limitMailThreshold(state.level);
-  if (!state || !reached || reached < Number(threshold)) return null;
+  const rank = (item: LimitMailThreshold) => LIMIT_MAIL_THRESHOLDS.indexOf(item);
+  if (!state || !reached || rank(reached) < rank(threshold)) return null;
   return {
-    subject: T.limit.subject(reached, T.limit.vat),
-    text: limitMailText(userId, state, year),
-    after: { report: "limit", period: String(year), threshold: reached },
+    subject:
+      threshold === "over"
+        ? T.limit.overSubject(T.limit.vat)
+        : T.limit.subject(threshold, T.limit.vat),
+    text: limitMailText(userId, state, year, threshold),
+    after: { report: "limit", period: String(year), threshold: String(threshold) },
   };
 }
 
@@ -445,7 +435,7 @@ export async function deliverOwnerReport(row: Job): Promise<void> {
   const delivery = deliveryOf(userId, row.payload);
   if (!delivery) return;
   const transport = await resolveTransport(userId);
-  if (!transport) return;
+  if (!transport) throw new RetryLater("E-mail pro vlastníka čeká na nastavení pošty", RETRY_MS);
   const { from, replyTo } = transport.identity;
   try {
     // Without the account's standing copies: this message is for the owner alone.

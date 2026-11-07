@@ -96,10 +96,12 @@ export function AutomationPanel({
   settings,
   impact,
   advanceFinalMode,
+  vatWatch,
 }: {
   settings: AutomationSettings;
   impact: AutomationImpact;
   advanceFinalMode: AdvanceFinalMode;
+  vatWatch: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<Message>(null);
@@ -314,11 +316,13 @@ export function AutomationPanel({
           <input
             type="checkbox"
             checked={settings.limitMail}
-            disabled={pending}
+            // Turning it off stays possible; turning it on without the watch would send nothing.
+            disabled={pending || (!vatWatch && !settings.limitMail)}
             onChange={(event) => perform(() => setLimitMailAction(event.target.checked))}
           />
           {T.ownerMail.limit}
         </label>
+        {!vatWatch && <p className="text-sm text-muted-foreground">{T.ownerMail.unwatched}</p>}
       </section>
     </div>
   );
