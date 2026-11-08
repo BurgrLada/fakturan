@@ -76,6 +76,8 @@ async function waitForRun(page: Page, plan: string) {
     await page.goto(plan);
     await expect(page.getByTestId("run-row")).toHaveCount(1, { timeout: 1000 });
   }).toPass({ timeout: 30_000 });
+  // Typing into the server-rendered form before hydration is lost when React takes over.
+  await page.waitForLoadState("networkidle");
 }
 
 test("[REC-004] detail plánu má v titulku jeho název", async ({ page, freshApp }) => {
