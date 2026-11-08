@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:mutation": "stryker run",
     "test:mutation:file": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation.ts",
