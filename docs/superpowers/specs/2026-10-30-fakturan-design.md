@@ -402,8 +402,8 @@ Princip: uživatel si ve Fio nastaví e-mailová oznámení do své schránky a 
 - **BNK-001** Nastavení IMAP: server, port, TLS, uživatel, heslo, složka. Doporučená je samostatná schránka. Test připojení.
 - **BNK-002** Návod v aplikaci: Nastavení → Oznámení → Uživatelská oznámení → Pohyby → Přidat oznámení; e-mail, částka 0,01, formát „Fio banka - příjem na účtu“, zapnuté „Posílat online“.
 - **BNK-003** Kontrola schránky každých 5 minut **[návrh]** a tlačítko „Zkontrolovat teď“.
-- **BNK-004** Zpracovávají se jen zprávy od `automat@fio.cz` s předmětem „Fio banka - příjem na účtu“, „Fio banka - příjem na kontě“ nebo „Fio banka - new income on account“. Výdajová avíza se ignorují.
-- **BNK-005** Parser čte: cílový účet, částku, měnu, datum a čas, VS, KS, protiúčet, název protistrany, zprávu, ID pokynu, a to v české i anglické variantě. Česky je částka s desetinnou čárkou a popisek `Protistrana`, anglicky s desetinnou tečkou, datum m/d/rrrr a popisky `Variable symbol`, `Counterparty`, `Instruction ID`. Česká varianta existuje ve dvou podobách (bloková „Příjem na kontě“ a větná „zůstatek účtu … zvýšil o …“), parser zvládá obě. Kód parseru je vlastní, formát je ověřen jen z veřejných zmínek.
+- **BNK-004** Zpracovávají se jen zprávy od `automat@fio.cz` s předmětem „Fio banka - příjem na účtu“ nebo „Fio banka - new income on account“. Výdajová avíza („Fio banka - výdaj na účtu“) se ignorují.
+- **BNK-005** Parser čte: cílový účet, částku, měnu, datum a čas, VS, KS, protiúčet, název protistrany, zprávu, ID pokynu, a to v české i anglické variantě. Česká varianta je ověřená na skutečném avízu: věta „zůstatek účtu <účet> se <dd.mm.rrrr> v <hh:mm> zvýšil o <částka> <měna>.“ (účet bez kódu banky znamená Fio 2010, částka s mezerami po tisících a desetinnou čárkou) a pod ní popisky v pevném pořadí `Typ pohybu`, `Protistrana` (`<účet>/<kód>` a volitelně jméno v závorce), `ID pokynu`, `Variabilní symbol`, `Specifický symbol`, `Konstantní symbol`, `Uživatelský symbol`, `Zpráva pro příjemce`; povinné jsou jen věta a ID pokynu. Anglicky je částka s desetinnou tečkou, datum m/d/rrrr a popisky `Variable symbol`, `Counterparty`, `Instruction ID`; tato varianta je sestavená jen z veřejných zmínek, proto je prozatímní a automaticky se nepáruje. Kód parseru je vlastní.
 - **BNK-006** Podle ID pokynu se avízo zpracuje jen jednou. Znovu přečtená zpráva nic nezmění.
 - **BNK-007** Cílový účet musí odpovídat účtu uživatele, jinak se avízo ignoruje a zaznamená.
 - **BNK-008** Automatické spárování nastane, když sedí VS, částka a měna a faktura je otevřená. Datum platby se vezme z avíza.
@@ -682,7 +682,7 @@ Všech devět bodů je hotových. Co zbývá, závisí na zadavateli a daňovém
 
 | Bod | Dopad | Kdo |
 |---|---|---|
-| Vzorek českého avíza Fio | Bez něj nejde ověřit BNK-005, formát není veřejně popsaný. Staví se proti anglické variantě známé z veřejných zmínek, česká je do dodání vzorku prozatímní. | zadavatel |
+| Vzorek anglického avíza Fio | Česká varianta BNK-005 je ověřená na skutečném avízu. Anglická je sestavená z veřejných zmínek, do dodání vzorku je prozatímní a sama se nepáruje. | zadavatel |
 | Vzorky ISDOC a CSV z Fakturoidu a iDokladu | Fakturovač je ověřený na 40 reálných dokladech, ostatní jen z dokumentace. Vestavěné předlohy (IMP-002) a porovnání součtů se zdrojem (TST-020) čekají na skutečné exporty | zadavatel, pak implementace |
 | Znění doložky FOR-006, náležitosti neplátce, TAX-001, použití pevného kurzu FOR-010 | Daňová správnost, zatím z obecné znalosti | daňový poradce |
 | Referenční PNG designů faktur | Vizuální regrese (TST-014, PDF-007) hlídá jen první stranu a čeká na schválení | zadavatel |

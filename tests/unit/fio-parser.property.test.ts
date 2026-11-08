@@ -3,12 +3,17 @@ import { describe, expect, test } from "vitest";
 import { fioParser } from "@/lib/bank-notices/fio";
 import type { NoticeMeta } from "@/lib/bank-notices/types";
 
-const SUBJECTS = [
-  "Fio banka - new income on account",
-  "Fio banka - příjem na kontě",
-  "Fio banka - příjem na účtu",
+const SUBJECTS = ["Fio banka - new income on account", "Fio banka - příjem na účtu"];
+const LABELS = [
+  "Amount: ",
+  "Variable symbol: ",
+  "Date: ",
+  "Variabilní symbol: ",
+  "Protistrana: ",
+  "ID pokynu: ",
+  "zůstatek účtu ",
+  " se 1.1.2026 v 1:00 zvýšil o ",
 ];
-const LABELS = ["Amount: ", "Částka: ", "VS: ", "Variable symbol: ", "Date: ", "zůstatek účtu "];
 
 const meta = (subject: string): NoticeMeta => ({ from: ["automat@fio.cz"], subject });
 
@@ -43,10 +48,7 @@ describe("parser na náhodném vstupu", () => {
             "Instruction ID: 1",
           ].join("\n");
           const cs = [
-            "Příjem na kontě: 9999999999",
-            `Částka: ${formatted(minor, separator, ",")}`,
-            "Měna: CZK",
-            "Datum: 2.1.2026",
+            `zůstatek účtu 9999999999 se 02.01.2026 v 09:30 zvýšil o ${formatted(minor, separator, ",")} CZK.`,
             "ID pokynu: 1",
           ].join("\n");
           expect(fioParser.parse(en, meta(SUBJECTS[0]!))?.amountMinor).toBe(minor);

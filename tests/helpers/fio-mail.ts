@@ -11,25 +11,37 @@ export type NoticeFields = {
   amount?: string;
   currency?: string;
   date?: string;
+  time?: string;
   vs?: string;
   id?: string;
   message?: string;
 };
 
+export const INCOME_SUBJECT = "Fio banka - příjem na účtu";
+
+// The layout of a real Czech Fio notice, trailing spaces included; every value is made up.
 export function noticeText(over: NoticeFields = {}): string {
+  const account = over.account ?? "9999999999";
+  const date = over.date ?? "30.10.2026";
+  const time = over.time ?? "14:05";
+  const amount = over.amount ?? "3 000,00";
+  const currency = over.currency ?? "CZK";
   return [
-    "Dear client,",
+    "Dobrý den, ",
+    " ",
+    `zůstatek účtu ${account} se ${date} v ${time} zvýšil o ${amount} ${currency}.`,
     "",
-    `Account: ${over.account ?? "9999999999/2010"}`,
-    `Amount: ${over.amount ?? "3 000.00"}`,
-    `Currency: ${over.currency ?? "CZK"}`,
-    `Date: ${over.date ?? "10/30/2026 14:05"}`,
-    `Variable symbol: ${over.vs ?? VS}`,
-    "Constant symbol: 0308",
-    `Counterparty account: ${COUNTERPARTY}`,
-    "Counterparty: Ukazkova Firma s.r.o.",
-    `Instruction ID: ${over.id ?? "10000000001"}`,
-    `Message: ${over.message ?? "Fiktivni platba"}`,
+    "Další parametry",
+    "Typ pohybu: Okamžitá příchozí platba ",
+    `Protistrana: ${COUNTERPARTY} (Ukazkova Firma s.r.o.) `,
+    `ID pokynu: ${over.id ?? "10000000001"}     `,
+    `Variabilní symbol: ${over.vs ?? VS} `,
+    "Konstantní symbol: 0308",
+    `Zpráva pro příjemce: ${over.message ?? "Fiktivni platba"} `,
+    "",
+    `Aktuální zůstatek: 103 000,00 ${currency}`,
+    "",
+    "Fio banka",
   ].join("\r\n");
 }
 
@@ -50,7 +62,7 @@ export type MailFields = {
 export function rawMail(fields: MailFields = {}): string {
   const {
     from = "Fio banka <automat@fio.cz>",
-    subject = "Fio banka - new income on account",
+    subject = encodedSubject(INCOME_SUBJECT),
     headers = [PASS_HEADER],
     body = noticeText(),
     messageId = `<${randomUUID()}@fio.cz>`,

@@ -13,18 +13,17 @@ import type { BankNoticeParser, NoticeMeta, ParsedNotice } from "@/lib/bank-noti
 
 const FIXTURES = join(import.meta.dirname, "../fixtures/fio");
 const SYNTHETIC = "# SYNTETICKÉ: smyšlené údaje sestavené z popisků spec, nejde o reálné avízo";
-const PROVISIONAL = "# PROZATÍMNÍ: nesestaveno z reálného vzorku";
+const FROM_REAL = "# SYNTETICKÉ: smyšlené údaje podle struktury reálného avíza";
 
-const fixture = (name: string) =>
-  readFileSync(join(FIXTURES, `${name}.txt`), "utf8")
+const fixture = (name: string, ext = "txt") =>
+  readFileSync(join(FIXTURES, `${name}.${ext}`), "utf8")
     .split("\n")
     .filter((line) => !line.startsWith("#"))
     .join("\n");
 
 const meta = (subject: string, from = ["automat@fio.cz"]): NoticeMeta => ({ from, subject });
 const EN = meta("Fio banka - new income on account");
-const CS_BLOCK = meta("Fio banka - příjem na kontě");
-const CS_SENTENCE = meta("Fio banka - příjem na účtu");
+const CS = meta("Fio banka - příjem na účtu");
 
 const enBody = (overrides: Record<string, string | null> = {}) =>
   Object.entries({
@@ -39,21 +38,51 @@ const enBody = (overrides: Record<string, string | null> = {}) =>
     .map(([label, value]) => `${label}: ${value}`)
     .join("\n");
 
-const csBody = (overrides: Record<string, string | null> = {}) =>
+type Sentence = {
+  account?: string;
+  date?: string;
+  time?: string;
+  verb?: string;
+  amount?: string;
+  currency?: string;
+};
+
+const sentence = (over: Sentence = {}) => {
+  const { account, date, time, verb, amount, currency } = {
+    account: "9999999999",
+    date: "30.10.2026",
+    time: "14:05",
+    verb: "zvýšil",
+    amount: "100,00",
+    currency: "CZK",
+    ...over,
+  };
+  return `zůstatek účtu ${account} se ${date} v ${time} ${verb} o ${amount} ${currency}.`;
+};
+
+const csFields = (overrides: Record<string, string | null> = {}) =>
   Object.entries({
-    "Příjem na kontě": "9999999999/2010",
-    Částka: "100,00",
-    Měna: "CZK",
-    Datum: "30.10.2026 14:05",
+    "Typ pohybu": "Okamžitá příchozí platba",
+    Protistrana: "1111111116/0800 (Ukázková Firma s.r.o.)",
     "ID pokynu": "10000000001",
     ...overrides,
   })
     .filter(([, value]) => value !== null)
-    .map(([label, value]) => `${label}: ${value}`)
-    .join("\n");
+    .map(([label, value]) => `${label}: ${value} `);
 
-const sentenceBody = (sentence: string) =>
-  [sentence, "Datum: 30.10.2026 14:05", "ID pokynu: 10000000001"].join("\n");
+const csBody = (overrides: Record<string, string | null> = {}, over: Sentence = {}) =>
+  [
+    "Dobrý den, ",
+    " ",
+    sentence(over),
+    "",
+    "Další parametry",
+    ...csFields(overrides),
+    "",
+    "Aktuální zůstatek: 100,00 CZK",
+    "",
+    "Fio banka",
+  ].join("\n");
 
 const FULL = {
   targetAccount: "9999999999/2010",
@@ -124,69 +153,214 @@ describe("anglická varianta", () => {
   });
 });
 
-// BNK-005 stays partial: no real Czech notice exists, so these prove the parser
-// against assumed labels only and AUTO_MATCH_VARIANTS keeps them out of matching.
-describe("prozatímní česká varianta", () => {
-  test("[BNK-005] prozatímní česká bloková varianta s desetinnou čárkou", () => {
-    expect(fioParser.parse(fixture("cs-provisional-block"), CS_BLOCK)).toEqual({
+describe("česká varianta", () => {
+  test("[BNK-005] česká varianta podle reálného avíza dá všechna pole", () => {
+    expect(fioParser.parse(fixture("cs-income"), CS)).toEqual({
       ...FULL,
-      variant: "cs_block",
+      targetAccount: "9999999999",
+      variant: "cs",
       counterpartyName: "Ukázková Firma s.r.o.",
       message: "Fiktivní platba",
       instructionId: "10000000003",
     });
   });
 
-  test("[BNK-005] prozatímní česká větná varianta", () => {
-    expect(fioParser.parse(fixture("cs-provisional-sentence"), CS_SENTENCE)).toEqual({
-      ...FULL,
-      variant: "cs_sentence",
-      counterpartyName: "Ukázková Firma s.r.o.",
-      message: "Fiktivní platba",
+  test("[BNK-005] nejkratší české avízo bez symbolů, zprávy a jména protistrany", () => {
+    expect(fioParser.parse(fixture("cs-income-minimal"), CS)).toEqual({
+      variant: "cs",
+      targetAccount: "9999999999",
+      amountMinor: 100,
+      currency: "CZK",
+      occurredAt: { date: "2026-01-02", time: "09:30" },
+      variableSymbol: null,
+      constantSymbol: null,
+      counterpartyAccount: "1111111116/2010",
+      counterpartyName: null,
+      message: null,
       instructionId: "10000000004",
     });
   });
 
-  test("větná varianta smí začínat velkým písmenem bez tečky na konci", () => {
+  test("[BNK-005] řádky CRLF a mezery na konci řádků nevadí", () => {
+    const body = fixture("cs-income").replaceAll("\n", "\r\n");
+    expect(fioParser.parse(body, CS)).toMatchObject({
+      instructionId: "10000000003",
+      variableSymbol: "20260042",
+      message: "Fiktivní platba",
+    });
+  });
+
+  test("[BNK-005] účet s předčíslím a s kódem banky projde", () => {
     const parsed = fioParser.parse(
-      sentenceBody("Zůstatek účtu 9999999999 se zvýšil o 100,50 EUR"),
-      CS_SENTENCE,
+      csBody({ Protistrana: "19-1111111116/0800" }, { account: "19-9999999999" }),
+      CS,
     );
     expect(parsed).toMatchObject({
-      targetAccount: "9999999999",
-      amountMinor: 10_050,
-      currency: "EUR",
+      targetAccount: "19-9999999999",
+      counterpartyAccount: "19-1111111116/0800",
+    });
+    expect(fioParser.parse(csBody({}, { account: "9999999999/2010" }), CS)?.targetAccount).toBe(
+      "9999999999/2010",
+    );
+  });
+
+  test("[BNK-005] jméno protistrany smí obsahovat závorky a chybět", () => {
+    expect(
+      fioParser.parse(csBody({ Protistrana: "1111111116/0800 (Firma (CZ) s.r.o.)" }), CS),
+    ).toMatchObject({
+      counterpartyAccount: "1111111116/0800",
+      counterpartyName: "Firma (CZ) s.r.o.",
+    });
+    expect(fioParser.parse(csBody({ Protistrana: "1111111116/0800" }), CS)).toMatchObject({
+      counterpartyAccount: "1111111116/0800",
+      counterpartyName: null,
+    });
+    expect(fioParser.parse(csBody({ Protistrana: null }), CS)).toMatchObject({
+      counterpartyAccount: null,
+      counterpartyName: null,
+    });
+  });
+
+  test("[BNK-005] symboly jsou číslice a uživatelský symbol volný text", () => {
+    const parsed = fioParser.parse(
+      csBody({
+        "Variabilní symbol": "0042",
+        "Specifický symbol": "77",
+        "Konstantní symbol": "0558",
+        "Uživatelský symbol": "Nájem: listopad",
+      }),
+      CS,
+    );
+    expect(parsed).toMatchObject({ variableSymbol: "0042", constantSymbol: "0558" });
+  });
+
+  test("[BNK-005] mezera za ID pokynu se ořízne", () => {
+    expect(fioParser.parse(csBody({ "ID pokynu": "10000000001    " }), CS)?.instructionId).toBe(
+      "10000000001",
+    );
+  });
+
+  test.each([
+    ["1 000", 100_000],
+    ["14 200,00", 1_420_000],
+    ["14\u00A0200,00", 1_420_000],
+    ["1,00", 100],
+    ["0,01", 1],
+  ])("česká částka %s", (amount, minor) => {
+    expect(fioParser.parse(csBody({}, { amount }), CS)?.amountMinor).toBe(minor);
+  });
+
+  test("datum a čas se čtou z věty, hodina smí být jednociferná", () => {
+    expect(fioParser.parse(csBody({}, { date: "3.4.2026", time: "7:05" }), CS)?.occurredAt).toEqual(
+      { date: "2026-04-03", time: "07:05" },
+    );
+    expect(fioParser.parse(csBody({}, { time: "23:59" }), CS)?.occurredAt).toEqual({
+      date: "2026-10-30",
+      time: "23:59",
     });
   });
 
   test.each([
+    ["30.2.2026", "14:05"],
+    ["1.13.2026", "14:05"],
+    ["10/30/2026", "14:05"],
+    ["30.10.1999", "14:05"],
+    ["30.10.26", "14:05"],
+    ["30.10.2026", "24:00"],
+    ["30.10.2026", "14:60"],
+    ["30.10.2026", "14.05"],
+  ])("české datum %s %s je nerozpoznané", (date, time) => {
+    expect(fioParser.parse(csBody({}, { date, time }), CS)).toBeNull();
+  });
+
+  test.each([
+    ["snížení zůstatku", { verb: "snížil" }],
+    ["tečka v částce", { amount: "1.00" }],
+    ["tisíce s tečkou", { amount: "1.234,50" }],
+    ["neznámá měna", { currency: "HUF" }],
+    ["neplatný účet", { account: "abc" }],
+    ["nulová částka", { amount: "0,00" }],
+    ["záporná částka", { amount: "-1,00" }],
+  ])("věta je nerozpoznaná: %s", (_, over) => {
+    expect(fioParser.parse(csBody({}, over), CS)).toBeNull();
+  });
+
+  test.each([
+    ["druhá věta", (body: string) => `${body}\n${sentence({ amount: "9,00" })}`],
+    ["věta chybí", (body: string) => body.replace(sentence(), "")],
+    ["slovo před větou", (body: string) => body.replace(sentence(), `x${sentence()}`)],
+    ["text za větou", (body: string) => body.replace(sentence(), `${sentence()} navíc`)],
     [
-      "druhá věta v textu",
-      "zůstatek účtu 1 se zvýšil o 1,00 CZK\nzůstatek účtu 2 se zvýšil o 9,00 CZK",
+      "věta až za parametry",
+      (body: string) => body.replace(sentence(), "").replace("Fio banka", sentence()),
     ],
-    ["žádná věta", "Dobrý den"],
-    ["slovo přilepené před větou", "xzůstatek účtu 1 se zvýšil o 1,00 CZK"],
-    ["text za větou", "zůstatek účtu 1 se zvýšil o 1,00 CZK navíc"],
-    ["neplatný účet", "zůstatek účtu abc se zvýšil o 1,00 CZK"],
-    ["tečka v částce", "zůstatek účtu 1 se zvýšil o 1.00 CZK"],
-    ["neznámá měna", "zůstatek účtu 1 se zvýšil o 1,00 HUF"],
-  ])("větná varianta je nerozpoznaná: %s", (_, sentence) => {
-    expect(fioParser.parse(sentenceBody(sentence), CS_SENTENCE)).toBeNull();
+  ])("avízo je nerozpoznané: %s", (_, change) => {
+    expect(fioParser.parse(change(csBody()), CS)).toBeNull();
   });
 
-  test("větná varianta přijme celou částku a konce řádků CRLF", () => {
-    const body = sentenceBody("Zůstatek účtu 1 se zvýšil o 1 000 CZK.").replaceAll("\n", "\r\n");
-    expect(fioParser.parse(body, CS_SENTENCE)?.amountMinor).toBe(100_000);
+  test.each([
+    ["Protistrana", "abc"],
+    ["Protistrana", "1111111116"],
+    ["Protistrana", "1111111116/0800 Firma"],
+    ["Protistrana", "1111111116/0800 ()"],
+    ["Variabilní symbol", "12A"],
+    ["Specifický symbol", "x"],
+    ["Konstantní symbol", "12345678901"],
+    ["ID pokynu", "12 34"],
+    ["ID pokynu", ""],
+  ])("pochybný údaj %s=%s shodí celé avízo", (label, value) => {
+    expect(fioParser.parse(csBody({ [label]: value }), CS)).toBeNull();
   });
 
-  test("předmět určí podobu, bloková zpráva pod předmětem větné nejde dál", () => {
-    expect(fioParser.parse(fixture("cs-provisional-block"), CS_SENTENCE)).toBeNull();
-    expect(fioParser.parse(fixture("cs-provisional-sentence"), CS_BLOCK)).toBeNull();
+  test("povinné ID pokynu nesmí chybět", () => {
+    expect(fioParser.parse(csBody({ "ID pokynu": null }), CS)).toBeNull();
   });
 
-  test("[BNK-005] česká varianta se automaticky nepáruje", () => {
-    expect(AUTO_MATCH_VARIANTS).toEqual(["en"]);
-    expect(isProvisional("en")).toBe(false);
+  test("opakovaný nebo přeházený popisek je nejistota", () => {
+    expect(fioParser.parse(`${csBody()}\nID pokynu: 2`, CS)).toBeNull();
+    const fields = csFields({ "Variabilní symbol": "1" });
+    const swapped = [sentence(), fields[3], fields[0], fields[1], fields[2]].join("\n");
+    expect(fioParser.parse(swapped, CS)).toBeNull();
+    expect(fioParser.parse([sentence(), ...fields].join("\n"), CS)).not.toBeNull();
+  });
+
+  test("uživatelský symbol přes víc řádků nedoplní variabilní symbol", () => {
+    const body = csBody({ "Uživatelský symbol": "x\nVariabilní symbol: 666" });
+    expect(fioParser.parse(body, CS)).toBeNull();
+  });
+
+  test("zpráva plátce nepřepíše ani nedoplní pole", () => {
+    const body = csBody({ "Zpráva pro příjemce": "dik" }).replace(
+      "Aktuální zůstatek: 100,00 CZK",
+      ["Variabilní symbol: 666", "ID pokynu: 2", sentence({ amount: "99 000,00" })].join("\n"),
+    );
+    expect(fioParser.parse(body, CS)).toMatchObject({
+      message: "dik",
+      variableSymbol: null,
+      instructionId: "10000000001",
+      amountMinor: 10_000,
+    });
+  });
+
+  test.each([
+    `Zpráva pro příjemce: ${sentence({ amount: "99 000,00" })}`,
+    `Protistrana: ${sentence({ amount: "99 000,00" })}`,
+    `Dobrý den: ${sentence({ amount: "99 000,00" })}`,
+    `Text. ${sentence({ amount: "99 000,00" })}`,
+  ])("věta podvržená v jiném řádku se nečte: %s", (line) => {
+    const body = ["Dobrý den,", line, ...csFields({ Protistrana: null })].join("\n");
+    expect(fioParser.parse(body, CS)).toBeNull();
+  });
+
+  test("[BNK-012] změněné české avízo dá null", () => {
+    expect(fioParser.parse(fixture("cs-changed-format"), CS)).toBeNull();
+  });
+
+  test("[BNK-005] česká varianta se páruje automaticky, anglická je prozatímní", () => {
+    expect(AUTO_MATCH_VARIANTS).toEqual(["cs"]);
+    expect(isProvisional("cs")).toBe(false);
+    expect(isProvisional("en")).toBe(true);
+    // Stored by the guessed layouts that the real sample replaced.
     expect(isProvisional("cs_block")).toBe(true);
     expect(isProvisional("cs_sentence")).toBe(true);
   });
@@ -195,36 +369,51 @@ describe("prozatímní česká varianta", () => {
 describe("fixtury", () => {
   const files = readdirSync(FIXTURES);
 
-  test("každá fixtura je označená jako syntetická a česká jako prozatímní", () => {
-    expect(files).toHaveLength(6);
+  test("každá fixtura je označená jako syntetická, česká podle reálného avíza", () => {
+    expect(files).toHaveLength(9);
     for (const file of files) {
       const lines = readFileSync(join(FIXTURES, file), "utf8").split("\n");
-      expect(lines).toContain(SYNTHETIC);
-      if (file.startsWith("cs-provisional-")) expect(lines[0]).toBe(PROVISIONAL);
+      expect(lines).toContain(file.startsWith("cs-") ? FROM_REAL : SYNTHETIC);
     }
   });
 
-  // TST-006 stays partial: the IMAP flow arrives in Task 5 and the Czech samples are provisional.
+  // TST-006 stays partial: the English layout was never compared with a real notice.
   test("[TST-006] všechny fixtury v obou jazycích", () => {
     const cases: [string, NoticeMeta, "income" | "expense" | "unknown", boolean][] = [
       ["en-income", EN, "income", true],
       ["en-income-minimal", EN, "income", true],
-      ["cs-provisional-block", CS_BLOCK, "income", true],
-      ["cs-provisional-sentence", CS_SENTENCE, "income", true],
+      ["cs-income", CS, "income", true],
+      ["cs-income-minimal", CS, "income", true],
       ["en-expense", meta("Fio banka - expense on account"), "expense", false],
+      ["cs-expense", meta("Fio banka - výdaj na účtu"), "expense", false],
       ["en-changed-format", EN, "income", false],
+      ["cs-changed-format", CS, "income", false],
     ];
-    expect(cases.map(([name]) => `${name}.txt`).sort()).toEqual([...files].sort());
+    const texts = files.filter((file) => file.endsWith(".txt"));
+    expect(cases.map(([name]) => `${name}.txt`).sort()).toEqual(texts.sort());
     for (const [name, noticeMeta, kind, parses] of cases) {
       expect(fioParser.classify(noticeMeta)).toBe(kind);
       expect(fioParser.parse(fixture(name), noticeMeta) !== null).toBe(parses);
     }
   });
+
+  test("[TST-006] výdajové české avízo pod příjmovým předmětem neprojde", () => {
+    expect(fioParser.parse(fixture("cs-expense"), CS)).toBeNull();
+  });
+
+  test("[TST-006] celá zpráva avíza je jen v quoted-printable fixtuře", () => {
+    expect(files.filter((file) => file.endsWith(".eml"))).toEqual(["cs-income.eml"]);
+    const raw = fixture("cs-income", "eml");
+    expect(raw).toContain("Content-Transfer-Encoding: quoted-printable");
+    expect(raw).toContain("From: automat@fio.cz");
+    expect(raw).toMatch(/=20$/m);
+  });
 });
 
 describe("třídění", () => {
-  test("[BNK-004] jen přesný odesílatel a tři předměty jdou do parseru", () => {
-    for (const subject of [EN.subject, CS_BLOCK.subject, CS_SENTENCE.subject]) {
+  test("[BNK-004] jen přesný odesílatel a dva předměty jdou do parseru", () => {
+    expect(fioParser.classify(meta("Fio banka - příjem na kontě"))).toBe("unknown");
+    for (const subject of [EN.subject, CS.subject]) {
       expect(fioParser.classify(meta(subject))).toBe("income");
       expect(fioParser.classify(meta(subject, ["AUTOMAT@Fio.CZ"]))).toBe("income");
       expect(fioParser.classify(meta(subject, ["xautomat@fio.cz"]))).toBeNull();
@@ -238,6 +427,7 @@ describe("třídění", () => {
     for (const subject of [
       "Fio banka - výdaj na kontě",
       "Fio banka - VYDAJ na účtu",
+      "Fio banka - výdaj na účtu",
       "Fio banka - new expense on account",
       "Fio banka - debit on account",
       "Fio banka - Outgoing payment",
@@ -295,7 +485,7 @@ describe("třídění", () => {
     expect(() => assertVariantIds([fioParser, named(["en"])])).toThrow("en");
     expect(() => assertVariantIds([named(["a", "a"])])).toThrow("a");
     expect(() => assertVariantIds([named(["a"], ["b"])])).toThrow("b");
-    expect(fioParser.variants).toEqual(["en", "cs_block", "cs_sentence"]);
+    expect(fioParser.variants).toEqual(["en", "cs"]);
   });
 });
 
@@ -305,9 +495,6 @@ describe("přísnost", () => {
     for (const label of ["Account", "Amount", "Currency", "Date", "Instruction ID"]) {
       expect(fioParser.parse(enBody({ [label]: null }), EN)).toBeNull();
       expect(fioParser.parse(enBody({ [label]: "" }), EN)).toBeNull();
-    }
-    for (const label of ["Příjem na kontě", "Částka", "Měna", "Datum", "ID pokynu"]) {
-      expect(fioParser.parse(csBody({ [label]: null }), CS_BLOCK)).toBeNull();
     }
     expect(fioParser.parse("", EN)).toBeNull();
   });
@@ -333,7 +520,7 @@ describe("přísnost", () => {
       expect(fioParser.parse(enBody({ Amount: amount }), EN)).toBeNull();
     }
     for (const amount of ["1.234,50", "1.234", "1,234", "1,5", "12 34,00", "-1,00", "0,00"]) {
-      expect(fioParser.parse(csBody({ Částka: amount }), CS_BLOCK)).toBeNull();
+      expect(fioParser.parse(csBody({}, { amount }), CS)).toBeNull();
     }
   });
 
@@ -346,15 +533,6 @@ describe("přísnost", () => {
     ["1000000.00", 100_000_000],
   ])("anglická částka %s", (amount, minor) => {
     expect(fioParser.parse(enBody({ Amount: amount }), EN)?.amountMinor).toBe(minor);
-  });
-
-  test.each([
-    ["1 234,50", 123_450],
-    ["1 234,50", 123_450],
-    ["0,01", 1],
-    ["1 234", 123_400],
-  ])("česká částka %s", (amount, minor) => {
-    expect(fioParser.parse(csBody({ Částka: amount }), CS_BLOCK)?.amountMinor).toBe(minor);
   });
 
   test("největší bezpečná částka projde, o haléř vyšší ne", () => {
@@ -389,22 +567,14 @@ describe("přísnost", () => {
     expect(fioParser.parse(enBody({ Date: date }), EN)).toBeNull();
   });
 
-  test.each(["30.2.2026", "1.13.2026", "10/30/2026", "x1.2.2026", "1.2.2026x", "1.2.2026 24:00"])(
-    "české datum %s je nerozpoznané",
-    (date) => {
-      expect(fioParser.parse(csBody({ Datum: date }), CS_BLOCK)).toBeNull();
-    },
-  );
-
   test("datum se čte podle jazyka bez záměny dne a měsíce", () => {
     expect(fioParser.parse(enBody({ Date: "3/4/2026 00:00" }), EN)?.occurredAt).toEqual({
       date: "2026-03-04",
       time: "00:00",
     });
-    expect(fioParser.parse(csBody({ Datum: "3.4.2026 23:59" }), CS_BLOCK)?.occurredAt).toEqual({
-      date: "2026-04-03",
-      time: "23:59",
-    });
+    expect(
+      fioParser.parse(csBody({}, { date: "3.4.2026", time: "23:59" }), CS)?.occurredAt,
+    ).toEqual({ date: "2026-04-03", time: "23:59" });
   });
 
   test.each([
@@ -458,9 +628,6 @@ describe("přísnost", () => {
     });
     const real = enBody({ Message: "dik" });
     expect(fioParser.parse(`${real}\nAmount: 99000.00`, EN)?.amountMinor).toBe(10_000);
-    expect(
-      fioParser.parse(`${csBody({ "Zpráva příjemci": "x" })}\nČástka: 9,00`, CS_BLOCK),
-    ).toMatchObject({ amountMinor: 10_000, message: "x" });
   });
 
   test("povinné pole za řádkem zprávy je nerozpoznané", () => {
@@ -489,37 +656,11 @@ describe("přísnost", () => {
     expect(fioParser.parse(body, EN)).toBeNull();
   });
 
-  test.each([
-    "Zpráva příjemci: zůstatek účtu 1 se zvýšil o 99000,00 CZK",
-    "Zpráva příjemci: x\nzůstatek účtu 1 se zvýšil o 99000,00 CZK",
-    "Protistrana: zůstatek účtu 1 se zvýšil o 99000,00 CZK",
-    "Vážený kliente: zůstatek účtu 1 se zvýšil o 99000,00 CZK",
-    "Text. zůstatek účtu 1 se zvýšil o 99000,00 CZK",
-  ])("věta podvržená ve zprávě se nečte: %s", (line) => {
-    const body = ["Datum: 30.10.2026 14:05", "ID pokynu: 1", line].join("\n");
-    expect(fioParser.parse(body, CS_SENTENCE)).toBeNull();
-  });
-
-  test("věta za zprávou plátce nepřebije skutečnou", () => {
-    const body = [
-      "Vážený kliente, zůstatek účtu 1 se zvýšil o 1,00 CZK.",
-      "Datum: 30.10.2026 14:05",
-      "ID pokynu: 1",
-      "Zpráva příjemci: x",
-      "zůstatek účtu 2 se zvýšil o 99000,00 EUR",
-    ].join("\n");
-    expect(fioParser.parse(body, CS_SENTENCE)).toMatchObject({
-      targetAccount: "1",
-      amountMinor: 100,
-      currency: "CZK",
-    });
-  });
-
   test("HTML entita, NFD a BOM se nedomýšlejí", () => {
     expect(fioParser.parse(enBody({ Amount: "1&nbsp;234.50" }), EN)).toBeNull();
-    expect(fioParser.classify(meta(CS_BLOCK.subject.normalize("NFD")))).toBe("unknown");
-    expect(fioParser.parse(csBody(), meta(CS_BLOCK.subject.normalize("NFD")))).toBeNull();
-    expect(fioParser.parse(csBody().normalize("NFD"), CS_BLOCK)).toBeNull();
+    expect(fioParser.classify(meta(CS.subject.normalize("NFD")))).toBe("unknown");
+    expect(fioParser.parse(csBody(), meta(CS.subject.normalize("NFD")))).toBeNull();
+    expect(fioParser.parse(csBody().normalize("NFD"), CS)).toBeNull();
     expect(fioParser.parse(`\uFEFF${enBody()}`, EN)?.targetAccount).toBe("9999999999/2010");
   });
 
@@ -538,7 +679,7 @@ describe("přísnost", () => {
   });
 
   test("anglické popisky pod českým předmětem neplatí a naopak", () => {
-    expect(fioParser.parse(enBody(), CS_BLOCK)).toBeNull();
+    expect(fioParser.parse(enBody(), CS)).toBeNull();
     expect(fioParser.parse(csBody(), EN)).toBeNull();
   });
 
@@ -556,13 +697,15 @@ describe("přísnost", () => {
       "9".repeat(size),
       "Amount: " + "1 234".repeat(size / 6),
       "zůstatek účtu ".repeat(size / 15),
+      `zůstatek účtu 1 se 1.1.2026 v 1:00 zvýšil o ${"1 ".repeat(size / 3)}`,
+      "Protistrana: 1/0800 (" + "(".repeat(size / 2),
       " ".repeat(size),
       "\n".repeat(size),
     ];
     const start = performance.now();
     for (const input of inputs) {
       fioParser.parse(input, EN);
-      fioParser.parse(input, CS_SENTENCE);
+      fioParser.parse(input, CS);
     }
     expect(performance.now() - start).toBeLessThan(1000);
   });
@@ -574,6 +717,8 @@ describe("soukromí", () => {
     const spies = methods.map((method) => vi.spyOn(console, method));
     fioParser.parse(fixture("en-income"), EN);
     fioParser.parse(fixture("en-changed-format"), EN);
+    fioParser.parse(fixture("cs-income"), CS);
+    fioParser.parse(fixture("cs-changed-format"), CS);
     for (const spy of spies) {
       expect(spy).not.toHaveBeenCalled();
       spy.mockRestore();

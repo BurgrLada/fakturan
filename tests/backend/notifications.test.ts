@@ -251,7 +251,7 @@ describe("odvozená upozornění ve zvonku", () => {
     ingestNotice(owner, {
       ...base,
       notice: {
-        variant: "en",
+        variant: "cs",
         targetAccount: "9999999999/2010",
         amountMinor: 300_000,
         currency: "CZK",

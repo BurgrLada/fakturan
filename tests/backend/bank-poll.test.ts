@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DrizzleQueryError, eq } from "drizzle-orm";
@@ -12,6 +12,7 @@ import {
   automationSettings,
   bankMailbox,
   bankNotification,
+  invoice,
   job,
   notification,
   payment,
@@ -37,7 +38,6 @@ import { assertConsistent } from "../helpers/consistency";
 import { createTestDb } from "../helpers/db";
 import {
   COUNTERPARTY,
-  encodedSubject,
   INVOICE_TOTAL,
   jobsOf,
   noticeText,
@@ -176,28 +176,55 @@ describe("tok ze schránky", () => {
     expect(invoiceStatus(owner, invoiceId)).toBe("paid");
   });
 
-  test("prozatímní česká varianta jde do fronty a neuhradí nic", async () => {
+  test("[BNK-005] prozatímní anglická varianta jde do fronty a neuhradí nic", async () => {
     const { owner, invoiceId } = account({ requireConfirmation: false });
     const body = [
-      "Příjem na kontě: 9999999999/2010",
-      "Částka: 3 000,00",
-      "Měna: CZK",
-      "Datum: 30.10.2026 14:05",
-      "VS: 20260042",
-      "ID pokynu: 10000000003",
+      "Account: 9999999999/2010",
+      "Amount: 3 000.00",
+      "Currency: CZK",
+      "Date: 10/30/2026 14:05",
+      "Variable symbol: 20260042",
+      "Instruction ID: 10000000003",
     ].join("\r\n");
-    imap.addMessage(rawMail({ subject: encodedSubject("Fio banka - příjem na kontě"), body }));
+    imap.addMessage(rawMail({ subject: "Fio banka - new income on account", body }));
 
     await poll(owner);
 
     expect(notices(owner)[0]).toMatchObject({
       status: "pending",
       reason: "provisional",
-      variant: "cs_block",
+      variant: "en",
       authResult: "pass",
     });
     expect(payments(owner)).toEqual([]);
     expect(invoiceStatus(owner, invoiceId)).not.toBe("paid");
+  });
+
+  test("[TST-006] [BNK-005] celé české avízo v quoted-printable uhradí fakturu", async () => {
+    const { owner, invoiceId } = account();
+    db.update(invoice).set({ totalMinor: 1_234_560 }).where(eq(invoice.id, invoiceId)).run();
+    const eml = readFileSync(join(import.meta.dirname, "../fixtures/fio/cs-income.eml"), "utf8")
+      .split("\n")
+      .filter((line) => !line.startsWith("#"))
+      .join("\r\n");
+    imap.addMessage(eml);
+
+    await poll(owner);
+
+    expect(notices(owner)[0]).toMatchObject({
+      status: "matched",
+      variant: "cs",
+      authResult: "pass",
+      amountMinor: 1_234_560,
+      paidOn: "2026-10-30",
+      paidTime: "14:05",
+      variableSymbol: "20260042",
+      constantSymbol: "0308",
+      counterpartyName: "Ukázková Firma s.r.o.",
+      message: "Fiktivní platba",
+      instructionId: "10000000009",
+    });
+    expect(invoiceStatus(owner, invoiceId)).toBe("paid");
   });
 });
 
@@ -352,7 +379,7 @@ describe("kurzor a duplicity", () => {
   test("první běh čte nejvýš 30 dní zpět", async () => {
     const { owner } = account();
     imap.addMessage(rawMail({ body: noticeText({ id: "1" }) }), new Date(NOW.getTime() - 40 * DAY));
-    imap.addMessage(rawMail({ body: noticeText({ id: "2", amount: "1.00" }) }), NOW);
+    imap.addMessage(rawMail({ body: noticeText({ id: "2", amount: "1,00" }) }), NOW);
 
     await poll(owner);
 
@@ -558,7 +585,7 @@ describe("selhání", () => {
     const { owner } = account();
     const secret = "TajnaZprava";
     imap.addMessage(rawMail({ body: noticeText({ message: secret }) }));
-    imap.addMessage(rawMail({ body: noticeText({ id: "2", amount: "1.00", message: secret }) }));
+    imap.addMessage(rawMail({ body: noticeText({ id: "2", amount: "1,00", message: secret }) }));
     imap.addMessage(rawMail({ body: `Jiný formát ${secret}` }));
     await poll(owner);
     imap.addMessage(rawMail({ body: noticeText({ id: "3", message: secret }) }));

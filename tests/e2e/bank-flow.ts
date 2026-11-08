@@ -45,8 +45,8 @@ export function notice(): string {
   return rawMail({
     body: noticeText({
       account: ACCOUNT,
-      amount: "1 000.00",
-      date: `${month}/${day}/${year}`,
+      amount: "1 000,00",
+      date: `${day}.${month}.${year}`,
       vs: VS,
     }),
   });

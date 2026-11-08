@@ -894,7 +894,7 @@ describe("stejný VS záloh a faktur", () => {
     ({
       bank: "fio",
       notice: {
-        variant: "en",
+        variant: "cs",
         targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
         amountMinor,
         currency: "CZK",

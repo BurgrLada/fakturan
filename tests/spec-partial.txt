@@ -2,8 +2,8 @@
 TST-014	Referenční PNG designů zatím neschválil člověk	schválení uživatelem
 PDF-007	Vizuální reference pokrývají jen první stranu	po schválení TST-014
 TST-013	Všechny soubory z mutate mají po souborech ≥ 90 % kromě src/lib/safe-input/zip.ts (78,97 %, 72 přeživších): většina nemění výstup (časné návraty po první chybě, načasování rozpoznání PDF, záložní hledání hlavičky za očekávaným místem) a meze okna HeaderTracker by odhalil jen archiv se jménem a extra polem po 64 KiB, který testovací zapisovač ZIP neumí	budoucí rozšíření (zapisovač ZIP s poli nad 64 KiB)
-BNK-005	Česká varianta je prozatímní bez reálného vzorku a nepáruje se automaticky; anglická je sestavená z veřejných zmínek a není porovnaná s reálným avízem	po dodání vzorku od zadavatele
-TST-006	České fixtury jsou prozatímní, anglická není porovnaná s reálným avízem	po dodání vzorku od zadavatele
+BNK-005	Česká varianta je ověřená na reálném avízu; anglická je sestavená z veřejných zmínek, není porovnaná s reálným avízem, proto je prozatímní a nepáruje se automaticky	po dodání anglického vzorku od zadavatele
+TST-006	České fixtury vycházejí ze struktury reálného avíza; anglické nejsou porovnané s reálným avízem	po dodání anglického vzorku od zadavatele
 IMP-000	Fakturoid, iDoklad, SuperFaktura, Vyfakturuj a ABRA Flexi jsou ověřené jen z dokumentace	kap. 24
 IMP-002	Vestavěné předlohy čekají na reálné soubory Fakturoidu a iDokladu	kap. 24
 TST-020	Skript a test nad smyšlenou fixturou hotové; čeká na porovnání uživatelem proti zdrojovému systému na skutečných dokladech	zadavatel, kap. 24

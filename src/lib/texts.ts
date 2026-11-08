@@ -3824,7 +3824,7 @@ export const TEXTS = {
         body: [
           "Platby zapisujete ručně na detailu faktury, nebo je Fakturan páruje z e-mailových avíz Fio banky. Schránku s avízy nastavíte v Nastavení, Avíza, kde je i návod, jak avíza zapnout v internetbankingu Fio.",
           "Schránka se kontroluje každých 5 minut a jen se čte, nic se v ní nemaže. Sama se uhradí jen faktura, se kterou avízo přesně sedí: variabilní symbol, měna, částka i účet. Ostatní avíza čekají v sekci Platby ve frontě nespárovaných plateb, kde je přiřadíte ručně.",
-          "Česká avíza mají zatím prozatímní formát. Čtou se, ale nikdy se nepárují automaticky a ve frontě mají štítek Prozatímní formát. Automaticky se páruje jen anglická varianta avíza.",
+          "Automaticky se páruje česká podoba avíza, ověřená na skutečném avízu z Fio. Anglická podoba zatím ověřená není, proto se čte, ale nikdy se nepáruje automaticky a ve frontě má štítek Prozatímní formát. V internetbankingu proto zvolte český formát avíza.",
           "Volba Vyžadovat potvrzení je ve výchozím stavu zapnutá a pošle do fronty avízo, u kterého váš poštovní server neověřil odesílatele. Bez vyplněného serveru ověření (authserv-id) čeká ve frontě každé avízo.",
           "Spárování z avíza jde vrátit. Klientovi nic neodejde, pokud nezapnete automatiku Potvrzení o přijaté platbě.",
         ],
@@ -3982,7 +3982,7 @@ export const TEXTS = {
       },
       {
         q: "Proč se platba z avíza nespárovala sama?",
-        a: "Sama se spáruje jen platba, která přesně sedí na jeden doklad: variabilní symbol, měna, částka a účet. Do fronty jde i avízo s neověřeným odesílatelem, avízo v prozatímním českém formátu a platba k importované faktuře. Ve frontě v sekci Platby ji přiřadíte ručně.",
+        a: "Sama se spáruje jen platba, která přesně sedí na jeden doklad: variabilní symbol, měna, částka a účet. Do fronty jde i avízo s neověřeným odesílatelem, avízo v prozatímním anglickém formátu a platba k importované faktuře. Ve frontě v sekci Platby ji přiřadíte ručně.",
       },
       {
         q: "Proč má záloha stejný variabilní symbol jako faktura?",

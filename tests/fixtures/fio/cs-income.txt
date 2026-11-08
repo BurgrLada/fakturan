@@ -1,0 +1,20 @@
+# SYNTETICKÉ: smyšlené údaje podle struktury reálného avíza
+Dobrý den, 
+ 
+zůstatek účtu 9999999999 se 30.10.2026 v 14:05 zvýšil o 12 345,60 CZK.
+
+Další parametry
+Typ pohybu: Okamžitá příchozí platba 
+Protistrana: 1111111116/0800 (Ukázková Firma s.r.o.) 
+ID pokynu: 10000000003     
+Variabilní symbol: 20260042 
+Specifický symbol: 1234 
+Konstantní symbol: 0308
+Uživatelský symbol: Ukázka 
+Zpráva pro příjemce: Fiktivní platba 
+
+Aktuální zůstatek: 112 345,60 CZK
+
+Pokud si již nepřejete dostávat tyto informace, můžete si jejich zasílání kdykoli vypnout v nastavení našich aplikací. 
+
+Fio banka

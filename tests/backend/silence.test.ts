@@ -148,7 +148,7 @@ function pairNotice(owner: string, invoiceId: string, accountId: string, symbol:
   const result = ingestNotice(owner, {
     bank: "fio",
     notice: {
-      variant: "en",
+      variant: "cs",
       targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
       amountMinor: db.select().from(invoice).where(eq(invoice.id, invoiceId)).get()!.totalMinor,
       currency: "CZK",
@@ -299,7 +299,7 @@ function armedImported(key: AutomationKey): string {
   const result = ingestNotice(owner, {
     bank: "fio",
     notice: {
-      variant: "en",
+      variant: "cs",
       targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
       amountMinor: db.select().from(invoice).where(eq(invoice.id, id)).get()!.totalMinor,
       currency: "CZK",

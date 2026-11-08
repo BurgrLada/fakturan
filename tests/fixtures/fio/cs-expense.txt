@@ -1,0 +1,16 @@
+# SYNTETICKÉ: smyšlené údaje podle struktury reálného avíza
+Dobrý den, 
+ 
+zůstatek účtu 9999999999 se 30.10.2026 v 14:05 snížil o 14 200,00 CZK.
+
+Další parametry
+Typ pohybu: Platba převodem uvnitř banky 
+Protistrana: 1111111116/2010 (Ukázková Firma s.r.o.) 
+ID pokynu: 10000000007     
+Variabilní symbol: 20260042 
+
+Aktuální zůstatek: 85 800,00 CZK
+
+Pokud si již nepřejete dostávat tyto informace, můžete si jejich zasílání kdykoli vypnout v nastavení našich aplikací. 
+
+Fio banka

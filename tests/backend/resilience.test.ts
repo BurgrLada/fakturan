@@ -198,7 +198,7 @@ function archivedInvoice() {
   return queued;
 }
 
-const YESTERDAY = "03/09/2026 14:05";
+const YESTERDAY = "09.03.2026";
 // T0 is before 14:30 in Prague, so the list expected at that moment is the one of the day before.
 const LIST_DATE = "2026-03-09";
 const imapPort = (port: number) =>

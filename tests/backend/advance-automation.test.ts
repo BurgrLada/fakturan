@@ -138,7 +138,7 @@ const paymentInput = (owner: string, id: string, amountMinor: number, over = {})
 });
 
 const parsed = (over: Partial<ParsedNotice> = {}): ParsedNotice => ({
-  variant: "en",
+  variant: "cs",
   targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
   amountMinor: TOTAL,
   currency: "CZK",

@@ -11,7 +11,7 @@ import {
 
 const ACCOUNT = "acc-1";
 const notice = (over: Partial<MatchableNotice> = {}): MatchableNotice => ({
-  variant: "en",
+  variant: "cs",
   authResult: "pass",
   amountMinor: 100_000,
   currency: "CZK",
@@ -55,15 +55,16 @@ describe("normalizeSymbol", () => {
 
 describe("autoMatchAllowed", () => {
   test.each([
-    ["en", "pass", true, true],
-    ["en", "pass", false, true],
-    ["en", "none", false, true],
-    ["en", "none", true, false],
-    ["en", "fail", false, false],
-    ["en", "fail", true, false],
+    ["cs", "pass", true, true],
+    ["cs", "pass", false, true],
+    ["cs", "none", false, true],
+    ["cs", "none", true, false],
+    ["cs", "fail", false, false],
+    ["cs", "fail", true, false],
+    ["en", "pass", false, false],
+    ["en", "none", false, false],
     ["cs_block", "pass", false, false],
     ["cs_sentence", "pass", false, false],
-    ["cs_block", "none", false, false],
   ] as const)("%s %s s potvrzením %s dá %s", (variant, auth, confirmation, expected) => {
     expect(autoMatchAllowed(variant, auth, confirmation)).toBe(expected);
   });
@@ -162,9 +163,9 @@ describe("matchNotice", () => {
     });
   });
 
-  test("prozatímní varianta se nespáruje ani s povolením volajícího", () => {
-    const czech = notice({ variant: "cs_block" });
-    expect(match(czech, [candidate()], true)).toEqual({
+  test("[BNK-005] prozatímní varianta se nespáruje ani s povolením volajícího", () => {
+    const english = notice({ variant: "en" });
+    expect(match(english, [candidate()], true)).toEqual({
       result: "queue",
       reason: "provisional",
       invoiceIds: ["inv-1"],
@@ -179,9 +180,9 @@ describe("matchNotice", () => {
       result: "queue",
       reason: "auth_failed",
     });
-    expect(
-      match(notice({ authResult: "fail", variant: "cs_block" }), [candidate()], true),
-    ).toMatchObject({ reason: "auth_failed" });
+    expect(match(notice({ authResult: "fail", variant: "en" }), [candidate()], true)).toMatchObject(
+      { reason: "auth_failed" },
+    );
   });
 
   test("uzavřený doklad se při zablokování nenabízí", () => {
@@ -201,7 +202,7 @@ describe("matchNotice", () => {
     multiple: () => match(notice(), [candidate(), candidate({ id: "inv-2" })]),
     other_account: () => match(notice(), [candidate({ bankAccountId: "acc-2" })]),
     closed: () => match(notice(), [candidate({ status: "paid", paidMinor: 100_000 })]),
-    provisional: () => match(notice({ variant: "cs_block" }), [candidate()], false),
+    provisional: () => match(notice({ variant: "en" }), [candidate()], false),
     unverified: () => match(notice({ authResult: "none" }), [candidate()], false),
     auth_failed: () => match(notice({ authResult: "fail" }), [candidate()], false),
     manual_duplicate: () =>

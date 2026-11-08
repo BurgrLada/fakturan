@@ -55,7 +55,7 @@ function seedNotice(dataDir: string, seed: NoticeSeed = {}) {
         id,
         owner,
         key: `test:${id}`,
-        variant: recognized ? (seed.variant ?? "en") : null,
+        variant: recognized ? (seed.variant ?? "cs") : null,
         status,
         reason: recognized ? (seed.reason ?? "unknown_vs") : null,
         amount: recognized ? (seed.amountMinor ?? 100_000) : null,
@@ -116,11 +116,14 @@ test("[UI-011] [BNK-012] nespárované a nerozpoznané jsou v centru i na zvonku
   await expect(page.getByRole("link", { name: "Upozornění, nepřečtených: 0" })).toBeVisible();
 });
 
-test("prozatímní avízo má štítek v seznamu i dialogu", async ({ page, freshApp }) => {
+test("[BNK-005] prozatímní anglické avízo má štítek v seznamu i dialogu", async ({
+  page,
+  freshApp,
+}) => {
   const { baseURL, dataDir } = freshApp;
   await register(page, baseURL);
-  seedNotice(dataDir, { variant: "cs_block", reason: "provisional" });
-  seedNotice(dataDir, { variant: "en" });
+  seedNotice(dataDir, { variant: "en", reason: "provisional" });
+  seedNotice(dataDir, { variant: "cs" });
 
   await page.goto(`${baseURL}/platby`);
   const rows = page.getByTestId("notice-row");

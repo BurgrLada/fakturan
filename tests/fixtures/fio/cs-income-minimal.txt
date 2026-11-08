@@ -1,0 +1,15 @@
+# SYNTETICKÉ: smyšlené údaje podle struktury reálného avíza
+Dobrý den, 
+ 
+zůstatek účtu 9999999999 se 02.01.2026 v 09:30 zvýšil o 1,00 CZK.
+
+Další parametry
+Typ pohybu: Příjem převodem uvnitř banky 
+Protistrana: 1111111116/2010 
+ID pokynu: 10000000004     
+
+Aktuální zůstatek: 1,00 CZK
+
+Pokud si již nepřejete dostávat tyto informace, můžete si jejich zasílání kdykoli vypnout v nastavení našich aplikací. 
+
+Fio banka

@@ -241,7 +241,7 @@ describe("importovaný doklad", () => {
     const result = ingestNotice(owner, {
       bank: "fio",
       notice: {
-        variant: "en",
+        variant: "cs",
         targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
         amountMinor: row(id).totalMinor,
         currency: "CZK",

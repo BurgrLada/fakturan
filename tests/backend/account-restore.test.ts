@@ -491,7 +491,7 @@ describe("obnova účtu", () => {
     const input = () => ({
       bank: "fio" as const,
       notice: {
-        variant: "en" as const,
+        variant: "cs" as const,
         targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
         amountMinor: 1_000,
         currency: "CZK" as const,

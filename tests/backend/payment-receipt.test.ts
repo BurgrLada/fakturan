@@ -91,7 +91,7 @@ afterEach(() => {
 });
 
 const parsed = (over: Partial<ParsedNotice> = {}): ParsedNotice => ({
-  variant: "en",
+  variant: "cs",
   targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
   amountMinor: INVOICE_TOTAL,
   currency: "CZK",

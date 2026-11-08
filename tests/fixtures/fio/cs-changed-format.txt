@@ -1,0 +1,11 @@
+# SYNTETICKÉ: smyšlené údaje podle struktury reálného avíza
+Dobrý den, 
+ 
+na účet 9999999999 dne 30.10.2026 přišlo 100,00 CZK.
+
+Další parametry
+Typ pohybu: Okamžitá příchozí platba 
+Protistrana: 1111111116/0800 (Ukázková Firma s.r.o.) 
+ID pokynu: 10000000008     
+
+Fio banka

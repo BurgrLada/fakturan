@@ -70,7 +70,7 @@ const DAY = 86_400_000;
 
 let nextId = 1;
 const parsed = (over: Partial<ParsedNotice> = {}): ParsedNotice => ({
-  variant: "en",
+  variant: "cs",
   targetAccount: `${TARGET.number}/${TARGET.bankCode}`,
   amountMinor: INVOICE_TOTAL,
   currency: "CZK",
@@ -1223,10 +1223,10 @@ describe("fronta", () => {
     expect(found.more).toBe(false);
   });
 
-  test("seznam ukáže prozatímní variantu a doklady spárovaných avíz", () => {
+  test("[BNK-005] seznam ukáže prozatímní anglickou variantu a doklady spárovaných avíz", () => {
     const { owner, invoiceId } = seedAccount(db, NOW);
     ingestNotice(owner, income(parsed()));
-    ingestNotice(owner, income(parsed({ variant: "cs_block", amountMinor: 5 })));
+    ingestNotice(owner, income(parsed({ variant: "en", amountMinor: 5 })));
 
     const all = listNotices(owner, { statuses: ["matched", "pending"] });
 

@@ -312,9 +312,10 @@ přestane sedět SPF, projde jen podpis DKIM, pokud ho přeposílající server 
 podpisu vypadá stejně jako podvržená, skončí jako neověřená s výsledkem `fail` a čeká ve frontě bez
 ohledu na přepínač. Server ověření musí být ten, který zprávu přijal do čtené schránky.
 
-Česká avíza jsou zatím prozatímní: formát není ověřený na skutečném vzorku, proto se čtou, ale nikdy
-se nepárují automaticky a ve frontě mají štítek „Prozatímní formát“. Automaticky se páruje jen
-anglická varianta.
+Česká avíza („Fio banka - příjem na účtu“) jsou ověřená na skutečném avízu z Fio a párují se
+automaticky podle pravidel výše. Anglická varianta je sestavená jen z veřejných zmínek a se skutečným
+avízem porovnaná není, proto je prozatímní: čte se, ale nikdy se nepáruje automaticky a ve frontě má
+štítek „Prozatímní formát“. V internetbankingu proto zvolte český formát avíza.
 
 ## Statistiky a dashboard
 
