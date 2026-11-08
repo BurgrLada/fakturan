@@ -36,7 +36,7 @@ describe("provozní soubory", () => {
       "pnpm run typecheck",
       "vitest run --project unit",
       "playwright install",
-      "test:e2e",
+      "playwright test --shard=",
       "test:coverage-spec",
       "pnpm run build",
     ]) {
@@ -47,11 +47,10 @@ describe("provozní soubory", () => {
 
   test("[TST-011] CI pouští backend po šesti shardech bez pdf-designs a pdf-designs po čtyřech částech", () => {
     const ci = read(".github/workflows/ci.yml");
-    for (let n = 1; n <= 6; n += 1) {
-      expect(ci).toContain(
-        `vitest run --project backend --shard=${n}/6 --exclude tests/backend/pdf-designs.test.ts`,
-      );
-    }
+    expect(ci).toContain("shard: [1, 2, 3, 4, 5, 6]");
+    expect(ci).toContain(
+      "vitest run --project backend --shard=${{ matrix.shard }}/6 --exclude tests/backend/pdf-designs.test.ts",
+    );
     expect(ci).not.toMatch(/--shard=\d+\/4/);
   });
 
