@@ -9,6 +9,8 @@ RUN mkdir -p /sharp/.pnpm \
  && ln -s .pnpm/$(ls /sharp/.pnpm | grep '^sharp@')/node_modules/sharp /sharp/sharp
 
 FROM deps AS build
+# A small builder (Render free) runs out of memory with one page-data worker per host CPU.
+ARG NEXT_BUILD_CPUS
 COPY . .
 # The build needs valid-looking values only to evaluate config; they are not baked into the image at runtime.
 RUN BETTER_AUTH_URL=http://localhost BETTER_AUTH_SECRET=build-only-build-only-build-only-00 pnpm run build

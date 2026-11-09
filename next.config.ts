@@ -43,7 +43,11 @@ const nextConfig: NextConfig = {
   // widgets are about 2.1 MiB of cache (README, Výkon), so 50 MB keeps two dozen such accounts.
   cacheMaxMemorySize: 50 * 1024 * 1024,
   // Above MAX_FILE_BYTES (src/lib/file-limits.ts) plus multipart overhead; Next defaults to 1 MB.
-  experimental: { serverActions: { bodySizeLimit: "3mb" } },
+  experimental: {
+    serverActions: { bodySizeLimit: "3mb" },
+    // Dockerfile ARG for small builders; unset keeps the per-CPU default.
+    ...(Number(process.env.NEXT_BUILD_CPUS) > 0 && { cpus: Number(process.env.NEXT_BUILD_CPUS) }),
+  },
   // xmllint-wasm starts its worker and loads its wasm from __dirname, which a bundle would break.
   serverExternalPackages: ["better-sqlite3", "@react-pdf/renderer", "xmllint-wasm"],
   // All are read from process.cwd() at runtime, which tracing cannot see.
