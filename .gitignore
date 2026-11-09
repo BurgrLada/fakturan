@@ -54,3 +54,4 @@ data/
 isdoc-faktury-*.zip
 local-samples/
 !/tests/fixtures/isdoc/*.isdoc
+__pycache__/

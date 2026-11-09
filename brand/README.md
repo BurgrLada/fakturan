@@ -9,7 +9,8 @@ Logo je `fakt[U]ran`: slovo malými písmeny a uprostřed dlaždice uranu z peri
 | `logo.svg` | světlé pozadí |
 | `logo-dark.svg` | tmavé pozadí |
 | `logo-mono.svg` | jedna barva, přebírá `currentColor` |
-| `favicon.svg`, `favicon.ico` | záložka prohlížeče, zjednodušené U bez čísla 92 |
+| `favicon.svg` | záložka prohlížeče, U s číslem 92 (stejná jako `icon.svg`) |
+| `favicon.ico` | záloha pro starší prohlížeče, zjednodušené U bez čísla 92 |
 | `icon.svg`, `icon-192.png`, `icon-512.png` | větší ikona s číslem 92 |
 | `apple-touch-icon.svg`, `apple-touch-icon.png` | ikona pro iOS, bez zaoblení a průhlednosti |
 | `tokens.css` | barvy a písmo pro světlý a tmavý režim |
@@ -38,7 +39,7 @@ Logo je `fakt[U]ran`: slovo malými písmeny a uprostřed dlaždice uranu z peri
 - Dlaždice je v obou režimech zelená a text na ní vždy tmavý.
 - Zelená dlaždice není barva textu, na světlém pozadí je nečitelná.
 - `#652335` se na tmavém pozadí nepoužívá, kontrast je jen 1,5:1.
-- Na malých plochách se používá `favicon.svg`, číslo 92 pod 32 px splývá.
+- Číslo 92 je čitelné od 32 px. V 16 px (záložka na monitoru bez HiDPI) splývá, proto ho `favicon.ico` nemá.
 - Logo se nepřekresluje živým textem, písmo je v SVG převedené na křivky.
 
 ## Písmo
