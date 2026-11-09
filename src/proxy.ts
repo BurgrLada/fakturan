@@ -17,6 +17,9 @@ const FIXED_PAGES = new Set([
   "/pravidelne/nova",
 ]);
 const NEW_INVOICE = "/faktury/nova";
+// Every page of the (app) group; tests/unit/proxy-matcher.test.ts keeps it in sync with the folders.
+const APP_SECTIONS =
+  /^\/(?:$|(?:administrace|cenik|dashboardy|faktury|napoveda|nastaveni|platby|pravidelne|prehledy|pruvodce|upozorneni|zakaznici)(?:\/|$))/;
 const FINDERS = {
   zakaznici: getCustomer,
   cenik: getCatalogItem,
@@ -34,6 +37,17 @@ export async function proxy(request: NextRequest) {
   const notFound = () =>
     NextResponse.rewrite(new URL("/stranka-neexistuje", request.url), { status: 404 });
   const { pathname } = request.nextUrl;
+
+  // The (app) layout has a static shell that would paint before requireSession() redirects inside
+  // Suspense. Only a browser navigation is sent away: route handlers keep their own 401 and 404.
+  if (
+    !session &&
+    request.method === "GET" &&
+    request.headers.get("sec-fetch-dest") === "document" &&
+    APP_SECTIONS.test(pathname)
+  ) {
+    return NextResponse.redirect(new URL("/prihlaseni", request.url));
+  }
 
   if (pathname === "/administrace") {
     if (session && session.user.role !== "admin") {
@@ -88,12 +102,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/administrace",
-    "/zakaznici/:id",
-    "/cenik/:id",
-    "/pravidelne/:id",
-    "/faktury/:id",
-    "/faktury/:id/upravit",
-    "/faktury/:id/verze/:versionId",
+    "/",
+    "/(administrace|cenik|dashboardy|faktury|napoveda|nastaveni|platby|pravidelne|prehledy|pruvodce|upozorneni|zakaznici)/:path*",
   ],
 };

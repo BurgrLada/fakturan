@@ -17,8 +17,12 @@ const isDark = (page: Page) =>
   page.evaluate(() => document.documentElement.classList.contains("dark"));
 
 test("[UI-009] nepřihlášený je z přehledu poslán na přihlášení", async ({ page, freshApp }) => {
-  await page.goto(freshApp.baseURL);
-  await expect(page).toHaveURL(/\/prihlaseni$/);
+  // A server redirect, so the static shell of the app never paints before the login page.
+  for (const path of ["/", "/faktury", "/nastaveni/ucet", "/administrace"]) {
+    const response = await page.goto(`${freshApp.baseURL}${path}`);
+    expect(response?.request().redirectedFrom()?.url(), path).toBe(`${freshApp.baseURL}${path}`);
+    await expect(page).toHaveURL(/\/prihlaseni$/);
+  }
 });
 
 test("[UI-009] přehled bez dat ukazuje prázdné widgety s další akcí", async ({
