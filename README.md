@@ -418,7 +418,8 @@ obnovy se uklízejí samy.
 
 ## Ukázka
 
-Veřejná ukázka: `https://…` (adresa se doplní po nasazení).
+Veřejná ukázka: <https://fakturan-demo.onrender.com> (Render, bezplatný plán: po 15 minutách bez
+návštěvy usne, první načtení pak trvá do minuty a data ukázky se při uspání založí znovu).
 
 Ukázka je běžná instance s `DEMO_MODE=1` (OPS-007). Má jeden účet se smyšlenými daty za 18 měsíců
 (Zkušební s. r. o., vymyšlená IČO s platným součtem): faktury v CZK i EUR, zálohu s konečnou
@@ -455,6 +456,9 @@ Nasazení v Coolify (ručně, auto-deploy není):
    Skript je bundle ze `scripts/demo-seed-entry.ts`. Spustí migrace, založí účet a vypíše počet
    dokladů. Když účet už existuje, nic nezmění. Bez tohoto kroku založí ukázku plánovač
    při prvním ticku.
+
+Na malém builderu (Render free) nastavte `NEXT_BUILD_CPUS=2`, jinak build při sběru dat stránek
+dojde paměť. Render obraz nesvazkuje, `DATA_DIR=/data` stačí jako obyčejná složka.
 
 ## Ověření importu proti zdroji (TST-020)
 
