@@ -2226,6 +2226,8 @@ export const TEXTS = {
   },
   settings: {
     nav: "Nastavení",
+    tabsBack: "Předchozí sekce nastavení",
+    tabsForward: "Další sekce nastavení",
     account: "Účet",
     supplier: "Dodavatel",
     bankAccounts: "Bankovní účty",
