@@ -81,7 +81,7 @@ export function AppShell({
           </div>
         </aside>
         <main id="obsah" className="min-w-0 flex-1 p-4 md:p-8">
-          <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">{children}</div>
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">{children}</div>
         </main>
         {search}
       </div>

@@ -11,6 +11,13 @@
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-roboto-slab);
   --font-brand: var(--font-space-grotesk);
+  /* Source Sans 3 has a small x-height, so each step sits ~1px above Tailwind's default to read at the same size. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.375rem;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.625rem;
   --color-brand-tile: var(--brand-tile);
   --color-brand-tile-foreground: var(--brand-tile-foreground);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -131,5 +138,8 @@
   }
   html {
     @apply font-sans;
+  }
+  body {
+    @apply text-base;
   }
 }
