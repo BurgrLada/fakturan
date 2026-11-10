@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { bulkSendAction, bulkSendPreviewAction } from "@/app/(app)/faktury/actions";
+import Link from "next/link";
+import { GoToLink } from "@/components/go-to-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -109,7 +111,17 @@ function Summary({
           <ul data-testid="bulk-skipped" className="flex flex-col gap-1">
             {preview.skipped.map((row) => (
               <li key={row.id} className="break-words">
-                {row.number ? `${row.number}: ` : ""}
+                {row.number && (
+                  <>
+                    <Link
+                      href={`/faktury/${row.id}`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {row.number}
+                    </Link>
+                    {": "}
+                  </>
+                )}
                 {row.reason}
               </li>
             ))}
@@ -118,7 +130,9 @@ function Summary({
       )}
       {preview?.paused && (
         <Alert>
-          <AlertDescription>{T.paused}</AlertDescription>
+          <AlertDescription>
+            {T.paused} <GoToLink href="/nastaveni/automatizace">{TEXTS.goTo.automation}</GoToLink>
+          </AlertDescription>
         </Alert>
       )}
       {error && (

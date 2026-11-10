@@ -1,5 +1,6 @@
 "use client";
 
+import { GoToLink } from "@/components/go-to-link";
 import { useState, useTransition, type FormEvent } from "react";
 import { deleteOwnAccountAction } from "@/app/(app)/nastaveni/ucet/actions";
 import { createBackupAction } from "@/app/(app)/nastaveni/zaloha/actions";
@@ -31,7 +32,9 @@ function BackupOfferBox({ offer }: { offer: BackupOffer }) {
     <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm" data-testid="backup-offer">
       <p>{offer.lastBackupAt ? O.last(offer.lastBackupAt) : O.none}</p>
       {running && <p>{O.running}</p>}
-      <p className="text-muted-foreground">{O.warning}</p>
+      <p className="text-muted-foreground">
+        {O.warning} <GoToLink href="/nastaveni/zaloha">{TEXTS.goTo.backup}</GoToLink>
+      </p>
       {message && <p role="status">{message}</p>}
       <div>
         <Button type="button" variant="outline" onClick={create} disabled={pending || running}>

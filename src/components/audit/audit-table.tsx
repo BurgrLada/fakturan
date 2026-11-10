@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { auditActionLabel } from "@/lib/audit-labels";
 import { diffAudit } from "@/lib/audit-diff";
 import { formatDateTime } from "@/lib/format";
@@ -11,6 +12,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+const ENTITY_HREF: Record<string, (id: string) => string> = {
+  invoice: (id) => `/faktury/${id}`,
+  customer: (id) => `/zakaznici/${id}`,
+  recurring_invoice: (id) => `/pravidelne/${id}`,
+  catalog_item: (id) => `/cenik/${id}`,
+  import_batch: (id) => `/nastaveni/import/${id}`,
+  dashboard: (id) => `/dashboardy/${id}/upravit`,
+};
+
+function entityHref(row: AuditRow, live: Set<string>): string | null {
+  const href = row.entityId ? ENTITY_HREF[row.entity] : undefined;
+  return href && live.has(`${row.entity}:${row.entityId}`) ? href(row.entityId!) : null;
+}
 
 function actorText(row: AuditRow, ownerId: string): string {
   if (row.actorId === ownerId) return TEXTS.history.self;
@@ -55,7 +70,15 @@ function Detail({ row }: { row: AuditRow }) {
   );
 }
 
-export function AuditTable({ rows, ownerId }: { rows: AuditRow[]; ownerId: string }) {
+export function AuditTable({
+  rows,
+  ownerId,
+  live,
+}: {
+  rows: AuditRow[];
+  ownerId: string;
+  live: Set<string>;
+}) {
   return (
     <Table>
       <TableHeader>
@@ -71,7 +94,19 @@ export function AuditTable({ rows, ownerId }: { rows: AuditRow[]; ownerId: strin
         {rows.map((row) => (
           <TableRow key={row.id}>
             <TableCell>{formatDateTime(row.at)}</TableCell>
-            <TableCell>{auditActionLabel(row.action)}</TableCell>
+            <TableCell>
+              {(() => {
+                const href = entityHref(row, live);
+                const label = auditActionLabel(row.action);
+                return href ? (
+                  <Link href={href} className="underline-offset-4 hover:underline">
+                    {label}
+                  </Link>
+                ) : (
+                  label
+                );
+              })()}
+            </TableCell>
             <TableCell>{actorText(row, ownerId)}</TableCell>
             <TableCell>{TEXTS.history.sources[row.source]}</TableCell>
             <TableCell className="whitespace-normal">

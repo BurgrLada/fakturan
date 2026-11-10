@@ -58,7 +58,7 @@ export function ReminderPanel({
   latestSnooze: CalendarDate;
   canSend: boolean;
   sent: boolean;
-  queuedNotice: boolean;
+  queuedNotice: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -88,7 +88,7 @@ export function ReminderPanel({
         <Alert data-testid="reminder-queued-notice">
           <AlertDescription>
             {T.queuedNotice}{" "}
-            <Link href="/platby" className="underline underline-offset-4">
+            <Link href={`/platby#avizo-${queuedNotice}`} className="underline underline-offset-4">
               {T.queuedNoticeLink}
             </Link>
           </AlertDescription>

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { notificationText } from "@/lib/notification-text";
+import { notificationTarget, notificationText } from "@/lib/notification-text";
 import type { NotificationKind } from "@/lib/automation";
 import { TEXTS } from "@/lib/texts";
 
@@ -23,4 +23,19 @@ test("[UI-011] upozornění na limit nese procento, částky a upozorňuje, že 
   expect(text).toContain("registraci k DPH");
   expect(text).toContain("1 900 000,00 Kč");
   expect(notificationText("turnover_limit", { limit: "flat", over: true })).toContain("překročený");
+});
+
+test("upozornění na doklad nebo plán vede na jeho stránku, odvozené podle druhu", () => {
+  expect(notificationTarget("mail_failed", { type: "invoice", id: "f1" })?.href).toBe(
+    "/faktury/f1",
+  );
+  expect(
+    notificationTarget("recurring_missed", { type: "recurring_invoice", id: "p1" })?.href,
+  ).toBe("/pravidelne/p1");
+  expect(notificationTarget("invoices_overdue")?.href).toBe("/faktury?stav=po-splatnosti");
+  expect(notificationTarget("bank_connection_failed")?.href).toBe("/nastaveni/aviza");
+  expect(notificationTarget("export_ready", { type: "export", id: "e1" })?.href).toBe(
+    "/nastaveni/export",
+  );
+  expect(notificationTarget("mail_failed")).toBeNull();
 });

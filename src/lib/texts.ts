@@ -578,6 +578,15 @@ export const TEXTS = {
       failed: "Uložení se nepovedlo. Zkuste to znovu.",
     },
   },
+  goTo: {
+    automation: "Nastavení automatizace",
+    mail: "Nastavení pošty",
+    accounts: "Nastavení bankovních účtů",
+    supplier: "Nastavení dodavatele",
+    backup: "Záloha účtu",
+    payments: "Otevřít platby",
+    notice: "Otevřít avízo",
+  },
   shell: {
     mainNav: "Hlavní navigace",
     openMenu: "Otevřít nabídku",
@@ -1596,6 +1605,18 @@ export const TEXTS = {
     newer: "Novější",
     older: "Starší",
     unknownKind: "Na pozadí se stala událost, kterou tato verze neumí popsat.",
+    open: {
+      invoice: "Otevřít doklad",
+      plan: "Otevřít pravidelnou fakturu",
+      overdue: "Faktury po splatnosti",
+      dueSoon: "Faktury podle splatnosti",
+      reminders: "Upomínky ke kontrole",
+      payments: "Otevřít platby",
+      mailbox: "Nastavení avíz",
+      limits: "Přehled limitů",
+      exports: "Otevřít exporty",
+      backups: "Otevřít zálohy",
+    },
     kinds: {
       mail_failed: (p: Record<string, unknown>) =>
         `E-mail k dokladu ${p.invoice ?? ""} se nepodařilo odeslat.`,

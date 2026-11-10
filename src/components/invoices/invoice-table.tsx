@@ -2,6 +2,7 @@
 
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { GoToLink } from "@/components/go-to-link";
 import { useState, useTransition } from "react";
 import {
   deleteDraftAction,
@@ -239,7 +240,8 @@ export function InvoiceTable({
           </Button>
           {!mailAvailable && (
             <span className="text-sm text-muted-foreground">
-              {TEXTS.invoiceMail.bulk.unavailable}
+              {TEXTS.invoiceMail.bulk.unavailable}{" "}
+              <GoToLink href="/nastaveni/posta">{TEXTS.goTo.mail}</GoToLink>
             </span>
           )}
         </div>
@@ -379,7 +381,18 @@ export function InvoiceTable({
                   </span>
                 )}
               </TableCell>
-              <TableCell className="whitespace-normal">{row.customerName || "–"}</TableCell>
+              <TableCell className="whitespace-normal">
+                {row.customerId && row.customerName ? (
+                  <Link
+                    href={`/zakaznici/${row.customerId}`}
+                    className="underline-offset-4 hover:underline"
+                  >
+                    {row.customerName}
+                  </Link>
+                ) : (
+                  row.customerName || "–"
+                )}
+              </TableCell>
               <TableCell className={NARROW_HIDDEN}>{shortDate(row.issueDate)}</TableCell>
               <TableCell className={NARROW_HIDDEN}>{shortDate(row.dueDate)}</TableCell>
               <TableCell className="text-right whitespace-nowrap">

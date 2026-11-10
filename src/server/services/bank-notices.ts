@@ -615,8 +615,12 @@ export function noticeCounts(
 
 // Bears on a reminder: the client may have paid already, only the money waits for the user.
 export function hasQueuedNotice(ownerId: string, variableSymbol: string | null): boolean {
+  return queuedNoticeId(ownerId, variableSymbol) !== null;
+}
+
+export function queuedNoticeId(ownerId: string, variableSymbol: string | null): string | null {
   const symbol = normalizeSymbol(variableSymbol);
-  if (!symbol) return false;
+  if (!symbol) return null;
   const row = db
     .select({ id: bankNotification.id })
     .from(bankNotification)
@@ -627,7 +631,7 @@ export function hasQueuedNotice(ownerId: string, variableSymbol: string | null):
     )
     .limit(1)
     .get();
-  return row !== undefined;
+  return row?.id ?? null;
 }
 
 export type NoticeCandidate = {

@@ -61,11 +61,14 @@ export function NoticeList({
       <ul className="flex flex-col gap-1 text-sm" data-testid="widget-notices">
         {detail.notices.map((row) => (
           <li key={row.id} className="flex flex-wrap gap-x-2">
-            <span className="tabular-nums">
+            <Link
+              href={`/platby#avizo-${row.id}`}
+              className="tabular-nums underline-offset-4 hover:underline"
+            >
               {row.amountMinor !== null && row.currency
                 ? formatMoney(row.amountMinor, row.currency)
                 : "–"}
-            </span>
+            </Link>
             <span>{row.counterpartyName ?? row.variableSymbol ?? S.noticeFallback}</span>
             {row.paidOn && (
               <span className="text-muted-foreground">

@@ -1,5 +1,6 @@
 "use client";
 
+import { GoToLink } from "@/components/go-to-link";
 import { useState, useTransition, type FormEvent } from "react";
 import {
   clearBankMailboxAction,
@@ -120,6 +121,12 @@ function Status({ settings }: { settings: BankMailboxView | null }) {
         </span>
         <span>
           {S.lastNotice}: {settings.lastNoticeAt ? formatDateTime(settings.lastNoticeAt) : S.never}
+          {settings.lastNoticeAt && (
+            <>
+              {" "}
+              <GoToLink href="/platby">{TEXTS.goTo.payments}</GoToLink>
+            </>
+          )}
         </span>
         {settings.failureCode && (
           <span>

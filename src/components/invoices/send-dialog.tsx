@@ -10,6 +10,7 @@ import {
   sendReceiptAction,
   sendReminderAction,
 } from "@/app/(app)/faktury/actions";
+import { GoToLink } from "@/components/go-to-link";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -256,7 +257,9 @@ function Composer({
       )}
       {draft?.paused && (
         <Alert>
-          <AlertDescription>{T.paused}</AlertDescription>
+          <AlertDescription>
+            {T.paused} <GoToLink href="/nastaveni/automatizace">{TEXTS.goTo.automation}</GoToLink>
+          </AlertDescription>
         </Alert>
       )}
       {draft?.unknownPending && (

@@ -13,6 +13,7 @@ import { PaymentPanel } from "@/components/invoices/payment-panel";
 import { RelatedDocuments } from "@/components/invoices/related-documents";
 import { PageLoading } from "@/components/page-loading";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { GoToLink } from "@/components/go-to-link";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/format";
@@ -28,13 +29,13 @@ import { invoiceDocument } from "@/lib/invoice-document";
 import { formatMoney } from "@/lib/money";
 import { calendarDateInPrague } from "@/lib/number-format";
 import { canAmendPayment, canTakePayment } from "@/lib/payments";
-import { amountDue, qrStateOf } from "@/lib/qr-payload";
+import { amountDue, qrStateOf, type QrState } from "@/lib/qr-payload";
 import { MAX_SNOOZE_DAYS } from "@/lib/reminders";
 import { formatCalendarDate } from "@/lib/template-vars";
 import { TEXTS } from "@/lib/texts";
 import { requireSession } from "@/server/auth/session";
 import { clock } from "@/server/clock";
-import { hasQueuedNotice } from "@/server/services/bank-notices";
+import { queuedNoticeId } from "@/server/services/bank-notices";
 import { db } from "@/server/db";
 import { relatedDocuments } from "@/server/services/credit-notes";
 import { finalOf } from "@/server/services/invoice-balance";
@@ -52,6 +53,14 @@ import {
 } from "@/server/services/reminders";
 
 const T = TEXTS.invoices.detail;
+
+const ACCOUNTS_FIX = { href: "/nastaveni/ucty", label: TEXTS.goTo.accounts };
+const QR_FIX: Partial<Record<QrState, { href: string; label: string }>> = {
+  no_account: ACCOUNTS_FIX,
+  not_czech_account: ACCOUNTS_FIX,
+  missing_iban_bic: ACCOUNTS_FIX,
+  missing_recipient: { href: "/nastaveni/dodavatel", label: TEXTS.goTo.supplier },
+};
 
 export const metadata: Metadata = { title: `${T.title} | ${TEXTS.appName}` };
 
@@ -155,7 +164,15 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         <InvoiceStatusBadge status={row.status} overdue={isOverdue(row, today)} />
         {row.supersededAt && <Badge variant="outline">{T.superseded}</Badge>}
         {row.external && (
-          <Badge variant="outline" data-testid="invoice-source">
+          <Badge
+            variant="outline"
+            data-testid="invoice-source"
+            render={
+              row.importBatchId ? (
+                <Link href={`/nastaveni/import/${row.importBatchId}`} />
+              ) : undefined
+            }
+          >
             {row.sourceSystem
               ? TEXTS.importing.source(row.sourceSystem)
               : TEXTS.importing.sourceUnknown}
@@ -190,7 +207,11 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
       {row.tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {row.tags.map((tag) => (
-            <Badge key={tag.id} variant="outline">
+            <Badge
+              key={tag.id}
+              variant="outline"
+              render={<Link href={`/faktury?stitek=${encodeURIComponent(tag.id)}`} />}
+            >
               {tag.name}
             </Badge>
           ))}
@@ -235,6 +256,12 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
         {!isNote && (
           <p data-testid="invoice-qr" className="text-sm text-muted-foreground">
             {TEXTS.invoices.qr[qr]}
+            {QR_FIX[qr] && (
+              <>
+                {" "}
+                <GoToLink href={QR_FIX[qr].href}>{QR_FIX[qr].label}</GoToLink>
+              </>
+            )}
           </p>
         )}
       </section>
@@ -260,7 +287,7 @@ async function DetailContent({ params, searchParams }: PageProps<"/faktury/[id]"
           latestSnooze={addDays(today, MAX_SNOOZE_DAYS)}
           canSend={available && !sending}
           sent={row.sentAt !== null}
-          queuedNotice={hasQueuedNotice(user.id, row.variableSymbol)}
+          queuedNotice={queuedNoticeId(user.id, row.variableSymbol)}
         />
       )}
       {showsPayments && (

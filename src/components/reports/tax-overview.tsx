@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
@@ -159,7 +160,14 @@ export function TaxOverviewView({
               {overview.lines.map((line, index) => (
                 <TableRow key={`${line.invoiceId}-${index}`}>
                   <TableCell>{day(line.date)}</TableCell>
-                  <TableCell>{line.number}</TableCell>
+                  <TableCell>
+                    <Link
+                      href={`/faktury/${line.invoiceId}`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {line.number}
+                    </Link>
+                  </TableCell>
                   <TableCell className="hidden whitespace-normal sm:table-cell">
                     {line.customer}
                   </TableCell>
@@ -199,7 +207,14 @@ export function TaxOverviewView({
             <TableBody>
               {overview.unpaid.map((row) => (
                 <TableRow key={row.invoiceId}>
-                  <TableCell>{row.number}</TableCell>
+                  <TableCell>
+                    <Link
+                      href={`/faktury/${row.invoiceId}`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {row.number}
+                    </Link>
+                  </TableCell>
                   <TableCell className="hidden whitespace-normal sm:table-cell">
                     {row.customer}
                   </TableCell>

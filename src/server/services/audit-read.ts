@@ -1,11 +1,19 @@
 import "server-only";
-import { and, desc, eq, gte, isNull, lt, ne, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { auditActionLabel } from "@/lib/audit-labels";
 import { neutralizeCsvCell } from "@/lib/tabular";
 import type { Actor } from "../audit/context";
 import { db, type Tx } from "../db";
-import { auditLog } from "../db/schema";
+import {
+  auditLog,
+  catalogItem,
+  customer,
+  dashboard,
+  importBatch,
+  invoice,
+  recurringInvoice,
+} from "../db/schema";
 import { scoped } from "../db/scoped";
 import { RATE_RULES } from "../rate-limit";
 import { enforceRateLimit, ServiceError } from "./access";
@@ -128,6 +136,38 @@ export function listAudit(actor: Actor, filter: AuditFilter = {}): Page<AuditRow
     pageSize,
     hasNext: rows.length > pageSize,
   };
+}
+
+const LINKABLE = {
+  invoice,
+  customer,
+  recurring_invoice: recurringInvoice,
+  catalog_item: catalogItem,
+  import_batch: importBatch,
+  dashboard,
+} as const;
+
+export type AuditEntityType = keyof typeof LINKABLE;
+
+// Only entities that still exist get a link, so a history row never leads to a missing page.
+export function liveAuditEntities(actor: Actor, rows: AuditRow[]): Set<string> {
+  const ownerId = ownerOf(actor);
+  const live = new Set<string>();
+  for (const [type, table] of Object.entries(LINKABLE)) {
+    const ids = [
+      ...new Set(
+        rows.flatMap((r) => (r.entity === type && r.entityId !== null ? [r.entityId] : [])),
+      ),
+    ];
+    if (ids.length === 0) continue;
+    const found = db
+      .select({ id: table.id })
+      .from(table)
+      .where(scoped(ownerId).where(table, (t) => inArray(t.id, ids)))
+      .all();
+    for (const { id } of found) live.add(`${type}:${id}`);
+  }
+  return live;
 }
 
 export function listAuditFacets(actor: Actor): { actions: string[]; entities: string[] } {

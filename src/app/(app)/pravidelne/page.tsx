@@ -33,9 +33,10 @@ async function RecurringContent() {
   }
   return (
     <RecurringList
-      rows={rows.map(({ id, name, customerName, nextIssueDate, mode, status }) => ({
+      rows={rows.map(({ id, name, customerId, customerName, nextIssueDate, mode, status }) => ({
         id,
         name,
+        customerId,
         customerName,
         nextIssueDate,
         mode,

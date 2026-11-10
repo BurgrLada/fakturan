@@ -12,6 +12,7 @@ import { actorFromRequest, requireSession } from "@/server/auth/session";
 import {
   listAudit,
   listAuditFacets,
+  liveAuditEntities,
   parseAuditFilter,
   type AuditFilter,
 } from "@/server/services/audit-read";
@@ -58,7 +59,11 @@ async function HistoryContent({
           }
         />
       ) : (
-        <AuditTable rows={result.rows} ownerId={user.id} />
+        <AuditTable
+          rows={result.rows}
+          ownerId={user.id}
+          live={liveAuditEntities(actor, result.rows)}
+        />
       )}
       <div className="flex gap-2">
         {result.page > 1 && (

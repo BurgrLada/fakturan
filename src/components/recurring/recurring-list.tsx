@@ -17,6 +17,7 @@ const T = TEXTS.recurring;
 export type RecurringListRow = {
   id: string;
   name: string;
+  customerId: string | null;
   customerName: string | null;
   nextIssueDate: string | null;
   mode: RecurringMode;
@@ -44,7 +45,16 @@ export function RecurringList({ rows }: { rows: RecurringListRow[] }) {
               </Link>
             </TableCell>
             <TableCell className="whitespace-normal">
-              {row.customerName ?? <span className="text-muted-foreground">{T.noCustomer}</span>}
+              {row.customerId && row.customerName ? (
+                <Link
+                  href={`/zakaznici/${row.customerId}`}
+                  className="underline-offset-4 hover:underline"
+                >
+                  {row.customerName}
+                </Link>
+              ) : (
+                (row.customerName ?? <span className="text-muted-foreground">{T.noCustomer}</span>)
+              )}
             </TableCell>
             <TableCell className="tabular-nums">
               {row.nextIssueDate ? formatCalendarDate(row.nextIssueDate, "d. M. yyyy") : T.noNext}
