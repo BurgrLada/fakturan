@@ -14,6 +14,10 @@ export function reportSummary(ownerId: string, filter: ReportFilter, today: Cale
   return core.reportSummary(db, ownerId, filter, today);
 }
 
+export function reportCounts(ownerId: string, filter: ReportFilter, today: CalendarDate) {
+  return core.summaryCounts(db, ownerId, filter, today);
+}
+
 export function invoicedSeries(ownerId: string, filter: ReportFilter, unit: BucketUnit) {
   return core.invoicedSeries(db, ownerId, filter, unit);
 }

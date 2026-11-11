@@ -1,4 +1,17 @@
-import { and, asc, desc, eq, gte, inArray, lte, ne, notInArray, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  lte,
+  ne,
+  notInArray,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Currency } from "@/lib/currency";
 import { daysBetween } from "@/lib/invoice";
@@ -273,6 +286,32 @@ function summaryIn(
       advanceOpen: missing.advanceOpen,
     },
   };
+}
+
+export type SummaryCounts = { issued: number; unpaid: number; overdue: number };
+
+// How many documents stand behind the sums of reportSummary: issued in the period (advances stay
+// out like in invoiced), still owed, and owed past the due date.
+export function summaryCounts(
+  q: SnapshotReader,
+  ownerId: string,
+  filter: ReportFilter,
+  today: CalendarDate,
+): SummaryCounts {
+  checkToday(today);
+  return q.transaction(
+    (tx: Reader) => {
+      const state = stateFilter(tx, ownerId, filter);
+      const of = (condition: SQL) =>
+        tx.select({ n: count() }).from(invoice).where(and(state, condition)).get()?.n ?? 0;
+      return {
+        issued: of(and(notAdvance, issuedIn(filter)) as SQL),
+        unpaid: of(outstanding),
+        overdue: of(and(overdueCondition(today), notAdvance) as SQL),
+      };
+    },
+    { behavior: "deferred" },
+  );
 }
 
 export function incomeTotal(

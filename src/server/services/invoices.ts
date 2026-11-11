@@ -48,6 +48,7 @@ import {
 import { AmountOutOfRangeError } from "@/lib/money";
 import { calendarDateInPrague, isCalendarDate } from "@/lib/number-format";
 import { defaultIssueDate, LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
+import { amountDue } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -317,6 +318,22 @@ export function linesOf(q: Reader, ownerId: string, invoiceId: string): InvoiceL
 export function getInvoice(ownerId: string, id: string): InvoiceDetail | null {
   const row = readOwned(db, ownerId, id);
   if (!row) return null;
+  return detailOf(row);
+}
+
+// The number is unique per account, so the same account scope as the id lookup applies.
+export function getInvoiceByNumber(ownerId: string, number: string): InvoiceDetail | null {
+  const row = db
+    .select()
+    .from(invoice)
+    .where(scoped(ownerId).where(invoice, (t, { eq }) => eq(t.number, number)))
+    .get();
+  return row ? detailOf(row) : null;
+}
+
+function detailOf(row: Invoice): InvoiceDetail {
+  const ownerId = row.userId;
+  const id = row.id;
   return {
     ...row,
     lines: linesOf(db, ownerId, id),
@@ -836,6 +853,9 @@ export type InvoiceFilter = {
   type?: InvoiceType;
   tagId?: string;
   external?: boolean;
+  // Issued, sent or partly paid documents with something left to pay; advances stay out like in
+  // the reports.
+  unpaid?: boolean;
   sort?: InvoiceSort;
   dir?: SortDirection;
   page?: number;
@@ -1020,6 +1040,7 @@ function invoiceConditions(ownerId: string, filter: InvoiceFilter): SQL {
       filter.currency ? eq(t.currency, filter.currency) : undefined,
       filter.type ? eq(t.type, filter.type) : undefined,
       filter.external ? eq(t.external, true) : undefined,
+      filter.unpaid ? and(openCondition, ne(t.type, "advance")) : undefined,
       tagId
         ? exists(
             db
@@ -1085,6 +1106,33 @@ function invoiceRows(where: SQL, filter: InvoiceFilter): Page<InvoiceRow> {
 
 export function listInvoices(ownerId: string, filter: InvoiceFilter): Page<InvoiceRow> {
   return invoiceRows(invoiceConditions(ownerId, filter), filter);
+}
+
+export type UnpaidRow = InvoiceRow & { remainingMinor: number; daysOverdue: number };
+
+// What is still owed, oldest due date first, with the amount left and the days past due worked
+// out here so that a caller never does arithmetic on amounts or dates.
+export function listUnpaidInvoices(
+  ownerId: string,
+  filter: Pick<InvoiceFilter, "customerId" | "page" | "pageSize"> & { overdueOnly?: boolean },
+): Page<UnpaidRow> {
+  const { overdueOnly, ...rest } = filter;
+  const today = calendarDateInPrague(clock.now());
+  const page = listInvoices(ownerId, {
+    ...rest,
+    unpaid: true,
+    status: overdueOnly ? "overdue" : undefined,
+    sort: "dueDate",
+    dir: "asc",
+  });
+  return {
+    ...page,
+    rows: page.rows.map((row) => ({
+      ...row,
+      remainingMinor: amountDue(row),
+      daysOverdue: row.overdue && row.dueDate ? daysBetween(row.dueDate, today) : 0,
+    })),
+  };
 }
 
 export function invoiceSummary(ownerId: string, filter: InvoiceFilter): InvoiceSummaryRow[] {

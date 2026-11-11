@@ -111,6 +111,19 @@ describe("strukturní pravidla", () => {
     expect(offenders(dirs, NEXT_IMPORT)).toEqual([]);
   });
 
+  test("[ARC-001] mcp nástroje neimportují drizzle", () => {
+    const DB_IMPORT =
+      /(?:from\s+|import\s*\(\s*|import\s+)["'](?:drizzle-orm(?:\/[^"']*)?|better-sqlite3|(?:@\/server|\.\.?)(?:\/\.\.)*\/db(?:\/[^"']*)?)["']/;
+    expect(DB_IMPORT.test('import { eq } from "drizzle-orm";')).toBe(true);
+    expect(DB_IMPORT.test('import { db } from "../../db";')).toBe(true);
+    expect(DB_IMPORT.test('import { db } from "@/server/db/schema";')).toBe(true);
+    expect(DB_IMPORT.test('import { getInvoice } from "../../services/invoices";')).toBe(false);
+
+    const dir = join("src", "server", "mcp", "tools");
+    expect(sourceFiles(dir).length).toBeGreaterThanOrEqual(4);
+    expect(offenders([dir], DB_IMPORT)).toEqual([]);
+  });
+
   test("[UI-003] komponenty nemají natvrdo barvy", () => {
     for (const sample of [
       'className="bg-red-500"',

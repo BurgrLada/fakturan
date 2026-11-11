@@ -3210,6 +3210,128 @@ export const TEXTS = {
       invalidInput: (issues: string) => `Neplatné vstupy: ${issues}`,
       failed: "Akce se nepodařila kvůli chybě ve Fakturanu. Zkuste to prosím později.",
     },
+    // Read tools: what the model gets as text next to the structured output (MCP-020 to MCP-023).
+    read: {
+      dateFormat: "Datum zadejte ve tvaru RRRR-MM-DD.",
+      periodReversed: "Období nesmí končit dřív, než začíná.",
+      invoiceNotFound: "Faktura nenalezena.",
+      customerNotFound: "Zákazník nenalezen.",
+      invoiceSelector: "Zadejte právě jedno z id a number.",
+      noUnpaid: "Žádné neuhrazené faktury.",
+      noCustomers: "Žádný zákazník nevyhovuje hledání.",
+      noItems: "Žádná položka ceníku nevyhovuje hledání.",
+      queryRequired: "Zadejte hledaný text.",
+      noNumber: "bez čísla",
+      draft: "koncept",
+      overview: {
+        name: "get_overview",
+        title: "Přehled faktur",
+        description:
+          "Přehled za období (výchozí od 1. 1. letošního roku do dneška): vystaveno, uhrazeno, neuhrazeno a z toho po splatnosti, počty dokladů a rozdělení podle měny. Koncepty a storna se nepočítají. Součty jsou přepočtené na CZK, rozdělení podle měny je v původních měnách. Data ve tvaru RRRR-MM-DD.",
+        from: "Začátek období, RRRR-MM-DD (výchozí 1. 1. letošního roku).",
+        to: "Konec období včetně, RRRR-MM-DD (výchozí dnes).",
+        heading: (from: string, to: string) => `Přehled od ${from} do ${to} (součty v CZK):`,
+        invoiced: (amount: string, count: number) => `Vystaveno: ${amount} (${count} dokladů)`,
+        income: (amount: string) => `Uhrazeno: ${amount}`,
+        outstanding: (amount: string, count: number) => `Neuhrazeno: ${amount} (${count} dokladů)`,
+        overdue: (amount: string, count: number) =>
+          `z toho po splatnosti: ${amount} (${count} dokladů)`,
+        unconverted: (count: number) => `U ${count} dokladů chybí kurz, v přepočtu na CZK nejsou.`,
+        byCurrency: "Podle měny:",
+        currencyRow: (
+          currency: string,
+          invoiced: string,
+          income: string,
+          outstanding: string,
+          overdue: string,
+        ) =>
+          `${currency}: vystaveno ${invoiced}, uhrazeno ${income}, neuhrazeno ${outstanding}, po splatnosti ${overdue}`,
+      },
+      unpaid: {
+        name: "list_unpaid_invoices",
+        title: "Neuhrazené faktury",
+        description:
+          "Vystavené faktury, které nejsou uhrazené nebo jsou uhrazené jen částečně, od nejstarší splatnosti. U každé je číslo, odběratel, vystavení, splatnost, dní po splatnosti, zbývá uhradit a odkaz do webu. Stránky po 25.",
+        overdueOnly: "Jen faktury po splatnosti.",
+        customerId: "Jen faktury tohoto zákazníka (id z search_customers).",
+        page: "Číslo stránky od 1.",
+        heading: (count: number, page: number, hasNext: boolean) =>
+          `Neuhrazené faktury, stránka ${page}: ${count}${hasNext ? " (další stránka existuje)" : ""}`,
+        row: (
+          number: string,
+          customer: string,
+          dueDate: string,
+          remaining: string,
+          overdueDays: number,
+          link: string,
+        ) =>
+          `${number}, ${customer}, splatnost ${dueDate}${overdueDays > 0 ? ` (${overdueDays} dní po splatnosti)` : ""}, zbývá uhradit ${remaining}, ${link}`,
+      },
+      invoice: {
+        name: "get_invoice",
+        title: "Detail faktury",
+        description:
+          "Detail faktury podle id nebo čísla (zadejte právě jedno): hlavička, odběratel, položky, součty, stav, platby a odkaz do webu. Faktura jiného účtu se chová jako neexistující.",
+        id: "ID faktury.",
+        number: "Číslo faktury, například 2026001.",
+        header: (number: string, status: string, type: string) =>
+          `Faktura ${number}, ${type}, stav: ${status}`,
+        dates: (issue: string, due: string, taxable: string) =>
+          `Vystaveno ${issue}, splatnost ${due}, zdanitelné plnění ${taxable}`,
+        customer: "Odběratel",
+        lineLabel: (position: number) => `Položka ${position}`,
+        line: (label: string, quantity: string, unit: string, price: string, net: string) =>
+          `${label} (${quantity} ${unit} po ${price}, celkem ${net})`,
+        totals: (total: string, paid: string, remaining: string) =>
+          `Celkem ${total}, uhrazeno ${paid}, zbývá uhradit ${remaining}`,
+        payments: "Platby:",
+        payment: (date: string, amount: string, kind: string) => `${date}: ${amount} (${kind})`,
+        note: "Poznámka",
+        textBefore: "Text před položkami",
+        textAfter: "Text za položkami",
+        reference: "Reference",
+        orderRef: "Objednávka",
+        tags: "Štítky",
+        statuses: {
+          draft: "koncept",
+          issued: "vystavená",
+          sent: "odeslaná",
+          partially_paid: "částečně uhrazená",
+          paid: "uhrazená",
+          cancelled: "stornovaná",
+          credited: "dobropisovaná",
+        },
+        types: {
+          invoice: "faktura",
+          advance: "zálohová faktura",
+          credit_note: "dobropis",
+        },
+        kinds: { payment: "platba", refund: "vratka" },
+      },
+      customers: {
+        name: "search_customers",
+        title: "Hledání zákazníka",
+        description:
+          "Najde aktivní zákazníky podle názvu, IČO, DIČ nebo e-mailu (nejvýš 10). Slouží k zjištění id zákazníka, aby se nemuselo hádat.",
+        query: "Hledaný text, nejvýš 100 znaků.",
+        label: "Zákazník",
+        heading: (count: number) => `Nalezeno zákazníků: ${count}`,
+        row: (id: string, name: string, ico: string, link: string) =>
+          `${id}: ${name}${ico ? `, ${ico}` : ""}, ${link}`,
+        ico: "IČO",
+      },
+      catalog: {
+        name: "search_catalog",
+        title: "Hledání v ceníku",
+        description:
+          "Najde položky ceníku podle názvu nebo popisu (nejvýš 10), nejpoužívanější první. Slouží k zjištění id položky a její ceny.",
+        query: "Hledaný text, nejvýš 100 znaků.",
+        label: "Položka ceníku",
+        heading: (count: number) => `Nalezeno položek: ${count}`,
+        row: (id: string, name: string, price: string, unit: string, link: string) =>
+          `${id}: ${name}, ${price} / ${unit}, ${link}`,
+      },
+    },
   },
   demo: {
     locked: "V ukázce tohle nejde změnit",

@@ -13,6 +13,7 @@ import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable, MCP_SCOPE, mcpResource } from "./availability";
 import { mcpRateLimit } from "./rate-limit";
 import { runTool, TOOLS, type McpClaims } from "./tool";
+import "./tools";
 
 // The schema is advertised in tools/list, but the arguments reach runTool unchecked: the SDK would
 // otherwise validate them before the access checks and answer in English (MCP-012).
