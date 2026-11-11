@@ -11,6 +11,7 @@ import type { Auth } from "../auth";
 import type { Env } from "../env";
 import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable, MCP_SCOPE, mcpResource } from "./availability";
+import { mcpRateLimit } from "./rate-limit";
 import { runTool, TOOLS, type McpClaims } from "./tool";
 
 // The schema is advertised in tools/list, but the arguments reach runTool unchecked: the SDK would
@@ -50,6 +51,18 @@ export function buildMcpServer(claims: McpClaims, env: Env): McpServer {
 
 const ISSUER_PATH = "/api/auth";
 
+// MCP-032: a plain HTTP 429, with the JSON-RPC error body the auth challenges use too.
+function tooManyRequests(retryAfterSeconds: number): Response {
+  return Response.json(
+    {
+      jsonrpc: "2.0",
+      error: { code: -32000, message: TEXTS.mcp.tools.rateLimited(retryAfterSeconds) },
+      id: null,
+    },
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+  );
+}
+
 // POST /api/mcp. The token is checked by Better Auth (signature, issuer, audience, expiry); a request
 // without one gets 401 with the RFC 9728 challenge (MCP-034). The challenge also names
 // offline_access, so a client that takes its scope from it receives a refresh token (MCP-007).
@@ -58,10 +71,15 @@ export async function mcpEndpoint(auth: Auth, env: Env, request: Request): Promi
   const issuer = new URL(ISSUER_PATH, env.BETTER_AUTH_URL).href;
   const handler = requireMcpAuth(
     auth,
-    (req, claims) =>
-      createMcpHandler(() => buildMcpServer(claims as McpClaims, env), {
-        legacy: "stateless",
-      }).fetch(req),
+    (req, raw) => {
+      const claims = raw as McpClaims;
+      const clientId = claims.azp ?? claims.client_id;
+      const retryAfter = claims.sub && clientId ? mcpRateLimit(claims.sub, clientId) : null;
+      if (retryAfter !== null) return tooManyRequests(retryAfter);
+      return createMcpHandler(() => buildMcpServer(claims, env), { legacy: "stateless" }).fetch(
+        req,
+      );
+    },
     {
       resource: mcpResource(env),
       issuer,

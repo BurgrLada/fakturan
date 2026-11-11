@@ -18,7 +18,6 @@ import {
 import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable } from "./availability";
 import { McpToolError, toolErrorResult } from "./errors";
-import { enforceMcpRateLimit } from "./rate-limit";
 
 const T = TEXTS.mcp.tools;
 
@@ -58,6 +57,7 @@ export function defineTool<I, O>(def: ToolDef<I, O>): ToolDef<I, O> {
 export const TOOLS: ToolDef<any, any>[] = [];
 
 // The checks of MCP-012, in this order, on every call: nothing is trusted from the connection time.
+// The rate limit (MCP-032) is checked before this, per HTTP request in mcpEndpoint.
 function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): ToolContext {
   if (!isMcpAvailable(env)) throw new McpToolError(T.unavailable);
   const ownerId = claims.sub;
@@ -71,14 +71,13 @@ function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): Too
     throw new McpToolError(T.capabilityOff[def.capability]);
   }
   const clientName = mcpClientName(clientId);
-  const actor = {
+  const actor: Actor = {
     userId: ownerId,
     source: "mcp",
     clientId,
     clientName,
     requestId: randomUUID(),
-  } satisfies Actor;
-  enforceMcpRateLimit(actor);
+  };
   return {
     ownerId,
     actor,

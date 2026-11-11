@@ -1,12 +1,13 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createAuth } from "@/server/auth";
-import { rateLimit, user } from "@/server/db/schema";
+import { setClockForTests } from "@/server/clock";
+import { auditLog, rateLimit, user } from "@/server/db/schema";
 import { parseEnv, type Env } from "@/server/env";
 import { mcpEndpoint } from "@/server/mcp/server";
 import { defineTool, TOOLS } from "@/server/mcp/tool";
@@ -192,6 +193,38 @@ describe("endpoint /api/mcp", () => {
     expect(response.status, body).toBe(200);
     const { tools } = await rpcResult<{ tools: { name: string }[] }>(response);
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["echo", "echo_create"]));
+  });
+
+  test("[MCP-032] 61. volání za minutu", async () => {
+    const start = new Date("2026-11-11T10:00:00Z");
+    setClockForTests({ now: () => start });
+    try {
+      const first = await issueMcpToken(auth, browser);
+      const second = await issueMcpToken(auth, browser, "Jiný asistent");
+      // Every request counts, a refused tool call too: the limit sits in front of the tools.
+      setAccess({ read: false });
+      for (let i = 0; i < 60; i += 1) {
+        expect((await mcpEndpoint(auth, env, post(first.accessToken, toolsList))).status).toBe(200);
+      }
+      const limited = await mcpEndpoint(auth, env, post(first.accessToken, toolsList));
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("retry-after")).toBe("60");
+
+      // The limit is per user and client: another assistant of the same user still works.
+      expect((await mcpEndpoint(auth, env, post(second.accessToken, toolsList))).status).toBe(200);
+      const denials = db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.action, "rate_limit.exceeded"), eq(auditLog.ownerId, ownerId)))
+        .all();
+      expect(denials).toHaveLength(1);
+      expect(denials[0]).toMatchObject({ source: "mcp", clientId: first.clientId });
+
+      setClockForTests({ now: () => new Date(start.getTime() + 60_000) });
+      expect((await mcpEndpoint(auth, env, post(first.accessToken, toolsList))).status).toBe(200);
+    } finally {
+      setClockForTests(null);
+    }
   });
 
   test("[MCP-009] demo 404", async () => {

@@ -229,28 +229,6 @@ describe("obal nástrojů MCP", () => {
     expect(echoRun).not.toHaveBeenCalled();
   });
 
-  test("[MCP-032] 61. volání za minutu", async () => {
-    const start = new Date("2026-11-11T10:00:00Z");
-    setClockForTests({ now: () => start });
-    const first = await connect();
-    const second = await connect("Jiný asistent");
-    for (let i = 0; i < 60; i += 1) {
-      expect((await runTool(echo, first.claims, { text: "ahoj" }, env)).isError).toBeFalsy();
-    }
-    const limited = await runTool(echo, first.claims, { text: "ahoj" }, env);
-    expect(limited.isError).toBe(true);
-    expect(textOf(limited)).toBe(T.rateLimited(60));
-    expect(echoRun).toHaveBeenCalledTimes(60);
-
-    // The limit is per user and client: another assistant of the same user still works.
-    expect((await runTool(echo, second.claims, { text: "ahoj" }, env)).isError).toBeFalsy();
-    const denials = db.select().from(auditLog).where(eq(auditLog.action, "rate_limit.exceeded"));
-    expect(denials.all()).toHaveLength(1);
-
-    setClockForTests({ now: () => new Date(start.getTime() + 60_000) });
-    expect((await runTool(echo, first.claims, { text: "ahoj" }, env)).isError).toBeFalsy();
-  });
-
   test("[MCP-030] zápisová akce má v auditu source mcp a client_name", async () => {
     const { claims, clientId } = await connect("Claude Desktop");
     const result = await runTool(createCustomer, claims, { text: "Alfa s.r.o." }, env);
