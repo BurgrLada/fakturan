@@ -3,7 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { db, type Tx } from "../db";
-import { oauthAccessToken, oauthClient, oauthConsent, oauthRefreshToken } from "../db/schema";
+import { oauthAccessToken, oauthClient, oauthConsent, oauthRefreshToken, user } from "../db/schema";
 import { consentInfo } from "../mcp/consent-info";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
@@ -85,6 +85,19 @@ export function isMcpConnected(ownerId: string, clientId: string): boolean {
     .where(and(eq(oauthConsent.userId, ownerId), eq(oauthConsent.clientId, clientId)))
     .get();
   return row !== undefined;
+}
+
+// An access token stays valid after its account is deactivated or deleted, so the account is read
+// again on every tool call (MCP-012).
+export function isMcpAccountActive(ownerId: string): boolean {
+  const row = db.select({ banned: user.banned }).from(user).where(eq(user.id, ownerId)).get();
+  return row !== undefined && !row.banned;
+}
+
+// The client's self-declared name as the history shows it, for the audit of its writes (MCP-030).
+export function mcpClientName(clientId: string): string {
+  const row = findClient(db, clientId);
+  return row ? describe(row).name : TEXTS.mcp.consent.unknownClient;
 }
 
 function findClient(tx: Pick<Tx, "select">, clientId: string): ClientRow | undefined {

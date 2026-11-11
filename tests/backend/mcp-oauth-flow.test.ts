@@ -1,4 +1,3 @@
-import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,15 +10,25 @@ import { auditLog, instanceMeta, oauthRefreshToken, rateLimit, user } from "@/se
 import { parseEnv, type Env } from "@/server/env";
 import { consentPage, consentRequest } from "@/server/mcp/consent-info";
 import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
-import { Browser, fakeGithub, type Auth } from "../helpers/auth-browser";
+import { BASE, Browser, fakeGithub } from "../helpers/auth-browser";
+import {
+  answerConsent,
+  authorize,
+  codeParams,
+  exchangeCode,
+  githubDuringAuthorization,
+  oauthQuery,
+  REDIRECT_URI,
+  refresh,
+  registerClient,
+  RESOURCE,
+  signInDuringAuthorization,
+  tokenResponse,
+} from "../helpers/mcp-oauth";
 import { createTestDb } from "../helpers/db";
 
 const db = createTestDb();
 
-const BASE = "http://localhost:3000";
-const ISSUER = `${BASE}/api/auth`;
-const RESOURCE = `${BASE}/api/mcp`;
-const REDIRECT_URI = "http://127.0.0.1:33418/callback";
 const OWNER = "majitel@example.cz";
 const dataDir = mkdtempSync(join(tmpdir(), "fakturan-mcp-flow-"));
 
@@ -32,138 +41,6 @@ function testEnv(extra: Record<string, string> = {}): Env {
     GITHUB_CLIENT_ID: "gh-id",
     GITHUB_CLIENT_SECRET: "gh-secret",
     ...extra,
-  });
-}
-
-// The steps of an assistant connecting through OAuth. Kept free of test state so they can move to
-// tests/helpers/mcp-oauth.ts (Task 5).
-
-async function registerClient(auth: Auth, redirectUri = REDIRECT_URI): Promise<string> {
-  const response = await auth.handler(
-    new Request(`${ISSUER}/oauth2/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: "Claude Code",
-        redirect_uris: [redirectUri],
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-      }),
-    }),
-  );
-  expect(response.status).toBeLessThan(300);
-  return ((await response.json()) as { client_id: string }).client_id;
-}
-
-function pkce() {
-  const verifier = randomBytes(32).toString("base64url");
-  return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
-}
-
-type Authorization = { clientId: string; verifier: string; redirectUri: string };
-
-// Starts /oauth2/authorize and returns where the provider sent the browser.
-async function authorize(browser: Browser, clientId: string, redirectUri = REDIRECT_URI) {
-  const { verifier, challenge } = pkce();
-  const query = new URLSearchParams({
-    response_type: "code",
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    scope: "fakturan offline_access",
-    state: "stav-1",
-    resource: RESOURCE,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-  });
-  const response = await browser.request(`/oauth2/authorize?${query}`);
-  expect(response.status).toBe(302);
-  const location = new URL(response.headers.get("location")!, BASE);
-  return { location, flow: { clientId, verifier, redirectUri } satisfies Authorization };
-}
-
-// What the login form sends: the signed query of the page it is on.
-function oauthQuery(page: URL): string {
-  return page.search.slice(1);
-}
-
-async function signInDuringAuthorization(browser: Browser, loginPage: URL, email: string) {
-  const response = await browser.request("/sign-in/email", {
-    body: { email, password: "správné-kůň-baterie-sponka", oauth_query: oauthQuery(loginPage) },
-  });
-  expect(response.status).toBe(200);
-  const body = (await response.json()) as { redirect?: boolean; url?: string };
-  return body.redirect && body.url ? new URL(body.url, BASE) : null;
-}
-
-// A social login as the browser runs it: the button posts with the signed query, the provider
-// sends the browser back to the callback, which is a navigation.
-async function githubDuringAuthorization(browser: Browser, loginPage: URL) {
-  const start = await browser.request("/sign-in/social", {
-    body: {
-      provider: "github",
-      callbackURL: "/",
-      errorCallbackURL: "/prihlaseni",
-      oauth_query: oauthQuery(loginPage),
-    },
-  });
-  const { url } = (await start.json()) as { url: string };
-  const state = new URL(url).searchParams.get("state")!;
-  const callback = await browser.request(
-    `/callback/github?code=kod&state=${encodeURIComponent(state)}`,
-    { headers: { "sec-fetch-mode": "navigate", accept: "text/html" } },
-  );
-  expect(callback.status).toBe(302);
-  return new URL(callback.headers.get("location")!, BASE);
-}
-
-async function answerConsent(browser: Browser, consentPage: URL, accept: boolean) {
-  const response = await browser.request("/oauth2/consent", {
-    body: { accept, oauth_query: oauthQuery(consentPage) },
-  });
-  expect(response.status).toBe(200);
-  return new URL(((await response.json()) as { url: string }).url);
-}
-
-function tokenResponse(auth: Auth, params: Record<string, string>) {
-  return auth.handler(
-    new Request(`${ISSUER}/oauth2/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ ...params, resource: RESOURCE }),
-    }),
-  );
-}
-
-async function tokenRequest(auth: Auth, params: Record<string, string>) {
-  const response = await tokenResponse(auth, params);
-  expect(response.status).toBe(200);
-  return (await response.json()) as {
-    access_token: string;
-    refresh_token?: string;
-    expires_in: number;
-  };
-}
-
-function codeParams(flow: Authorization, code: string) {
-  return {
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: flow.redirectUri,
-    client_id: flow.clientId,
-    code_verifier: flow.verifier,
-  };
-}
-
-function exchangeCode(auth: Auth, flow: Authorization, code: string) {
-  return tokenRequest(auth, codeParams(flow, code));
-}
-
-function refresh(auth: Auth, clientId: string, refreshToken: string) {
-  return tokenRequest(auth, {
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    client_id: clientId,
   });
 }
 

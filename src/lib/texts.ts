@@ -3189,6 +3189,27 @@ export const TEXTS = {
         forbidden: "Pro správu asistentů se přihlaste.",
       },
     },
+    // Tool results are read by the model and shown to the user (MCP-012).
+    tools: {
+      unavailable: "Přístup asistentů na této instanci Fakturanu není dostupný.",
+      noAccount: "Účet, ke kterému je asistent připojený, neexistuje nebo je deaktivovaný.",
+      disabled:
+        "Přístup asistentů je v Nastavení › Asistenti vypnutý. Zapněte ho tam a akci zopakujte.",
+      notConnected:
+        "Asistent už není s Fakturanem propojený. Připojte ho znovu a povolte mu přístup.",
+      capabilityOff: {
+        read: "Čtení dat je v Nastavení › Asistenti vypnuté.",
+        create: "Zakládání faktur je v Nastavení › Asistenti vypnuté.",
+        edit: "Upravování konceptů je v Nastavení › Asistenti vypnuté.",
+        issue: "Vystavování faktur je v Nastavení › Asistenti vypnuté.",
+        send: "Odesílání faktur je v Nastavení › Asistenti vypnuté.",
+      },
+      offSuffix: " (v Nastavení › Asistenti vypnuto)",
+      rateLimited: (seconds: number) =>
+        `Příliš mnoho volání najednou. Zkuste to znovu za ${seconds} s.`,
+      invalidInput: (issues: string) => `Neplatné vstupy: ${issues}`,
+      failed: "Akce se nepodařila kvůli chybě ve Fakturanu. Zkuste to prosím později.",
+    },
   },
   demo: {
     locked: "V ukázce tohle nejde změnit",
