@@ -3088,6 +3088,28 @@ export const TEXTS = {
     other: "Jiný uživatel",
     nobody: "Systém nebo nepřihlášený",
   },
+  mcp: {
+    consent: {
+      pageTitle: "Přístup asistenta | Fakturan",
+      title: (name: string) => `${name} chce přístup k vašemu Fakturanu`,
+      unknownClient: "Neznámá aplikace",
+      localHost: "aplikace na tomto počítači",
+      hostLabel: "Odkud",
+      nameIsClaimed: "Název uvádí aplikace sama.",
+      capabilitiesIntro: "Asistent bude smět:",
+      capabilities: { read: "Číst faktury, zákazníky, ceník a přehledy" },
+      nothingAllowed:
+        "Asistent se připojí, ale zatím nic nesmí. Schopnosti zapnete v Nastavení › Asistenti.",
+      settingsHint: "Co asistent smí, změníte kdykoli v",
+      settingsLink: "Nastavení › Asistenti",
+      allow: "Povolit",
+      deny: "Zamítnout",
+      failed: "Odpověď se nepodařilo odeslat, zkuste to prosím znovu.",
+      invalidTitle: "Přístup asistenta",
+      invalid:
+        "Žádost o přístup neplatí nebo vypršela. Vraťte se do asistenta a připojte Fakturan znovu.",
+    },
+  },
   demo: {
     locked: "V ukázce tohle nejde změnit",
     login: "Ukázka Fakturanu",

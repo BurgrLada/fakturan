@@ -15,11 +15,15 @@ export class Browser {
     return [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
   }
 
-  async request(path: string, init: { method?: string; body?: unknown; ua?: string } = {}) {
+  async request(
+    path: string,
+    init: { method?: string; body?: unknown; ua?: string; headers?: Record<string, string> } = {},
+  ) {
     const headers: Record<string, string> = {
       origin: BASE,
       cookie: this.cookieHeader(),
       "user-agent": init.ua ?? "vitest",
+      ...init.headers,
     };
     if (init.body !== undefined) headers["content-type"] = "application/json";
     const res = await this.auth.handler(

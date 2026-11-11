@@ -18,15 +18,21 @@ export function LoginForm() {
     const form = new FormData(event.currentTarget);
     setPending(true);
     setError(null);
-    const { error: failure } = await authClient.signIn.email({
+    const { data, error: failure } = await authClient.signIn.email({
       email: String(form.get("email")),
       password: String(form.get("password")),
     });
-    setPending(false);
     if (failure) {
+      setPending(false);
       setError(authErrorMessage(failure.code));
       return;
     }
+    // An assistant's authorization continues on the consent page (MCP-003).
+    if (data.redirect && data.url) {
+      window.location.assign(data.url);
+      return;
+    }
+    setPending(false);
     router.push("/");
     router.refresh();
   }

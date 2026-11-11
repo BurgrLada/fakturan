@@ -12,3 +12,9 @@ Co pluginy Better Auth (`@better-auth/mcp`, `@better-auth/oauth-provider`, `@bet
 - **`/.well-known/openid-configuration` se nepublikuje.** Mezi rozsahy chybí `openid`, takže server není poskytovatel OIDC a plugin tento dokument nevydává. Klienti MCP hledají nejdřív `oauth-authorization-server`.
 - **Limit registrace.** Vestavěný limiter Better Auth je v instanci vypnutý (`rateLimit.enabled: false`), takže výchozí limity pluginu neplatí. Registraci `/oauth2/register` hlídá `oauthRegisterIp` (10 za hodinu podle IP) ve stávajícím `rate-limits.ts`.
 - **CIMD je zapojený, ale neověřený.** `cimd({ fetchClientMetadataResource, metadataProfile: "mcp-2026-07-28" })` používá transport z `@better-auth/cimd/node`. Ten odmítá adresy z privátních rozsahů a zpětnou smyčku, takže lokálně ani offline ho otestovat nejde. Testy pokrývají jen DCR.
+
+## Task 2
+
+- **Pokračování přihlášení zajišťuje klientský plugin.** `authClient` má `oauthProviderClient()` z `@better-auth/oauth-provider/client`. Na stránce s podepsaným dotazem (`sig`) přidá ke každému POST pole `oauth_query`. Server po vzniku relace sám spustí `/oauth2/authorize` a vrátí `{ redirect: true, url }` na souhlas. Přihlašovací formulář pak místo `router.push("/")` přejde na `url`. U sociálního přihlášení plugin uloží dotaz do stavu OAuth a návrat z poskytovatele přesměruje rovnou na souhlas. Stránku `/prihlaseni` nebylo třeba měnit, jen `login-form.tsx` a `auth-client.ts`.
+- **Souhlasová stránka bez relace nepoužívá `requireSession`.** Ta by přesměrovala na `/prihlaseni` bez dotazu a rozpracovaná autorizace by se ztratila. Stránka proto při platném podpisu přesměruje na `/prihlaseni?<podepsaný dotaz>` a po přihlášení se vrátí zpět, jinak na prosté `/prihlaseni`.
+- **Odmítnuté sociální přihlášení ukončí autorizaci.** Cizí e-mail skončí na `SOCIAL_REJECTED_PATH` (`/prihlaseni?chyba=pozvanka`) stejně jako ve webu (MCP-004). Podepsaný dotaz se tím ztratí a asistent musí připojení spustit znovu.
