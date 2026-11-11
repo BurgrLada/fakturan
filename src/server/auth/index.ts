@@ -1,9 +1,12 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { cimd } from "@better-auth/cimd";
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
+import { mcp } from "@better-auth/mcp";
 import { betterAuth, type GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
-import { admin } from "better-auth/plugins";
+import { admin, jwt } from "better-auth/plugins";
 import { TEXTS } from "@/lib/texts";
 import { emailHash } from "../audit/email-hash";
 import type { AuditAction } from "../audit/record";
@@ -11,6 +14,7 @@ import { db } from "../db";
 import * as schema from "../db/schema";
 import { env as defaultEnv, type Env } from "../env";
 import { isInstanceMailConfigured, sendInstanceMail } from "../mail/instance";
+import { isMcpAvailable, MCP_SCOPE, mcpResource } from "../mcp/availability";
 import { mutate } from "../services/mutation";
 import {
   auditAuthEndpoint,
@@ -57,6 +61,40 @@ function inviteRequired(): APIError {
     code: AUTH_ERROR_INVITE_REQUIRED,
     message: "Přístup je jen na pozvánku",
   });
+}
+
+// The jwt plugin's own session token is not needed: MCP access tokens come from /oauth2/token.
+const JWT_PATHS = ["/token"];
+
+const OAUTH_SCOPES = [MCP_SCOPE, "offline_access"];
+
+// Without these plugins every OAuth and metadata path is a 404 (MCP-009, MCP-038).
+// Path review: the /admin/oauth2/* endpoints are SERVER_ONLY, so ADMIN_PATHS needs nothing more,
+// and DEMO_LOCKED_PATHS needs nothing because the demo never gets these plugins.
+function mcpPlugins(env: Env) {
+  if (!isMcpAvailable(env)) return [];
+  return [
+    jwt(),
+    mcp({
+      loginPage: "/prihlaseni",
+      consentPage: "/pristup-asistenta",
+      resource: mcpResource(env),
+      // offline_access is what makes the provider issue a rotating refresh token (MCP-007).
+      scopes: OAUTH_SCOPES,
+      accessTokenExpiresIn: 900,
+      // No client_credentials: every token must act for a signed-in user.
+      grantTypes: ["authorization_code", "refresh_token"],
+      allowDynamicClientRegistration: true,
+      allowUnauthenticatedClientRegistration: true,
+      clientRegistrationRequirePKCE: true,
+      clientRegistrationDefaultScopes: OAUTH_SCOPES,
+      clientRegistrationAllowedScopes: OAUTH_SCOPES,
+      // Claude Code registers an http://127.0.0.1 callback without application_type, which the
+      // default "web" type would refuse.
+      clientRegistrationDefaultApplicationType: "infer",
+    }),
+    cimd({ fetchClientMetadataResource, metadataProfile: "mcp-2026-07-28" }),
+  ];
 }
 
 // The demo login is shared and public: nobody may change it or end other visitors' sessions (OPS-007).
@@ -203,7 +241,7 @@ export function createAuth(env: Env) {
     secret: env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(db, { provider: "sqlite", schema }),
     telemetry: { enabled: false },
-    disabledPaths: ADMIN_PATHS,
+    disabledPaths: [...ADMIN_PATHS, ...JWT_PATHS],
     rateLimit: { enabled: false },
     advanced: {
       useSecureCookies: env.BETTER_AUTH_URL.startsWith("https://"),
@@ -214,7 +252,7 @@ export function createAuth(env: Env) {
     trustedOrigins: enabledProviders(env).includes("apple") ? ["https://appleid.apple.com"] : [],
     onAPIError: { errorURL: "/prihlaseni" },
     socialProviders: socialProviders(env),
-    plugins: [admin({ defaultRole: "user", adminRoles: ["admin"] })],
+    plugins: [admin({ defaultRole: "user", adminRoles: ["admin"] }), ...mcpPlugins(env)],
     account: { encryptOAuthTokens: true },
     session: { expiresIn: 30 * DAY_SECONDS, updateAge: DAY_SECONDS },
     user: {

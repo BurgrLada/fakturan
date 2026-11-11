@@ -56,8 +56,15 @@ describe("registr zálohy", () => {
 
   test("[EXP-006] jen auditní tabulky mají vlastníka mimo registr a audit jde zvlášť", () => {
     const tables = [...BACKUP_TABLES.map((entry) => entry.table), ...USER_OWNED_TABLES];
+    // OAuth tajemství, MCP-042: clients, tokens and consents never go into a backup.
+    const oauth = ["oauth_client", "oauth_access_token", "oauth_refresh_token", "oauth_consent"];
     expect(
-      findUnregisteredOwnedTables(schema, tables, ["audit_log", "audit_purge", "invitation"]),
+      findUnregisteredOwnedTables(schema, tables, [
+        "audit_log",
+        "audit_purge",
+        "invitation",
+        ...oauth,
+      ]),
     ).toEqual([]);
     expect(registered).not.toContain("audit_log");
   });

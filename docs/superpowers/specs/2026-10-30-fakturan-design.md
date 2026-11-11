@@ -602,6 +602,7 @@ Pravidla:
 | `DEMO_MODE` | ne | Režim ukázky, OPS-007 |
 | `DEMO_EMAIL` | s `DEMO_MODE` | E-mail účtu ukázky, ukáže se na přihlášení |
 | `DEMO_PASSWORD` | s `DEMO_MODE` | Heslo účtu ukázky, ukáže se na přihlášení |
+| `MCP_ENABLED` | ne | Přístup AI asistentů přes MCP pro celou instanci, výchozí `true`; `false` vypne endpoint, metadata i autorizaci (MCP-038) |
 
 ## 20. Design a UI (UI)
 

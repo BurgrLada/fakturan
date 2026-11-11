@@ -80,6 +80,15 @@ describe("env", () => {
     );
     expect(() => parseEnv({ ...base, VIES_BASE_URL: "vies" })).toThrow(/VIES_BASE_URL/);
   });
+
+  test("[MCP-038] MCP_ENABLED je volitelný boolean s výchozí hodnotou true", () => {
+    expect(parseEnv(base).MCP_ENABLED).toBe(true);
+    expect(parseEnv({ ...base, MCP_ENABLED: "" }).MCP_ENABLED).toBe(true);
+    expect(parseEnv({ ...base, MCP_ENABLED: "false" }).MCP_ENABLED).toBe(false);
+    expect(parseEnv({ ...base, MCP_ENABLED: "0" }).MCP_ENABLED).toBe(false);
+    expect(parseEnv({ ...base, MCP_ENABLED: "1" }).MCP_ENABLED).toBe(true);
+    expect(() => parseEnv({ ...base, MCP_ENABLED: "ano" })).toThrow(/MCP_ENABLED/);
+  });
 });
 
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
