@@ -63,7 +63,9 @@ function inviteRequired(): APIError {
   });
 }
 
-// The jwt plugin's own session token is not needed: MCP access tokens come from /oauth2/token.
+// The jwt plugin only signs MCP access tokens (from /oauth2/token) and serves /jwks. Its session
+// JWTs (the /token endpoint and the set-auth-jwt header on /get-session) are turned off, so nothing
+// else is signed with the keys a resource server trusts.
 const JWT_PATHS = ["/token"];
 
 const OAUTH_SCOPES = [MCP_SCOPE, "offline_access"];
@@ -74,7 +76,7 @@ const OAUTH_SCOPES = [MCP_SCOPE, "offline_access"];
 function mcpPlugins(env: Env) {
   if (!isMcpAvailable(env)) return [];
   return [
-    jwt(),
+    jwt({ disableSettingJwtHeader: true }),
     mcp({
       loginPage: "/prihlaseni",
       consentPage: "/pristup-asistenta",

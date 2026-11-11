@@ -224,10 +224,14 @@ describe("autorizační server MCP", () => {
     expect(responses.map((response) => response.status)).toEqual([404, 404, 404, 404, 404, 404]);
   });
 
-  test("[MCP-007] autorizace s PKCE vydá JWT s audience /api/mcp na 15 minut a obnovovací token", async () => {
+  test("[MCP-007] autorizace s PKCE vydá JWT s audience /api/mcp na 15 minut a obnovovací token, relace JWT nevydá", async () => {
     const auth = createAuth(testEnv());
     const browser = new Browser(auth);
     await browser.signUp("majitel@example.cz");
+    // The session itself carries no JWT signed with the keys a resource server trusts.
+    const session = await browser.request("/get-session");
+    expect((await session.json())?.user?.email).toBe("majitel@example.cz");
+    expect(session.headers.get("set-auth-jwt")).toBeNull();
     const redirectUri = "http://127.0.0.1:33418/callback";
     const { client_id: clientId } = await (await register(auth)).json();
     const verifier = randomBytes(32).toString("base64url");
