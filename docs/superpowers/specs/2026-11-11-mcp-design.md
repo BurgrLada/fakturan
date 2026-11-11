@@ -125,6 +125,7 @@ Všechno v tomto oddílu je **[volba]** autora návrhu.
 - **MCP-044** **Souhlasová stránka:**
   - Zobrazí název klienta a hostitele z `redirect_uri`. Pro `localhost` a `127.0.0.1` místo hostitele ukáže „aplikace na tomto počítači“. Pro dokument CIMD ukáže hostitele dokumentu.
   - Když je hlavní vypínač zapnutý, ale všechny schopnosti vypnuté, souhlas jde udělit. Stránka to řekne větou „Asistent se připojí, ale zatím nic nesmí. Schopnosti zapnete v Nastavení › Asistenti.“
+- **MCP-045** **Lokální provoz.** Na `http://localhost` a `http://127.0.0.1` funguje celý tok (metadata, registrace, přihlášení, souhlas, nástroje) bez HTTPS. Vydavatel, audience i metadata se odvozují z `BETTER_AUTH_URL`. Lokální klienti (Claude Code, MCP Inspector) se připojí přímo. Webové asistenty (Claude.ai, ChatGPT) volají ze svého cloudu, takže potřebují veřejnou HTTPS adresu, tedy nasazenou instanci nebo tunel s `BETTER_AUTH_URL` nastaveným na veřejnou adresu. README popíše oba případy. Vývojové ověření probíhá proti lokální instanci (uživatel schválil).
 
 ## 5. Architektura (návrh pro implementera)
 
