@@ -17,6 +17,7 @@ import {
 import { parseEnv, type Env } from "@/server/env";
 import { isMcpAvailable, MCP_SCOPE, mcpResource } from "@/server/mcp/availability";
 import { oauthMetadata } from "@/server/mcp/well-known";
+import { saveMcpSettings } from "@/server/services/mcp-settings";
 import { Browser } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
 
@@ -232,6 +233,12 @@ describe("autorizační server MCP", () => {
     const session = await browser.request("/get-session");
     expect((await session.json())?.user?.email).toBe("majitel@example.cz");
     expect(session.headers.get("set-auth-jwt")).toBeNull();
+    // Assistant access is off by default (MCP-010).
+    const owner = (await browser.sessionUser())!.id;
+    saveMcpSettings(
+      { userId: owner, source: "web" },
+      { enabled: true, read: true, create: false, revision: 0 },
+    );
     const redirectUri = "http://127.0.0.1:33418/callback";
     const { client_id: clientId } = await (await register(auth)).json();
     const verifier = randomBytes(32).toString("base64url");

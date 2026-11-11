@@ -1,10 +1,12 @@
 import "server-only";
 import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import { eq } from "drizzle-orm";
+import type { McpCapability } from "@/lib/mcp-settings";
 import { TEXTS } from "@/lib/texts";
 import type { Db } from "../db";
 import { oauthClient } from "../db/schema";
 import type { Env } from "../env";
+import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
 
 const C = TEXTS.mcp.consent;
 const NAME_LIMIT = 80; // název nejvýš 80 znaků (MCP-005)
@@ -64,4 +66,24 @@ export async function consentRequest(
     clientId,
     oauthQuery,
   };
+}
+
+export type ConsentPage =
+  | { kind: "invalid" }
+  | { kind: "disabled" }
+  | { kind: "consent"; request: ConsentRequest; capabilities: McpCapability[] };
+
+// What /pristup-asistenta shows a signed-in user. With access off the authorization ends here with
+// an explanation and no consent (MCP-006); the provider sends the browser here for that too.
+export async function consentPage(
+  db: Db,
+  env: Env,
+  oauthQuery: string,
+  userId: string,
+): Promise<ConsentPage> {
+  const request = await consentRequest(db, env, oauthQuery);
+  if (!request) return { kind: "invalid" };
+  const settings = getMcpSettings(userId);
+  if (!settings.enabled) return { kind: "disabled" };
+  return { kind: "consent", request, capabilities: allowedCapabilities(settings) };
 }

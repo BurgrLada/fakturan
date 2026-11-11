@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { auditActionLabel } from "@/lib/audit-labels";
+import { auditActionLabel, auditSourceLabel } from "@/lib/audit-labels";
 import { diffAudit } from "@/lib/audit-diff";
 import { formatDateTime } from "@/lib/format";
 import { TEXTS } from "@/lib/texts";
@@ -108,7 +108,7 @@ export function AuditTable({
               })()}
             </TableCell>
             <TableCell>{actorText(row, ownerId)}</TableCell>
-            <TableCell>{TEXTS.history.sources[row.source]}</TableCell>
+            <TableCell className="break-words whitespace-normal">{auditSourceLabel(row)}</TableCell>
             <TableCell className="whitespace-normal">
               <Detail row={row} />
             </TableCell>

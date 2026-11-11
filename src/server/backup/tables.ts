@@ -23,6 +23,7 @@ import {
   mailLook,
   mailSettings,
   mappingPreset,
+  mcpSettings,
   notification,
   numberSeries,
   numberSeriesCounter,
@@ -653,6 +654,23 @@ export const BACKUP_TABLES: BackupTable[] = [
     table: limitMailSent,
     since: 2,
     columns: { id: "id", user_id: "owner", year: C, threshold: C, created_at: C },
+  },
+  {
+    name: "mcp_settings",
+    table: mcpSettings,
+    since: 2,
+    // Restored with access switched off (MCP-042); OAuth clients, tokens and consents never go in.
+    columns: {
+      user_id: "owner",
+      enabled: C,
+      can_read: C,
+      can_create: C,
+      can_edit: C,
+      can_issue: C,
+      can_send: C,
+      revision: C,
+      updated_at: C,
+    },
   },
   {
     name: "email_template",

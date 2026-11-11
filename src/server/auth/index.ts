@@ -14,6 +14,7 @@ import { db } from "../db";
 import * as schema from "../db/schema";
 import { env as defaultEnv, type Env } from "../env";
 import { isInstanceMailConfigured, sendInstanceMail } from "../mail/instance";
+import { auditMcpConsent, guardMcpAccess, mcpPostLogin } from "../mcp/access-guard";
 import { isMcpAvailable, MCP_SCOPE, mcpResource } from "../mcp/availability";
 import { mutate } from "../services/mutation";
 import {
@@ -94,6 +95,8 @@ function mcpPlugins(env: Env) {
       // Claude Code registers an http://127.0.0.1 callback without application_type, which the
       // default "web" type would refuse.
       clientRegistrationDefaultApplicationType: "infer",
+      // With assistant access off, authorization ends on the consent page's explanation (MCP-006).
+      postLogin: mcpPostLogin,
     }),
     cimd({ fetchClientMetadataResource, metadataProfile: "mcp-2026-07-28" }),
   ];
@@ -357,6 +360,7 @@ export function createAuth(env: Env) {
         linkRequestHeaders(ctx.headers, ctx.request?.headers);
         const body = (ctx.body ?? {}) as Record<string, unknown>;
         enforceAuthRateLimit(ctx, env);
+        await guardMcpAccess(ctx);
         if (env.DEMO_MODE && DEMO_LOCKED_PATHS.includes(ctx.path)) {
           const current = await getSessionFromCtx(ctx, { disableRefresh: true });
           if (sameAddress(current?.user.email, env.DEMO_EMAIL)) throw demoLocked();
@@ -404,7 +408,10 @@ export function createAuth(env: Env) {
           return { context: { body: { ...body, revokeOtherSessions: true } } };
         }
       }),
-      after: createAuthMiddleware(async (ctx) => auditAuthEndpoint(ctx, env)),
+      after: createAuthMiddleware(async (ctx) => {
+        await auditMcpConsent(ctx, env);
+        await auditAuthEndpoint(ctx, env);
+      }),
     },
   });
 }

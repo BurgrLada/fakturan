@@ -179,6 +179,9 @@ export const oauthConsent = sqliteTable(
     scopes: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
+    // Ours, not the plugin's: when the assistant last called a tool, written at most once a minute
+    // and outside the audit (MCP-041). The plugin updates a consent in place, so it survives.
+    lastUsedAt: timestamp("last_used_at"),
   },
   (t) => [
     index("oauth_consent_client_idx").on(t.clientId),

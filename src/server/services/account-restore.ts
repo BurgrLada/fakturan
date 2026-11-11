@@ -32,6 +32,7 @@ import {
   exportJob,
   file,
   job,
+  mcpSettings,
   preferences,
   unit,
   type Job,
@@ -56,8 +57,15 @@ const INSERT_CHUNK = 50;
 // A chunk of 50 rows near the line cap would be 100 MiB of text before its objects; bytes close it
 // first.
 const INSERT_BYTES = 4 * 1024 * 1024;
-// Created by the app on its own for any account; a restore replaces them (R-32).
-const AUTOMATIC_TABLES = new Set(["preferences", "unit", "dashboard", "dashboard_widget"]);
+// Created by the app on its own for any account, or settings rather than data; a restore replaces
+// them (R-32).
+const AUTOMATIC_TABLES = new Set([
+  "preferences",
+  "unit",
+  "dashboard",
+  "dashboard_widget",
+  "mcp_settings",
+]);
 const FINISHED_BATCH = new Set(["done", "undone", "failed"]);
 
 type Owned = SQLiteTable & { userId: AnyColumn };
@@ -231,6 +239,8 @@ function silenced(table: string, row: ArchiveRow): ArchiveRow {
     row.send_confirmed_at = null;
     if (row.status === "active") row.status = "paused";
   } else if (table === "mail_settings") row.verified_at = null;
+  // An assistant must not get in through a restored switch; the capabilities come back (MCP-042).
+  else if (table === "mcp_settings") row.enabled = false;
   else if (table === "email_log" && (row.status === "queued" || row.status === "sending")) {
     row.status = "cancelled";
   } else if (table === "import_batch" && !FINISHED_BATCH.has(row.status as string)) {
@@ -413,6 +423,7 @@ function commit(run: Run, prepared: Prepared): void {
     tx.delete(dashboard).where(scoped(ownerId).where(dashboard)).run();
     tx.delete(preferences).where(scoped(ownerId).where(preferences)).run();
     tx.delete(unit).where(scoped(ownerId).where(unit)).run();
+    tx.delete(mcpSettings).where(scoped(ownerId).where(mcpSettings)).run();
     let total = 0;
     for (const entry of BACKUP_TABLES) total += insertSpooled(tx, entry, ownerId, run, prepared);
     const now = clock.now();

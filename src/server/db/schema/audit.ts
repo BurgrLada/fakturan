@@ -9,7 +9,7 @@ export const auditLog = sqliteTable(
     at: integer({ mode: "timestamp_ms" }).notNull(),
     actorId: text("actor_id"),
     ownerId: text("owner_id"),
-    source: text({ enum: ["web", "scheduler", "import", "system"] }).notNull(),
+    source: text({ enum: ["web", "scheduler", "import", "system", "mcp"] }).notNull(),
     scope: text({ enum: ["user", "instance"] }).notNull(),
     action: text().notNull(),
     entity: text().notNull(),
@@ -19,6 +19,9 @@ export const auditLog = sqliteTable(
     ip: text(),
     userAgent: text("user_agent"),
     requestId: text("request_id"),
+    // The assistant behind a change made through MCP (MCP-030); the name is the client's own claim.
+    clientId: text("client_id"),
+    clientName: text("client_name"),
   },
   (t) => [
     index("audit_log_owner_at_idx").on(t.ownerId, t.at),

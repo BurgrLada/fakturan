@@ -58,6 +58,8 @@ export function recordAudit(tx: Tx, entry: AuditEntry): void {
       ip: actor.ip,
       userAgent: actor.userAgent,
       requestId: actor.requestId,
+      clientId: actor.clientId,
+      clientName: actor.clientName,
     })
     .run();
 }

@@ -3,7 +3,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 export type Actor = {
   userId: string | null;
-  source: "web" | "scheduler" | "import" | "system";
+  source: "web" | "scheduler" | "import" | "system" | "mcp";
+  // With source "mcp": the OAuth client acting for the user and its self-declared name (MCP-030).
+  clientId?: string;
+  clientName?: string;
   ip?: string;
   userAgent?: string;
   requestId?: string;

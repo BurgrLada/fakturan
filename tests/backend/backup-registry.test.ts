@@ -155,6 +155,7 @@ describe("registr zálohy", () => {
     expect(added.map((entry) => [entry.name, entry.since])).toEqual([
       ["mail_look", 2],
       ["limit_mail_sent", 2],
+      ["mcp_settings", 2],
     ]);
     for (const entry of BACKUP_TABLES.filter((item) => v1.includes(item.name))) {
       expect(entry.since ?? 1).toBe(1);
@@ -177,6 +178,7 @@ describe("registr zálohy", () => {
     }
     delete v1.tables.limit_mail_sent;
     delete v1.tables.mail_look;
+    delete v1.tables.mcp_settings;
     expect(fixture(1)).toEqual({ ...v1, v: 1 });
     const row = { id: "a", name: "b" };
     expect(BACKUP_UPGRADES[1]!("customer", row)).toEqual(row);

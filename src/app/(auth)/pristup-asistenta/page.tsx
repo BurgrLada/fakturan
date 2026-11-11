@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { AssistantConsent } from "@/components/auth/assistant-consent";
@@ -8,9 +9,10 @@ import { TEXTS } from "@/lib/texts";
 import { getCurrentSession } from "@/server/auth/session";
 import { db } from "@/server/db";
 import { env } from "@/server/env";
-import { consentRequest } from "@/server/mcp/consent-info";
+import { consentPage, consentRequest } from "@/server/mcp/consent-info";
 
 const C = TEXTS.mcp.consent;
+const D = TEXTS.mcp.disabled;
 
 export const metadata: Metadata = { title: C.pageTitle, robots: { index: false } };
 
@@ -29,10 +31,14 @@ async function ConsentContent({
   searchParams,
 }: Pick<PageProps<"/pristup-asistenta">, "searchParams">) {
   const oauthQuery = toQuery(await searchParams);
-  const request = await consentRequest(db, env, oauthQuery);
+  const session = await getCurrentSession();
   // Without a session the login page takes the signed query and comes back here (MCP-003).
-  if (!(await getCurrentSession())) redirect(request ? `/prihlaseni?${oauthQuery}` : "/prihlaseni");
-  if (!request) {
+  if (!session) {
+    const request = await consentRequest(db, env, oauthQuery);
+    redirect(request ? `/prihlaseni?${oauthQuery}` : "/prihlaseni");
+  }
+  const page = await consentPage(db, env, oauthQuery, session.user.id);
+  if (page.kind === "invalid") {
     return (
       <Card>
         <CardHeader>
@@ -48,9 +54,30 @@ async function ConsentContent({
       </Card>
     );
   }
-  // MCP settings arrive in Task 3: until then access is on with Read only. The MCP-006 check
-  // (access off → explanation, no consent) and the capability list come from getMcpSettings here.
-  const capabilities = [C.capabilities.read];
+  // Access off: the authorization ends here, with no consent (MCP-006).
+  if (page.kind === "disabled") {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h1>{D.title}</h1>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 text-sm">
+          <p>{D.body}</p>
+          <p className="text-muted-foreground">{D.retry}</p>
+          <Link
+            href="/nastaveni/asistenti"
+            className="text-primary underline-offset-4 hover:underline"
+          >
+            {D.link}
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+  const { request } = page;
+  const capabilities = page.capabilities.map((capability) => C.capabilities[capability]);
   return (
     <Card>
       <CardHeader>

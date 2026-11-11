@@ -3083,7 +3083,14 @@ export const TEXTS = {
     emptyEntity: "Zatím žádné záznamy.",
     newer: "Novější",
     older: "Starší",
-    sources: { web: "Web", scheduler: "Plánovač", import: "Import", system: "Systém" },
+    sources: {
+      web: "Web",
+      scheduler: "Plánovač",
+      import: "Import",
+      system: "Systém",
+      mcp: "Asistent",
+    },
+    assistant: (name: string) => `Asistent: ${name}`,
     self: "Já",
     other: "Jiný uživatel",
     nobody: "Systém nebo nepřihlášený",
@@ -3097,7 +3104,13 @@ export const TEXTS = {
       hostLabel: "Odkud",
       nameIsClaimed: "Název uvádí aplikace sama.",
       capabilitiesIntro: "Asistent bude smět:",
-      capabilities: { read: "Číst faktury, zákazníky, ceník a přehledy" },
+      capabilities: {
+        read: "Číst faktury, zákazníky, ceník a přehledy",
+        create: "Zakládat koncepty faktur",
+        edit: "Upravovat koncepty faktur",
+        issue: "Vystavovat faktury",
+        send: "Odesílat faktury e-mailem",
+      },
       nothingAllowed:
         "Asistent se připojí, ale zatím nic nesmí. Schopnosti zapnete v Nastavení › Asistenti.",
       settingsHint: "Co asistent smí, změníte kdykoli v",
@@ -3108,6 +3121,27 @@ export const TEXTS = {
       invalidTitle: "Přístup asistenta",
       invalid:
         "Žádost o přístup neplatí nebo vypršela. Vraťte se do asistenta a připojte Fakturan znovu.",
+    },
+    disabled: {
+      title: "Přístup asistentů je vypnutý",
+      body: "Asistent se k Fakturanu nemůže připojit, dokud v Nastavení nezapnete „Povolit připojení asistentů“.",
+      retry:
+        "Po zapnutí obnovte tuto stránku, nebo asistenta připojte znovu. Žádost platí 10 minut.",
+      link: "Otevřít Nastavení › Asistenti",
+    },
+    settings: {
+      errors: {
+        invalid: "Nastavení asistentů se nepodařilo uložit, zkontrolujte volby.",
+        notAvailable: "Tuto schopnost zatím nejde zapnout, připravujeme ji.",
+        stale: "Nastavení mezitím změnil někdo jiný. Načtěte stránku znovu a změnu zopakujte.",
+        forbidden: "Pro změnu nastavení se přihlaste.",
+      },
+    },
+    connections: {
+      errors: {
+        notFound: "Tento asistent není propojený.",
+        forbidden: "Pro správu asistentů se přihlaste.",
+      },
     },
   },
   demo: {

@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
+import Database from "better-sqlite3";
 import { expect, test } from "./fixtures";
 
 const PASSWORD = "správné-kůň-baterie-sponka";
@@ -40,6 +42,21 @@ function authorizeUrl(baseURL: string, clientId: string, state: string): string 
   })}`;
 }
 
+// What Nastavení › Asistenti will do (Task 4): switch access on, Read and Create allowed.
+function allowAssistants(dataDir: string): void {
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  try {
+    sqlite
+      .prepare(
+        "INSERT INTO mcp_settings (user_id, enabled, can_read, can_create, revision, updated_at) " +
+          "SELECT id, 1, 1, 1, 1, ? FROM user WHERE email = ?",
+      )
+      .run(Date.now(), EMAIL);
+  } finally {
+    sqlite.close();
+  }
+}
+
 // Clicks a consent button and returns the callback URL the browser was sent to.
 async function answer(page: Page, button: "Povolit" | "Zamítnout"): Promise<URL> {
   const callback = page.waitForRequest((request) => request.url().startsWith(REDIRECT_URI));
@@ -47,8 +64,8 @@ async function answer(page: Page, button: "Povolit" | "Zamítnout"): Promise<URL
   return new URL((await callback).url());
 }
 
-test("[MCP-005] souhlasová stránka", async ({ page, freshApp }) => {
-  const { baseURL } = freshApp;
+test("[MCP-005][MCP-006] souhlasová stránka", async ({ page, freshApp }) => {
+  const { baseURL, dataDir } = freshApp;
   await page.route(`${REDIRECT_URI}**`, (route) =>
     route.fulfill({ contentType: "text/plain", body: "ok" }),
   );
@@ -69,6 +86,17 @@ test("[MCP-005] souhlasová stránka", async ({ page, freshApp }) => {
   await page.getByRole("button", { name: "Přihlásit se" }).click();
   await expect(page).toHaveURL(/\/pristup-asistenta\?/);
 
+  // MCP-006: access is off by default, so the authorization ends on the explanation.
+  await expect(page.getByRole("heading", { name: "Přístup asistentů je vypnutý" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Povolit" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Otevřít Nastavení › Asistenti" })).toHaveAttribute(
+    "href",
+    "/nastaveni/asistenti",
+  );
+
+  // Once switched on, reloading the same page shows the consent.
+  allowAssistants(dataDir);
+  await page.reload();
   await expect(
     page.getByRole("heading", { name: `${CLIENT_NAME} chce přístup k vašemu Fakturanu` }),
   ).toBeVisible();
@@ -76,6 +104,7 @@ test("[MCP-005] souhlasová stránka", async ({ page, freshApp }) => {
   await expect(page.getByText("aplikace na tomto počítači")).toBeVisible();
   await expect(page.getByText("Název uvádí aplikace sama.")).toBeVisible();
   await expect(page.getByText("Číst faktury, zákazníky, ceník a přehledy")).toBeVisible();
+  await expect(page.getByText("Zakládat koncepty faktur")).toBeVisible();
   await expect(page.getByRole("link", { name: "Nastavení › Asistenti" })).toHaveAttribute(
     "href",
     "/nastaveni/asistenti",

@@ -23,7 +23,7 @@ export type AuditRow = typeof auditLog.$inferSelect;
 
 export type Page<T> = { rows: T[]; page: number; pageSize: number; hasNext: boolean };
 
-export const AUDIT_SOURCES = ["web", "scheduler", "import", "system"] as const;
+export const AUDIT_SOURCES = ["web", "scheduler", "import", "system", "mcp"] as const;
 
 export type AuditFilter = {
   action?: string;

@@ -690,3 +690,57 @@ Všech devět bodů je hotových. Co zbývá, závisí na zadavateli a daňovém
 
 Uzavřené body: TanStack Charts (stabilní řada 1.x, použito přesně `@tanstack/charts@1.1.0` za obalem `Chart`; hydratace, CSP a tmavý režim ověřeny, při budoucím problému obal dostane `recharts@3.10.1` beze změny `ChartSpec`).
 
+## 25. Přístup asistentů (MCP)
+
+Požadavky převzaté z `2026-11-11-mcp-design.md`, kap. 4 (jen věty požadavků; zdůvodnění, uživatelský tok a architektura jsou tam).
+
+### 25.1 Autorizace a připojení
+
+- **MCP-001** Fakturan je autorizační server OAuth 2.1 pro vlastní MCP endpoint přes pluginy Better Auth. Publikuje metadata autorizačního serveru (RFC 8414) i chráněného zdroje (RFC 9728) na cestách, které klienti hledají, včetně variant pod `/.well-known/…` v kořeni domény.
+- **MCP-002** Registrace klienta podporuje to, co potřebují Claude.ai, Claude Code a ChatGPT (dynamická registrace RFC 7591 a/nebo Client ID Metadata Document), ověřené na reálném klientovi. PKCE (S256) je povinné.
+- **MCP-003** Přihlášení na `/prihlaseni` po úspěchu pokračuje v rozpracované autorizaci, heslem i přes sociální poskytovatele.
+- **MCP-004** OAuth nikdy nezaloží účet. AUTH-002 a AUTH-005 platí beze změny.
+- **MCP-005** Souhlasová stránka `/pristup-asistenta` zobrazí název a doménu klienta jako nedůvěryhodný text (žádné HTML, omezená délka) a upozorní, že název uvádí klient sám. Zamítnutí vrátí klientovi `access_denied`.
+- **MCP-006** Když je přístup asistentů vypnutý (MCP-010), autorizace skončí na stránce s vysvětlením a odkazem do Nastavení. Souhlas se neukáže a token se nevydá.
+- **MCP-007** Přístupový token platí nejvýš 15 minut, obnovovací token se při použití rotuje. Audience tokenu je přesně adresa `/api/mcp` této instance, token pro jiný zdroj endpoint odmítne.
+- **MCP-008** Scope je jediný, `fakturan`. Co asistent smí, určují přepínače v Nastavení kontrolované při každém volání (MCP-012).
+- **MCP-009** V režimu ukázky je MCP vypnuté: endpoint, metadata i autorizace vrací `404` a záložka v Nastavení se nezobrazí.
+
+### 25.2 Nastavení › Asistenti
+
+- **MCP-010** Hlavní vypínač „Povolit připojení asistentů“ je ve výchozím stavu vypnutý. Vypnutí okamžitě odmítne všechna volání a nové autorizace, propojení ale nesmaže.
+- **MCP-011** Přepínače schopností platí pro všechny asistenty uživatele: Číst (výchozí zapnuto) a Zakládat (výchozí vypnuto) jsou v první verzi; Upravovat, Vystavovat a Odesílat jsou vidět, nejdou zapnout a mají text „připravujeme“.
+- **MCP-012** Server při každém volání nástroje ověří platný token, hlavní vypínač, potřebnou schopnost, existující propojení klienta s uživatelem a že účet není zablokovaný. Vypnutá schopnost vrátí chybu nástroje se srozumitelnou českou větou, ne HTTP chybu.
+- **MCP-013** Seznam propojených asistentů ukáže název klienta, doménu, kdy byl připojen a kdy naposledy použit (na minuty) a tlačítko Odpojit. Odpojení smaže souhlas i obnovovací tokeny klienta a přestane platit i ještě neexpirovaný přístupový token.
+- **MCP-014** Změny vypínače, schopností a odpojení se zapíší do auditu jako ostatní nastavení (zdroj `web`).
+- **MCP-015** Záložka je dostupná každému uživateli a každý uživatel má vlastní nastavení.
+
+### 25.3 Nástroje první verze
+
+- **MCP-020** `get_overview` (Číst) vrátí za zvolené období vystaveno, uhrazeno, neuhrazeno, z toho po splatnosti, počty a rozdělení podle měny shodně se Statistikami (REP), bez konceptů a storen.
+- **MCP-021** `list_unpaid_invoices` (Číst) vrátí neuhrazené a částečně uhrazené vystavené faktury, volitelně jen po splatnosti a jen pro zákazníka, se stránkováním a výchozím řazením podle splatnosti.
+- **MCP-022** `get_invoice` (Číst) vrátí detail faktury podle ID nebo čísla. Faktura jiného účtu se chová jako neexistující.
+- **MCP-023** `search_customers` a `search_catalog` (Číst) hledají zákazníka a položku ceníku podle textu stávajícím hledáním.
+- **MCP-024** `create_draft_invoice` (Zakládat) založí jen koncept přes stejné schéma a službu jako web, doplní výchozí hodnoty uživatele, nespálí žádné číslo a chyby validace vrátí jako chybu nástroje s výčtem polí.
+- **MCP-025** Nástroj bez zapnuté schopnosti se v `tools/list` objeví také, s popisem, že je v Nastavení vypnutý.
+
+### 25.4 Audit, limity, bezpečnost
+
+- **MCP-030** Audit má zdroj `mcp`. Záznam nese ID a název klienta a historie ve webu ukáže „Asistent: <název>“.
+- **MCP-031** Čtení přes MCP se do auditu nezapisuje. Zapisuje se vydání a odvolání přístupu (autorizace, odpojení).
+- **MCP-032** Endpoint má limit volání na uživatele a klienta (60 za minutu) a registrace klientů limit podle IP. Překročení vrátí `429`. Platí i limity účtu.
+- **MCP-033** Výstupy nástrojů jsou data, ne instrukce: texty z dokladů jsou v `structuredContent` jako hodnoty a v textu zřetelně oddělené. Žádný nástroj nesmí na základě obsahu dokumentu provést další akci.
+- **MCP-034** `proxy.ts` endpoint MCP, metadata ani OAuth trasy nepřesměrovává na přihlášení. Odpověď bez tokenu je `401` s hlavičkou `WWW-Authenticate` podle RFC 9728.
+- **MCP-035** Endpoint je bezstavový, každý požadavek nese token.
+- **MCP-036** Do Sentry jde u chyb MCP jen ID uživatele a název nástroje, ne argumenty ani výstup.
+- **MCP-037** MCP nepřidává žádnou povinnou proměnnou. Adresa instance se bere z `BETTER_AUTH_URL`; nová proměnná se přidá do `.env.example` a kap. 19.5.
+- **MCP-038** Volitelná proměnná `MCP_ENABLED` (výchozí `true`) vypne MCP pro celou instanci stejně jako režim ukázky.
+
+### 25.5 Upřesnění
+
+- **MCP-040** Autorizační server staví výhradně na ekosystému Better Auth a tenkém lepidle kolem něj. Povinné jsou PKCE, audience, okamžité odpojení a funkční registrace aspoň pro Claude Code a Claude.ai. Odchylky se zapíší do PR.
+- **MCP-041** Propojení je řádek souhlasu pro dvojici uživatel a klient, který obal nástrojů čte při každém volání. „Naposledy použit“ se zapisuje nejvýš jednou za minutu na propojení, mimo audit.
+- **MCP-042** `mcp_settings` je součástí zálohy účtu a po obnově je hlavní vypínač vždy vypnutý, schopnosti se obnoví. OAuth tabulky nejsou v záloze, exportu ani obnově. Smazání uživatele smaže jeho souhlasy a tokeny, klienti zůstanou.
+- **MCP-043** `create_draft_invoice` zakládá běžnou fakturu ve výchozí řadě, ceny a množství přijímá jako desetinné řetězce převedené stávajícími pomocníky, kurz cizí měny doplní z ČNB, `idempotency_key` předá jako `clientId` konceptu a odkaz ve výstupu je absolutní.
+- **MCP-044** Souhlasová stránka ukáže hostitele z `redirect_uri` („aplikace na tomto počítači“ pro `localhost` a `127.0.0.1`, hostitele dokumentu u CIMD). Se zapnutým vypínačem a všemi schopnostmi vypnutými jde souhlas udělit a stránka to řekne větou „Asistent se připojí, ale zatím nic nesmí. Schopnosti zapnete v Nastavení › Asistenti.“
+- **MCP-045** Na `http://localhost` a `http://127.0.0.1` funguje celý tok bez HTTPS. Vydavatel, audience i metadata se odvozují z `BETTER_AUTH_URL`.

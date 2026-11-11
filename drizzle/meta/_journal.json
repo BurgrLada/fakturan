@@ -372,6 +372,13 @@
       "when": 1794407969063,
       "tag": "0052_oauth_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1794429753494,
+      "tag": "0053_mcp_settings_audit_client",
+      "breakpoints": true
     }
   ]
 }
