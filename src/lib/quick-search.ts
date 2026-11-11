@@ -31,7 +31,7 @@ export function staticHits(q: string, role: string | null): SearchHit[] {
       detail: T.section,
       href: item.href,
     })),
-    ...SETTINGS_TABS.map((tab) => ({
+    ...SETTINGS_TABS.filter((tab) => !tab.mcpOnly).map((tab) => ({
       group: "page" as const,
       id: `settings:${tab.href}`,
       label: tab.label,

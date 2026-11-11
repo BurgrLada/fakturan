@@ -2238,6 +2238,7 @@ export const TEXTS = {
     automation: "Automatizace",
     mail: "Pošta",
     bankMailbox: "Avíza",
+    assistants: "Asistenti",
   },
   mailLook: {
     title: "Vzhled e-mailu",
@@ -3130,6 +3131,36 @@ export const TEXTS = {
       link: "Otevřít Nastavení › Asistenti",
     },
     settings: {
+      title: "Asistenti",
+      pageTitle: "Asistenti | Fakturan",
+      intro:
+        "Připojte AI asistenta, například Claude, aby mohl číst vaše faktury a zakládat koncepty. Vystavovat a odesílat nic nesmí.",
+      saved: "Nastavení uloženo",
+      enable: "Povolit připojení asistentů",
+      enableHint:
+        "Když je vypnuto, žádný asistent se nepřipojí ani nic neudělá. Už propojení asistenti zůstanou.",
+      addressLabel: "Adresa Fakturanu pro asistenty",
+      copy: "Kopírovat",
+      copied: "Zkopírováno",
+      copyFailed: "Kopírování se nepovedlo, adresu označte ručně.",
+      guide: {
+        title: "Jak asistenta připojit",
+        claudeCode: "Claude Code: v terminálu spusťte",
+        claudeWeb: "Claude.ai: Settings › Connectors › Add custom connector, a vložte adresu výše.",
+        after: "Při připojení se přihlásíte do Fakturanu a asistentovi přístup povolíte.",
+        localhost:
+          "Tahle adresa je jen na tomto počítači, takže webové asistenty potřebují veřejnou adresu s HTTPS.",
+      },
+      capabilitiesTitle: "Co asistenti smějí",
+      capabilitiesLabel: "Schopnosti asistentů",
+      comingSoon: "připravujeme",
+      capabilities: {
+        read: "Číst (přehled, seznamy, detail faktury)",
+        create: "Zakládat koncepty faktur",
+        edit: "Upravovat koncepty",
+        issue: "Vystavovat faktury (přidělit číslo)",
+        send: "Odesílat faktury e-mailem",
+      },
       errors: {
         invalid: "Nastavení asistentů se nepodařilo uložit, zkontrolujte volby.",
         notAvailable: "Tuto schopnost zatím nejde zapnout, připravujeme ji.",
@@ -3138,6 +3169,21 @@ export const TEXTS = {
       },
     },
     connections: {
+      title: "Propojení asistenti",
+      empty: "Zatím není připojený žádný asistent.",
+      listLabel: "Seznam propojených asistentů",
+      host: "Odkud",
+      connected: (date: string) => `Připojen ${date}`,
+      lastUsed: (date: string) => `Naposledy ${date}`,
+      neverUsed: "Zatím nepoužito",
+      disconnect: "Odpojit",
+      confirmTitle: (name: string) => `Odpojit ${name}?`,
+      confirmBody:
+        "Asistent přestane mít přístup k vašim datům a nové připojení bude vyžadovat váš souhlas.",
+      confirmAction: "Odpojit",
+      cancel: "Zrušit",
+      done: "Asistent je odpojený.",
+      failed: "Odpojení se nepovedlo. Zkuste to znovu.",
       errors: {
         notFound: "Tento asistent není propojený.",
         forbidden: "Pro správu asistentů se přihlaste.",

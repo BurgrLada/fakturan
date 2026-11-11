@@ -48,7 +48,9 @@ export function isVisible(
   return (showPlanned || !entry.planned) && (!entry.adminOnly || role === "admin");
 }
 
-export const SETTINGS_TABS: readonly { href: string; label: string }[] = [
+export type SettingsTab = { href: string; label: string; mcpOnly?: true };
+
+export const SETTINGS_TABS: readonly SettingsTab[] = [
   { href: "/nastaveni/ucet", label: TEXTS.settings.account },
   { href: "/nastaveni/dodavatel", label: TEXTS.settings.supplier },
   { href: "/nastaveni/ucty", label: TEXTS.settings.bankAccounts },
@@ -58,8 +60,14 @@ export const SETTINGS_TABS: readonly { href: string; label: string }[] = [
   { href: "/nastaveni/posta", label: TEXTS.settings.mail },
   { href: "/nastaveni/aviza", label: TEXTS.settings.bankMailbox },
   { href: "/nastaveni/automatizace", label: TEXTS.settings.automation },
+  { href: "/nastaveni/asistenti", label: TEXTS.settings.assistants, mcpOnly: true },
   { href: "/nastaveni/import", label: TEXTS.importing.nav },
   { href: "/nastaveni/export", label: TEXTS.exporting.nav },
   { href: "/nastaveni/zaloha", label: TEXTS.backup.nav },
   { href: "/nastaveni/historie", label: TEXTS.settings.history },
 ];
+
+// The Assistants tab only exists where MCP access is available (MCP-009).
+export function settingsTabs(mcpAvailable: boolean): readonly SettingsTab[] {
+  return SETTINGS_TABS.filter((tab) => mcpAvailable || !tab.mcpOnly);
+}

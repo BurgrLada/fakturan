@@ -1,82 +1,24 @@
-import { createHash, randomBytes } from "node:crypto";
-import { join } from "node:path";
-import type { Page } from "@playwright/test";
-import Database from "better-sqlite3";
 import { expect, test } from "./fixtures";
+import {
+  answer,
+  authorizeUrl,
+  EMAIL,
+  PASSWORD,
+  REDIRECT_URI,
+  registerClient,
+  registerOwner,
+} from "./mcp-helpers";
 
-const PASSWORD = "správné-kůň-baterie-sponka";
-const EMAIL = "majitel@example.cz";
-// Nothing listens here: the test answers the client's callback itself.
-const REDIRECT_URI = "http://127.0.0.1:33418/callback";
 const CLIENT_NAME = "<b>Claude</b> Code";
 
-async function registerClient(baseURL: string): Promise<string> {
-  const response = await fetch(`${baseURL}/api/auth/oauth2/register`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      client_name: CLIENT_NAME,
-      redirect_uris: [REDIRECT_URI],
-      token_endpoint_auth_method: "none",
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-    }),
-  });
-  expect(response.status).toBeLessThan(300);
-  return ((await response.json()) as { client_id: string }).client_id;
-}
-
-function authorizeUrl(baseURL: string, clientId: string, state: string): string {
-  const challenge = createHash("sha256")
-    .update(randomBytes(32).toString("base64url"))
-    .digest("base64url");
-  return `${baseURL}/api/auth/oauth2/authorize?${new URLSearchParams({
-    response_type: "code",
-    client_id: clientId,
-    redirect_uri: REDIRECT_URI,
-    scope: "fakturan offline_access",
-    state,
-    resource: `${baseURL}/api/mcp`,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-  })}`;
-}
-
-// What Nastavení › Asistenti will do (Task 4): switch access on, Read and Create allowed.
-function allowAssistants(dataDir: string): void {
-  const sqlite = new Database(join(dataDir, "fakturan.db"));
-  try {
-    sqlite
-      .prepare(
-        "INSERT INTO mcp_settings (user_id, enabled, can_read, can_create, revision, updated_at) " +
-          "SELECT id, 1, 1, 1, 1, ? FROM user WHERE email = ?",
-      )
-      .run(Date.now(), EMAIL);
-  } finally {
-    sqlite.close();
-  }
-}
-
-// Clicks a consent button and returns the callback URL the browser was sent to.
-async function answer(page: Page, button: "Povolit" | "Zamítnout"): Promise<URL> {
-  const callback = page.waitForRequest((request) => request.url().startsWith(REDIRECT_URI));
-  await page.getByRole("button", { name: button }).click();
-  return new URL((await callback).url());
-}
-
 test("[MCP-005][MCP-006] souhlasová stránka", async ({ page, freshApp }) => {
-  const { baseURL, dataDir } = freshApp;
+  const { baseURL } = freshApp;
   await page.route(`${REDIRECT_URI}**`, (route) =>
     route.fulfill({ contentType: "text/plain", body: "ok" }),
   );
-  await page.goto(`${baseURL}/registrace`);
-  await page.getByLabel("Jméno").fill("Jan Novák");
-  await page.getByLabel("E-mail").fill(EMAIL);
-  await page.getByLabel("Heslo").fill(PASSWORD);
-  await page.getByRole("button", { name: "Vytvořit účet" }).click();
-  await expect(page.getByText(EMAIL)).toBeVisible();
+  await registerOwner(page, baseURL);
   await page.context().clearCookies();
-  const clientId = await registerClient(baseURL);
+  const clientId = await registerClient(baseURL, CLIENT_NAME);
 
   // MCP-003: the login continues the authorization.
   await page.goto(authorizeUrl(baseURL, clientId, "zamitnuti"));
@@ -94,8 +36,14 @@ test("[MCP-005][MCP-006] souhlasová stránka", async ({ page, freshApp }) => {
     "/nastaveni/asistenti",
   );
 
-  // Once switched on, reloading the same page shows the consent.
-  allowAssistants(dataDir);
+  // Switched on in Nastavení › Asistenti (Read and Create), reloading the same page shows the consent.
+  const settings = await page.context().newPage();
+  await settings.goto(`${baseURL}/nastaveni/asistenti`);
+  await settings.waitForLoadState("networkidle");
+  await settings.getByRole("checkbox", { name: "Povolit připojení asistentů" }).click();
+  await settings.getByRole("checkbox", { name: /Zakládat koncepty faktur/ }).click();
+  await expect(settings.getByRole("checkbox", { name: /Zakládat koncepty faktur/ })).toBeChecked();
+  await settings.close();
   await page.reload();
   await expect(
     page.getByRole("heading", { name: `${CLIENT_NAME} chce přístup k vašemu Fakturanu` }),
