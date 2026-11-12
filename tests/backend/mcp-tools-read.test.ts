@@ -260,10 +260,10 @@ describe("čtecí nástroje MCP", () => {
       expect(names).toContain(name);
     }
     expect(TOOLS.filter((tool) => tool.level === "read").length).toBeGreaterThanOrEqual(5);
-    // The one tool that writes (MCP-024) is registered beside them.
-    expect(TOOLS.filter((tool) => tool.level === "drafts").map((tool) => tool.name)).toEqual([
+    // The first tool that writes (MCP-024) is registered beside them.
+    expect(TOOLS.filter((tool) => tool.level === "drafts").map((tool) => tool.name)).toContain(
       "create_draft_invoice",
-    ]);
+    );
   });
 
   test("[MCP-020] přehled se shoduje s reportSummary a nepočítá koncepty ani storna", async () => {

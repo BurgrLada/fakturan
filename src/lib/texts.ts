@@ -3253,6 +3253,9 @@ export const TEXTS = {
         "Přístup asistentů je v Nastavení › Asistenti vypnutý. Zapněte ho tam a akci zopakujte.",
       notConnected:
         "Asistent už není s Fakturanem propojený. Připojte ho znovu a povolte mu přístup.",
+      // A write sent an old revision (MCP-072).
+      stale:
+        "Doklad se mezitím změnil. Načtěte ho znovu nástrojem get_invoice a pošlete aktuální revision.",
       levelTooLow: (levelName: string) =>
         `Tahle operace vyžaduje úroveň ${levelName}. Úroveň nastavíte v Nastavení › Asistenti.`,
       higherLevelHint:
@@ -3554,6 +3557,7 @@ export const TEXTS = {
       dueDate: "Datum splatnosti RRRR-MM-DD (výchozí podle zákazníka nebo nastavení).",
       currency: "Měna faktury, například CZK nebo EUR (výchozí podle zákazníka nebo nastavení).",
       note: "Poznámka na faktuře.",
+      tags: "Názvy štítků faktury. Chybějící štítky vzniknou, stejně jako ve webu.",
       idempotencyKey:
         "UUID zvolené asistentem. Opakované volání se stejným klíčem vrátí týž koncept místo nového.",
       linesRequired: "Zadejte aspoň jednu položku.",
@@ -3580,14 +3584,71 @@ export const TEXTS = {
         currency: "měna",
         note: "poznámka",
         idempotency_key: "klíč opakování",
+        tags: "štítky",
       },
       created: "Koncept faktury je založený, zatím bez čísla. Nic se nevystavilo ani neodeslalo.",
       customer: "Odběratel",
       lineLabel: (position: number) => `Položka ${position}`,
       line: (label: string, total: string) => `${label}: ${total}`,
       noteLabel: "Poznámka",
+      tagsLabel: "Štítky",
       total: (total: string) => `Celkem ${total}`,
+      revision: (revision: number) => `Revize ${revision} (pošlete ji při další úpravě).`,
+      problems: "Před vystavením je ještě potřeba:",
       link: (link: string) => `Zkontrolovat a vystavit ve webu: ${link}`,
+    },
+    // Draft tools beyond create_draft_invoice (MCP-024, MCP-072).
+    drafts: {
+      notDraft: "Upravit jde jen koncept. Vystavenou fakturu upravíte ve webu.",
+      fields: {
+        id: "faktura",
+        revision: "revize",
+        customerId: "zákazník",
+        lines: "položky",
+        name: "název",
+        quantity: "množství",
+        unitPrice: "cena",
+        vatRate: "sazba DPH",
+        catalogItemId: "položka ceníku",
+        issueDate: "datum vystavení",
+        dueDate: "splatnost",
+        currency: "měna",
+        note: "poznámka",
+        tags: "štítky",
+      },
+      update: {
+        name: "update_draft_invoice",
+        title: "Upravit koncept faktury",
+        description:
+          "Nahradí obsah konceptu faktury: zákazníka, položky a co dalšího zadáte. Co nezadáte (datum, splatnost, měna, poznámka, štítky), zůstane, jak je; ostatní nastavení dokladu se nemění. Pošlete revision z get_invoice nebo z předchozí úpravy; když se koncept mezitím změnil, úprava se odmítne. Vystavenou fakturu tímto nástrojem upravit nejde.",
+        id: "ID konceptu faktury.",
+        revision: "Revize konceptu, jak ji vrátil get_invoice nebo předchozí úprava.",
+        done: "Koncept faktury je upravený. Nic se nevystavilo ani neodeslalo.",
+      },
+      duplicate: {
+        name: "duplicate_invoice",
+        title: "Zkopírovat fakturu do konceptu",
+        description:
+          "Vytvoří nový koncept jako kopii faktury nebo zálohy (bez čísla, s dnešním datem a stejnou délkou splatnosti), stejně jako „Kopírovat“ ve webu. Dobropis kopírovat nejde.",
+        id: "ID faktury, kterou zkopírovat.",
+        done: "Kopie je založená jako koncept bez čísla. Nic se nevystavilo ani neodeslalo.",
+      },
+      template: {
+        name: "draft_from_template",
+        title: "Založit koncept ze šablony",
+        description:
+          "Založí koncept faktury z uložené šablony faktury, stejně jako „Použít šablonu“ ve webu.",
+        templateId: "ID šablony faktury.",
+        done: "Koncept ze šablony je založený, zatím bez čísla. Nic se nevystavilo ani neodeslalo.",
+      },
+      convert: {
+        name: "convert_advance_to_final",
+        title: "Vytvořit konečnou fakturu k záloze",
+        description:
+          "K vystavené zaplacené záloze vytvoří koncept konečné faktury, stejně jako ve webu. Číslo dostane až při vystavení. Když konečná faktura už existuje, vrátí ji.",
+        id: "ID vystavené zálohy.",
+        done: "Konečná faktura je založená jako koncept. Nic se nevystavilo ani neodeslalo.",
+      },
     },
   },
   demo: {

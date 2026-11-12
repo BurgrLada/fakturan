@@ -1,5 +1,6 @@
 import { TOOLS } from "../tool";
 import { createDraftInvoiceTool } from "./create-draft";
+import { DRAFT_TOOLS } from "./drafts";
 import { getInvoiceTool } from "./invoice";
 import { INVOICE_READ_TOOLS } from "./invoices-read";
 import { getOverviewTool } from "./overview";
@@ -15,6 +16,7 @@ const ALL_TOOLS = [
   searchCatalogTool,
   createDraftInvoiceTool,
   ...INVOICE_READ_TOOLS,
+  ...DRAFT_TOOLS,
 ];
 
 for (const tool of ALL_TOOLS) {

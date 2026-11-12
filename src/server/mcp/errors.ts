@@ -75,6 +75,10 @@ export function toolErrorResult(
   userId: string,
   labels?: FieldLabels,
 ): CallToolResult {
+  // The web says to reload the page; an assistant reads the invoice again instead (MCP-072).
+  if (error instanceof ServiceError && error.message === TEXTS.invoices.stale) {
+    return toolError(TEXTS.mcp.tools.stale);
+  }
   if (error instanceof McpToolError || error instanceof ServiceError) {
     return toolError(error.message);
   }
