@@ -4538,6 +4538,202 @@ export const TEXTS = {
         done: "Řada je smazaná.",
       },
     },
+    config: {
+      fields: {
+        key: "automatizace",
+        time: "čas",
+        enabled: "zapnuto",
+        mode: "režim",
+        offsetDays: "posun ve dnech",
+        texts: "texty",
+        kind: "druh zprávy",
+        language: "jazyk",
+        subject: "předmět",
+        body: "text",
+        turnoverVatLimit: "limit obratu pro DPH",
+        turnoverFlatLimit: "limit obratu pro paušální daň",
+        fixedRates: "pevné kurzy",
+      },
+      supplier: {
+        field: "Údaj dodavatele; vynechané pole zůstane, jak je.",
+        missing: (fields: string) => `Před vystavením faktury chybí: ${fields}`,
+        complete: "Údaje potřebné k vystavení jsou vyplněné.",
+        vatIdentified: (yes: boolean) =>
+          yes ? "Identifikovaná osoba k DPH: ano" : "Identifikovaná osoba k DPH: ne",
+        get: {
+          name: "get_supplier",
+          title: "Údaje dodavatele",
+          description:
+            "Údaje dodavatele, které se tisknou na fakturách (jméno, adresa, IČO, DIČ, kontakt a texty), a seznam údajů, které chybí k vystavení.",
+        },
+        save: {
+          name: "save_supplier",
+          title: "Uložit údaje dodavatele",
+          description:
+            "Změní údaje dodavatele. Pošli jen pole, která se mění; ostatní zůstanou. Logo a podpis se nastavují jen ve webu.",
+          done: "Údaje dodavatele jsou uložené.",
+        },
+      },
+      preferences: {
+        field: "Výchozí hodnota pro nové faktury; vynechané pole zůstane, jak je.",
+        turnoverLimit:
+          "Vlastní limit obratu v Kč jako desetinné číslo, např. 1 500 000; null znamená zákonný limit.",
+        fixedRates:
+          'Pevné kurzy cizích měn vůči Kč, např. { "EUR": "25,1" }; měna, která chybí, používá kurz ČNB.',
+        heading: "Výchozí hodnoty:",
+        row: (label: string, value: string) => `${label}: ${value}`,
+        statutory: "zákonný",
+        get: {
+          name: "get_preferences",
+          title: "Výchozí hodnoty",
+          description:
+            "Výchozí hodnoty nových faktur: splatnost, jazyk, měna, způsob platby, jednotka, texty, formáty, kurzy a limity obratu. Vzhled dokladu sem nepatří, nastavuje se ve webu.",
+        },
+        save: {
+          name: "save_preferences",
+          title: "Uložit výchozí hodnoty",
+          description:
+            "Změní výchozí hodnoty nových faktur. Pošli jen pole, která se mění. Design, barvy a umístění loga se nastavují jen ve webu.",
+          done: "Výchozí hodnoty jsou uložené.",
+        },
+      },
+      automation: {
+        key: "Automatizace: recurringSend (odesílání pravidelných faktur), reminders (upomínky), paymentReceipt (potvrzení platby), advanceInvoice (daňový doklad k záloze).",
+        time: "Čas odesílání automatické pošty, HH:MM.",
+        enabled: "true zapne, false vypne.",
+        mode: "Souhrn za období: off, monthly, quarterly.",
+        on: "zapnuto",
+        off: "vypnuto",
+        state: (label: string, on: string) => `${label}: ${on}`,
+        labels: {
+          recurringSend: "Odesílání pravidelných faktur",
+          reminders: "Upomínky",
+          paymentReceipt: "Potvrzení přijaté platby",
+          advanceInvoice: "Daňový doklad k přijaté záloze",
+          paused: "Vše pozastaveno",
+          sendTime: "Čas odesílání",
+          dailyDigest: "Denní přehled",
+          periodSummary: "Souhrn za období",
+          taxReminder: "Připomínka daní",
+          limitMail: "Upozornění na limity obratu",
+        },
+        get: {
+          name: "get_automation",
+          title: "Automatizace",
+          description:
+            "Které automatizace jsou zapnuté, zda je vše pozastavené, čas odesílání a pošta, kterou Fakturan posílá vlastníkovi účtu.",
+        },
+        disable: {
+          name: "disable_automation",
+          title: "Vypnout automatizaci",
+          description:
+            "Vypne jednu automatizaci. Zapnout ji jde jen ve webu, protože to potvrzuje člověk.",
+          done: "Automatizace je vypnutá.",
+        },
+        pause: {
+          name: "pause_automation",
+          title: "Pozastavit automatizace",
+          description:
+            "Pozastaví všechny automatizace najednou. Obnovit je jde jen ve webu, protože to potvrzuje člověk.",
+          done: "Automatizace jsou pozastavené.",
+        },
+        sendTime: {
+          name: "set_send_time",
+          title: "Čas odesílání",
+          description: "Nastaví čas, kdy odchází automatická pošta.",
+          done: "Čas odesílání je uložený.",
+        },
+        dailyDigest: {
+          name: "set_daily_digest",
+          title: "Denní přehled",
+          description: "Zapne nebo vypne denní přehled, který chodí vlastníkovi účtu.",
+          done: "Denní přehled je nastavený.",
+        },
+        periodSummary: {
+          name: "set_period_summary",
+          title: "Souhrn za období",
+          description: "Nastaví měsíční nebo čtvrtletní souhrn pro vlastníka účtu, nebo ho vypne.",
+          done: "Souhrn za období je nastavený.",
+        },
+        taxReminder: {
+          name: "set_tax_reminder",
+          title: "Připomínka daní",
+          description: "Zapne nebo vypne připomínku daňových termínů pro vlastníka účtu.",
+          done: "Připomínka daní je nastavená.",
+        },
+        limitMail: {
+          name: "set_limit_mail",
+          title: "Upozornění na limity obratu",
+          description: "Zapne nebo vypne e-mail vlastníkovi, když se obrat blíží limitu.",
+          done: "Upozornění na limity je nastavené.",
+        },
+      },
+      reminders: {
+        id: "ID pravidla upomínky (z list_reminder_rules).",
+        offsetDays:
+          "Kolik dní po splatnosti upomínka odchází; záporné číslo znamená před splatností.",
+        texts:
+          "Vlastní texty upomínky podle jazyka { cs: { subject, body }, en: { subject, body } }; null znamená výchozí text.",
+        empty: "Žádná pravidla upomínek.",
+        heading: "Pravidla upomínek:",
+        row: (id: string, offset: number, custom: boolean) =>
+          `${id}: ${offset} dní po splatnosti${custom ? ", vlastní text" : ""}`,
+        subjectLabel: (language: string) => `Předmět (${language})`,
+        list: {
+          name: "list_reminder_rules",
+          title: "Pravidla upomínek",
+          description:
+            "Pravidla automatických upomínek: kolik dní po splatnosti odcházejí a jejich vlastní texty.",
+        },
+        save: {
+          name: "save_reminder_rule",
+          title: "Uložit pravidlo upomínky",
+          description:
+            "Založí pravidlo upomínky, nebo s id upraví existující; vynechané pole zůstane, jak je.",
+          done: "Pravidlo upomínky je uložené.",
+        },
+        delete: {
+          name: "delete_reminder_rule",
+          title: "Smazat pravidlo upomínky",
+          description: "Smaže pravidlo upomínky.",
+          done: "Pravidlo upomínky je smazané.",
+        },
+      },
+      templates: {
+        kind: "Druh zprávy: invoice, advance, credit_note, reminder, payment_receipt.",
+        language: "Jazyk zprávy: cs, en.",
+        subject: "Předmět; může obsahovat proměnné jako {{cislo_faktury}}.",
+        body: "Text zprávy; může obsahovat proměnné jako {{castka}} nebo {{splatnost}}.",
+        custom: " (vlastní)",
+        heading: "E-mailové šablony:",
+        row: (kind: string, language: string, custom: string) => `${kind} ${language}${custom}`,
+        subjectLabel: "Předmět",
+        bodyLabel: "Text",
+        list: {
+          name: "list_email_templates",
+          title: "E-mailové šablony",
+          description:
+            "Předměty a texty e-mailů podle druhu zprávy a jazyka; vlastní znění je označené.",
+        },
+        get: {
+          name: "get_email_template",
+          title: "E-mailová šablona",
+          description: "Předmět a text e-mailu pro jeden druh zprávy a jazyk.",
+        },
+        save: {
+          name: "save_email_template",
+          title: "Uložit e-mailovou šablonu",
+          description: "Uloží vlastní předmět nebo text e-mailu; vynechané pole zůstane, jak je.",
+          done: "Šablona je uložená.",
+        },
+        reset: {
+          name: "reset_email_template",
+          title: "Vrátit výchozí znění šablony",
+          description: "Smaže vlastní znění a vrátí výchozí předmět a text.",
+          done: "Šablona má výchozí znění.",
+        },
+      },
+    },
   },
   demo: {
     locked: "V ukázce tohle nejde změnit",

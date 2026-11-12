@@ -13,6 +13,7 @@ import { RECURRING_TOOLS } from "./recurring";
 import { searchCatalogTool, searchCustomersTool } from "./search";
 import { SENDING_TOOLS } from "./sending";
 import { SERIES_TOOLS } from "./series";
+import { SETTINGS_TOOLS } from "./settings";
 import { TEMPLATE_TOOLS } from "./templates";
 import { listUnpaidInvoicesTool } from "./unpaid-invoices";
 
@@ -35,6 +36,7 @@ const ALL_TOOLS = [
   ...RECURRING_TOOLS,
   ...TEMPLATE_TOOLS,
   ...SERIES_TOOLS,
+  ...SETTINGS_TOOLS,
 ];
 
 for (const tool of ALL_TOOLS) {
