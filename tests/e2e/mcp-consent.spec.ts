@@ -36,13 +36,15 @@ test("[MCP-005][MCP-006] souhlasová stránka", async ({ page, freshApp }) => {
     "/nastaveni/asistenti",
   );
 
-  // Switched on in Nastavení › Asistenti (Read and Create), reloading the same page shows the consent.
+  // Switched on in Nastavení › Asistenti at Koncepty, reloading the same page shows the consent.
   const settings = await page.context().newPage();
   await settings.goto(`${baseURL}/nastaveni/asistenti`);
   await settings.waitForLoadState("networkidle");
   await settings.getByRole("checkbox", { name: "Povolit připojení asistentů" }).click();
-  await settings.getByRole("checkbox", { name: /Zakládat koncepty faktur/ }).click();
-  await expect(settings.getByRole("checkbox", { name: /Zakládat koncepty faktur/ })).toBeChecked();
+  await expect(settings.getByText("Nastavení uloženo")).toBeVisible();
+  await settings.getByRole("radio", { name: "Koncepty" }).check();
+  await expect(settings.getByRole("radio", { name: "Koncepty" })).toBeChecked();
+  await expect(settings.getByText("Nastavení uloženo")).toBeVisible();
   await settings.close();
   await page.reload();
   await expect(
@@ -51,8 +53,9 @@ test("[MCP-005][MCP-006] souhlasová stránka", async ({ page, freshApp }) => {
   await expect(page.locator("h1 b")).toHaveCount(0);
   await expect(page.getByText("aplikace na tomto počítači")).toBeVisible();
   await expect(page.getByText("Název uvádí aplikace sama.")).toBeVisible();
-  await expect(page.getByText("Číst faktury, zákazníky, ceník a přehledy")).toBeVisible();
-  await expect(page.getByText("Zakládat koncepty faktur")).toBeVisible();
+  // [MCP-054] The consent shows the current level instead of a list of capabilities.
+  await expect(page.getByText("Úroveň oprávnění: Koncepty")).toBeVisible();
+  await expect(page.getByText(/Zakládat a upravovat koncepty faktur/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Nastavení › Asistenti" })).toHaveAttribute(
     "href",
     "/nastaveni/asistenti",

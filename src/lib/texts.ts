@@ -3104,16 +3104,7 @@ export const TEXTS = {
       localHost: "aplikace na tomto počítači",
       hostLabel: "Odkud",
       nameIsClaimed: "Název uvádí aplikace sama.",
-      capabilitiesIntro: "Asistent bude smět:",
-      capabilities: {
-        read: "Číst faktury, zákazníky, ceník a přehledy",
-        create: "Zakládat koncepty faktur",
-        edit: "Upravovat koncepty faktur",
-        issue: "Vystavovat faktury",
-        send: "Odesílat faktury e-mailem",
-      },
-      nothingAllowed:
-        "Asistent se připojí, ale zatím nic nesmí. Schopnosti zapnete v Nastavení › Asistenti.",
+      level: (name: string) => `Úroveň oprávnění: ${name}`,
       settingsHint: "Co asistent smí, změníte kdykoli v",
       settingsLink: "Nastavení › Asistenti",
       allow: "Povolit",
@@ -3134,7 +3125,7 @@ export const TEXTS = {
       title: "Asistenti",
       pageTitle: "Asistenti | Fakturan",
       intro:
-        "Připojte AI asistenta, například Claude, aby mohl číst vaše faktury a zakládat koncepty. Vystavovat a odesílat nic nesmí.",
+        "Připojte AI asistenta, například Claude, aby mohl pracovat s vaší fakturací. Co smí, určuje zvolená úroveň oprávnění.",
       saved: "Nastavení uloženo",
       enable: "Povolit připojení asistentů",
       enableHint:
@@ -3151,19 +3142,14 @@ export const TEXTS = {
         localhost:
           "Tahle adresa je jen na tomto počítači, takže webové asistenty potřebují veřejnou adresu s HTTPS.",
       },
-      capabilitiesTitle: "Co asistenti smějí",
-      capabilitiesLabel: "Schopnosti asistentů",
-      comingSoon: "připravujeme",
-      capabilities: {
-        read: "Číst (přehled, seznamy, detail faktury)",
-        create: "Zakládat koncepty faktur",
-        edit: "Upravovat koncepty",
-        issue: "Vystavovat faktury (přidělit číslo)",
-        send: "Odesílat faktury e-mailem",
-      },
+      levelTitle: "Co asistenti smějí",
+      levelLabel: "Úroveň oprávnění asistentů",
+      levelHint: "Každá úroveň obsahuje i všechno z úrovní nad ní.",
+      logCalls: "Zaznamenávat volání asistentů",
+      logCallsHint:
+        "Záznam každého volání asistenta, i odmítnutého. Změny dat se v Historii změn zapisují vždy.",
       errors: {
         invalid: "Nastavení asistentů se nepodařilo uložit, zkontrolujte volby.",
-        notAvailable: "Tuto schopnost zatím nejde zapnout, připravujeme ji.",
         stale: "Nastavení mezitím změnil někdo jiný. Načtěte stránku znovu a změnu zopakujte.",
         forbidden: "Pro změnu nastavení se přihlaste.",
       },

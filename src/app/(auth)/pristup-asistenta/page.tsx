@@ -76,7 +76,7 @@ async function ConsentContent({
     );
   }
   const { request } = page;
-  const capabilities = page.capabilities.map((capability) => C.capabilities[capability]);
+  const level = TEXTS.mcp.levels[page.level];
   return (
     <Card>
       <CardHeader>
@@ -88,7 +88,8 @@ async function ConsentContent({
       <CardContent>
         <AssistantConsent
           host={request.host}
-          capabilities={capabilities}
+          levelName={level.name}
+          levelDescription={level.description}
           oauthQuery={request.oauthQuery}
         />
       </CardContent>

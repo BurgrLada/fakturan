@@ -30,31 +30,60 @@ test("[MCP-010][MCP-015] zapnutí a vypnutí přístupu", async ({ page, freshAp
   await page.reload();
   await expect(page.getByRole("checkbox", { name: MASTER })).toBeChecked();
 
-  // Several quick changes keep working: the revision moves on with every save.
-  const create = page.getByRole("checkbox", { name: /Zakládat koncepty faktur/ });
-  await create.click();
-  await expect(create).toBeChecked();
-  await page.getByRole("checkbox", { name: /^Číst/ }).click();
-  await expect(page.getByRole("checkbox", { name: /^Číst/ })).not.toBeChecked();
-
   await page.getByRole("checkbox", { name: MASTER }).click();
   await expect(page.getByRole("checkbox", { name: MASTER })).not.toBeChecked();
   await page.reload();
   await expect(page.getByRole("checkbox", { name: MASTER })).not.toBeChecked();
-  await expect(page.getByRole("checkbox", { name: /Zakládat koncepty faktur/ })).toBeChecked();
 });
 
-test("[MCP-011] připravované přepínače nejdou zapnout", async ({ page, freshApp }) => {
+test("[MCP-054] [MCP-011] zvolí úroveň Účetní operace a po načtení zůstane zvolená", async ({
+  page,
+  freshApp,
+}) => {
   await registerOwner(page, freshApp.baseURL);
   await page.goto(`${freshApp.baseURL}${OPEN}`);
-  for (const name of [/Upravovat koncepty/, /Vystavovat faktury/, /Odesílat faktury/]) {
-    const box = page.getByRole("checkbox", { name });
-    await expect(box).toBeDisabled();
-    await expect(box).not.toBeChecked();
-  }
-  await expect(page.getByText("připravujeme")).toHaveCount(3);
-  await expect(page.getByRole("checkbox", { name: /^Číst/ })).toBeEnabled();
-  await expect(page.getByRole("checkbox", { name: /Zakládat koncepty faktur/ })).toBeEnabled();
+  await page.waitForLoadState("networkidle");
+  const group = page.getByRole("radiogroup", { name: "Úroveň oprávnění asistentů" });
+  const names = [
+    "Jen čtení",
+    "Koncepty",
+    "Účetní operace",
+    "Vystavování a odesílání",
+    "Plný přístup",
+  ];
+  await expect(group.getByRole("radio")).toHaveCount(5);
+  for (const name of names) await expect(group.getByRole("radio", { name })).toBeVisible();
+  // Every level says in one sentence what it adds.
+  await expect(group.getByText("Vše číst. Nic nezměnit.")).toBeVisible();
+  // MCP-011: the default is read only.
+  await expect(group.getByRole("radio", { name: "Jen čtení" })).toBeChecked();
+
+  // Several quick changes keep working: the revision moves on with every save.
+  await group.getByRole("radio", { name: "Koncepty" }).check();
+  await expect(page.getByText("Nastavení uloženo")).toBeVisible();
+  await group.getByRole("radio", { name: "Účetní operace" }).check();
+  await expect(group.getByRole("radio", { name: "Účetní operace" })).toBeChecked();
+  for (const name of names) await expect(group.getByRole("radio", { name })).toBeEnabled();
+  await page.reload();
+  await expect(
+    page
+      .getByRole("radiogroup", { name: "Úroveň oprávnění asistentů" })
+      .getByRole("radio", { name: "Účetní operace" }),
+  ).toBeChecked();
+});
+
+test("[MCP-062] přepínač Zaznamenávat volání se uloží", async ({ page, freshApp }) => {
+  await registerOwner(page, freshApp.baseURL);
+  await page.goto(`${freshApp.baseURL}${OPEN}`);
+  await page.waitForLoadState("networkidle");
+  const log = page.getByRole("checkbox", { name: "Zaznamenávat volání asistentů" });
+  await expect(log).toBeChecked();
+  await log.click();
+  await expect(page.getByText("Nastavení uloženo")).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("checkbox", { name: "Zaznamenávat volání asistentů" }),
+  ).not.toBeChecked();
 });
 
 test("[MCP-013] odpojení asistenta zmizí ze seznamu", async ({ page, freshApp }) => {

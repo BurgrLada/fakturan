@@ -3,7 +3,8 @@ import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import type { Env } from "../env";
 import { findMcpClient } from "../services/mcp-connections";
 import { consentInfo, type ConsentInfo } from "../services/mcp-client-info";
-import { capabilitiesOf, getMcpSettings } from "../services/mcp-settings";
+import type { McpLevel } from "@/lib/mcp-settings";
+import { getMcpSettings } from "../services/mcp-settings";
 
 export { consentInfo, type ConsentInfo } from "../services/mcp-client-info";
 
@@ -41,7 +42,7 @@ export async function consentRequest(env: Env, oauthQuery: string): Promise<Cons
 export type ConsentPage =
   | { kind: "invalid" }
   | { kind: "disabled" }
-  | { kind: "consent"; request: ConsentRequest; capabilities: ("read" | "create")[] };
+  | { kind: "consent"; request: ConsentRequest; level: McpLevel };
 
 // What /pristup-asistenta shows a signed-in user. With access off the authorization ends here with
 // an explanation and no consent (MCP-006); the provider sends the browser here for that too.
@@ -54,5 +55,6 @@ export async function consentPage(
   if (!request) return { kind: "invalid" };
   const settings = getMcpSettings(userId);
   if (!settings.enabled) return { kind: "disabled" };
-  return { kind: "consent", request, capabilities: capabilitiesOf(settings) };
+  // The consent names the level the assistant gets right now (MCP-054).
+  return { kind: "consent", request, level: settings.level };
 }

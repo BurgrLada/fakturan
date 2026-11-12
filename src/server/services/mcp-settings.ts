@@ -40,13 +40,6 @@ export function activeLevel(settings: McpSettings): McpLevel | null {
   return settings.enabled ? settings.level : null;
 }
 
-// Bridge until the tools carry a level (Task 2 of plan 11 removes it).
-export function capabilitiesOf(settings: McpSettings): ("read" | "create")[] {
-  const level = activeLevel(settings);
-  if (!level) return [];
-  return level === "read" ? ["read"] : ["read", "create"];
-}
-
 export function saveMcpSettings(actor: Actor, raw: unknown): McpSettings {
   const ownerId = ownerOf(actor);
   const parsed = mcpSettingsSchema.safeParse(raw);

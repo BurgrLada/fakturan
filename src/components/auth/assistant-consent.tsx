@@ -13,11 +13,13 @@ const C = TEXTS.mcp.consent;
 // carrying a code or access_denied (MCP-005).
 export function AssistantConsent({
   host,
-  capabilities,
+  levelName,
+  levelDescription,
   oauthQuery,
 }: {
   host: string;
-  capabilities: string[];
+  levelName: string;
+  levelDescription: string;
   oauthQuery: string;
 }) {
   const [pending, setPending] = useState(false);
@@ -44,18 +46,10 @@ export function AssistantConsent({
         </p>
       )}
       <p className="text-sm text-muted-foreground">{C.nameIsClaimed}</p>
-      {capabilities.length > 0 ? (
-        <div className="flex flex-col gap-1 text-sm">
-          <p>{C.capabilitiesIntro}</p>
-          <ul className="list-disc pl-5">
-            {capabilities.map((capability) => (
-              <li key={capability}>{capability}</li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <p className="text-sm">{C.nothingAllowed}</p>
-      )}
+      <div className="flex flex-col gap-1 text-sm">
+        <p className="font-medium">{C.level(levelName)}</p>
+        <p>{levelDescription}</p>
+      </div>
       <p className="text-sm text-muted-foreground">
         {C.settingsHint}{" "}
         <Link href="/nastaveni/asistenti" className="underline">

@@ -247,6 +247,20 @@ describe("vypnutý přístup asistentů (MCP-006)", () => {
     expect(refreshTokensOfOwner()).toBe(before);
   });
 
+  test("[MCP-054] souhlas nese aktuální úroveň", async () => {
+    const browser = new Browser(auth);
+    await browser.signIn(OWNER);
+    const { location: page } = await authorize(browser, await registerClient(auth));
+    const id = ownerId();
+    for (const level of ["read", "issue_send"] as const) {
+      saveMcpSettings({ userId: id, source: "web" }, { ...getMcpSettings(id), level });
+      expect(await consentPage(env, oauthQuery(page), id)).toMatchObject({
+        kind: "consent",
+        level,
+      });
+    }
+  });
+
   test("[MCP-006] stránka souhlasu otevřená před vypnutím už souhlas neudělí", async () => {
     const browser = new Browser(auth);
     await browser.signIn(OWNER);
