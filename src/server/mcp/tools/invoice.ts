@@ -5,6 +5,9 @@ import { TEXTS } from "@/lib/texts";
 import { McpToolError } from "../errors";
 import { appLink, money, moneySchema, quantityText, quoted } from "../format";
 import { defineTool } from "../tool";
+import { relatedDocuments } from "../../services/credit-notes";
+import { listEmailLog } from "../../services/invoice-mail";
+import { listVersions } from "../../services/invoice-versions";
 import { getInvoice, getInvoiceByNumber } from "../../services/invoices";
 import { listPayments } from "../../services/payments";
 
@@ -30,6 +33,8 @@ const output = z.object({
   taxableDate: z.string().nullable(),
   currency: z.string(),
   variableSymbol: z.string().nullable(),
+  // Later writes send this back for optimistic concurrency (MCP-072).
+  revision: z.number().int(),
   customer: z.object({ id: z.string().nullable(), name: z.string() }),
   lines: z.array(
     z.object({
@@ -54,6 +59,7 @@ const output = z.object({
   }),
   payments: z.array(
     z.object({
+      id: z.string(),
       paidOn: z.string(),
       kind: z.string(),
       method: z.string(),
@@ -67,6 +73,9 @@ const output = z.object({
   reference: z.string(),
   orderRef: z.string(),
   tags: z.array(z.string()),
+  versions: z.array(z.object({ id: z.string(), createdAt: z.string() })),
+  mailLog: z.array(z.object({ id: z.string(), status: z.string() })),
+  related: z.array(z.object({ id: z.string(), type: z.string(), number: z.string().nullable() })),
   link: z.string(),
 });
 
@@ -83,6 +92,7 @@ export const getInvoiceTool = defineTool({
       id !== undefined ? getInvoice(ctx.ownerId, id) : getInvoiceByNumber(ctx.ownerId, number!);
     if (!found) throw new McpToolError(T.invoiceNotFound);
     const currency = found.currency;
+    const related = relatedDocuments(ctx.ownerId, found.id);
     const m = (minor: number) => money(minor, currency);
     return {
       id: found.id,
@@ -94,6 +104,7 @@ export const getInvoiceTool = defineTool({
       taxableDate: found.taxableDate,
       currency,
       variableSymbol: found.variableSymbol,
+      revision: found.revision,
       customer: { id: found.customerId, name: found.customerName },
       lines: found.lines.map((line) => ({
         position: line.position,
@@ -115,6 +126,7 @@ export const getInvoiceTool = defineTool({
         remaining: m(amountDue(found)),
       },
       payments: listPayments(ctx.ownerId, found.id).map((entry) => ({
+        id: entry.id,
         paidOn: entry.paidOn,
         kind: entry.kind,
         method: entry.method,
@@ -127,6 +139,18 @@ export const getInvoiceTool = defineTool({
       reference: found.reference,
       orderRef: found.orderRef,
       tags: found.tags.map((tag) => tag.name),
+      // The same reads the web detail page composes.
+      versions: listVersions(ctx.ownerId, found.id).map((version) => ({
+        id: version.id,
+        createdAt: version.createdAt.toISOString(),
+      })),
+      mailLog: listEmailLog(ctx.ownerId, found.id).map((row) => ({
+        id: row.id,
+        status: row.status,
+      })),
+      related: [related.parent, ...related.children]
+        .filter((doc) => doc !== null)
+        .map((doc) => ({ id: doc.id, type: doc.type, number: doc.number })),
       link: appLink(ctx.baseUrl, `/faktury/${found.id}`),
     };
   },

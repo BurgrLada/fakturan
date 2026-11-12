@@ -15,6 +15,12 @@ export function seedOwner(db: Db, now: Date): string {
   db.insert(user)
     .values({ id, name: id, email: `${id}@example.cz`, createdAt: now, updatedAt: now })
     .run();
+  seedSupplier(id);
+  return id;
+}
+
+// Series, supplier and a CZK account: what issuing needs, for a user that already exists.
+export function seedSupplier(id: string): void {
   const actor = webActor(id);
   ensureDefaultSeries(actor);
   saveSupplier(actor, {
@@ -43,7 +49,6 @@ export function seedOwner(db: Db, now: Date): string {
     iban: "",
     swift: "",
   });
-  return id;
 }
 
 export function seedCustomer(owner: string, email = "alfa@example.cz"): string {

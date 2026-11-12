@@ -3388,6 +3388,153 @@ export const TEXTS = {
           `${id}: ${name}, ${price} / ${unit}, ${link}`,
       },
     },
+    // Reading invoices, versions, the mail log and prepared messages (spec 5.1).
+    invoicesRead: {
+      invoiceId: "ID faktury (z list_invoices nebo get_invoice).",
+      versionNotFound: "Verze faktury nenalezena.",
+      tagNotFound: "Štítek nenalezen.",
+      emailStatuses: {
+        queued: "ve frontě",
+        sending: "odesílá se",
+        sent: "odesláno",
+        failed: "selhalo",
+        unknown: "nejisté doručení",
+        held: "pozdrženo",
+        cancelled: "zrušeno",
+      },
+      list: {
+        name: "list_invoices",
+        title: "Seznam faktur",
+        description:
+          "Doklady účtu s filtrem jako v seznamu faktur na webu: stav (včetně overdue = po splatnosti), hledaný text, zákazník, období vystavení, měna, typ, štítek, jen neuhrazené. Stránky po 50. U každého dokladu je číslo, stav, odběratel, data, celkem, zbývá uhradit a odkaz do webu.",
+        q: "Hledaný text (číslo, odběratel, položky), nejvýš 100 znaků.",
+        status: "Stav dokladu; overdue jsou doklady po splatnosti.",
+        customerId: "Jen doklady tohoto zákazníka (id z search_customers).",
+        from: "Vystaveno od, RRRR-MM-DD.",
+        to: "Vystaveno do včetně, RRRR-MM-DD.",
+        currency: "Jen doklady v této měně.",
+        type: "Typ dokladu: invoice (faktura), advance (zálohová faktura), credit_note (dobropis).",
+        tagId: "Jen doklady s tímto štítkem (id z list_tags).",
+        unpaid: "Jen vystavené doklady, které zbývá uhradit (bez záloh).",
+        sort: "Řazení.",
+        dir: "Směr řazení: asc vzestupně, desc sestupně.",
+        page: "Číslo stránky od 1.",
+        empty: "Žádný doklad nevyhovuje filtru.",
+        heading: (count: number, page: number, hasNext: boolean) =>
+          `Doklady, stránka ${page}: ${count}${hasNext ? " (další stránka existuje)" : ""}`,
+        row: (
+          number: string,
+          status: string,
+          customer: string,
+          issueDate: string,
+          total: string,
+          remaining: string,
+          link: string,
+        ) =>
+          `${number}, ${status}, ${customer}, vystaveno ${issueDate}, celkem ${total}, zbývá uhradit ${remaining}, ${link}`,
+      },
+      versions: {
+        name: "list_invoice_versions",
+        title: "Verze faktury",
+        description:
+          "Uložené verze vystavené faktury (stav před každou úpravou), od nejnovější. Obsah verze vrátí get_invoice_version.",
+        empty: "Faktura nemá žádnou uloženou verzi.",
+        heading: (count: number) => `Uložené verze: ${count}`,
+        row: (versionNo: number, createdAt: string, id: string) =>
+          `Verze ${versionNo} z ${createdAt}, id ${id}`,
+      },
+      version: {
+        name: "get_invoice_version",
+        title: "Obsah verze faktury",
+        description:
+          "Obsah jedné uložené verze faktury: hlavička, položky a součty, jak byly před úpravou.",
+        versionId: "ID verze (z list_invoice_versions).",
+        header: (versionNo: number, number: string, createdAt: string) =>
+          `Verze ${versionNo} faktury ${number} z ${createdAt}`,
+        total: (total: string) => `Celkem ${total}`,
+      },
+      mailLog: {
+        name: "list_invoice_mail_log",
+        title: "Pošta k faktuře",
+        description:
+          "Záznamy e-mailů k faktuře od nejnovějšího: druh, stav, příjemci, předmět a čas. Ukáže, zda se právě něco odesílá a který záznam čeká na vyřešení na webu.",
+        empty: "K faktuře nebyl odeslán žádný e-mail.",
+        sending: "Právě se odesílá.",
+        problem: (id: string) => `Na vyřešení na webu čeká záznam ${id}.`,
+        subject: "Předmět",
+        recipients: "Příjemci",
+        row: (createdAt: string, status: string, recipients: string, subject: string, id: string) =>
+          `${createdAt}: ${status}, ${recipients}, ${subject}, id ${id}`,
+      },
+      reminders: {
+        name: "list_reminder_history",
+        title: "Historie upomínek",
+        description: "Upomínky odeslané k faktuře: kdy, ručně nebo automaticky, a stav e-mailu.",
+        empty: "K faktuře nebyla odeslána žádná upomínka.",
+        triggers: { manual: "ručně", automatic: "automaticky", bulk: "hromadně" },
+        row: (createdAt: string, trigger: string, status: string) =>
+          `${createdAt}: ${trigger}, ${status}`,
+      },
+      issuable: {
+        name: "check_invoice_issuable",
+        title: "Kontrola před vystavením",
+        description:
+          "Zkontroluje koncept, zda jde vystavit, a vrátí seznam problémů (prázdný = lze vystavit). Nic nemění.",
+        ok: "Koncept lze vystavit.",
+        problems: "Před vystavením je potřeba opravit:",
+      },
+      preview: {
+        name: "preview_issue",
+        title: "Náhled vystavení",
+        description:
+          "Ukáže, jak by koncept vystavení dopadlo: číslo, které by dostal, variabilní symbol, datum, odběratele, částku a problémy. Číslo se nespotřebuje a nic se nemění.",
+        number: (number: string) => `Číslo by bylo ${number}`,
+        noNumber: "Číslo zatím nejde určit.",
+        summary: (customer: string, total: string, issueDate: string) =>
+          `${customer}, celkem ${total}, vystaveno ${issueDate}`,
+        notes: "Poznámky:",
+      },
+      prepare: {
+        email: {
+          name: "prepare_invoice_email",
+          title: "Předvyplněný e-mail s fakturou",
+          description:
+            "Připraví e-mail s fakturou tak, jak ho předvyplní web: příjemci, předmět, text a revize faktury. Nic neodešle. S logId připraví znovuodeslání zprávy ze záznamu pošty.",
+          logId: "ID záznamu pošty (z list_invoice_mail_log) pro znovuodeslání.",
+        },
+        receipt: {
+          name: "prepare_payment_receipt",
+          title: "Předvyplněné potvrzení platby",
+          description:
+            "Připraví potvrzení přijaté platby e-mailem tak, jak ho předvyplní web. Nic neodešle.",
+          paymentId: "ID platby (z get_invoice, payments[].id).",
+        },
+        reminder: {
+          name: "prepare_reminder",
+          title: "Předvyplněná upomínka",
+          description:
+            "Připraví upomínku k odeslané neuhrazené faktuře tak, jak ji předvyplní web. Nic neodešle. Bez stageKey je to ruční upomínka.",
+          stageKey: "ID stupně upomínky z nastavení, nebo null pro ruční upomínku.",
+          repeat: "Tato upomínka už k faktuře odešla.",
+        },
+        recipients: "Příjemci",
+        copies: "Kopie",
+        subject: "Předmět",
+        body: "Text zprávy",
+        attachment: "Příloha",
+        revision: (revision: number) => `Revize faktury: ${revision}`,
+        unknownPending: "Dřívější zpráva má nejisté doručení; vyřešte ji na webu.",
+        paused: "Odesílání je pozastavené.",
+      },
+      tags: {
+        name: "list_tags",
+        title: "Štítky",
+        description: "Štítky účtu s jejich id, pro filtr v list_invoices.",
+        empty: "Účet nemá žádné štítky.",
+        label: "Štítek",
+        row: (id: string, name: string) => `${id}: ${name}`,
+      },
+    },
     // create_draft_invoice (MCP-024, MCP-043).
     create: {
       name: "create_draft_invoice",
