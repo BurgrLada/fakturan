@@ -8,7 +8,7 @@ import { z } from "zod";
 import { TEXTS } from "@/lib/texts";
 import { createAuth } from "@/server/auth";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, rateLimit, user } from "@/server/db/schema";
+import { auditLog, mcpCallLog, rateLimit, user } from "@/server/db/schema";
 import { parseEnv, type Env } from "@/server/env";
 import { mcpEndpoint } from "@/server/mcp/server";
 import { defineTool, TOOLS } from "@/server/mcp/tool";
@@ -319,7 +319,7 @@ describe("endpoint /api/mcp", () => {
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["echo", "echo_create"]));
   });
 
-  test("[MCP-032] 61. volání za minutu", async () => {
+  test("[MCP-032] [MCP-066] 61. volání za minutu", async () => {
     const start = new Date("2026-11-11T10:00:00Z");
     setClockForTests({ now: () => start });
     try {
@@ -332,6 +332,22 @@ describe("endpoint /api/mcp", () => {
       const limited = await mcpEndpoint(auth, env, post(first.accessToken, toolsList));
       expect(limited.status).toBe(429);
       expect(limited.headers.get("retry-after")).toBe("60");
+      // MCP-066: a refused tool call never reaches the tool, so the call log stays empty.
+      const call = {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "echo", arguments: { text: "ahoj" } },
+      };
+      const loggedBefore = db
+        .select()
+        .from(mcpCallLog)
+        .where(eq(mcpCallLog.ownerId, ownerId))
+        .all();
+      expect((await mcpEndpoint(auth, env, post(first.accessToken, call))).status).toBe(429);
+      expect(db.select().from(mcpCallLog).where(eq(mcpCallLog.ownerId, ownerId)).all()).toEqual(
+        loggedBefore,
+      );
 
       // The limit is per user and client: another assistant of the same user still works.
       expect((await mcpEndpoint(auth, env, post(second.accessToken, toolsList))).status).toBe(200);

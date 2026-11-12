@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import Database from "better-sqlite3";
 import { answer, authorizeUrl, REDIRECT_URI, registerClient, registerOwner } from "./mcp-helpers";
 import { DEMO, expect, test } from "./fixtures";
 
@@ -84,6 +87,87 @@ test("[MCP-062] přepínač Zaznamenávat volání se uloží", async ({ page, f
   await expect(
     page.getByRole("checkbox", { name: "Zaznamenávat volání asistentů" }),
   ).not.toBeChecked();
+});
+
+type CallSeed = { client: string; tool: string; outcome: string; reason?: string; level?: string };
+
+// Lines as the tool wrapper writes them, straight into the instance's database.
+function seedCalls(dataDir: string, calls: CallSeed[]) {
+  const sqlite = new Database(join(dataDir, "fakturan.db"));
+  try {
+    const owner = sqlite.prepare("SELECT id FROM user").pluck().get() as string;
+    const insert = sqlite.prepare(
+      `INSERT INTO mcp_call_log (owner_id, at, client_id, client_name, tool, outcome, reason, required_level, request_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const start = Date.now() - calls.length * 60_000;
+    calls.forEach((call, i) =>
+      insert.run(
+        owner,
+        start + i * 60_000,
+        `klient-${call.client}`,
+        call.client,
+        call.tool,
+        call.outcome,
+        call.reason ?? null,
+        call.level ?? null,
+        randomUUID(),
+      ),
+    );
+  } finally {
+    sqlite.close();
+  }
+}
+
+test("[MCP-063] [MCP-064] log ukáže volání asistenta", async ({ page, freshApp }) => {
+  const { baseURL, dataDir } = freshApp;
+  await registerOwner(page, baseURL);
+  seedCalls(dataDir, [
+    { client: "Claude Code", tool: "get_overview", outcome: "ok" },
+    { client: "Claude.ai", tool: "list_invoices", outcome: "ok" },
+    {
+      client: "Claude Code",
+      tool: "create_draft_invoice",
+      outcome: "denied",
+      reason: "level",
+      level: "drafts",
+    },
+  ]);
+  await page.goto(`${baseURL}${OPEN}`);
+  await page.waitForLoadState("networkidle");
+
+  const table = page.getByRole("table", { name: "Log volání asistentů" });
+  await expect(table.getByRole("row")).toHaveCount(4);
+  // Newest first, with the reason and the missing level in Czech.
+  const newest = table.getByRole("row").nth(1);
+  await expect(newest).toContainText("create_draft_invoice");
+  await expect(newest).toContainText("Odmítnuto");
+  await expect(newest).toContainText("Nízká úroveň oprávnění");
+  await expect(newest).toContainText("Koncepty");
+
+  await page.getByRole("combobox", { name: "Výsledek" }).selectOption("denied");
+  await page.getByRole("button", { name: "Filtrovat" }).click();
+  await expect(page).toHaveURL(/vysledek=denied/);
+  await expect(table.getByRole("row")).toHaveCount(2);
+
+  await page.goto(`${baseURL}${OPEN}`);
+  await page.getByRole("combobox", { name: "Asistent" }).selectOption({ label: "Claude.ai" });
+  await page.getByRole("button", { name: "Filtrovat" }).click();
+  await expect(table.getByRole("row")).toHaveCount(2);
+  await expect(table).toContainText("list_invoices");
+
+  // Cancelling keeps the log, confirming empties it.
+  await page.goto(`${baseURL}${OPEN}`);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Smazat log" }).click();
+  await page.getByRole("button", { name: "Zrušit" }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(table.getByRole("row")).toHaveCount(4);
+  await page.getByRole("button", { name: "Smazat log" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Smazat log" }).click();
+  await expect(page.getByText("Zatím žádné volání.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Zatím žádné volání.")).toBeVisible();
 });
 
 test("[MCP-013] odpojení asistenta zmizí ze seznamu", async ({ page, freshApp }) => {

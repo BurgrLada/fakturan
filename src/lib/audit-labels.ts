@@ -151,6 +151,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "mcp.connected": "Propojení asistenta",
   "mcp.disconnected": "Odpojení asistenta",
   "mcp.settings_changed": "Změna nastavení asistentů",
+  "mcp.call_log_cleared": "Smazání logu volání asistentů",
   "mapping_preset.save": "Uložení předlohy importu",
   "notification.read": "Přečtení upozornění",
   "notification.read_all": "Přečtení všech upozornění",

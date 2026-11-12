@@ -12,6 +12,7 @@ import { bindWorker, haltWorker, jobInFlight } from "../jobs/worker";
 import { recoverBackupJob, runBackup } from "../services/account-backup";
 import { purgeStaleRestores, recoverRestore, runRestore } from "../services/account-restore";
 import { purgeNotices } from "../services/bank-notices";
+import { purgeMcpCallLog } from "../services/mcp-call-log";
 import { planBankPolls, pollMailbox } from "../services/bank-poll";
 import { digestJob, planDigests } from "../services/due-alerts";
 import { planRateFetch, runRateFetch } from "../services/exchange-rates";
@@ -57,6 +58,7 @@ export const jobCleanupTask: TickTask = {
     cleanedOn = today;
     purgeFinishedJobs(now);
     purgeNotices(now);
+    purgeMcpCallLog(now);
   },
 };
 

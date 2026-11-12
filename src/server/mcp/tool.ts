@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import type { z } from "zod";
+import { z } from "zod";
 import { levelAtLeast, type McpLevel } from "@/lib/mcp-settings";
 import { calendarDateInPrague, type CalendarDate } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
@@ -15,9 +15,10 @@ import {
   mcpClientName,
   touchMcpConnection,
 } from "../services/mcp-connections";
+import { recordMcpCall, type McpCallOutcome, type McpCallReason } from "../services/mcp-call-log";
 import { activeLevel, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable } from "./availability";
-import { McpToolError, toolErrorResult, type FieldLabels } from "./errors";
+import { McpDenied, McpToolError, toolErrorResult, type FieldLabels } from "./errors";
 
 const T = TEXTS.mcp.tools;
 
@@ -66,15 +67,23 @@ export const TOOLS: ToolDef<any, any>[] = [];
 // The checks of MCP-012 and MCP-052, in this order, on every call: nothing is trusted from the
 // connection time. The input is validated only after the minimum level, in runTool.
 // The rate limit (MCP-032) is checked before this, per HTTP request in mcpEndpoint.
-function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): ToolContext {
-  if (!isMcpAvailable(env)) throw new McpToolError(T.unavailable);
+function admit(
+  def: ToolDef<unknown, unknown>,
+  claims: McpClaims,
+  env: Env,
+  requestId: string,
+): ToolContext {
+  if (!isMcpAvailable(env)) throw new McpDenied(T.unavailable, "unavailable");
   const ownerId = claims.sub;
+  // Not logged: there is no account to log it for (MCP-061).
   if (!ownerId || !isMcpAccountActive(ownerId)) throw new McpToolError(T.noAccount);
   const settings = getMcpSettings(ownerId);
-  if (!settings.enabled) throw new McpToolError(T.disabled);
+  if (!settings.enabled) throw new McpDenied(T.disabled, "disabled");
   const clientId = claims.azp ?? claims.client_id;
   // JWT access tokens are not stored, so disconnecting cannot revoke them: the consent row decides.
-  if (!clientId || !isMcpConnected(ownerId, clientId)) throw new McpToolError(T.notConnected);
+  if (!clientId || !isMcpConnected(ownerId, clientId)) {
+    throw new McpDenied(T.notConnected, "not_connected");
+  }
   const level = activeLevel(settings)!;
   requireLevel(level, def.level);
   const clientName = mcpClientName(clientId);
@@ -83,7 +92,7 @@ function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): Too
     source: "mcp",
     clientId,
     clientName,
-    requestId: randomUUID(),
+    requestId,
   };
   return {
     ownerId,
@@ -97,7 +106,52 @@ function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): Too
 }
 
 function requireLevel(have: McpLevel, need: McpLevel): void {
-  if (!levelAtLeast(have, need)) throw new McpToolError(T.levelTooLow(TEXTS.mcp.levels[need].name));
+  if (!levelAtLeast(have, need)) {
+    throw new McpDenied(T.levelTooLow(TEXTS.mcp.levels[need].name), "level", need);
+  }
+}
+
+type Logged = {
+  outcome: McpCallOutcome;
+  reason: McpCallReason | null;
+  requiredLevel: McpLevel | null;
+};
+
+// How a failed call ends in the log: a refusal by the checks, bad input, or anything else.
+function loggedFailure(error: unknown): Logged {
+  if (error instanceof McpDenied) {
+    return { outcome: "denied", reason: error.reason, requiredLevel: error.requiredLevel };
+  }
+  if (error instanceof z.ZodError) {
+    return { outcome: "error", reason: "invalid_input", requiredLevel: null };
+  }
+  return { outcome: "error", reason: "service_error", requiredLevel: null };
+}
+
+// Every call of a known, active account goes to the call log (MCP-061); the log decides itself
+// whether it is switched on (MCP-062).
+function logCall(
+  def: { name: string },
+  claims: McpClaims,
+  requestId: string,
+  logged: Logged,
+): void {
+  try {
+    const ownerId = claims.sub;
+    if (!ownerId || !isMcpAccountActive(ownerId)) return;
+    const clientId = claims.azp ?? claims.client_id ?? "";
+    recordMcpCall({
+      ownerId,
+      clientId,
+      clientName: clientId ? mcpClientName(clientId) : TEXTS.mcp.consent.unknownClient,
+      tool: def.name,
+      requestId,
+      at: clock.now(),
+      ...logged,
+    });
+  } catch {
+    // recordMcpCall reports its own failures; the lookups above must not change the result either.
+  }
 }
 
 export async function runTool<I, O>(
@@ -106,8 +160,10 @@ export async function runTool<I, O>(
   raw: unknown,
   env: Env,
 ): Promise<CallToolResult> {
+  const requestId = randomUUID();
+  let logged: Logged = { outcome: "ok", reason: null, requiredLevel: null };
   try {
-    const ctx = admit(def as ToolDef<unknown, unknown>, claims, env);
+    const ctx = admit(def as ToolDef<unknown, unknown>, claims, env, requestId);
     const input = def.input.parse(raw, { error: czechError });
     if (def.levelFor) requireLevel(ctx.level, def.levelFor(ctx, input));
     const result = await runWithActor(ctx.actor, () => def.run(ctx, input));
@@ -121,6 +177,9 @@ export async function runTool<I, O>(
       structuredContent: output as Record<string, unknown>,
     };
   } catch (error) {
+    logged = loggedFailure(error);
     return toolErrorResult(error, def.name, claims.sub ?? "", def.fieldLabels);
+  } finally {
+    logCall(def, claims, requestId, logged);
   }
 }

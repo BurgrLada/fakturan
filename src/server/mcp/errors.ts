@@ -2,13 +2,26 @@ import "server-only";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import * as Sentry from "@sentry/nextjs";
 import { z } from "zod";
+import type { McpLevel } from "@/lib/mcp-settings";
 import { TEXTS } from "@/lib/texts";
 import { logger } from "../logger";
 import { scrubText } from "../monitoring/before-send";
 import { ServiceError } from "../services/access";
+import type { McpCallReason } from "../services/mcp-call-log";
 
 // A refusal or failure the assistant should relay to the user. The message is Czech and shown as is.
 export class McpToolError extends Error {}
+
+// A refusal by the access checks, with the code the call log keeps (MCP-061, MCP-067).
+export class McpDenied extends McpToolError {
+  constructor(
+    message: string,
+    readonly reason: McpCallReason,
+    readonly requiredLevel: McpLevel | null = null,
+  ) {
+    super(message);
+  }
+}
 
 export function toolError(text: string): CallToolResult {
   return { isError: true, content: [{ type: "text", text }] };

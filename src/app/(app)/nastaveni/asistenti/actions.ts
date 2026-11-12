@@ -7,6 +7,7 @@ import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { env } from "@/server/env";
 import { isMcpAvailable } from "@/server/mcp/availability";
 import { ServiceError } from "@/server/services/access";
+import { clearMcpCallLog } from "@/server/services/mcp-call-log";
 import { disconnectMcpClient } from "@/server/services/mcp-connections";
 import { saveMcpSettings } from "@/server/services/mcp-settings";
 
@@ -36,5 +37,11 @@ export async function saveMcpSettingsAction(
 export async function disconnectMcpClientAction(clientId: string): Promise<Outcome> {
   await requireSession();
   const result = await guarded((actor) => disconnectMcpClient(actor, String(clientId)));
+  return result.ok ? { ok: true } : result;
+}
+
+export async function clearMcpCallLogAction(): Promise<Outcome> {
+  await requireSession();
+  const result = await guarded((actor) => clearMcpCallLog(actor));
   return result.ok ? { ok: true } : result;
 }
