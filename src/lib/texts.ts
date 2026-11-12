@@ -4311,6 +4311,233 @@ export const TEXTS = {
         stageKey: "ID stupně upomínky, nebo null pro ruční upomínku.",
       },
     },
+    // Recurring plans (spec 5.1, 5.3, 5.4, 5.5).
+    recurring: {
+      fields: {
+        id: "plán",
+        name: "název",
+        customerId: "zákazník",
+        lines: "položky",
+        note: "poznámka",
+        dueDays: "splatnost",
+        frequency: "četnost",
+        every: "každých",
+        issueRule: "den vystavení",
+        issueDay: "konkrétní den",
+        startsOn: "začátek",
+        endsOn: "konec",
+        maxCount: "nejvýš termínů",
+        periodOffset: "posun období",
+        mode: "režim",
+        notifyDaysBefore: "upozornění předem",
+        runId: "termín",
+        action: "volba",
+      },
+      id: "ID pravidelné faktury (z list_recurring).",
+      name: "Název plánu.",
+      customerId: "ID zákazníka (z search_customers), nebo null pro plán bez zákazníka.",
+      lines:
+        "Položky faktury. V textu lze použít proměnné období jako {{mesic}}, {{mesic_nazev}}, {{rok}}.",
+      note: "Poznámka na faktuře.",
+      dueDays: "Splatnost ve dnech od vystavení.",
+      frequency:
+        "Četnost: weekly, monthly, quarterly, half_yearly, yearly, every_weeks, every_months.",
+      every: "U every_weeks a every_months počet týdnů nebo měsíců.",
+      issueRule:
+        "Kdy vystavit: day (konkrétní den), period_end, first_working_day, last_working_day.",
+      issueDay: "Den v měsíci u issueRule day.",
+      startsOn: "Začátek plánu, RRRR-MM-DD.",
+      endsOn: "Konec plánu, RRRR-MM-DD, nebo null.",
+      maxCount: "Nejvýš termínů, nebo null.",
+      periodOffset: "Posun fakturovaného období proti datu vystavení (-1 předchozí, 0 aktuální).",
+      mode: "Režim: draft vytvoří koncept, issue fakturu vystaví, send ji vystaví a odešle. Plán, který vystavuje nebo odesílá, vyžaduje úroveň Vystavování a odesílání.",
+      notifyDaysBefore: "Upozornit uživatele tolik dní předem, nebo null.",
+      label: "Plán",
+      lineLabel: (n: number) => `Položka ${n}`,
+      noteLabel: "Poznámka",
+      customerLabel: "Zákazník",
+      noCustomer: "bez zákazníka",
+      empty: "Žádná pravidelná faktura.",
+      heading: (count: number, more: boolean) =>
+        `Pravidelné faktury: ${count}${more ? " (zobrazeno prvních 50)" : ""}`,
+      row: (id: string, name: string, status: string, mode: string, next: string, link: string) =>
+        `${id}: ${name}, ${status}, ${mode}, příště ${next}, ${link}`,
+      noNext: "už ne",
+      plan: (status: string, mode: string, frequency: string, next: string) =>
+        `Stav: ${status}, režim: ${mode}, četnost: ${frequency}, příští vystavení: ${next}`,
+      line: (name: string, quantity: string, price: string) => `${name}: ${quantity} × ${price}`,
+      list: {
+        name: "list_recurring",
+        title: "Seznam pravidelných faktur",
+        description:
+          "Pravidelné faktury účtu (nejvýš 50): název, zákazník, stav, režim a datum příštího vystavení.",
+      },
+      get: {
+        name: "get_recurring",
+        title: "Detail pravidelné faktury",
+        description: "Plán pravidelné faktury: pravidlo opakování, režim, stav a položky.",
+      },
+      runs: {
+        name: "list_recurring_runs",
+        title: "Termíny pravidelné faktury",
+        description:
+          "Proběhlé a zmeškané termíny plánu (nejvýš 50), nejnovější první. Zmeškaný termín vyřeší resolve_missed_run.",
+        empty: "Plán zatím nemá žádný termín.",
+        row: (id: string, date: string, status: string, number: string) =>
+          `${id}: ${date}, ${status}${number ? `, faktura ${number}` : ""}`,
+      },
+      invoices: {
+        name: "list_plan_invoices",
+        title: "Faktury z pravidelné faktury",
+        description: "Doklady, které plán vytvořil (nejvýš 50).",
+        empty: "Plán zatím nevytvořil žádný doklad.",
+        row: (id: string, number: string, status: string, total: string) =>
+          `${id}: ${number}, ${status}, ${total}`,
+        noNumber: "bez čísla",
+      },
+      preview: {
+        name: "preview_recurring",
+        title: "Náhled termínů pravidelné faktury",
+        description:
+          "Spočítá nejbližší termíny vystavení pro zadané pravidlo, nic neuloží. S id počítá s uloženým plánem a doplní, co v zadání chybí.",
+        heading: "Nejbližší termíny:",
+        row: (date: string, from: string, to: string) => `${date} (období ${from} až ${to})`,
+      },
+      save: {
+        name: "save_recurring",
+        title: "Uložit pravidelnou fakturu",
+        description:
+          "Založí plán pravidelné faktury, nebo s id upraví existující; co neuvedete, zůstane. Režim send musí poprvé potvrdit uživatel ve webu.",
+        done: "Plán je uložený.",
+      },
+      pause: {
+        name: "pause_recurring",
+        title: "Pozastavit pravidelnou fakturu",
+        description: "Pozastaví aktivní plán; do obnovení nic nevystaví.",
+        done: "Plán je pozastavený.",
+      },
+      resume: {
+        name: "resume_recurring",
+        title: "Obnovit pravidelnou fakturu",
+        description:
+          "Obnoví pozastavený plán. Termíny, které mezitím uplynuly, se označí jako zmeškané.",
+        done: "Plán je obnovený.",
+      },
+      missed: {
+        name: "resolve_missed_run",
+        title: "Vyřešit zmeškaný termín",
+        description:
+          "Zmeškaný termín plánu buď vytvoří jako koncept (draft), nebo vynechá (skip). Nic se neodešle.",
+        runId: "ID termínu z list_recurring_runs.",
+        action: "draft vytvoří koncept, skip termín vynechá.",
+        drafted: "Termín je vyřízený, vznikl koncept.",
+        skipped: "Termín je vynechaný.",
+      },
+      fromTemplate: {
+        name: "recurring_from_template",
+        title: "Pravidelná faktura ze šablony",
+        description:
+          "Založí měsíční plán v režimu koncept ze šablony faktury; pravidlo pak upravíte přes save_recurring.",
+        id: "ID šablony (z list_invoice_templates).",
+      },
+      delete: {
+        name: "delete_recurring",
+        title: "Smazat pravidelnou fakturu",
+        description: "Trvale smaže plán. Faktury, které vytvořil, zůstanou.",
+        done: "Plán je smazaný.",
+      },
+    },
+    // Invoice templates (spec 5.1, 5.4, 5.5).
+    templates: {
+      fields: { id: "šablona", name: "název" },
+      id: "ID šablony faktury (z list_invoice_templates).",
+      label: "Šablona",
+      lineLabel: (n: number) => `Položka ${n}`,
+      customerLabel: "Zákazník",
+      empty: "Žádná šablona faktury.",
+      heading: (count: number, more: boolean) =>
+        `Šablony faktur: ${count}${more ? " (zobrazeno prvních 50)" : ""}`,
+      row: (id: string, name: string, lines: number) => `${id}: ${name}, položek ${lines}`,
+      list: {
+        name: "list_invoice_templates",
+        title: "Seznam šablon faktur",
+        description: "Šablony faktur účtu (nejvýš 50) s počtem položek.",
+      },
+      get: {
+        name: "get_invoice_template",
+        title: "Detail šablony faktury",
+        description: "Šablona faktury: zákazník, měna, splatnost a položky.",
+      },
+      fromInvoice: {
+        name: "save_invoice_as_template",
+        title: "Uložit fakturu jako šablonu",
+        description: "Uloží položky a nastavení faktury jako novou šablonu.",
+        id: "ID faktury.",
+        name_: "Název šablony.",
+        done: "Šablona je uložená.",
+      },
+      delete: {
+        name: "delete_invoice_template",
+        title: "Smazat šablonu faktury",
+        description: "Trvale smaže šablonu. Plány a faktury z ní zůstanou.",
+        done: "Šablona je smazaná.",
+      },
+    },
+    // Number series (spec 5.1, 5.4, 5.5).
+    series: {
+      fields: {
+        id: "řada",
+        name: "název",
+        documentType: "typ dokladu",
+        template: "formát",
+        reset: "nulování",
+        next: "příští číslo",
+        date: "datum",
+      },
+      id: "ID číselné řady (z list_number_series).",
+      name: "Název řady.",
+      documentType: "Typ dokladu: invoice, advance, credit_note.",
+      template:
+        "Formát čísla, např. {RRRR}-{NNN}; {RRRR} rok, {RR} rok dvoumístně, {MM} měsíc, {NNN} pořadí.",
+      reset: "Kdy začít znovu od 1: yearly, quarterly, monthly, never.",
+      defaultMark: " (výchozí)",
+      heading: "Číselné řady:",
+      row: (id: string, name: string, type: string, template: string, next: string) =>
+        `${id}: ${name}, ${type}, ${template}, příští číslo ${next}`,
+      list: {
+        name: "list_number_series",
+        title: "Číselné řady",
+        description:
+          "Číselné řady účtu s formátem, výchozí řadou pro každý typ dokladu a číslem, které dostane příští vystavený doklad.",
+      },
+      save: {
+        name: "save_number_series",
+        title: "Uložit číselnou řadu",
+        description: "Založí číselnou řadu, nebo s id upraví existující.",
+        done: "Řada je uložená.",
+      },
+      setDefault: {
+        name: "set_default_series",
+        title: "Nastavit výchozí řadu",
+        description: "Nastaví řadu jako výchozí pro její typ dokladu.",
+        done: "Řada je výchozí.",
+      },
+      setNext: {
+        name: "set_next_number",
+        title: "Nastavit příští číslo řady",
+        description:
+          "Nastaví pořadí, které dostane příští vystavený doklad v aktuálním období řady. Obsazené číslo odmítne.",
+        next: "Příští pořadové číslo, od 1.",
+        date: "Den, jehož období se mění, RRRR-MM-DD; jinak dnešek.",
+        done: (next: number) => `Příští pořadí je ${next}.`,
+      },
+      delete: {
+        name: "delete_number_series",
+        title: "Smazat číselnou řadu",
+        description: "Smaže nepoužitou řadu, která není výchozí.",
+        done: "Řada je smazaná.",
+      },
+    },
   },
   demo: {
     locked: "V ukázce tohle nejde změnit",

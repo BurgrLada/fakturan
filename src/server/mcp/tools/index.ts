@@ -9,8 +9,11 @@ import { INVOICE_READ_TOOLS } from "./invoices-read";
 import { LIFECYCLE_TOOLS } from "./lifecycle";
 import { getOverviewTool } from "./overview";
 import { PAYMENT_TOOLS } from "./payments";
+import { RECURRING_TOOLS } from "./recurring";
 import { searchCatalogTool, searchCustomersTool } from "./search";
 import { SENDING_TOOLS } from "./sending";
+import { SERIES_TOOLS } from "./series";
+import { TEMPLATE_TOOLS } from "./templates";
 import { listUnpaidInvoicesTool } from "./unpaid-invoices";
 
 // Every tool of the endpoint; server.ts imports this module, so production sees them (MCP-025).
@@ -29,6 +32,9 @@ const ALL_TOOLS = [
   ...BANK_TOOLS,
   ...LIFECYCLE_TOOLS,
   ...SENDING_TOOLS,
+  ...RECURRING_TOOLS,
+  ...TEMPLATE_TOOLS,
+  ...SERIES_TOOLS,
 ];
 
 for (const tool of ALL_TOOLS) {
