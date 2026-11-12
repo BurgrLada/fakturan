@@ -237,7 +237,7 @@ describe("autorizační server MCP", () => {
     const owner = (await browser.sessionUser())!.id;
     saveMcpSettings(
       { userId: owner, source: "web" },
-      { enabled: true, read: true, create: false, revision: 0 },
+      { enabled: true, level: "read", logCalls: true, revision: 0 },
     );
     const redirectUri = "http://127.0.0.1:33418/callback";
     const { client_id: clientId } = await (await register(auth)).json();

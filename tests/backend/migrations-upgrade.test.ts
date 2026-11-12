@@ -10,7 +10,7 @@ import { registerSqlFunctions } from "@/lib/sql-functions";
 import { textLimit } from "@/lib/text-limits";
 import { setClockForTests } from "@/server/clock";
 import { createDb, runMigrations, setDbForTests, type Db } from "@/server/db";
-import { auditLog, invoice, job, schedulerState, user } from "@/server/db/schema";
+import { auditLog, invoice, job, mcpSettings, schedulerState, user } from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
@@ -306,5 +306,35 @@ describe("doplnění záznamů o e-mailu k limitu", () => {
     ]);
     for (const row of rows) expect(row.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
     assertSound(db);
+  });
+});
+
+describe("převod schopností asistenta na úroveň", () => {
+  test("[MCP-055] migrace převede can_create na drafts", () => {
+    const db = freshDb();
+    const before = journal.entries.findIndex((entry) => entry.tag.startsWith("0054_"));
+    migrate(db, { migrationsFolder: prefixFolder(before) });
+    const insertUser = db.$client.prepare(
+      "INSERT INTO user (id, name, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    );
+    const insertSettings = db.$client.prepare(
+      "INSERT INTO mcp_settings (user_id, enabled, can_read, can_create, revision, updated_at) VALUES (?, 1, 1, ?, 3, ?)",
+    );
+    for (const [id, create] of [
+      ["u-create", 1],
+      ["u-read", 0],
+    ] as const) {
+      insertUser.run(id, id, `${id}@example.cz`, NOW.getTime(), NOW.getTime());
+      insertSettings.run(id, create, NOW.getTime());
+    }
+    runMigrations(db);
+    assertSound(db);
+    const rows = db.select().from(mcpSettings).all();
+    expect(Object.fromEntries(rows.map((row) => [row.userId, row.level]))).toEqual({
+      "u-create": "drafts",
+      "u-read": "read",
+    });
+    expect(rows.every((row) => row.enabled && row.logCalls && row.revision === 3)).toBe(true);
+    expect(tableColumns(db, "mcp_settings").filter((name) => name.startsWith("can_"))).toEqual([]);
   });
 });

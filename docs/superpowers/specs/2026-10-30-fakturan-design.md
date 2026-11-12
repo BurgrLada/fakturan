@@ -703,16 +703,16 @@ Požadavky převzaté z `2026-11-11-mcp-design.md`, kap. 4 (jen věty požadavk�
 - **MCP-005** Souhlasová stránka `/pristup-asistenta` zobrazí název a doménu klienta jako nedůvěryhodný text (žádné HTML, omezená délka) a upozorní, že název uvádí klient sám. Zamítnutí vrátí klientovi `access_denied`.
 - **MCP-006** Když je přístup asistentů vypnutý (MCP-010), autorizace skončí na stránce s vysvětlením a odkazem do Nastavení. Souhlas se neukáže a token se nevydá.
 - **MCP-007** Přístupový token platí nejvýš 15 minut, obnovovací token se při použití rotuje. Audience tokenu je přesně adresa `/api/mcp` této instance, token pro jiný zdroj endpoint odmítne.
-- **MCP-008** Scope je jediný, `fakturan`. Co asistent smí, určují přepínače v Nastavení kontrolované při každém volání (MCP-012).
+- **MCP-008** Scope je jediný, `fakturan`. Co asistent smí, určuje úroveň oprávnění v Nastavení kontrolovaná při každém volání (MCP-012, MCP-052).
 - **MCP-009** V režimu ukázky je MCP vypnuté: endpoint, metadata i autorizace vrací `404` a záložka v Nastavení se nezobrazí.
 
 ### 25.2 Nastavení › Asistenti
 
 - **MCP-010** Hlavní vypínač „Povolit připojení asistentů“ je ve výchozím stavu vypnutý. Vypnutí okamžitě odmítne všechna volání a nové autorizace, propojení ale nesmaže.
-- **MCP-011** Přepínače schopností platí pro všechny asistenty uživatele: Číst (výchozí zapnuto) a Zakládat (výchozí vypnuto) jsou v první verzi; Upravovat, Vystavovat a Odesílat jsou vidět, nejdou zapnout a mají text „připravujeme“.
-- **MCP-012** Server při každém volání nástroje ověří platný token, hlavní vypínač, potřebnou schopnost, existující propojení klienta s uživatelem a že účet není zablokovaný. Vypnutá schopnost vrátí chybu nástroje se srozumitelnou českou větou, ne HTTP chybu.
+- **MCP-011** Úroveň oprávnění (MCP-050) platí pro všechny asistenty uživatele; výchozí je Jen čtení. Nahrazuje přepínače schopností první verze.
+- **MCP-012** Server při každém volání nástroje ověří platný token, hlavní vypínač, potřebnou úroveň, existující propojení klienta s uživatelem a že účet není zablokovaný. Nedostatečná úroveň vrátí chybu nástroje se srozumitelnou českou větou, ne HTTP chybu (pořadí kontrol MCP-052).
 - **MCP-013** Seznam propojených asistentů ukáže název klienta, doménu, kdy byl připojen a kdy naposledy použit (na minuty) a tlačítko Odpojit. Odpojení smaže souhlas i obnovovací tokeny klienta a přestane platit i ještě neexpirovaný přístupový token.
-- **MCP-014** Změny vypínače, schopností a odpojení se zapíší do auditu jako ostatní nastavení (zdroj `web`).
+- **MCP-014** Změny vypínače, úrovně, záznamu volání a odpojení se zapíší do auditu jako ostatní nastavení (zdroj `web`).
 - **MCP-015** Záložka je dostupná každému uživateli a každý uživatel má vlastní nastavení.
 
 ### 25.3 Nástroje první verze
@@ -722,12 +722,12 @@ Požadavky převzaté z `2026-11-11-mcp-design.md`, kap. 4 (jen věty požadavk�
 - **MCP-022** `get_invoice` (Číst) vrátí detail faktury podle ID nebo čísla. Faktura jiného účtu se chová jako neexistující.
 - **MCP-023** `search_customers` a `search_catalog` (Číst) hledají zákazníka a položku ceníku podle textu stávajícím hledáním.
 - **MCP-024** `create_draft_invoice` (Zakládat) založí jen koncept přes stejné schéma a službu jako web, doplní výchozí hodnoty uživatele, nespálí žádné číslo a chyby validace vrátí jako chybu nástroje s výčtem polí.
-- **MCP-025** Nástroj bez zapnuté schopnosti se v `tools/list` objeví také, s popisem, že je v Nastavení vypnutý.
+- **MCP-025** Nahrazeno MCP-053: `tools/list` vrací jen nástroje do aktuální úrovně a instrukce serveru říkají, že chybějící nástroj může vyžadovat vyšší úroveň.
 
 ### 25.4 Audit, limity, bezpečnost
 
 - **MCP-030** Audit má zdroj `mcp`. Záznam nese ID a název klienta a historie ve webu ukáže „Asistent: <název>“.
-- **MCP-031** Čtení přes MCP se do auditu nezapisuje. Zapisuje se vydání a odvolání přístupu (autorizace, odpojení).
+- **MCP-031** Čtení přes MCP se do auditu nezapisuje. Zapisuje se vydání a odvolání přístupu (autorizace, odpojení). Každé volání včetně čtení jde do samostatného logu volání (MCP-060), pokud ho uživatel nevypnul.
 - **MCP-032** Endpoint má limit volání na uživatele a klienta (60 za minutu) a registrace klientů limit podle IP. Překročení vrátí `429`. Platí i limity účtu.
 - **MCP-033** Výstupy nástrojů jsou data, ne instrukce: texty z dokladů jsou v `structuredContent` jako hodnoty a v textu zřetelně oddělené. Žádný nástroj nesmí na základě obsahu dokumentu provést další akci.
 - **MCP-034** `proxy.ts` endpoint MCP, metadata ani OAuth trasy nepřesměrovává na přihlášení. Odpověď bez tokenu je `401` s hlavičkou `WWW-Authenticate` podle RFC 9728.
@@ -740,7 +740,34 @@ Požadavky převzaté z `2026-11-11-mcp-design.md`, kap. 4 (jen věty požadavk�
 
 - **MCP-040** Autorizační server staví výhradně na ekosystému Better Auth a tenkém lepidle kolem něj. Povinné jsou PKCE, audience, okamžité odpojení a funkční registrace aspoň pro Claude Code a Claude.ai. Odchylky se zapíší do PR.
 - **MCP-041** Propojení je řádek souhlasu pro dvojici uživatel a klient, který obal nástrojů čte při každém volání. „Naposledy použit“ se zapisuje nejvýš jednou za minutu na propojení, mimo audit.
-- **MCP-042** `mcp_settings` je součástí zálohy účtu a po obnově je hlavní vypínač vždy vypnutý, schopnosti se obnoví. OAuth tabulky nejsou v záloze, exportu ani obnově. Smazání uživatele smaže jeho souhlasy a tokeny, klienti zůstanou.
+- **MCP-042** `mcp_settings` je součástí zálohy účtu a po obnově je hlavní vypínač vždy vypnutý, úroveň a přepínač logu se obnoví. Log volání v záloze není (MCP-065). OAuth tabulky nejsou v záloze, exportu ani obnově. Smazání uživatele smaže jeho souhlasy a tokeny, klienti zůstanou.
 - **MCP-043** `create_draft_invoice` zakládá běžnou fakturu ve výchozí řadě, ceny a množství přijímá jako desetinné řetězce převedené stávajícími pomocníky, kurz cizí měny doplní z ČNB, `idempotency_key` předá jako `clientId` konceptu a odkaz ve výstupu je absolutní.
-- **MCP-044** Souhlasová stránka ukáže hostitele z `redirect_uri` („aplikace na tomto počítači“ pro `localhost` a `127.0.0.1`, hostitele dokumentu u CIMD). Se zapnutým vypínačem a všemi schopnostmi vypnutými jde souhlas udělit a stránka to řekne větou „Asistent se připojí, ale zatím nic nesmí. Schopnosti zapnete v Nastavení › Asistenti.“
+- **MCP-044** Souhlasová stránka ukáže hostitele z `redirect_uri` („aplikace na tomto počítači“ pro `localhost` a `127.0.0.1`, hostitele dokumentu u CIMD). Stránka ukáže aktuální úroveň oprávnění a větu, že ji lze změnit v Nastavení › Asistenti (MCP-054).
 - **MCP-045** Na `http://localhost` a `http://127.0.0.1` funguje celý tok bez HTTPS. Vydavatel, audience i metadata se odvozují z `BETTER_AUTH_URL`.
+
+### 25.5 Úrovně oprávnění, log volání a plná sada nástrojů
+
+Návrh: `docs/superpowers/specs/2026-11-12-mcp-full-design.md` (kap. 5 je závazný seznam nástrojů).
+
+- **MCP-050** Úroveň je jedna na uživatele a platí pro všechny jeho asistenty (jako v1). Výchozí je `read`. Hlavní vypínač (MCP-010) zůstává beze změny.
+- **MCP-051** Nástroj deklaruje minimální úroveň. U `save_recurring` je požadovaná úroveň vyšší ze dvou: podle režimu na vstupu a podle režimu uloženého plánu (`draft` = 3, `issue` a `send` = 4). Uložený plán se čte přes `getRecurring`. Asistent s úrovní 3 tak nezmění běžící plán, který sám vystavuje nebo odesílá.
+- **MCP-052** Ověření při každém volání (rozšíření MCP-012) v tomto pořadí: dostupnost → účet → vypínač → propojení → minimální úroveň nástroje (před validací vstupu, takže asistent pod úrovní se nedozví nic o vstupu) → validace vstupu → případně úroveň odvozená ze vstupu (MCP-051) → služba. Odmítnutí je chyba nástroje s českou větou, která říká potřebnou úroveň („Tahle operace vyžaduje úroveň Vystavování a odesílání. Úroveň nastavíte v Nastavení › Asistenti.“). Zachycuje i volání nástroje, který klient zná ze staršího seznamu.
+- **MCP-053** `tools/list` vrací jen nástroje dostupné na aktuální úrovni uživatele (nahrazuje MCP-025). Když je hlavní vypínač vypnutý nebo klient odpojený, seznam je prázdný. Server posílá MCP `instructions` (a stejnou větu má popis každého nástroje úrovně nižší než 5): „Fakturan má pět úrovní oprávnění (Jen čtení, Koncepty, Účetní operace, Vystavování a odesílání, Plný přístup). Aktuální úroveň je <název>. Pokud ti chybí nástroj pro to, co uživatel chce, je možné, že vyžaduje vyšší úroveň; řekni uživateli, že ji může nastavit v Nastavení › Asistenti. Operace, které ve webu potvrzuje člověk, přes asistenta nejdou vůbec.“ Endpoint je bezstavový (MCP-035), takže změnu úrovně klient uvidí po novém načtení seznamu nástrojů; do té doby ho chrání MCP-052. Anotace: `readOnlyHint` pro úroveň 1, `destructiveHint` pro úroveň 5.
+- **MCP-054** Nastavení › Asistenti: místo přepínačů schopností volba úrovně (5 možností s jednou větou popisu, co úroveň přidává). Souhlasová stránka ukazuje aktuální úroveň místo seznamu schopností.
+- **MCP-055** Migrace dat: nový sloupec `level` v `mcp_settings`, sloupce `can_*` se odstraní. Převod: `can_create = true` → `drafts`, jinak `read`. Registr záloh (`server/backup/tables.ts`) a obnova se upraví; starší záloha se sloupci `can_*` se při obnově převede stejným pravidlem. Po obnově zůstává hlavní vypínač vypnutý (MCP-042). Souhlasy a tokeny OAuth schopnosti neobsahují (jediný scope `fakturan`, MCP-008), takže stávající propojení po migraci fungují dál bez nového souhlasu.
+- **MCP-056** Změna úrovně se zapíše do Historie změn jako dosud (`mcp.settings_changed`, zdroj `web`).
+- **MCP-060** Nová tabulka `mcp_call_log`: id, `owner_id`, `at`, `client_id`, `client_name`, `tool`, `outcome` (`ok` | `denied` | `error`), `reason` (krátký kód: např. `level`, `disabled`, `not_connected`, `invalid_input`, `service_error`, `confirm_in_web`), `required_level`, `request_id`. Neukládají se argumenty ani výstup (data z dokladů v logu nebudou; v souladu s MCP-036).
+- **MCP-061** Zápis dělá obal `runTool` u každého volání, kde je znám vlastník (claim `sub` odpovídá aktivnímu účtu), včetně odmítnutí před `admit` dokončením. Zápis logu nesmí změnit výsledek volání: selhání zápisu jde do Sentry a volání pokračuje. Zápis logu je mimo audit transakci služby.
+- **MCP-062** Přepínač „Zaznamenávat volání asistentů“ v Nastavení › Asistenti, výchozí zapnuto. Když je vypnutý, do logu se nic nezapisuje. Změny dat jdou do Historie změn vždy (MCP-030) bez ohledu na přepínač. Změna přepínače se zapíše do Historie změn.
+- **MCP-063** Nastavení › Asistenti zobrazí log: čas, asistent, nástroj, výsledek, důvod odmítnutí česky; stránkování, nejnovější nahoře; filtr podle asistenta a výsledku.
+- **MCP-064** Záznamy starší než 90 dní maže plánovač (stejný vzor jako ostatní `purge*` v `server/scheduler/start.ts`). Tlačítko „Smazat log“ ve webu.
+- **MCP-065** Log patří k účtu: maže se se smazáním uživatele (cascade). V záloze účtu není (je to provozní záznam s krátkou životností).
+- **MCP-066** Rate limit (HTTP 429, MCP-032) se do logu nezapisuje, protože odmítnutí nastane před rozlišením nástroje.
+- **MCP-067** U odmítnutí kvůli úrovni se do `required_level` zapíše úroveň, která chyběla; u neplatného vstupu a chyb před ověřením úrovně je prázdná.
+- **MCP-070** Každý nástroj volá právě tu službu (nebo službu přesunutou z akce podle kap. 6), kterou volá odpovídající akce webu, se stejným vstupním schématem (Zod schéma služby nebo akce, viz inventura). Mutace dostávají `ctx.actor` (audit se zdrojem `mcp`), čtení `ctx.ownerId`.
+- **MCP-071** Konvence v1 platí dál: anglické `snake_case` názvy, české popisy, částky na vstupu jako desetinné řetězce převedené stávajícími pomocníky (`parseMoney`, `parseQuantity`), ve výstupu formátované i strojové (`server/mcp/format.ts`), data `RRRR-MM-DD`, texty z dokladů ohraničené `quoted()` (MCP-033), odkazy do webu absolutní. Kde webové schéma bere částky v nejmenších jednotkách, nástroj převede desetinný řetězec stávajícím pomocníkem; jiné převody nevznikají.
+- **MCP-072** Optimistická souběžnost: nástroje měnící fakturu nebo platbu přijímají `revision` stejně jako web. `get_invoice` proto nově vrací `revision`, ID plateb, ID verzí a ID záznamů pošty. Chyba „zastaralé“ vrací text s radou znovu načíst fakturu.
+- **MCP-073** Chyby služeb se mapují jako v1 (`toolErrorResult`). `NotIssuableError` vrátí výčet problémů v textu i ve `structuredContent`.
+- **MCP-074** Izolace účtů: cizí ID se chová jako neexistující (jako MCP-022), u všech nástrojů.
+- **MCP-075** Stránkování a limity velikosti výstupu převzaté ze služeb; tam, kde služba limit nemá, nástroj omezí stránku na nejvýš 50 položek.
+

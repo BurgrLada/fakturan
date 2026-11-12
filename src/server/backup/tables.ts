@@ -663,11 +663,8 @@ export const BACKUP_TABLES: BackupTable[] = [
     columns: {
       user_id: "owner",
       enabled: C,
-      can_read: C,
-      can_create: C,
-      can_edit: C,
-      can_issue: C,
-      can_send: C,
+      level: C,
+      log_calls: C,
       revision: C,
       updated_at: C,
     },
@@ -724,6 +721,7 @@ export const BACKUP_SKIPPED_TABLES: Record<string, string> = {
   job: "fronta se neobnovuje",
   export_job: "exporty i zálohy jsou dočasné a vyprší",
   bank_mailbox: "řádek nemůže existovat bez hesla, které do zálohy nesmí",
+  mcp_call_log: "provozní záznam volání asistentů s krátkou životností (MCP-065)",
 };
 
 export type BackupFingerprint = { v: number; tables: Record<string, Record<string, ColumnRule>> };

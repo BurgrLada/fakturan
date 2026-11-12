@@ -4,12 +4,7 @@ import { useState, useTransition } from "react";
 import { saveMcpSettingsAction } from "@/app/(app)/nastaveni/asistenti/actions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  AVAILABLE_CAPABILITIES,
-  MCP_CAPABILITIES,
-  type McpCapability,
-  type McpSettings,
-} from "@/lib/mcp-settings";
+import { MCP_LEVELS, type McpLevel, type McpSettings } from "@/lib/mcp-settings";
 import { TEXTS } from "@/lib/texts";
 
 const T = TEXTS.mcp.settings;
@@ -60,7 +55,7 @@ export function AssistantsForm({
   const [message, setMessage] = useState<Message>(null);
 
   // Every change saves at once; the returned revision is the base of the next one.
-  function change(patch: Partial<Record<"enabled" | McpCapability, boolean>>) {
+  function change(patch: Partial<Omit<McpSettings, "revision">>) {
     setMessage(null);
     startTransition(async () => {
       const result = await saveMcpSettingsAction({ ...current, ...patch });
@@ -120,33 +115,20 @@ export function AssistantsForm({
         <h2 id="mcp-capabilities" className="text-lg">
           {T.capabilitiesTitle}
         </h2>
-        <ul aria-label={T.capabilitiesLabel} className="flex flex-col gap-3">
-          {MCP_CAPABILITIES.map((capability) => {
-            const available = AVAILABLE_CAPABILITIES.includes(capability);
-            const id = `mcp-cap-${capability}`;
-            return (
-              <li key={capability} className="flex flex-wrap items-center gap-2">
-                <input
-                  id={id}
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={current[capability]}
-                  disabled={!available || pending}
-                  onChange={(event) => change({ [capability]: event.target.checked })}
-                />
-                <label
-                  htmlFor={id}
-                  className={available ? "text-sm" : "text-sm text-muted-foreground"}
-                >
-                  {T.capabilities[capability]}
-                </label>
-                {!available && (
-                  <span className="text-xs text-muted-foreground">{T.comingSoon}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        {/* Bridge until Task 3 of plan 11 brings the level choice with descriptions. */}
+        <select
+          aria-label={T.capabilitiesLabel}
+          className="w-fit rounded border px-2 py-1 text-sm"
+          value={current.level}
+          disabled={pending}
+          onChange={(event) => change({ level: event.target.value as McpLevel })}
+        >
+          {MCP_LEVELS.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
       </section>
     </div>
   );

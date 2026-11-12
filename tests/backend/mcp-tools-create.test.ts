@@ -119,7 +119,7 @@ beforeAll(async () => {
   ownerId = db.select({ id: user.id }).from(user).where(eq(user.email, OWNER)).get()!.id;
   saveMcpSettings(
     { userId: ownerId, source: "web" },
-    { ...getMcpSettings(ownerId), enabled: true, read: true, create: true },
+    { ...getMcpSettings(ownerId), enabled: true, level: "drafts" },
   );
   const token = await issueMcpToken(auth, browser, "Claude Code");
   claims = decodeJwt(token.accessToken) as { sub: string; azp?: string };
@@ -448,7 +448,7 @@ describe("create_draft_invoice", () => {
   test("[MCP-012] se schopností create vypnutou nic nevznikne", async () => {
     saveMcpSettings(
       { userId: ownerId, source: "web" },
-      { ...getMcpSettings(ownerId), create: false },
+      { ...getMcpSettings(ownerId), level: "read" },
     );
     try {
       const before = invoicesOf(ownerId).length;
@@ -459,7 +459,7 @@ describe("create_draft_invoice", () => {
     } finally {
       saveMcpSettings(
         { userId: ownerId, source: "web" },
-        { ...getMcpSettings(ownerId), create: true },
+        { ...getMcpSettings(ownerId), level: "drafts" },
       );
     }
   });

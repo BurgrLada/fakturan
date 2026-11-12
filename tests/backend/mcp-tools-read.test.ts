@@ -164,7 +164,7 @@ beforeAll(async () => {
   const ownerId = db.select({ id: user.id }).from(user).where(eq(user.email, OWNER)).get()!.id;
   saveMcpSettings(
     { userId: ownerId, source: "web" },
-    { ...getMcpSettings(ownerId), enabled: true, read: true },
+    { ...getMcpSettings(ownerId), enabled: true },
   );
   const token = await issueMcpToken(auth, browser, "Claude Code");
   claims = decodeJwt(token.accessToken) as { sub: string; azp?: string };

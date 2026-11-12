@@ -9,7 +9,7 @@ import type { z } from "zod";
 import { TEXTS } from "@/lib/texts";
 import type { Auth } from "../auth";
 import type { Env } from "../env";
-import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
+import { capabilitiesOf, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable, MCP_SCOPE, mcpResource } from "./availability";
 import { mcpRateLimit } from "./rate-limit";
 import { runTool, TOOLS, type McpClaims } from "./tool";
@@ -32,7 +32,7 @@ function advertised(schema: z.ZodType): StandardSchemaWithJSON {
 // assistant can tell the user what to switch on and the list does not change under it (MCP-025).
 export function buildMcpServer(claims: McpClaims, env: Env): McpServer {
   const server = new McpServer({ name: "fakturan", title: "Fakturan", version: "1.0.0" });
-  const allowed = allowedCapabilities(getMcpSettings(claims.sub ?? ""));
+  const allowed = capabilitiesOf(getMcpSettings(claims.sub ?? ""));
   for (const def of TOOLS) {
     const off = allowed.includes(def.capability) ? "" : TEXTS.mcp.tools.offSuffix;
     server.registerTool(

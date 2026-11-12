@@ -16,6 +16,7 @@ import { defineTool, runTool, TOOLS, type ToolDef } from "@/server/mcp/tool";
 import { ServiceError } from "@/server/services/access";
 import { saveCustomer } from "@/server/services/customers";
 import { disconnectMcpClient } from "@/server/services/mcp-connections";
+import type { McpSettings } from "@/lib/mcp-settings";
 import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
 import { BASE, Browser } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
@@ -93,7 +94,7 @@ const createCustomer = defineTool({
 let browser: Browser;
 let ownerId: string;
 
-function setAccess(changes: Partial<{ enabled: boolean; read: boolean; create: boolean }>) {
+function setAccess(changes: Partial<Omit<McpSettings, "revision">>) {
   const current = getMcpSettings(ownerId);
   saveMcpSettings({ userId: ownerId, source: "web" }, { ...current, ...changes });
 }
@@ -118,7 +119,7 @@ beforeAll(async () => {
 beforeEach(() => {
   db.delete(rateLimit).run();
   db.update(user).set({ banned: false }).run();
-  setAccess({ enabled: true, read: true, create: true });
+  setAccess({ enabled: true, level: "drafts" });
   echoRun.mockClear();
   sentry.captureException.mockClear();
 });
@@ -156,7 +157,7 @@ describe("obal nástrojů MCP", () => {
 
   test("[MCP-012] vypnutá schopnost vrací českou větu „… je v Nastavení › Asistenti vypnuté.“ a isError", async () => {
     const { claims } = await connect();
-    setAccess({ create: false });
+    setAccess({ level: "read" });
     // The capability is checked before the input: a wrong input says the same.
     for (const raw of [{ text: "Alfa s.r.o." }, { nic: 1 }]) {
       const result = await runTool(createCustomer, claims, raw, env);
@@ -164,11 +165,6 @@ describe("obal nástrojů MCP", () => {
       expect(textOf(result)).toBe("Zakládání faktur je v Nastavení › Asistenti vypnuté.");
     }
     expect(db.select().from(customer).all()).toHaveLength(0);
-
-    setAccess({ read: false });
-    const read = await runTool(echo, claims, { text: "ahoj" }, env);
-    expect(textOf(read)).toBe(T.capabilityOff.read);
-    expect(echoRun).not.toHaveBeenCalled();
   });
 
   test("[MCP-013] odpojený klient s platným tokenem", async () => {

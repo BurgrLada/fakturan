@@ -1,46 +1,38 @@
 import { z } from "zod";
 
-export type McpCapability = "read" | "create" | "edit" | "issue" | "send";
+// One permission level per user, each adding to the one before it (MCP-050).
+export type McpLevel = "read" | "drafts" | "accounting" | "issue_send" | "full";
 
-export const MCP_CAPABILITIES: readonly McpCapability[] = [
+export const MCP_LEVELS: readonly McpLevel[] = [
   "read",
-  "create",
-  "edit",
-  "issue",
-  "send",
+  "drafts",
+  "accounting",
+  "issue_send",
+  "full",
 ];
 
-// What the first version can do; the other switches are shown as „připravujeme“ (MCP-011).
-export const AVAILABLE_CAPABILITIES: readonly McpCapability[] = ["read", "create"];
+export function levelAtLeast(have: McpLevel, need: McpLevel): boolean {
+  return MCP_LEVELS.indexOf(have) >= MCP_LEVELS.indexOf(need);
+}
 
 export type McpSettings = {
   enabled: boolean;
-  read: boolean;
-  create: boolean;
-  edit: boolean;
-  issue: boolean;
-  send: boolean;
+  level: McpLevel;
+  logCalls: boolean;
   revision: number;
 };
 
 export const DEFAULT_MCP_SETTINGS: McpSettings = {
   enabled: false,
-  read: true,
-  create: false,
-  edit: false,
-  issue: false,
-  send: false,
+  level: "read",
+  logCalls: true,
   revision: 0,
 };
 
-// The capabilities not yet available may be sent as false or left out, never switched on.
 export const mcpSettingsSchema = z.strictObject({
   enabled: z.boolean(),
-  read: z.boolean(),
-  create: z.boolean(),
-  edit: z.boolean().default(false),
-  issue: z.boolean().default(false),
-  send: z.boolean().default(false),
+  level: z.enum(MCP_LEVELS as [McpLevel, ...McpLevel[]]),
+  logCalls: z.boolean(),
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
 });
 

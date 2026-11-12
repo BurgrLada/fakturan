@@ -379,6 +379,20 @@
       "when": 1794429753494,
       "tag": "0053_mcp_settings_audit_client",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1794504754245,
+      "tag": "0054_mcp_levels_call_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1794504755764,
+      "tag": "0055_mcp_drop_capabilities",
+      "breakpoints": true
     }
   ]
 }

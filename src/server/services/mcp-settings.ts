@@ -1,10 +1,8 @@
 import "server-only";
 import {
-  AVAILABLE_CAPABILITIES,
   DEFAULT_MCP_SETTINGS,
-  MCP_CAPABILITIES,
   mcpSettingsSchema,
-  type McpCapability,
+  type McpLevel,
   type McpSettings,
 } from "@/lib/mcp-settings";
 import { TEXTS } from "@/lib/texts";
@@ -16,7 +14,7 @@ import { scoped } from "../db/scoped";
 import { ServiceError } from "./access";
 import { mutate } from "./mutation";
 
-export { AVAILABLE_CAPABILITIES, type McpCapability, type McpSettings };
+export type { McpLevel, McpSettings };
 
 const E = TEXTS.mcp.settings.errors;
 
@@ -28,8 +26,8 @@ function ownerOf(actor: Actor): string {
 function readSettings(tx: Pick<Tx, "select">, ownerId: string): McpSettings {
   const row = tx.select().from(mcpSettings).where(scoped(ownerId).where(mcpSettings)).get();
   if (!row) return { ...DEFAULT_MCP_SETTINGS };
-  const { enabled, read, create, edit, issue, send, revision } = row;
-  return { enabled, read, create, edit, issue, send, revision };
+  const { enabled, level, logCalls, revision } = row;
+  return { enabled, level, logCalls, revision };
 }
 
 // Read on every authorization and every tool call (MCP-006, MCP-012): a local SQLite read.
@@ -37,10 +35,16 @@ export function getMcpSettings(ownerId: string): McpSettings {
   return readSettings(db, ownerId);
 }
 
-// The capabilities the assistant may use right now; empty when access is off.
-export function allowedCapabilities(settings: McpSettings): McpCapability[] {
-  if (!settings.enabled) return [];
-  return AVAILABLE_CAPABILITIES.filter((capability) => settings[capability]);
+// The level the assistant has right now; null when access is off (MCP-050).
+export function activeLevel(settings: McpSettings): McpLevel | null {
+  return settings.enabled ? settings.level : null;
+}
+
+// Bridge until the tools carry a level (Task 2 of plan 11 removes it).
+export function capabilitiesOf(settings: McpSettings): ("read" | "create")[] {
+  const level = activeLevel(settings);
+  if (!level) return [];
+  return level === "read" ? ["read"] : ["read", "create"];
 }
 
 export function saveMcpSettings(actor: Actor, raw: unknown): McpSettings {
@@ -48,21 +52,13 @@ export function saveMcpSettings(actor: Actor, raw: unknown): McpSettings {
   const parsed = mcpSettingsSchema.safeParse(raw);
   if (!parsed.success) throw new ServiceError(E.invalid);
   const input = parsed.data;
-  // The switches without a tool behind them stay off until they ship (MCP-011).
-  const unavailable = MCP_CAPABILITIES.filter((c) => !AVAILABLE_CAPABILITIES.includes(c));
-  if (unavailable.some((capability) => input[capability])) {
-    throw new ServiceError(E.notAvailable);
-  }
   return mutate(actor, "mcp.settings_changed", (tx, audit) => {
     const before = readSettings(tx, ownerId);
     if (before.revision !== input.revision) throw new ServiceError(E.stale);
     const values = {
       enabled: input.enabled,
-      read: input.read,
-      create: input.create,
-      edit: false,
-      issue: false,
-      send: false,
+      level: input.level,
+      logCalls: input.logCalls,
       revision: before.revision + 1,
       updatedAt: clock.now(),
     };

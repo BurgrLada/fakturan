@@ -1,10 +1,9 @@
 import "server-only";
 import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
-import type { McpCapability } from "@/lib/mcp-settings";
 import type { Env } from "../env";
 import { findMcpClient } from "../services/mcp-connections";
 import { consentInfo, type ConsentInfo } from "../services/mcp-client-info";
-import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
+import { capabilitiesOf, getMcpSettings } from "../services/mcp-settings";
 
 export { consentInfo, type ConsentInfo } from "../services/mcp-client-info";
 
@@ -42,7 +41,7 @@ export async function consentRequest(env: Env, oauthQuery: string): Promise<Cons
 export type ConsentPage =
   | { kind: "invalid" }
   | { kind: "disabled" }
-  | { kind: "consent"; request: ConsentRequest; capabilities: McpCapability[] };
+  | { kind: "consent"; request: ConsentRequest; capabilities: ("read" | "create")[] };
 
 // What /pristup-asistenta shows a signed-in user. With access off the authorization ends here with
 // an explanation and no consent (MCP-006); the provider sends the browser here for that too.
@@ -55,5 +54,5 @@ export async function consentPage(
   if (!request) return { kind: "invalid" };
   const settings = getMcpSettings(userId);
   if (!settings.enabled) return { kind: "disabled" };
-  return { kind: "consent", request, capabilities: allowedCapabilities(settings) };
+  return { kind: "consent", request, capabilities: capabilitiesOf(settings) };
 }

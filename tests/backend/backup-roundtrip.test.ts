@@ -533,19 +533,13 @@ describe("záloha účtu s dokumenty a řádky z dřívějška", () => {
     const source = seedOwner(db, NOW);
     saveMcpSettings(
       { userId: source, source: "web" },
-      {
-        enabled: true,
-        read: false,
-        create: true,
-        edit: false,
-        issue: false,
-        send: false,
-        revision: 0,
-      },
+      { enabled: true, level: "accounting", logCalls: false, revision: 0 },
     );
     const archive = await backupArchive(db, source);
     const rows = readJsonl(unzipSync(archive)["data/mcp_settings.jsonl"]!);
-    expect(rows).toEqual([expect.objectContaining({ enabled: true, can_create: true })]);
+    expect(rows).toEqual([
+      expect.objectContaining({ enabled: true, level: "accounting", log_calls: false }),
+    ]);
     // OAuth secrets never go into an archive.
     expect(Object.keys(unzipSync(archive)).filter((name) => name.includes("oauth"))).toEqual([]);
 
@@ -553,17 +547,13 @@ describe("záloha účtu s dokumenty a řádky z dřívějška", () => {
     // Settings the target already chose do not make the account count as filled.
     saveMcpSettings(
       { userId: target, source: "web" },
-      {
-        enabled: true,
-        read: true,
-        create: false,
-        edit: false,
-        issue: false,
-        send: false,
-        revision: 0,
-      },
+      { enabled: true, level: "read", logCalls: true, revision: 0 },
     );
     expect((await restoreArchive(db, target, archive)).status).toBe("done");
-    expect(getMcpSettings(target)).toMatchObject({ enabled: false, read: false, create: true });
+    expect(getMcpSettings(target)).toMatchObject({
+      enabled: false,
+      level: "accounting",
+      logCalls: false,
+    });
   });
 });

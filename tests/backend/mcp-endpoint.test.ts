@@ -12,6 +12,7 @@ import { auditLog, rateLimit, user } from "@/server/db/schema";
 import { parseEnv, type Env } from "@/server/env";
 import { mcpEndpoint } from "@/server/mcp/server";
 import { defineTool, TOOLS } from "@/server/mcp/tool";
+import type { McpSettings } from "@/lib/mcp-settings";
 import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
 import { BASE, Browser } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
@@ -54,7 +55,7 @@ const echoCreate = defineTool({
 let browser: Browser;
 let ownerId: string;
 
-function setAccess(changes: Partial<{ enabled: boolean; read: boolean; create: boolean }>) {
+function setAccess(changes: Partial<Omit<McpSettings, "revision">>) {
   const current = getMcpSettings(ownerId);
   saveMcpSettings({ userId: ownerId, source: "web" }, { ...current, ...changes });
 }
@@ -90,7 +91,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   db.delete(rateLimit).run();
-  setAccess({ enabled: true, read: true, create: true });
+  setAccess({ enabled: true, level: "drafts" });
   serveJwksFrom(auth);
   TOOLS.push(echo, echoCreate);
 });
@@ -188,7 +189,7 @@ describe("endpoint /api/mcp", () => {
 
   test("[MCP-035][MCP-025] tools/list s platným tokenem", async () => {
     const { accessToken } = await issueMcpToken(auth, browser);
-    setAccess({ create: false });
+    setAccess({ level: "read" });
 
     const response = await mcpEndpoint(auth, env, post(accessToken, toolsList));
     expect(response.status).toBe(200);
@@ -248,7 +249,6 @@ describe("endpoint /api/mcp", () => {
       const first = await issueMcpToken(auth, browser);
       const second = await issueMcpToken(auth, browser, "Jiný asistent");
       // Every request counts, a refused tool call too: the limit sits in front of the tools.
-      setAccess({ read: false });
       for (let i = 0; i < 60; i += 1) {
         expect((await mcpEndpoint(auth, env, post(first.accessToken, toolsList))).status).toBe(200);
       }

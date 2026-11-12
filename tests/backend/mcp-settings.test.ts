@@ -8,11 +8,8 @@ import { auditSourceLabel } from "@/lib/audit-labels";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, user } from "@/server/db/schema";
 import { ServiceError } from "@/server/services/access";
-import {
-  AVAILABLE_CAPABILITIES,
-  getMcpSettings,
-  saveMcpSettings,
-} from "@/server/services/mcp-settings";
+import { DEFAULT_MCP_SETTINGS, MCP_LEVELS, levelAtLeast } from "@/lib/mcp-settings";
+import { activeLevel, getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
 import { mutate } from "@/server/services/mutation";
 import { createTestDb } from "../helpers/db";
 
@@ -35,11 +32,8 @@ function newUser(): string {
 
 const input = (over: Record<string, unknown> = {}) => ({
   enabled: true,
-  read: true,
-  create: false,
-  edit: false,
-  issue: false,
-  send: false,
+  level: "read",
+  logCalls: true,
   revision: 0,
   ...over,
 });
@@ -57,32 +51,37 @@ beforeEach(() => setClockForTests({ now: () => NOW }));
 afterEach(() => setClockForTests(null));
 
 describe("nastavení asistentů", () => {
-  test("[MCP-010] výchozí stav vypnuto, Číst zapnuto", () => {
-    expect(getMcpSettings(newUser())).toEqual({
+  test("[MCP-050] výchozí nastavení je read, log zapnutý, přístup vypnutý", () => {
+    expect(getMcpSettings(newUser())).toEqual(DEFAULT_MCP_SETTINGS);
+    expect(DEFAULT_MCP_SETTINGS).toEqual({
       enabled: false,
-      read: true,
-      create: false,
-      edit: false,
-      issue: false,
-      send: false,
+      level: "read",
+      logCalls: true,
       revision: 0,
     });
-    expect(AVAILABLE_CAPABILITIES).toEqual(["read", "create"]);
   });
 
-  test("[MCP-010] uložení zapne přístup a zvýší revizi, starší revize se odmítne", () => {
+  test("[MCP-050] uloží každou úroveň", () => {
     const owner = newUser();
-    const saved = saveMcpSettings(web(owner), input({ create: true }));
-    expect(saved).toEqual({
-      enabled: true,
-      read: true,
-      create: true,
-      edit: false,
-      issue: false,
-      send: false,
-      revision: 1,
+    MCP_LEVELS.forEach((level, index) => {
+      const saved = saveMcpSettings(web(owner), input({ level, revision: index }));
+      expect(saved).toEqual({ enabled: true, level, logCalls: true, revision: index + 1 });
+      expect(getMcpSettings(owner)).toEqual(saved);
     });
-    expect(getMcpSettings(owner)).toEqual(saved);
+  });
+
+  test("[MCP-050] odmítne neznámou úroveň", () => {
+    const owner = newUser();
+    expect(() => saveMcpSettings(web(owner), input({ level: "admin" }))).toThrow(ServiceError);
+    expect(() => saveMcpSettings(web(owner), input({ create: true }))).toThrow(ServiceError);
+    expect(() => saveMcpSettings(web(owner), { enabled: "ano" })).toThrow(ServiceError);
+    expect(getMcpSettings(owner).revision).toBe(0);
+    expect(lastAudit(owner, "mcp.settings_changed")).toBeUndefined();
+  });
+
+  test("[MCP-010] uložení zvýší revizi, starší revize se odmítne", () => {
+    const owner = newUser();
+    expect(saveMcpSettings(web(owner), input()).revision).toBe(1);
     expect(() => saveMcpSettings(web(owner), input({ enabled: false, revision: 0 }))).toThrow(
       ServiceError,
     );
@@ -90,22 +89,10 @@ describe("nastavení asistentů", () => {
     expect(saveMcpSettings(web(owner), input({ enabled: false, revision: 1 })).revision).toBe(2);
   });
 
-  test("[MCP-011] nejde zapnout Upravovat, Vystavovat, Odesílat", () => {
-    const owner = newUser();
-    for (const capability of ["edit", "issue", "send"]) {
-      expect(() => saveMcpSettings(web(owner), input({ [capability]: true }))).toThrow(
-        ServiceError,
-      );
-    }
-    expect(() => saveMcpSettings(web(owner), { enabled: "ano" })).toThrow(ServiceError);
-    expect(getMcpSettings(owner).revision).toBe(0);
-    expect(lastAudit(owner, "mcp.settings_changed")).toBeUndefined();
-  });
-
-  test("[MCP-014] změna se audituje", () => {
+  test("[MCP-014] [MCP-056] změna úrovně se zapíše do auditu", () => {
     const owner = newUser();
     saveMcpSettings(web(owner), input());
-    saveMcpSettings(web(owner), input({ read: false, create: true, revision: 1 }));
+    saveMcpSettings(web(owner), input({ level: "accounting", logCalls: false, revision: 1 }));
     const row = lastAudit(owner, "mcp.settings_changed")!;
     expect(row).toMatchObject({
       source: "web",
@@ -116,17 +103,29 @@ describe("nastavení asistentů", () => {
       clientId: null,
       clientName: null,
     });
-    expect(row.before).toMatchObject({ enabled: true, read: true, create: false });
-    expect(row.after).toMatchObject({ enabled: true, read: false, create: true });
+    expect(row.before).toEqual({ enabled: true, level: "read", logCalls: true });
+    expect(row.after).toEqual({ enabled: true, level: "accounting", logCalls: false });
+  });
+
+  test("[MCP-050] activeLevel je null při vypnutém přístupu", () => {
+    expect(activeLevel({ ...DEFAULT_MCP_SETTINGS, level: "full" })).toBeNull();
+    expect(activeLevel({ ...DEFAULT_MCP_SETTINGS, enabled: true, level: "drafts" })).toBe("drafts");
+  });
+
+  test("[MCP-050] levelAtLeast porovnává pořadí úrovní", () => {
+    expect(MCP_LEVELS).toEqual(["read", "drafts", "accounting", "issue_send", "full"]);
+    expect(levelAtLeast("accounting", "drafts")).toBe(true);
+    expect(levelAtLeast("drafts", "accounting")).toBe(false);
+    for (const level of MCP_LEVELS) expect(levelAtLeast(level, level)).toBe(true);
   });
 
   test("[MCP-015] nastavení je per uživatel", () => {
     const first = newUser();
     const second = newUser();
-    saveMcpSettings(web(first), input({ create: true }));
-    expect(getMcpSettings(second)).toMatchObject({ enabled: false, create: false, revision: 0 });
-    saveMcpSettings(web(second), input({ read: false }));
-    expect(getMcpSettings(first)).toMatchObject({ enabled: true, read: true, create: true });
+    saveMcpSettings(web(first), input({ level: "drafts" }));
+    expect(getMcpSettings(second)).toMatchObject({ enabled: false, level: "read", revision: 0 });
+    saveMcpSettings(web(second), input({ level: "full" }));
+    expect(getMcpSettings(first)).toMatchObject({ enabled: true, level: "drafts" });
     expect(() => saveMcpSettings({ userId: null, source: "web" }, input())).toThrow(ServiceError);
   });
 

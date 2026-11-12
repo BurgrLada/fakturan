@@ -480,12 +480,9 @@
       "user_id": "owner"
     },
     "mcp_settings": {
-      "can_create": "copy",
-      "can_edit": "copy",
-      "can_issue": "copy",
-      "can_read": "copy",
-      "can_send": "copy",
       "enabled": "copy",
+      "level": "copy",
+      "log_calls": "copy",
       "revision": "copy",
       "updated_at": "copy",
       "user_id": "owner"

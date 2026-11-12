@@ -2,7 +2,6 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { z } from "zod";
-import type { McpCapability } from "@/lib/mcp-settings";
 import { calendarDateInPrague, type CalendarDate } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import { czechError } from "@/lib/validation-issue";
@@ -15,7 +14,7 @@ import {
   mcpClientName,
   touchMcpConnection,
 } from "../services/mcp-connections";
-import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
+import { capabilitiesOf, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable } from "./availability";
 import { McpToolError, toolErrorResult, type FieldLabels } from "./errors";
 
@@ -37,7 +36,7 @@ export type ToolDef<I, O> = {
   name: string;
   title: string;
   description: string;
-  capability: McpCapability;
+  capability: "read" | "create";
   input: z.ZodType<I>;
   output: z.ZodType<O>;
   run: (ctx: ToolContext, input: I) => O | Promise<O>;
@@ -69,7 +68,7 @@ function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): Too
   const clientId = claims.azp ?? claims.client_id;
   // JWT access tokens are not stored, so disconnecting cannot revoke them: the consent row decides.
   if (!clientId || !isMcpConnected(ownerId, clientId)) throw new McpToolError(T.notConnected);
-  if (!allowedCapabilities(settings).includes(def.capability)) {
+  if (!capabilitiesOf(settings).includes(def.capability)) {
     throw new McpToolError(T.capabilityOff[def.capability]);
   }
   const clientName = mcpClientName(clientId);
