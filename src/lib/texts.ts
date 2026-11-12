@@ -3189,6 +3189,33 @@ export const TEXTS = {
         forbidden: "Pro správu asistentů se přihlaste.",
       },
     },
+    // The permission levels, lowest first (MCP-050, MCP-054).
+    levels: {
+      read: { name: "Jen čtení", description: "Vše číst. Nic nezměnit." },
+      drafts: {
+        name: "Koncepty",
+        description:
+          "Zakládat a upravovat koncepty faktur, zákazníky a položky ceníku. Nic, co vidí zákazník, a nic, co spotřebuje číslo.",
+      },
+      accounting: {
+        name: "Účetní operace",
+        description:
+          "Platby, bankovní avíza, účty, číselné řady, opakované faktury v režimu koncept, šablony a nastavení.",
+      },
+      issue_send: {
+        name: "Vystavování a odesílání",
+        description:
+          "Vystavit fakturu, odeslat ji zákazníkovi, upomínku nebo potvrzení platby; opakované faktury, které se vystaví samy.",
+      },
+      full: {
+        name: "Plný přístup",
+        description:
+          "Mazat, stornovat, dobropisy, úprava vystavené faktury a vracení avíz a importů.",
+      },
+    },
+    // MCP instructions sent to the assistant on initialize (MCP-053).
+    instructions: (levelName: string) =>
+      `Fakturan má pět úrovní oprávnění (Jen čtení, Koncepty, Účetní operace, Vystavování a odesílání, Plný přístup). Aktuální úroveň je ${levelName}. Pokud ti chybí nástroj pro to, co uživatel chce, je možné, že vyžaduje vyšší úroveň; řekni uživateli, že ji může nastavit v Nastavení › Asistenti. Operace, které ve webu potvrzuje člověk, přes asistenta nejdou vůbec.`,
     // Tool results are read by the model and shown to the user (MCP-012).
     tools: {
       unavailable: "Přístup asistentů na této instanci Fakturanu není dostupný.",
@@ -3197,14 +3224,10 @@ export const TEXTS = {
         "Přístup asistentů je v Nastavení › Asistenti vypnutý. Zapněte ho tam a akci zopakujte.",
       notConnected:
         "Asistent už není s Fakturanem propojený. Připojte ho znovu a povolte mu přístup.",
-      capabilityOff: {
-        read: "Čtení dat je v Nastavení › Asistenti vypnuté.",
-        create: "Zakládání faktur je v Nastavení › Asistenti vypnuté.",
-        edit: "Upravování konceptů je v Nastavení › Asistenti vypnuté.",
-        issue: "Vystavování faktur je v Nastavení › Asistenti vypnuté.",
-        send: "Odesílání faktur je v Nastavení › Asistenti vypnuté.",
-      },
-      offSuffix: " (v Nastavení › Asistenti vypnuto)",
+      levelTooLow: (levelName: string) =>
+        `Tahle operace vyžaduje úroveň ${levelName}. Úroveň nastavíte v Nastavení › Asistenti.`,
+      higherLevelHint:
+        "Pokud ti chybí nástroj, může vyžadovat vyšší úroveň oprávnění, kterou uživatel nastaví v Nastavení › Asistenti.",
       rateLimited: (seconds: number) =>
         `Příliš mnoho volání najednou. Zkuste to znovu za ${seconds} s.`,
       invalidInput: (issues: string) => `Neplatné vstupy: ${issues}`,

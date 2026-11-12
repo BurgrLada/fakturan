@@ -22,6 +22,7 @@ import { saveSupplier, type SupplierInput } from "@/server/services/supplier";
 import { BASE, Browser } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
 import { issueMcpToken } from "../helpers/mcp-oauth";
+import { callTool, lastAuditSource, mcpAccount } from "../helpers/mcp-tools";
 
 vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
 
@@ -167,10 +168,31 @@ function invoicesOf(userId: string) {
 }
 
 describe("create_draft_invoice", () => {
-  test("[MCP-024] nástroj je v registru se schopností create", () => {
+  test("[MCP-024] nástroj je v registru s úrovní Koncepty", () => {
     const tool = TOOLS.find((t) => t.name === "create_draft_invoice");
     expect(tool).toBe(createDraftInvoiceTool);
-    expect(tool?.capability).toBe("create");
+    expect(tool?.level).toBe("drafts");
+  });
+
+  test("[MCP-030] [MCP-052] pomocník testů: účet s úrovní, volání a zdroj auditu", async () => {
+    const reader = await mcpAccount(db);
+    const readerData = prepare(reader.ownerId, "Čtenář s.r.o.");
+    const refused = await callTool("create_draft_invoice", reader.claims, {
+      customerId: readerData.customer,
+      lines: [line()],
+    });
+    expect(refused.isError).toBe(true);
+    expect(invoicesOf(reader.ownerId)).toHaveLength(0);
+
+    const writer = await mcpAccount(db, { level: "drafts" });
+    const writerData = prepare(writer.ownerId, "Pisatel s.r.o.");
+    const created = await callTool("create_draft_invoice", writer.claims, {
+      customerId: writerData.customer,
+      lines: [line()],
+    });
+    expect(created.isError).toBeFalsy();
+    expect(invoicesOf(writer.ownerId)).toHaveLength(1);
+    expect(lastAuditSource(db, writer.ownerId)).toBe("mcp");
   });
 
   test("[MCP-024] založí koncept bez čísla", async () => {
@@ -445,7 +467,7 @@ describe("create_draft_invoice", () => {
     expect(outside).not.toContain("Alfa");
   });
 
-  test("[MCP-012] se schopností create vypnutou nic nevznikne", async () => {
+  test("[MCP-052] na úrovni Jen čtení nic nevznikne", async () => {
     saveMcpSettings(
       { userId: ownerId, source: "web" },
       { ...getMcpSettings(ownerId), level: "read" },
@@ -454,7 +476,7 @@ describe("create_draft_invoice", () => {
       const before = invoicesOf(ownerId).length;
       const { result, text } = await create({ customerId: mine.customer, lines: [line()] });
       expect(result.isError).toBe(true);
-      expect(text).toBe(TEXTS.mcp.tools.capabilityOff.create);
+      expect(text).toBe(TEXTS.mcp.tools.levelTooLow("Koncepty"));
       expect(invoicesOf(ownerId).length).toBe(before);
     } finally {
       saveMcpSettings(

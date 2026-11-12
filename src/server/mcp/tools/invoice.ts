@@ -74,7 +74,7 @@ export const getInvoiceTool = defineTool({
   name: I.name,
   title: I.title,
   description: I.description,
-  capability: "read",
+  level: "read",
   input,
   output,
   run: (ctx, { id, number }) => {

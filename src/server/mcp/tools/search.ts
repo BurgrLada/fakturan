@@ -17,7 +17,7 @@ export const searchCustomersTool = defineTool({
   name: T.customers.name,
   title: T.customers.title,
   description: T.customers.description,
-  capability: "read",
+  level: "read",
   input: query(T.customers.query),
   output: z.object({
     customers: z.array(
@@ -63,7 +63,7 @@ export const searchCatalogTool = defineTool({
   name: T.catalog.name,
   title: T.catalog.title,
   description: T.catalog.description,
-  capability: "read",
+  level: "read",
   input: query(T.catalog.query),
   output: z.object({
     items: z.array(

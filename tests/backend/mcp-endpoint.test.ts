@@ -12,7 +12,8 @@ import { auditLog, rateLimit, user } from "@/server/db/schema";
 import { parseEnv, type Env } from "@/server/env";
 import { mcpEndpoint } from "@/server/mcp/server";
 import { defineTool, TOOLS } from "@/server/mcp/tool";
-import type { McpSettings } from "@/lib/mcp-settings";
+import { levelAtLeast, MCP_LEVELS, type McpSettings } from "@/lib/mcp-settings";
+import { disconnectMcpClient } from "@/server/services/mcp-connections";
 import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
 import { BASE, Browser } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
@@ -39,7 +40,7 @@ const echo = defineTool({
   name: "echo",
   title: "Ozvěna",
   description: "Vrátí zadaný text.",
-  capability: "read",
+  level: "read",
   input: z.strictObject({ text: z.string() }),
   output: z.object({ text: z.string() }),
   run: (_ctx, input) => ({ text: input.text }),
@@ -49,7 +50,13 @@ const echoCreate = defineTool({
   ...echo,
   name: "echo_create",
   description: "Zapíše zadaný text.",
-  capability: "create",
+  level: "drafts",
+});
+const echoFull = defineTool({
+  ...echo,
+  name: "echo_full",
+  description: "Smaže zadaný text.",
+  level: "full",
 });
 
 let browser: Browser;
@@ -93,7 +100,7 @@ beforeEach(() => {
   db.delete(rateLimit).run();
   setAccess({ enabled: true, level: "drafts" });
   serveJwksFrom(auth);
-  TOOLS.push(echo, echoCreate);
+  TOOLS.push(echo, echoCreate, echoFull);
 });
 
 // Only the test tools are removed: the production tools stay registered.
@@ -105,7 +112,7 @@ function unregister(...tools: (typeof TOOLS)[number][]) {
 }
 
 afterEach(() => {
-  unregister(echo, echoCreate);
+  unregister(echo, echoCreate, echoFull);
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -195,11 +202,9 @@ describe("endpoint /api/mcp", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("mcp-session-id")).toBeNull();
     const { tools } = await rpcResult<{ tools: { name: string; description: string }[] }>(response);
-    // [MCP-025] A tool without its capability is listed too, with a note where to switch it on.
     const ours = tools.filter((tool) => tool.name.startsWith("echo"));
     expect(ours.map((tool) => [tool.name, tool.description])).toEqual([
-      ["echo", "Vrátí zadaný text."],
-      ["echo_create", "Zapíše zadaný text. (v Nastavení › Asistenti vypnuto)"],
+      ["echo", `Vrátí zadaný text. ${TEXTS.mcp.tools.higherLevelHint}`],
     ]);
 
     // Stateless: another request with the same token needs no session or initialize.
@@ -218,6 +223,78 @@ describe("endpoint /api/mcp", () => {
       content: [{ type: "text", text: "ahoj" }],
       structuredContent: { text: "ahoj" },
     });
+  });
+
+  test("[MCP-053] tools/list obsahuje jen nástroje do úrovně", async () => {
+    const { accessToken } = await issueMcpToken(auth, browser);
+    for (const level of MCP_LEVELS) {
+      setAccess({ level });
+      const { tools } = await rpcResult<{ tools: { name: string }[] }>(
+        await mcpEndpoint(auth, env, post(accessToken, toolsList)),
+      );
+      const expected = TOOLS.filter((def) => levelAtLeast(level, def.level)).map((def) => def.name);
+      expect(tools.map((tool) => tool.name).toSorted(), level).toEqual(expected.toSorted());
+    }
+  });
+
+  test("[MCP-053] při vypnutém přístupu je seznam prázdný", async () => {
+    const { accessToken, clientId } = await issueMcpToken(auth, browser);
+    setAccess({ enabled: false, level: "full" });
+    const off = await rpcResult<{ tools: unknown[] }>(
+      await mcpEndpoint(auth, env, post(accessToken, toolsList)),
+    );
+    expect(off.tools).toEqual([]);
+
+    setAccess({ enabled: true });
+    disconnectMcpClient({ userId: ownerId, source: "web" }, clientId);
+    const disconnected = await rpcResult<{ tools: unknown[] }>(
+      await mcpEndpoint(auth, env, post(accessToken, toolsList)),
+    );
+    expect(disconnected.tools).toEqual([]);
+  });
+
+  test("[MCP-053] server posílá instrukce s aktuální úrovní", async () => {
+    const { accessToken } = await issueMcpToken(auth, browser);
+    setAccess({ level: "accounting" });
+    const response = await mcpEndpoint(
+      auth,
+      env,
+      post(accessToken, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" },
+        },
+      }),
+    );
+    const { instructions } = await rpcResult<{ instructions?: string }>(response);
+    expect(instructions).toBe(TEXTS.mcp.instructions("Účetní operace"));
+    expect(instructions).toContain("Aktuální úroveň je Účetní operace.");
+    expect(instructions).toContain("Nastavení › Asistenti");
+  });
+
+  test("[MCP-053] anotace", async () => {
+    const { accessToken } = await issueMcpToken(auth, browser);
+    setAccess({ level: "full" });
+    const { tools } = await rpcResult<{
+      tools: { name: string; description: string; annotations?: Record<string, unknown> }[];
+    }>(await mcpEndpoint(auth, env, post(accessToken, toolsList)));
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    expect(byName.get("echo")?.annotations).toMatchObject({ readOnlyHint: true });
+    expect(byName.get("echo")?.annotations?.destructiveHint).toBeFalsy();
+    expect(byName.get("echo_full")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+    });
+    expect(byName.get("echo_create")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+    });
+    // Only a tool below the highest level may point at a higher one.
+    expect(byName.get("echo_full")?.description).toBe("Smaže zadaný text.");
   });
 
   test("[MCP-002] klient na protokolu 2026-07-28 dostane seznam nástrojů", async () => {

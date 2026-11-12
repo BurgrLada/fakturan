@@ -9,7 +9,9 @@ import type { z } from "zod";
 import { TEXTS } from "@/lib/texts";
 import type { Auth } from "../auth";
 import type { Env } from "../env";
-import { capabilitiesOf, getMcpSettings } from "../services/mcp-settings";
+import { levelAtLeast } from "@/lib/mcp-settings";
+import { activeLevel, getMcpSettings } from "../services/mcp-settings";
+import { isMcpAccountActive, isMcpConnected } from "../services/mcp-connections";
 import { isMcpAvailable, MCP_SCOPE, mcpResource } from "./availability";
 import { mcpRateLimit } from "./rate-limit";
 import { runTool, TOOLS, type McpClaims } from "./tool";
@@ -28,26 +30,59 @@ function advertised(schema: z.ZodType): StandardSchemaWithJSON {
   };
 }
 
-// One server per request (MCP-035). Every tool is listed, also one whose capability is off, so the
-// assistant can tell the user what to switch on and the list does not change under it (MCP-025).
-export function buildMcpServer(claims: McpClaims, env: Env): McpServer {
-  const server = new McpServer({ name: "fakturan", title: "Fakturan", version: "1.0.0" });
-  const allowed = capabilitiesOf(getMcpSettings(claims.sub ?? ""));
+// One server per request (MCP-035). Only the tools of the user's current level are listed; with the
+// access off or the client disconnected the list is empty (MCP-053). A tools/call request gets every
+// tool registered, so a tool from an older list reaches runTool and is refused there in Czech
+// (MCP-052) instead of the SDK's "tool not found".
+export function buildMcpServer(
+  claims: McpClaims,
+  env: Env,
+  { allTools = false }: { allTools?: boolean } = {},
+): McpServer {
+  const ownerId = claims.sub ?? "";
+  const clientId = claims.azp ?? claims.client_id;
+  const active =
+    ownerId && clientId && isMcpAccountActive(ownerId) && isMcpConnected(ownerId, clientId)
+      ? activeLevel(getMcpSettings(ownerId))
+      : null;
+  const server = new McpServer(
+    { name: "fakturan", title: "Fakturan", version: "1.0.0" },
+    {
+      // Declared also for an empty list, so tools/list answers instead of "method not found".
+      capabilities: { tools: {} },
+      ...(active ? { instructions: TEXTS.mcp.instructions(TEXTS.mcp.levels[active].name) } : {}),
+    },
+  );
   for (const def of TOOLS) {
-    const off = allowed.includes(def.capability) ? "" : TEXTS.mcp.tools.offSuffix;
+    if (!allTools && !(active && levelAtLeast(active, def.level))) continue;
+    const hint = def.level === "full" ? "" : ` ${TEXTS.mcp.tools.higherLevelHint}`;
     server.registerTool(
       def.name,
       {
         title: def.title,
-        description: def.description + off,
+        description: def.description + hint,
         inputSchema: advertised(def.input),
         outputSchema: advertised(def.output),
-        annotations: { readOnlyHint: def.capability === "read", openWorldHint: false },
+        annotations: {
+          readOnlyHint: def.level === "read",
+          destructiveHint: def.level === "full",
+          openWorldHint: false,
+        },
       },
       (args) => runTool(def, claims, args, env),
     );
   }
   return server;
+}
+
+// Whether the JSON-RPC request is a tools/call; an unreadable body is not (the SDK answers it).
+async function isToolCall(request: Request): Promise<boolean> {
+  try {
+    const body: unknown = await request.clone().json();
+    return (body as { method?: unknown } | null)?.method === "tools/call";
+  } catch {
+    return false;
+  }
 }
 
 const ISSUER_PATH = "/api/auth";
@@ -77,8 +112,10 @@ export async function mcpEndpoint(auth: Auth, env: Env, request: Request): Promi
       const clientId = claims.azp ?? claims.client_id;
       const retryAfter = claims.sub && clientId ? mcpRateLimit(claims.sub, clientId) : null;
       if (retryAfter !== null) return tooManyRequests(retryAfter);
-      return createMcpHandler(() => buildMcpServer(claims, env), { legacy: "stateless" }).fetch(
-        req,
+      return isToolCall(req).then((allTools) =>
+        createMcpHandler(() => buildMcpServer(claims, env, { allTools }), {
+          legacy: "stateless",
+        }).fetch(req),
       );
     },
     {

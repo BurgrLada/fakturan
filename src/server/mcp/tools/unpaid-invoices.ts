@@ -42,7 +42,7 @@ export const listUnpaidInvoicesTool = defineTool({
   name: T.unpaid.name,
   title: T.unpaid.title,
   description: T.unpaid.description,
-  capability: "read",
+  level: "read",
   input,
   output,
   run: (ctx, { overdueOnly, customerId, page }) => {

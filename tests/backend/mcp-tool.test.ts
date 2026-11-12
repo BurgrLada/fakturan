@@ -54,7 +54,7 @@ const echo = defineTool({
   name: "echo",
   title: "Ozvěna",
   description: "Vrátí zadaný text.",
-  capability: "read",
+  level: "read",
   input: echoInput,
   output: echoOutput,
   run: echoRun,
@@ -65,7 +65,7 @@ const createCustomer = defineTool({
   name: "echo_create",
   title: "Ozvěna se zápisem",
   description: "Založí zákazníka se zadaným názvem.",
-  capability: "create",
+  level: "drafts",
   input: echoInput,
   output: z.object({ id: z.string() }),
   run: (ctx, input) => ({
@@ -89,6 +89,31 @@ const createCustomer = defineTool({
     }).id,
   }),
   text: (output) => `Zákazník ${output.id}`,
+});
+
+const issueRun = vi.fn((_ctx: unknown, input: { text: string }) => ({ id: input.text }));
+const echoIssue = defineTool({
+  name: "echo_issue",
+  title: "Ozvěna vystavení",
+  description: "Jako by vystavila fakturu.",
+  level: "issue_send",
+  input: echoInput,
+  output: z.object({ id: z.string() }),
+  run: issueRun,
+  text: (output) => output.id,
+});
+
+const hardRun = vi.fn((_ctx: unknown, input: { hard: boolean }) => ({ hard: input.hard }));
+const echoHard = defineTool({
+  name: "echo_hard",
+  title: "Ozvěna s odvozenou úrovní",
+  description: "Úroveň závisí na vstupu.",
+  level: "read",
+  levelFor: (_ctx, input) => (input.hard ? "full" : "read"),
+  input: z.strictObject({ hard: z.boolean() }),
+  output: z.object({ hard: z.boolean() }),
+  run: hardRun,
+  text: (output) => String(output.hard),
 });
 
 let browser: Browser;
@@ -121,6 +146,8 @@ beforeEach(() => {
   db.update(user).set({ banned: false }).run();
   setAccess({ enabled: true, level: "drafts" });
   echoRun.mockClear();
+  issueRun.mockClear();
+  hardRun.mockClear();
   sentry.captureException.mockClear();
 });
 
@@ -155,16 +182,78 @@ describe("obal nástrojů MCP", () => {
     expect(echoRun).not.toHaveBeenCalled();
   });
 
-  test("[MCP-012] vypnutá schopnost vrací českou větu „… je v Nastavení › Asistenti vypnuté.“ a isError", async () => {
+  test("[MCP-052] odmítne nástroj nad úrovní", async () => {
+    const { claims } = await connect();
+    setAccess({ level: "accounting" });
+    const result = await runTool(echoIssue, claims, { text: "F-1" }, env);
+    expect(result).toEqual({
+      isError: true,
+      content: [{ type: "text", text: T.levelTooLow("Vystavování a odesílání") }],
+    });
+    expect(T.levelTooLow("Vystavování a odesílání")).toBe(
+      "Tahle operace vyžaduje úroveň Vystavování a odesílání. Úroveň nastavíte v Nastavení › Asistenti.",
+    );
+    expect(issueRun).not.toHaveBeenCalled();
+    setAccess({ level: "issue_send" });
+    expect((await runTool(echoIssue, claims, { text: "F-1" }, env)).isError).toBeFalsy();
+  });
+
+  test("[MCP-052] úroveň se ověří před validací vstupu", async () => {
     const { claims } = await connect();
     setAccess({ level: "read" });
-    // The capability is checked before the input: a wrong input says the same.
     for (const raw of [{ text: "Alfa s.r.o." }, { nic: 1 }]) {
       const result = await runTool(createCustomer, claims, raw, env);
       expect(result.isError).toBe(true);
-      expect(textOf(result)).toBe("Zakládání faktur je v Nastavení › Asistenti vypnuté.");
+      expect(textOf(result)).toBe(T.levelTooLow("Koncepty"));
     }
     expect(db.select().from(customer).all()).toHaveLength(0);
+  });
+
+  test("[MCP-051] levelFor zvýší požadovanou úroveň", async () => {
+    const { claims } = await connect();
+    setAccess({ level: "read" });
+    const hard = await runTool(echoHard, claims, { hard: true }, env);
+    expect(textOf(hard)).toBe(T.levelTooLow("Plný přístup"));
+    expect(hardRun).not.toHaveBeenCalled();
+    const soft = await runTool(echoHard, claims, { hard: false }, env);
+    expect(soft.isError).toBeFalsy();
+    expect(hardRun).toHaveBeenCalledTimes(1);
+    // An invalid input is reported as such: the derived level needs a valid input first.
+    expect(textOf(await runTool(echoHard, claims, { hard: "ano" }, env))).toMatch(/^Neplatné/);
+  });
+
+  test("[MCP-052] volání nástroje mimo aktuální seznam", async () => {
+    serveJwksFrom(auth);
+    TOOLS.push(echoIssue);
+    try {
+      const { accessToken } = await connect();
+      setAccess({ level: "read" });
+      const response = await mcpEndpoint(
+        auth,
+        env,
+        new Request(RESOURCE, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "echo_issue", arguments: { text: "F-1" } },
+          }),
+        }),
+      );
+      const body = await response.text();
+      expect(body).toContain('"isError":true');
+      expect(body).toContain(T.levelTooLow("Vystavování a odesílání"));
+      expect(issueRun).not.toHaveBeenCalled();
+    } finally {
+      TOOLS.splice(TOOLS.indexOf(echoIssue), 1);
+    }
   });
 
   test("[MCP-013] odpojený klient s platným tokenem", async () => {

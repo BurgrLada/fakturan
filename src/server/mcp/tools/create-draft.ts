@@ -131,7 +131,7 @@ export const createDraftInvoiceTool = defineTool({
   name: T.name,
   title: T.title,
   description: T.description,
-  capability: "create",
+  level: "drafts",
   input,
   output,
   fieldLabels: T.fields,

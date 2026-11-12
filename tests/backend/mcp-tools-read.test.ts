@@ -259,9 +259,9 @@ describe("čtecí nástroje MCP", () => {
     ]) {
       expect(names).toContain(name);
     }
-    expect(TOOLS.filter((tool) => tool.capability === "read").length).toBeGreaterThanOrEqual(5);
+    expect(TOOLS.filter((tool) => tool.level === "read").length).toBeGreaterThanOrEqual(5);
     // The one tool that writes (MCP-024) is registered beside them.
-    expect(TOOLS.filter((tool) => tool.capability === "create").map((tool) => tool.name)).toEqual([
+    expect(TOOLS.filter((tool) => tool.level === "drafts").map((tool) => tool.name)).toEqual([
       "create_draft_invoice",
     ]);
   });
@@ -506,7 +506,7 @@ describe("čtecí nástroje MCP", () => {
       const { result, data } = await call(tool, input);
       expect(result.isError, tool.name).toBeFalsy();
       expect(() => tool.output.parse(data), tool.name).not.toThrow();
-      expect(tool.capability).toBe("read");
+      expect(tool.level).toBe("read");
     }
   });
 });

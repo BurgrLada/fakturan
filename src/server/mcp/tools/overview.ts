@@ -46,7 +46,7 @@ export const getOverviewTool = defineTool({
   name: T.overview.name,
   title: T.overview.title,
   description: T.overview.description,
-  capability: "read",
+  level: "read",
   input,
   output,
   run: (ctx, { from, to }) => {

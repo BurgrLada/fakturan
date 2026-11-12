@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { z } from "zod";
+import { levelAtLeast, type McpLevel } from "@/lib/mcp-settings";
 import { calendarDateInPrague, type CalendarDate } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
 import { czechError } from "@/lib/validation-issue";
@@ -14,7 +15,7 @@ import {
   mcpClientName,
   touchMcpConnection,
 } from "../services/mcp-connections";
-import { capabilitiesOf, getMcpSettings } from "../services/mcp-settings";
+import { activeLevel, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable } from "./availability";
 import { McpToolError, toolErrorResult, type FieldLabels } from "./errors";
 
@@ -29,14 +30,19 @@ export type ToolContext = {
   // The instance's origin, for absolute links into the web app.
   baseUrl: string;
   today: CalendarDate;
+  // The user's level at the time of the call.
+  level: McpLevel;
 };
 
-// A tool is a Zod input, a Zod output, the capability it needs and a call into a service (ARC-001).
+// A tool is a Zod input, a Zod output, the level it needs and a call into a service (ARC-001).
 export type ToolDef<I, O> = {
   name: string;
   title: string;
   description: string;
-  capability: "read" | "create";
+  // The minimum level, checked before the input is read (MCP-052).
+  level: McpLevel;
+  // A higher level derived from the valid input (MCP-051): a pure choice, no side effects.
+  levelFor?: (ctx: ToolContext, input: I) => McpLevel;
   input: z.ZodType<I>;
   output: z.ZodType<O>;
   run: (ctx: ToolContext, input: I) => O | Promise<O>;
@@ -57,7 +63,8 @@ export function defineTool<I, O>(def: ToolDef<I, O>): ToolDef<I, O> {
 // themselves here.
 export const TOOLS: ToolDef<any, any>[] = [];
 
-// The checks of MCP-012, in this order, on every call: nothing is trusted from the connection time.
+// The checks of MCP-012 and MCP-052, in this order, on every call: nothing is trusted from the
+// connection time. The input is validated only after the minimum level, in runTool.
 // The rate limit (MCP-032) is checked before this, per HTTP request in mcpEndpoint.
 function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): ToolContext {
   if (!isMcpAvailable(env)) throw new McpToolError(T.unavailable);
@@ -68,9 +75,8 @@ function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): Too
   const clientId = claims.azp ?? claims.client_id;
   // JWT access tokens are not stored, so disconnecting cannot revoke them: the consent row decides.
   if (!clientId || !isMcpConnected(ownerId, clientId)) throw new McpToolError(T.notConnected);
-  if (!capabilitiesOf(settings).includes(def.capability)) {
-    throw new McpToolError(T.capabilityOff[def.capability]);
-  }
+  const level = activeLevel(settings)!;
+  requireLevel(level, def.level);
   const clientName = mcpClientName(clientId);
   const actor: Actor = {
     userId: ownerId,
@@ -86,7 +92,12 @@ function admit(def: ToolDef<unknown, unknown>, claims: McpClaims, env: Env): Too
     clientName,
     baseUrl: new URL(env.BETTER_AUTH_URL).origin,
     today: calendarDateInPrague(clock.now()),
+    level,
   };
+}
+
+function requireLevel(have: McpLevel, need: McpLevel): void {
+  if (!levelAtLeast(have, need)) throw new McpToolError(T.levelTooLow(TEXTS.mcp.levels[need].name));
 }
 
 export async function runTool<I, O>(
@@ -98,6 +109,7 @@ export async function runTool<I, O>(
   try {
     const ctx = admit(def as ToolDef<unknown, unknown>, claims, env);
     const input = def.input.parse(raw, { error: czechError });
+    if (def.levelFor) requireLevel(ctx.level, def.levelFor(ctx, input));
     const result = await runWithActor(ctx.actor, () => def.run(ctx, input));
     // A mismatch is our bug, not the user's input: it goes to Sentry as a general failure.
     const checked = def.output.safeParse(result);
