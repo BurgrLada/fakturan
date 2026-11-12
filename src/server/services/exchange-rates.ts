@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CURRENCIES, type Currency } from "@/lib/currency";
-import { convertMinor, expectedListDate, RATE_UNIT } from "@/lib/fx";
+import { convertMinor, expectedListDate, RATE_UNIT, rateDate } from "@/lib/fx";
 import type { RateResult } from "@/lib/invoice-form";
 import {
   calendarDateInPrague,
@@ -171,6 +171,20 @@ export async function loadRate(
   if (!(await mayFetch(actor))) return first;
   await ensureRate(currency, date, fetcher);
   return resolveRate(db, ownerId, currency, date, clock.now());
+}
+
+// The rate a new draft gets without a person typing one: the decisive day follows the account's
+// basis exactly as the form's rate loader picks it (FOR-003). Null leaves the field empty, as the
+// form does when no list is available; issuing looks again.
+export async function draftRate(
+  actor: Actor,
+  draft: { currency: Currency; issueDate: CalendarDate | null; taxableDate: CalendarDate | null },
+): Promise<RateResult> {
+  if (draft.currency === "CZK") return null;
+  const ownerId = ownerOf(actor);
+  const today = calendarDateInPrague(clock.now());
+  const date = rateDate(draft, getPreferences(ownerId).fxBasis, today);
+  return loadRate(actor, { currency: draft.currency, date });
 }
 
 const creditSchema = z.object({

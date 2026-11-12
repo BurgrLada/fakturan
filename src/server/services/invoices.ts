@@ -46,7 +46,7 @@ import {
   type Totals,
 } from "@/lib/invoice-totals";
 import { AmountOutOfRangeError } from "@/lib/money";
-import { calendarDateInPrague, isCalendarDate } from "@/lib/number-format";
+import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import { defaultIssueDate, LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
 import { amountDue } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
@@ -348,27 +348,33 @@ export function isFreeDraftId(ownerId: string, id: string): boolean {
   return !readOwned(db, ownerId, id);
 }
 
+// What a caller already chose for the new document; the rest follows from it as in the web form:
+// the due date keeps the customer's gap after the issue date, the account matches the currency.
+export type DraftChoices = { issueDate?: CalendarDate; currency?: Currency };
+
 export function newDraftDefaults(
   ownerId: string,
   customerId: string | null,
   type: InvoiceType = "invoice",
+  chosen: DraftChoices = {},
 ): DraftInput {
   const prefs = getPreferences(ownerId);
   const defaults = customerId
     ? customerDefaults(ownerId, customerId, prefs)
     : { ...prefs, foreign: false, dic: "" };
   const { vatIdentified, texts } = clauseDefaultsOf(ownerId);
-  const issueDate = defaultIssueDate(defaults.issueDateMode, clock.now());
+  const issueDate = chosen.issueDate ?? defaultIssueDate(defaults.issueDateMode, clock.now());
+  const currency = chosen.currency ?? defaults.currency;
   return {
     type,
     customerId,
-    bankAccountId: defaultAccountFor(ownerId, defaults.currency)?.id ?? null,
+    bankAccountId: defaultAccountFor(ownerId, currency)?.id ?? null,
     seriesId: defaultSeriesFor(ownerId, type)?.id ?? null,
     issueDate,
     dueDate: addDays(issueDate, defaults.dueDays),
     taxableDate: null,
     language: defaults.language,
-    currency: defaults.currency,
+    currency,
     exchangeRateMicros: null,
     foreign: defaults.foreign,
     clause: suggestedClause({

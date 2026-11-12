@@ -17,7 +17,7 @@ import {
 } from "../services/mcp-connections";
 import { allowedCapabilities, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable } from "./availability";
-import { McpToolError, toolErrorResult } from "./errors";
+import { McpToolError, toolErrorResult, type FieldLabels } from "./errors";
 
 const T = TEXTS.mcp.tools;
 
@@ -43,6 +43,8 @@ export type ToolDef<I, O> = {
   run: (ctx: ToolContext, input: I) => O | Promise<O>;
   // The text for the model; values from documents must stay visibly data (MCP-033).
   text: (output: O) => string;
+  // Czech names of the input fields, for the list of invalid ones.
+  fieldLabels?: FieldLabels;
 };
 
 // The verified access token claims the wrapper needs: the user and the OAuth client.
@@ -108,6 +110,6 @@ export async function runTool<I, O>(
       structuredContent: output as Record<string, unknown>,
     };
   } catch (error) {
-    return toolErrorResult(error, def.name, claims.sub ?? "");
+    return toolErrorResult(error, def.name, claims.sub ?? "", def.fieldLabels);
   }
 }

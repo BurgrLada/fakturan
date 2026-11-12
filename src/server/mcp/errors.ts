@@ -14,12 +14,29 @@ export function toolError(text: string): CallToolResult {
   return { isError: true, content: [{ type: "text", text }] };
 }
 
-function issuesText(error: z.ZodError): string {
+// Field names a tool gives in Czech: "lines.0.quantity" reads "položky 1 › množství".
+export type FieldLabels = Readonly<Record<string, string>>;
+
+function labelledPath(path: PropertyKey[], labels: FieldLabels): string {
+  const parts: string[] = [];
+  for (const segment of path) {
+    if (typeof segment === "number" && parts.length > 0) {
+      parts[parts.length - 1] += ` ${segment + 1}`;
+    } else {
+      parts.push(labels[String(segment)] ?? String(segment));
+    }
+  }
+  return parts.join(" › ");
+}
+
+function issuesText(error: z.ZodError, labels?: FieldLabels): string {
   return error.issues
     .map((issue) => {
       const path = [...issue.path];
       if (issue.code === "unrecognized_keys") path.push(issue.keys.join(", "));
-      return path.length ? `${path.map(String).join(".")}: ${issue.message}` : issue.message;
+      if (!path.length) return issue.message;
+      const where = labels ? labelledPath(path, labels) : path.map(String).join(".");
+      return `${where}: ${issue.message}`;
     })
     .join("; ");
 }
@@ -39,12 +56,17 @@ function reportMcpFailure(error: unknown, tool: string, userId: string): void {
 
 // What a tool call returns when it throws: the user's own mistakes and refusals as a sentence, our
 // bugs as a general one.
-export function toolErrorResult(error: unknown, tool: string, userId: string): CallToolResult {
+export function toolErrorResult(
+  error: unknown,
+  tool: string,
+  userId: string,
+  labels?: FieldLabels,
+): CallToolResult {
   if (error instanceof McpToolError || error instanceof ServiceError) {
     return toolError(error.message);
   }
   if (error instanceof z.ZodError) {
-    return toolError(TEXTS.mcp.tools.invalidInput(issuesText(error)));
+    return toolError(TEXTS.mcp.tools.invalidInput(issuesText(error, labels)));
   }
   reportMcpFailure(error, tool, userId);
   return toolError(TEXTS.mcp.tools.failed);
