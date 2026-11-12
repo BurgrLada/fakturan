@@ -2,10 +2,10 @@
 
 import { z } from "zod";
 import { TEXTS } from "@/lib/texts";
-import { lookupAres, type AresResult } from "@/server/external/ares";
+import type { AresResult } from "@/server/external/ares";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
-import { RATE_RULES } from "@/server/rate-limit";
-import { enforceRateLimit, ServiceError } from "@/server/services/access";
+import { ServiceError } from "@/server/services/access";
+import { lookupCompany } from "@/server/services/company-lookup";
 
 type Failure = { ok: false; error: string };
 
@@ -18,10 +18,9 @@ export async function lookupAresAction(
   const parsed = icoInput.safeParse(raw);
   if (!parsed.success) return { ok: false, error: TEXTS.supplier.validation.invalid };
   try {
-    enforceRateLimit(await actorFromRequest(), RATE_RULES.aresLookup);
+    return { ok: true, result: await lookupCompany(await actorFromRequest(), parsed.data.ico) };
   } catch (error) {
     if (error instanceof ServiceError) return { ok: false, error: error.message };
     throw error;
   }
-  return { ok: true, result: await lookupAres(parsed.data.ico) };
 }

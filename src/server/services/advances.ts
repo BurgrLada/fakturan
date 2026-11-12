@@ -28,7 +28,7 @@ import {
 } from "./invoices";
 import { mutate, type Audit } from "./mutation";
 import { resolveEntityNotifications } from "./notifications";
-import { defaultSeriesFor } from "./number-series";
+import { defaultSeriesFor, ensureDefaultSeries } from "./number-series";
 import { linkTags, tagsOf } from "./tags";
 
 const V = TEXTS.invoices.validation;
@@ -165,4 +165,13 @@ export function syncAdvance(
     before: { supersededAt: advance.supersededAt },
     after: { supersededAt, finalId },
   });
+}
+
+// The default series exist before the final invoice takes a number from one.
+export function convertAdvanceWithSeries(
+  actor: Actor,
+  advanceId: string,
+): ReturnType<typeof convertAdvance> {
+  ensureDefaultSeries(actor);
+  return convertAdvance(actor, advanceId);
 }

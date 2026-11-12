@@ -1,13 +1,17 @@
 import "server-only";
 import { asc, desc, or, sql } from "drizzle-orm";
+import { z } from "zod";
 import { formatMoney } from "@/lib/money";
 import { foldText } from "@/lib/fold-text";
-import { MIN_QUERY_LENGTH, PER_GROUP, type SearchHit } from "@/lib/quick-search";
+import { MAX_QUERY_LENGTH, MIN_QUERY_LENGTH, PER_GROUP, type SearchHit } from "@/lib/quick-search";
 import { TEXTS } from "@/lib/texts";
+import type { Actor } from "../audit/context";
 import { db } from "../db";
 import { czech } from "../db/collation";
 import { invoice, recurringInvoice } from "../db/schema";
 import { scoped } from "../db/scoped";
+import { RATE_RULES } from "../rate-limit";
+import { enforceRateLimit, RateLimitError } from "./access";
 import { searchCatalog } from "./catalog";
 import { escapeLike, searchCustomers } from "./customers";
 
@@ -91,4 +95,20 @@ export function searchAll(ownerId: string, q: string, perGroup = PER_GROUP): Sea
     ...items,
     ...searchPlans(ownerId, term, perGroup),
   ];
+}
+
+const queryInput = z.string().max(MAX_QUERY_LENGTH);
+
+// Checked before the limit, so typing the first letter or a refused query costs nothing.
+export function quickSearch(actor: Actor, raw: string): { hits: SearchHit[]; limited: boolean } {
+  const parsed = queryInput.safeParse(raw);
+  const term = parsed.success ? parsed.data.trim() : "";
+  if (term.length < MIN_QUERY_LENGTH) return { hits: [], limited: false };
+  try {
+    enforceRateLimit(actor, RATE_RULES.searchUser);
+  } catch (error) {
+    if (error instanceof RateLimitError) return { hits: [], limited: true };
+    throw error;
+  }
+  return { hits: searchAll(actor.userId ?? "", term, PER_GROUP), limited: false };
 }

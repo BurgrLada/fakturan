@@ -71,11 +71,12 @@ import { defaultAccountFor } from "./bank-accounts";
 import { MAX_PRICE_MINOR } from "./catalog";
 import { customerDefaults, escapeLike } from "./customers";
 import { mutate, type Audit } from "./mutation";
-import { defaultSeriesFor } from "./number-series";
+import { checkIssuable, type IssueProblem } from "./invoice-lifecycle";
+import { defaultSeriesFor, ensureDefaultSeries } from "./number-series";
 import { averagePaymentDays } from "./payments";
 import { colorSchema, designIdSchema, getPreferences, logoPositionSchema } from "./preferences";
 import { clauseDefaultsOf } from "./supplier";
-import { linkTags, listTags, tagsOf, type Tag } from "./tags";
+import { assertTagNames, linkTags, listTags, setInvoiceTags, tagsOf, type Tag } from "./tags";
 
 export { dueSql, fullDue, openCondition, overdueCondition } from "../db/invoice-sql";
 
@@ -1196,4 +1197,22 @@ export function invoiceFilterOptions(ownerId: string): InvoiceFilterOptions {
     .orderBy(asc(czech(customer.name)), asc(customer.id))
     .all();
   return { customers, tags: listTags(ownerId) };
+}
+
+// The draft form's save: tags are checked before anything is written, the default series exist
+// before the draft needs one, and the answer says what still blocks issuing.
+export function saveDraftWithTags(
+  actor: Actor,
+  draft: DraftInput,
+  tags: string[],
+): { id: string; revision: number; problems: IssueProblem[] } {
+  assertTagNames(tags);
+  ensureDefaultSeries(actor);
+  const saved = saveDraft(actor, draft);
+  setInvoiceTags(actor, saved.id, tags);
+  return {
+    id: saved.id,
+    revision: saved.revision,
+    problems: checkIssuable(ownerOf(actor), saved.id),
+  };
 }

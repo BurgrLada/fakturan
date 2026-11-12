@@ -26,7 +26,7 @@ import {
   type Invoice,
 } from "./invoices";
 import { mutate } from "./mutation";
-import { defaultSeriesFor } from "./number-series";
+import { defaultSeriesFor, ensureDefaultSeries } from "./number-series";
 import { hasDifference } from "./payments";
 
 const V = TEXTS.invoices.validation;
@@ -175,3 +175,12 @@ export function relatedDocuments(ownerId: string, id: string) {
 }
 
 export type RelatedDocument = ReturnType<typeof relatedDocuments>["children"][number];
+
+// The default series exist before the note takes a number from one.
+export function createCreditNoteWithSeries(
+  actor: Actor,
+  invoiceId: string,
+): ReturnType<typeof createCreditNote> {
+  ensureDefaultSeries(actor);
+  return createCreditNote(actor, invoiceId);
+}
