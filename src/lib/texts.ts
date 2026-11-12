@@ -3264,6 +3264,9 @@ export const TEXTS = {
         `Příliš mnoho volání najednou. Zkuste to znovu za ${seconds} s.`,
       invalidInput: (issues: string) => `Neplatné vstupy: ${issues}`,
       failed: "Akce se nepodařila kvůli chybě ve Fakturanu. Zkuste to prosím později.",
+      // A step the web asks a person to confirm (a repeated reminder, an unclear delivery) (MCP-060).
+      confirmInWeb: (link: string) =>
+        `Tohle musí potvrdit uživatel ve webu, asistent to potvrdit nemůže. Otevřete: ${link}`,
     },
     // Read tools: what the model gets as text next to the structured output (MCP-020 to MCP-023).
     read: {
@@ -4109,6 +4112,203 @@ export const TEXTS = {
           description: "Smaže bankovní účet, který není na žádné faktuře; jinak ho jde jen skrýt.",
           done: "Bankovní účet je smazaný.",
         },
+      },
+    },
+    // Issuing, cancelling and amending invoices (Task 9).
+    lifecycle: {
+      fields: {
+        id: "faktura",
+        ids: "faktury",
+        revision: "revize",
+        variableSymbol: "variabilní symbol",
+        until: "odložit do",
+        off: "vypnuto",
+        on: "zapnuto",
+        versionId: "verze",
+        number: "číslo",
+        dueDate: "splatnost",
+        note: "poznámka",
+        lines: "položky",
+        name: "název",
+        quantity: "množství",
+        unitPrice: "cena",
+        vatRate: "sazba DPH",
+        catalogItemId: "položka ceníku",
+        tags: "štítky",
+      },
+      id: "ID faktury (z list_invoices nebo get_invoice).",
+      ids: "ID faktur, nejvýš 200.",
+      revision: "Revize faktury z get_invoice nebo z předchozí operace.",
+      state: (number: string, status: string, revision: number) =>
+        `Faktura ${number}: ${status}, revize ${revision}.`,
+      notIssuable: "Fakturu zatím nejde vystavit:",
+      issue: {
+        name: "issue_invoice",
+        title: "Vystavit fakturu",
+        description:
+          "Vystaví koncept: přidělí číslo z výchozí řady a doklad už nepůjde volně upravovat. Před vystavením se hodí preview_issue. Pošlete revision z get_invoice; když se koncept mezitím změnil, vystavení se odmítne. Když něco chybí, vrátí výčet problémů. Nic neodešle.",
+        variableSymbol:
+          "Vlastní variabilní symbol, nejvýš 10 číslic. Bez něj se použije číslo dokladu.",
+        done: "Faktura je vystavená. Nic se neodeslalo.",
+      },
+      markSent: {
+        name: "mark_sent",
+        title: "Označit jako odeslanou",
+        description:
+          "Označí vystavenou fakturu jako odeslanou bez posílání e-mailu, např. když ji uživatel předal jinak.",
+        done: "Faktura je označená jako odeslaná.",
+      },
+      markSentMany: {
+        name: "mark_sent_many",
+        title: "Označit více faktur jako odeslané",
+        description:
+          "Označí vystavené faktury jako odeslané bez posílání e-mailu. Faktury, které už odeslané jsou nebo to nejde, přeskočí.",
+        done: (done: number, skipped: number) =>
+          `Označeno jako odeslané: ${done}, přeskočeno: ${skipped}.`,
+      },
+      snooze: {
+        name: "snooze_reminders",
+        title: "Odložit upomínky",
+        description:
+          "Odloží automatické upomínky k faktuře do zadaného dne (RRRR-MM-DD, nejdéle o 30 dní), nebo odklad zruší (null).",
+        until: "Den RRRR-MM-DD, do kdy upomínky neodcházejí, nebo null pro zrušení odkladu.",
+        done: "Odklad upomínek je nastavený.",
+      },
+      remindersOff: {
+        name: "set_reminders_off",
+        title: "Vypnout upomínky k faktuře",
+        description:
+          "Vypne (off: true) nebo znovu zapne (off: false) automatické upomínky k faktuře.",
+        off: "true vypne upomínky, false je zapne.",
+        done: "Nastavení upomínek je uložené.",
+      },
+      partial: {
+        name: "set_partial_reminders",
+        title: "Upomínky při částečné úhradě",
+        description: "Zapne nebo vypne automatické upomínky i pro částečně uhrazenou fakturu.",
+        on: "true upomínky při částečné úhradě posílá, false ne.",
+        done: "Nastavení upomínek je uložené.",
+      },
+      deleteDraft: {
+        name: "delete_draft",
+        title: "Smazat koncept",
+        description:
+          "Smaže koncept faktury, který ještě nemá číslo. Vystavený doklad smazat nejde.",
+        done: "Koncept je smazaný.",
+      },
+      update: {
+        name: "update_issued_invoice",
+        title: "Upravit vystavenou fakturu",
+        description:
+          "Upraví vystavenou fakturu jako „Upravit“ ve webu: číslo, variabilní symbol, splatnost, poznámku, položky a štítky. Co nezadáte, zůstane. Předchozí podoba se uloží jako verze. Pošlete revision z get_invoice. Když už faktura odešla, výsledek doporučí poslat ji znovu.",
+        number: "Nové číslo dokladu.",
+        variableSymbol: "Variabilní symbol, nejvýš 10 číslic.",
+        lines: "Položky, které nahradí současné. Bez nich položky zůstanou.",
+        done: "Vystavená faktura je upravená. Nic se neodeslalo.",
+      },
+      refresh: {
+        name: "refresh_customer_snapshot",
+        title: "Převzít aktuální údaje zákazníka",
+        description:
+          "Přepíše údaje odběratele na vystavené faktuře aktuálními údaji ze zákazníka. Předchozí podoba se uloží jako verze.",
+        done: "Údaje zákazníka na faktuře jsou aktuální.",
+      },
+      restoreVersion: {
+        name: "restore_invoice_version",
+        title: "Obnovit verzi faktury",
+        description:
+          "Vrátí vystavenou fakturu do dřívější verze (z list_invoice_versions). Platby se nemění.",
+        versionId: "ID verze z list_invoice_versions.",
+        done: "Faktura je vrácená do zvolené verze.",
+      },
+      cancel: {
+        name: "cancel_invoice",
+        title: "Stornovat fakturu",
+        description:
+          "Stornuje vystavenou fakturu bez plateb a dobropisů. Číslo zůstane obsazené; storno jde vrátit nástrojem restore_cancelled_invoice.",
+        done: "Faktura je stornovaná.",
+      },
+      restore: {
+        name: "restore_cancelled_invoice",
+        title: "Obnovit stornovanou fakturu",
+        description: "Vrátí stornovanou fakturu do stavu před stornem.",
+        done: "Storno je zrušené.",
+      },
+      creditNote: {
+        name: "create_credit_note",
+        title: "Vytvořit dobropis",
+        description:
+          "K vystavené faktuře založí koncept dobropisu, stejně jako ve webu. Číslo dostane až při vystavení.",
+        done: "Dobropis je založený jako koncept bez čísla. Nic se nevystavilo ani neodeslalo.",
+      },
+      deleteImported: {
+        name: "delete_imported_invoice",
+        title: "Smazat importovaný doklad",
+        description:
+          "Smaže doklad importovaný z jiného systému i s jeho platbami. Doklad vystavený ve Fakturanu tímto smazat nejde.",
+        done: "Importovaný doklad je smazaný.",
+      },
+      edit: (revision: number) => `Nová revize: ${revision}.`,
+      resendSuggested: "Faktura už odešla; zvažte poslat zákazníkovi opravenou verzi.",
+      balance: {
+        overpaid: "Po úpravě je faktura přeplacená.",
+        underpaid: "Po úpravě už faktura není plně uhrazená.",
+      },
+    },
+    // Sending invoices, receipts and reminders (Task 9).
+    sending: {
+      fields: {
+        id: "faktura",
+        logId: "záznam pošty",
+        paymentId: "platba",
+        stageKey: "stupeň upomínky",
+        to: "příjemci",
+        cc: "kopie",
+        bcc: "skrytá kopie",
+        subject: "předmět",
+        body: "text",
+        revision: "revize",
+        attachIsdoc: "příloha ISDOC",
+        idempotency_key: "klíč opakování",
+      },
+      id: "ID faktury.",
+      to: "Adresy příjemců.",
+      cc: "Adresy v kopii.",
+      bcc: "Adresy ve skryté kopii.",
+      subject: "Předmět zprávy.",
+      body: "Text zprávy.",
+      revision: "Revize faktury, ke které je zpráva napsaná (z prepare_*).",
+      idempotencyKey:
+        "Náhodné UUID této zprávy, např. requestId z prepare_*. Opakované volání se stejným klíčem nic dalšího neodešle.",
+      queued: "Zpráva je zařazená k odeslání.",
+      invoice: {
+        name: "send_invoice",
+        title: "Odeslat fakturu e-mailem",
+        description:
+          "Odešle fakturu e-mailem zákazníkovi. Zprávu nejdřív připravte nástrojem prepare_invoice_email a předtím ji ukažte uživateli. Když je dřívější doručení nejisté, odeslání musí potvrdit uživatel ve webu.",
+        logId: "ID záznamu pošty, který tato zpráva nahrazuje (z prepare_invoice_email).",
+        attachIsdoc: "Přiložit i ISDOC.",
+      },
+      resend: {
+        name: "resend_from_log",
+        title: "Odeslat znovu ze záznamu pošty",
+        description:
+          "Odešle znovu zprávu, která selhala nebo byla zrušená, beze změny textu. Nejisté doručení musí potvrdit uživatel ve webu.",
+        logId: "ID záznamu pošty z list_invoice_mail_log.",
+      },
+      receipt: {
+        name: "send_payment_receipt",
+        title: "Odeslat potvrzení platby",
+        description:
+          "Odešle zákazníkovi potvrzení přijaté platby. Zprávu nejdřív připravte nástrojem prepare_payment_receipt.",
+        paymentId: "ID platby.",
+      },
+      reminder: {
+        name: "send_reminder",
+        title: "Odeslat upomínku",
+        description:
+          "Odešle upomínku k odeslané neuhrazené faktuře. Zprávu nejdřív připravte nástrojem prepare_reminder. Opakovanou upomínku musí potvrdit uživatel ve webu.",
+        stageKey: "ID stupně upomínky, nebo null pro ruční upomínku.",
       },
     },
   },

@@ -9,8 +9,16 @@ import { scrubText } from "../monitoring/before-send";
 import { ServiceError } from "../services/access";
 import type { McpCallReason } from "../services/mcp-call-log";
 
-// A refusal or failure the assistant should relay to the user. The message is Czech and shown as is.
-export class McpToolError extends Error {}
+// A refusal or failure the assistant should relay to the user. The message is Czech and shown as is;
+// `details` go with it as structured content, e.g. the problems that stop issuing (MCP-073).
+export class McpToolError extends Error {
+  constructor(
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
 
 // A refusal by the access checks, with the code the call log keeps (MCP-061, MCP-067).
 export class McpDenied extends McpToolError {
@@ -78,6 +86,9 @@ export function toolErrorResult(
   // The web says to reload the page; an assistant reads the invoice again instead (MCP-072).
   if (error instanceof ServiceError && error.message === TEXTS.invoices.stale) {
     return toolError(TEXTS.mcp.tools.stale);
+  }
+  if (error instanceof McpToolError && error.details) {
+    return { ...toolError(error.message), structuredContent: error.details };
   }
   if (error instanceof McpToolError || error instanceof ServiceError) {
     return toolError(error.message);
