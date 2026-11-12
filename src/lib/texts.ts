@@ -3650,6 +3650,467 @@ export const TEXTS = {
         done: "Konečná faktura je založená jako koncept. Nic se nevystavilo ani neodeslalo.",
       },
     },
+    customers: {
+      nameLabel: "Zákazník",
+      noteLabel: "Poznámka",
+      empty: "Žádný zákazník nevyhovuje filtru.",
+      archivedMark: " (archivovaný)",
+      fields: {
+        id: "zákazník",
+        name: "název",
+        street: "ulice",
+        city: "město",
+        zip: "PSČ",
+        country: "stát",
+        ico: "IČO",
+        dic: "DIČ",
+        email: "e-mail",
+        extraEmails: "další e-maily",
+        phone: "telefon",
+        note: "poznámka",
+        dueDays: "splatnost",
+        language: "jazyk",
+        currency: "měna",
+        remindersEnabled: "upomínky",
+      },
+      id: "ID zákazníka (z list_customers nebo search_customers).",
+      row: (id: string, name: string, ico: string, link: string) =>
+        [`- ${id}`, name, ico, link].filter(Boolean).join(" · "),
+      heading: (count: number, page: number, more: boolean) =>
+        `Zákazníci na stránce ${page}: ${count}${more ? " (další na další stránce)" : ""}.`,
+      card: (name: string, ico: string, dic: string, email: string) =>
+        [name, ico, dic, email].filter(Boolean).join(" · "),
+      totals: (currency: string, invoiced: string, outstanding: string) =>
+        `${currency}: fakturováno ${invoiced}, neuhrazeno ${outstanding}`,
+      invoice: (number: string, status: string, total: string) =>
+        `- ${number} · ${status} · ${total}`,
+      averageDays: (days: number) => `Průměrná doba úhrady: ${days} dní.`,
+      list: {
+        name: "list_customers",
+        title: "Seznam zákazníků",
+        description:
+          "Zákazníci účtu jako v seznamu zákazníků na webu: hledaný text, jen zahraniční, stav (active aktivní, archived archivovaní, all všichni). Stránky po 50.",
+        q: "Hledaný text (název, IČO, DIČ, e-mail, město), nejvýš 100 znaků.",
+        foreign: "Jen zahraniční zákazníci.",
+        status: "active aktivní (výchozí), archived archivovaní, all všichni.",
+        page: "Číslo stránky od 1.",
+      },
+      get: {
+        name: "get_customer",
+        title: "Karta zákazníka",
+        description:
+          "Údaje zákazníka a souhrn jeho dokladů jako na kartě zákazníka ve webu: fakturováno a neuhrazeno po měnách, průměrná doba úhrady a poslední doklady.",
+      },
+      ares: {
+        name: "lookup_company_ares",
+        title: "Najít firmu v ARES",
+        description:
+          "Načte název, DIČ a adresu firmy z rejstříku ARES podle IČO, stejně jako tlačítko u IČO ve webu. Nic neukládá; údaje pak můžete předat do save_customer.",
+        ico: "IČO firmy, 8 číslic.",
+        notFound: "Firma s tímto IČO v ARES není.",
+        found: (ico: string) => `Firma s IČO ${ico} v ARES:`,
+      },
+      save: {
+        name: "save_customer",
+        title: "Uložit zákazníka",
+        description:
+          "Bez id založí nového zákazníka (název je povinný), s id upraví existujícího. Při úpravě se mění jen pole, která zadáte; ostatní zůstanou. Kontroly jsou stejné jako ve formuláři zákazníka na webu.",
+        id: "ID zákazníka pro úpravu; bez něj se zákazník založí.",
+        name_: "Název firmy nebo jméno.",
+        street: "Ulice a číslo.",
+        city: "Město.",
+        zip: "PSČ.",
+        country: "Stát.",
+        ico: "IČO.",
+        dic: "DIČ.",
+        email: "E-mail pro faktury.",
+        extraEmails: "Další e-maily (nejvýš 10).",
+        phone: "Telefon.",
+        note: "Interní poznámka.",
+        dueDays: "Splatnost ve dnech pro tohoto zákazníka; null = výchozí účtu.",
+        language: "Jazyk dokladů; null = výchozí účtu.",
+        currency: "Měna dokladů; null = výchozí účtu.",
+        remindersEnabled: "false vypne upomínky tomuto zákazníkovi; null = podle účtu.",
+        created: "Zákazník je založený.",
+        updated: "Zákazník je uložený.",
+        duplicateIco: (ico: string) => `Pozor: IČO ${ico} má i jiný zákazník tohoto účtu.`,
+      },
+      archive: {
+        name: "archive_customer",
+        title: "Archivovat zákazníka",
+        description: "Archivuje zákazníka; nebude se nabízet pro nové doklady. Doklady zůstanou.",
+        done: "Zákazník je archivovaný.",
+      },
+      restore: {
+        name: "restore_customer",
+        title: "Obnovit zákazníka z archivu",
+        description: "Vrátí archivovaného zákazníka mezi aktivní.",
+        done: "Zákazník je znovu aktivní.",
+      },
+      verifyVat: {
+        name: "verify_customer_vat",
+        title: "Ověřit DIČ v systému VIES",
+        description:
+          "Ověří DIČ zákazníka v systému VIES a uloží výsledek, stejně jako tlačítko ve webu.",
+        states: {
+          valid: "DIČ je ve VIES platné.",
+          invalid: "DIČ ve VIES platné není.",
+          unavailable: "VIES teď neodpovídá, zkuste to později. Nic se neuložilo.",
+        } as Record<string, string>,
+      },
+      delete: {
+        name: "delete_customer",
+        title: "Smazat zákazníka",
+        description:
+          "Trvale smaže zákazníka bez dokladů. Zákazníka s doklady smazat nejde, jen archivovat.",
+        done: "Zákazník je smazaný.",
+      },
+    },
+    catalog: {
+      nameLabel: "Položka",
+      categoryLabel: "Kategorie",
+      unitLabel: "Jednotka",
+      empty: "Žádná položka ceníku nevyhovuje filtru.",
+      noCategories: "Ceník nemá žádné kategorie.",
+      priceInvalid: "Cenu zadejte jako nezáporné číslo, například 1500 nebo 1500.50.",
+      priceRequired: "Nová položka ceníku potřebuje cenu.",
+      fields: {
+        id: "položka",
+        name: "název",
+        description: "popis",
+        unit: "jednotka",
+        price: "cena",
+        unitPrice: "cena",
+        currency: "měna",
+        category: "kategorie",
+        tags: "štítky",
+      },
+      id: "ID položky ceníku (z list_catalog nebo search_catalog).",
+      row: (id: string, name: string, price: string, unit: string, link: string) =>
+        `- ${id} · ${name} · ${price} / ${unit} · ${link}`,
+      heading: (count: number, page: number, more: boolean) =>
+        `Položky ceníku na stránce ${page}: ${count}${more ? " (další na další stránce)" : ""}.`,
+      archivedMark: " (archivovaná)",
+      list: {
+        name: "list_catalog",
+        title: "Seznam položek ceníku",
+        description:
+          "Položky ceníku jako v ceníku na webu: hledaný text, kategorie, stav (active, archived, all), řazení podle názvu nebo použití. Stránky po 50.",
+        q: "Hledaný text, nejvýš 100 znaků.",
+        category: "Jen položky této kategorie.",
+        status: "active aktivní (výchozí), archived archivované, all všechny.",
+        sort: "name podle názvu (výchozí), usage podle počtu použití.",
+        page: "Číslo stránky od 1.",
+      },
+      get: {
+        name: "get_catalog_item",
+        title: "Položka ceníku",
+        description: "Údaje jedné položky ceníku.",
+      },
+      categories: {
+        name: "list_catalog_categories",
+        title: "Kategorie ceníku",
+        description: "Kategorie, které položky ceníku používají.",
+        heading: "Kategorie ceníku:",
+      },
+      units: {
+        name: "list_units",
+        title: "Jednotky",
+        description: "Jednotky, které účet nabízí u položek.",
+        heading: "Jednotky:",
+      },
+      save: {
+        name: "save_catalog_item",
+        title: "Uložit položku ceníku",
+        description:
+          "Bez id založí položku ceníku (název, jednotka a cena jsou povinné), s id upraví existující; při úpravě se mění jen zadaná pole. Cena je text jako ve formuláři, například 1500 nebo 1500.50. Měna je bez zadání výchozí měna účtu.",
+        id: "ID položky pro úpravu; bez něj se položka založí.",
+        name_: "Název položky.",
+        description_: "Popis.",
+        unit: "Jednotka, například hod. nebo ks.",
+        price: "Cena za jednotku jako text, například 1500.50.",
+        currency: "Měna ceny.",
+        category: "Kategorie.",
+        tags: "Štítky položky (nejvýš 10).",
+        created: "Položka ceníku je založená.",
+        updated: "Položka ceníku je uložená.",
+      },
+      archive: {
+        name: "archive_catalog_item",
+        title: "Archivovat položku ceníku",
+        description: "Archivuje položku; nebude se nabízet na nových dokladech.",
+        done: "Položka ceníku je archivovaná.",
+      },
+      restore: {
+        name: "restore_catalog_item",
+        title: "Obnovit položku ceníku",
+        description: "Vrátí archivovanou položku mezi aktivní.",
+        done: "Položka ceníku je znovu aktivní.",
+      },
+      saveUnit: {
+        name: "save_unit",
+        title: "Přidat jednotku",
+        description: "Přidá jednotku do nabídky jednotek účtu.",
+        unitName: "Název jednotky, nejvýš 20 znaků.",
+        done: "Jednotka je přidaná.",
+      },
+      deleteUnit: {
+        name: "delete_unit",
+        title: "Smazat jednotku",
+        description:
+          "Smaže jednotku z nabídky. Doklady a položky, které ji používají, si ji ponechají.",
+        id: "ID jednotky z list_units.",
+        done: "Jednotka je smazaná.",
+      },
+      fromLine: {
+        name: "save_line_to_catalog",
+        title: "Uložit řádek faktury do ceníku",
+        description:
+          "Uloží řádek faktury jako novou položku ceníku (bez kategorie a štítků), stejně jako „Uložit do ceníku“ u řádku ve webu.",
+        name_: "Název řádku.",
+        description_: "Popis řádku.",
+        unit: "Jednotka řádku.",
+        unitPrice: "Cena za jednotku jako text, například 1500.50.",
+        currency: "Měna dokladu.",
+        done: "Řádek je uložený jako položka ceníku.",
+      },
+    },
+    payments: {
+      amountInvalid: "Částku zadejte jako kladné číslo, například 1500 nebo 1500.50.",
+      fields: {
+        invoiceId: "faktura",
+        paymentId: "platba",
+        id: "faktura",
+        ids: "faktury",
+        revision: "revize",
+        paidOn: "datum úhrady",
+        amount: "částka",
+        credited: "připsáno",
+        currency: "měna",
+        method: "způsob",
+        note: "poznámka",
+      },
+      invoiceId: "ID faktury.",
+      paymentId: "ID platby (z get_invoice, pole payments).",
+      revision: "Revize faktury z get_invoice nebo z předchozí operace.",
+      paidOn: "Datum úhrady RRRR-MM-DD, nejpozději dnes.",
+      amount: "Částka jako text, například 1500.50.",
+      credited:
+        "Když platba přišla v jiné měně než faktura: kolik se faktuře připíše v její měně, jako text.",
+      currency: "Měna platby; bez zadání měna faktury.",
+      method: "Způsob: transfer převodem, cash hotově, other jinak.",
+      note: "Poznámka k platbě.",
+      summary: (status: string, paid: string, remaining: string) =>
+        `Stav faktury: ${status}. Uhrazeno ${paid}, zbývá ${remaining}.`,
+      add: {
+        name: "add_payment",
+        title: "Zapsat platbu",
+        description:
+          "Zapíše platbu k vystavené faktuře, stejně jako „Zapsat platbu“ ve webu. Pošlete revision z get_invoice. Když je zapnuté automatické potvrzení platby, Fakturan ho pošle jako při zápisu ve webu.",
+        done: "Platba je zapsaná.",
+      },
+      refund: {
+        name: "add_refund",
+        title: "Zapsat vrácení peněz",
+        description:
+          "Zapíše vrácení peněz zákazníkovi (vratku) k faktuře, stejně jako ve webu. Částka se zadává kladně.",
+        done: "Vrácení peněz je zapsané.",
+      },
+      update: {
+        name: "update_payment",
+        title: "Upravit platbu",
+        description:
+          "Upraví zapsanou platbu; mění se jen zadaná pole. Částky platby z avíza banky změnit nejde.",
+        done: "Platba je upravená.",
+      },
+      markPaid: {
+        name: "mark_paid",
+        title: "Označit fakturu jako uhrazenou",
+        description:
+          "Zapíše platbu na celý zbývající dluh faktury, stejně jako „Uhrazeno“ ve webu.",
+        id: "ID faktury.",
+        paidOn: "Datum úhrady RRRR-MM-DD; bez zadání dnes.",
+        done: "Faktura je uhrazená.",
+      },
+      markPaidMany: {
+        name: "mark_paid_many",
+        title: "Označit faktury jako uhrazené",
+        description:
+          "Uhradí dnešním datem každou z faktur, které zbývá uhradit, jako hromadná akce ve webu. Faktury, které uhradit nejde, přeskočí.",
+        ids: "ID faktur.",
+        done: (done: number, skipped: number) =>
+          `Uhrazeno faktur: ${done}. Přeskočeno: ${skipped}.`,
+      },
+      delete: {
+        name: "delete_payment",
+        title: "Smazat platbu",
+        description:
+          "Smaže zapsanou platbu. Platbu z avíza banky vrátí zpět do fronty plateb, jako ve webu.",
+        done: "Platba je smazaná.",
+      },
+    },
+    bank: {
+      counterpartyLabel: "Plátce",
+      messageLabel: "Zpráva pro příjemce",
+      textLabel: "Text avíza",
+      accountNameLabel: "Účet",
+      noNotices: "Žádná avíza.",
+      noCandidates: "Žádná faktura k přiřazení.",
+      noAccounts: "Účet nemá žádný bankovní účet.",
+      statuses: {
+        pending: "čeká",
+        unrecognized: "nerozpoznané",
+        matched: "spárované",
+        ignored: "mimo sledované účty",
+        dismissed: "zahozené",
+      } as Record<string, string>,
+      fields: {
+        id: "avízo",
+        view: "pohled",
+        search: "hledání",
+        invoiceId: "faktura",
+        credited: "připsáno",
+        parts: "části",
+        amount: "částka",
+        name: "název",
+        currency: "měna",
+        number: "číslo účtu",
+        bankCode: "kód banky",
+        iban: "IBAN",
+        swift: "SWIFT",
+      },
+      noticeId: "ID avíza z list_bank_notices.",
+      invoiceId: "ID faktury z list_notice_candidates.",
+      credited:
+        "Když avízo přišlo v jiné měně než faktura: kolik se faktuře připíše v její měně, jako text.",
+      noticeRow: (id: string, status: string, paidOn: string, amount: string, vs: string) =>
+        `- ${id} · ${status} · ${paidOn} · ${amount}${vs ? ` · VS ${vs}` : ""}`,
+      noticeInvoices: (numbers: string) => `  faktury: ${numbers}`,
+      list: {
+        name: "list_bank_notices",
+        title: "Avíza banky",
+        description:
+          "Avíza z bankovní schránky jako na stránce Platby: queue = čekají na přiřazení, unrecognized = nerozpoznané zprávy, history = posledních 50 vyřízených.",
+        view: "queue, unrecognized nebo history.",
+      },
+      status: {
+        name: "get_bank_status",
+        title: "Stav bankovní schránky",
+        description:
+          "Jestli je bankovní schránka nastavená a zapnutá, kdy se naposled kontrolovala a kolik avíz čeká.",
+        notConfigured:
+          "Bankovní schránka není nastavená. Nastavíte ji ve webu v Nastavení › Avíza.",
+        summary: (enabled: boolean, lastCheck: string, pending: number, unrecognized: number) =>
+          `Schránka je ${enabled ? "zapnutá" : "vypnutá"}, naposled kontrolována ${lastCheck}. Čeká avíz: ${pending}, nerozpoznaných: ${unrecognized}.`,
+        counts: (pending: number, unrecognized: number) =>
+          `Čeká avíz: ${pending}, nerozpoznaných: ${unrecognized}.`,
+        failing: (failures: number) => `Posledních ${failures} kontrol selhalo.`,
+      },
+      candidates: {
+        name: "list_notice_candidates",
+        title: "Faktury k avízu",
+        description:
+          "Faktury, ke kterým jde avízo přiřadit: nejdřív se stejným variabilním symbolem (suggested), pak ostatní čekající na platbu.",
+        search: "Hledat v čísle a odběrateli.",
+        row: (id: string, number: string, customer: string, due: string, suggested: boolean) =>
+          `- ${id} · ${number} · ${customer} · zbývá ${due}${suggested ? " · navrženo" : ""}`,
+        more: "Další faktury najdete upřesněním hledání.",
+      },
+      assign: {
+        name: "assign_notice",
+        title: "Přiřadit avízo k faktuře",
+        description:
+          "Zapíše platbu z avíza k faktuře, stejně jako „Přiřadit“ na stránce Platby. Když je zapnuté automatické potvrzení platby, Fakturan ho pošle.",
+        done: "Avízo je přiřazené a platba zapsaná.",
+      },
+      split: {
+        name: "split_notice",
+        title: "Rozdělit avízo mezi faktury",
+        description:
+          "Rozdělí platbu z avíza mezi více faktur; části musí dát dohromady celou částku avíza.",
+        parts: "Části: faktura a částka jako text (2 až 10 částí).",
+        amount: "Částka části v měně avíza, jako text.",
+        done: "Avízo je rozdělené a platby zapsané.",
+      },
+      dismiss: {
+        name: "dismiss_notice",
+        title: "Zahodit avízo",
+        description: "Zahodí avízo nebo nerozpoznanou zprávu z fronty, jako ve webu.",
+        done: "Avízo je zahozené.",
+      },
+      restoreNotice: {
+        name: "restore_notice",
+        title: "Vrátit zahozené avízo",
+        description: "Vrátí zahozené avízo zpět do fronty.",
+        done: "Avízo je zpět ve frontě.",
+      },
+      undo: {
+        name: "undo_notice",
+        title: "Vrátit přiřazení avíza",
+        description:
+          "Odstraní platby zapsané z avíza a vrátí avízo do fronty, jako „Vrátit“ ve webu.",
+        done: "Přiřazení je vrácené a avízo čeká ve frontě.",
+      },
+      check: {
+        name: "check_mailbox_now",
+        title: "Zkontrolovat bankovní schránku",
+        description:
+          "Hned zkontroluje bankovní schránku s uloženými údaji, jako „Zkontrolovat teď“ ve webu. Údaje schránky nemění.",
+        done: "Kontrola schránky je naplánovaná. Nová avíza uvidíte za chvíli v list_bank_notices.",
+      },
+      accounts: {
+        id: "ID bankovního účtu z list_bank_accounts.",
+        notFound: "Účet neexistuje",
+        row: (id: string, name: string, currency: string, account: string, flags: string) =>
+          `- ${id} · ${name} · ${currency} · ${account}${flags}`,
+        defaultMark: " · výchozí",
+        hiddenMark: " · skrytý",
+        list: {
+          name: "list_bank_accounts",
+          title: "Bankovní účty",
+          description: "Bankovní účty dodavatele, výchozí účet pro každou měnu a skryté účty.",
+        },
+        save: {
+          name: "save_bank_account",
+          title: "Uložit bankovní účet",
+          description:
+            "Bez id založí bankovní účet (název, měna a číslo s kódem banky nebo IBAN), s id upraví existující; při úpravě se mění jen zadaná pole.",
+          id: "ID účtu pro úpravu; bez něj se účet založí.",
+          name_: "Název účtu.",
+          currency: "Měna účtu.",
+          number: "Číslo účtu (s předčíslím), bez kódu banky.",
+          bankCode: "Kód banky, 4 číslice.",
+          iban: "IBAN, když účet nemá české číslo.",
+          swift: "SWIFT/BIC.",
+          created: "Bankovní účet je založený.",
+          updated: "Bankovní účet je uložený.",
+        },
+        setDefault: {
+          name: "set_default_bank_account",
+          title: "Nastavit výchozí účet",
+          description: "Nastaví účet jako výchozí pro jeho měnu.",
+          done: "Účet je výchozí pro svou měnu.",
+        },
+        hide: {
+          name: "hide_bank_account",
+          title: "Skrýt bankovní účet",
+          description: "Skryje účet; nebude se nabízet na nových dokladech.",
+          done: "Účet je skrytý.",
+        },
+        unhide: {
+          name: "unhide_bank_account",
+          title: "Zobrazit skrytý účet",
+          description: "Vrátí skrytý účet do nabídky.",
+          done: "Účet je znovu v nabídce.",
+        },
+        delete: {
+          name: "delete_bank_account",
+          title: "Smazat bankovní účet",
+          description: "Smaže bankovní účet, který není na žádné faktuře; jinak ho jde jen skrýt.",
+          done: "Bankovní účet je smazaný.",
+        },
+      },
+    },
   },
   demo: {
     locked: "V ukázce tohle nejde změnit",
