@@ -745,7 +745,7 @@ Požadavky převzaté z `2026-11-11-mcp-design.md`, kap. 4 (jen věty požadavk�
 - **MCP-044** Souhlasová stránka ukáže hostitele z `redirect_uri` („aplikace na tomto počítači“ pro `localhost` a `127.0.0.1`, hostitele dokumentu u CIMD). Stránka ukáže aktuální úroveň oprávnění a větu, že ji lze změnit v Nastavení › Asistenti (MCP-054).
 - **MCP-045** Na `http://localhost` a `http://127.0.0.1` funguje celý tok bez HTTPS. Vydavatel, audience i metadata se odvozují z `BETTER_AUTH_URL`.
 
-### 25.5 Úrovně oprávnění, log volání a plná sada nástrojů
+### 25.6 Úrovně oprávnění, log volání a plná sada nástrojů
 
 Návrh: `docs/superpowers/specs/2026-11-12-mcp-full-design.md` (kap. 5 je závazný seznam nástrojů).
 
