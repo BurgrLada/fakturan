@@ -8,7 +8,7 @@ import { draftRate } from "../../services/exchange-rates";
 import { draftFromTemplate } from "../../services/invoice-templates";
 import { duplicateInvoice, getInvoice, saveDraftWithTags } from "../../services/invoices";
 import { getPreferences } from "../../services/preferences";
-import { documentInput, draftOfId, draftOutput, draftText, lineOf } from "./create-draft";
+import { documentInput, draftOfId, draftOutput, draftText, keptLine, lineOf } from "./create-draft";
 
 const T = TEXTS.mcp.drafts;
 const id = (description: string) => z.string().min(1).max(100).describe(description);
@@ -22,6 +22,8 @@ export const updateDraftInvoiceTool = defineTool({
     id: id(T.update.id),
     revision: z.number().int().describe(T.update.revision),
     ...documentInput,
+    // Without lines the stored ones stay, as in update_issued_invoice.
+    lines: documentInput.lines.describe(T.update.lines).optional(),
   }),
   output: draftOutput,
   fieldLabels: T.fields,
@@ -40,7 +42,9 @@ export const updateDraftInvoiceTool = defineTool({
     const currency = args.currency ?? found.currency;
     const issueDate = args.issueDate ?? found.issueDate;
     const unit = getPreferences(ownerId).unit;
-    const lines = args.lines.map((line) => lineOf(ownerId, line, currency, unit));
+    const lines = args.lines
+      ? args.lines.map((line) => lineOf(ownerId, line, currency, unit))
+      : found.lines.map(keptLine);
     // The form fetches a new CNB rate when the currency or the date changes, otherwise keeps it.
     const rateChanged = currency !== found.currency || issueDate !== found.issueDate;
     const rate = rateChanged

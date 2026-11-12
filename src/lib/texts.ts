@@ -3264,6 +3264,9 @@ export const TEXTS = {
         `Příliš mnoho volání najednou. Zkuste to znovu za ${seconds} s.`,
       invalidInput: (issues: string) => `Neplatné vstupy: ${issues}`,
       failed: "Akce se nepodařila kvůli chybě ve Fakturanu. Zkuste to prosím později.",
+      // The change is saved but its summary failed; repeating it would save it twice.
+      doneWithoutSummary:
+        "Akce proběhla, ale shrnutí výsledku se nepodařilo sestavit. Neopakujte ji; výsledek ověřte načtením dat.",
       // A step the web asks a person to confirm (a repeated reminder, an unclear delivery) (MCP-060).
       confirmInWeb: (link: string) =>
         `Tohle musí potvrdit uživatel ve webu, asistent to potvrdit nemůže. Otevřete: ${link}`,
@@ -3555,7 +3558,13 @@ export const TEXTS = {
         "Cena za jednotku v hlavní jednotce měny faktury, například „1500.50“. Povinná, pokud nezadáte catalogItemId.",
       vatRate: "Sazba DPH v procentech. Fakturan DPH nepočítá, takže jde jen 0 nebo vynechat.",
       catalogItemId:
-        "ID položky ceníku (ze search_catalog). Doplní název, popis, jednotku a cenu; zadaný název a cena mají přednost.",
+        "ID položky ceníku (ze search_catalog). Doplní název, popis, jednotku a cenu; zadané hodnoty mají přednost.",
+      lineDescription: "Popis položky pod názvem (výchozí z ceníku, jinak prázdný).",
+      lineUnit: "Jednotka položky, například „hod“ (výchozí z ceníku, jinak podle nastavení).",
+      discountKind:
+        "Sleva na položce: none (bez slevy), percent (v procentech) nebo amount (částka za řádek). Výchozí none.",
+      discount:
+        "Výše slevy jako desetinné číslo v textu: procenta („10“) nebo částka v měně faktury („250.50“), podle discountKind.",
       issueDate: "Datum vystavení RRRR-MM-DD (výchozí podle nastavení, obvykle dnes).",
       dueDate: "Datum splatnosti RRRR-MM-DD (výchozí podle zákazníka nebo nastavení).",
       currency: "Měna faktury, například CZK nebo EUR (výchozí podle zákazníka nebo nastavení).",
@@ -3568,6 +3577,7 @@ export const TEXTS = {
       priceRequired: "Zadejte cenu nebo catalogItemId.",
       quantityInvalid: "Zadejte množství jako číslo, například „2“ nebo „1.5“.",
       unitPriceInvalid: "Zadejte cenu jako nezáporné číslo, například „1500.50“.",
+      discountInvalid: "Zadejte slevu jako nezáporné číslo, například „10“ nebo „250.50“.",
       vatRateInvalid:
         "Fakturan DPH nepočítá (dodavatel není plátce DPH). Sazbu vynechte nebo zadejte 0.",
       date: "Datum zadejte ve tvaru RRRR-MM-DD.",
@@ -3582,6 +3592,10 @@ export const TEXTS = {
         unitPrice: "cena",
         vatRate: "sazba DPH",
         catalogItemId: "položka ceníku",
+        description: "popis",
+        unit: "jednotka",
+        discountKind: "druh slevy",
+        discount: "sleva",
         issueDate: "datum vystavení",
         dueDate: "splatnost",
         currency: "měna",
@@ -3613,6 +3627,10 @@ export const TEXTS = {
         unitPrice: "cena",
         vatRate: "sazba DPH",
         catalogItemId: "položka ceníku",
+        description: "popis",
+        unit: "jednotka",
+        discountKind: "druh slevy",
+        discount: "sleva",
         issueDate: "datum vystavení",
         dueDate: "splatnost",
         currency: "měna",
@@ -3623,9 +3641,10 @@ export const TEXTS = {
         name: "update_draft_invoice",
         title: "Upravit koncept faktury",
         description:
-          "Nahradí obsah konceptu faktury: zákazníka, položky a co dalšího zadáte. Co nezadáte (datum, splatnost, měna, poznámka, štítky), zůstane, jak je; ostatní nastavení dokladu se nemění. Pošlete revision z get_invoice nebo z předchozí úpravy; když se koncept mezitím změnil, úprava se odmítne. Vystavenou fakturu tímto nástrojem upravit nejde.",
+          "Upraví koncept faktury: zákazníka a co dalšího zadáte. Co nezadáte (položky, datum, splatnost, měna, poznámka, štítky), zůstane, jak je; ostatní nastavení dokladu se nemění. Zadané položky nahradí všechny současné, takže pošlete i ty, které se nemění, s popisem, jednotkou a slevou z get_invoice. Pošlete revision z get_invoice nebo z předchozí úpravy; když se koncept mezitím změnil, úprava se odmítne. Vystavenou fakturu tímto nástrojem upravit nejde.",
         id: "ID konceptu faktury.",
         revision: "Revize konceptu, jak ji vrátil get_invoice nebo předchozí úprava.",
+        lines: "Položky, které nahradí všechny současné. Bez nich položky zůstanou.",
         done: "Koncept faktury je upravený. Nic se nevystavilo ani neodeslalo.",
       },
       duplicate: {

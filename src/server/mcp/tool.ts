@@ -18,7 +18,13 @@ import {
 import { recordMcpCall, type McpCallOutcome, type McpCallReason } from "../services/mcp-call-log";
 import { activeLevel, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable } from "./availability";
-import { McpDenied, McpToolError, toolErrorResult, type FieldLabels } from "./errors";
+import {
+  McpDenied,
+  McpToolError,
+  reportMcpFailure,
+  toolErrorResult,
+  type FieldLabels,
+} from "./errors";
 
 const T = TEXTS.mcp.tools;
 
@@ -154,6 +160,41 @@ function logCall(
   }
 }
 
+function finished<I, O>(
+  def: ToolDef<I, O>,
+  ownerId: string,
+  clientId: string,
+  result: O,
+): CallToolResult {
+  const report = (error: unknown) => reportMcpFailure(error, def.name, ownerId);
+  // The SDK refuses a success without valid structured content, so a summary we cannot build is
+  // marked as an error whose text says the change happened and must not be repeated.
+  const unsummarized: CallToolResult = {
+    isError: true,
+    content: [{ type: "text", text: TEXTS.mcp.tools.doneWithoutSummary }],
+  };
+  try {
+    touchMcpConnection(ownerId, clientId, clock.now());
+  } catch (error) {
+    report(error);
+  }
+  // A mismatch is our bug, not the user's input: it goes to Sentry.
+  const checked = def.output.safeParse(result);
+  if (!checked.success) {
+    report(new Error(`Výstup nástroje ${def.name} neodpovídá schématu`));
+    return unsummarized;
+  }
+  try {
+    return {
+      content: [{ type: "text", text: def.text(checked.data) }],
+      structuredContent: checked.data as Record<string, unknown>,
+    };
+  } catch (error) {
+    report(error);
+    return unsummarized;
+  }
+}
+
 export async function runTool<I, O>(
   def: ToolDef<I, O>,
   claims: McpClaims,
@@ -167,15 +208,9 @@ export async function runTool<I, O>(
     const input = def.input.parse(raw, { error: czechError });
     if (def.levelFor) requireLevel(ctx.level, def.levelFor(ctx, input));
     const result = await runWithActor(ctx.actor, () => def.run(ctx, input));
-    // A mismatch is our bug, not the user's input: it goes to Sentry as a general failure.
-    const checked = def.output.safeParse(result);
-    if (!checked.success) throw new Error(`Výstup nástroje ${def.name} neodpovídá schématu`);
-    const output = checked.data;
-    touchMcpConnection(ctx.ownerId, ctx.clientId, clock.now());
-    return {
-      content: [{ type: "text", text: def.text(output) }],
-      structuredContent: output as Record<string, unknown>,
-    };
+    // From here the change is saved: a later failure is reported, never answered as an error,
+    // or the assistant would repeat a payment or a new draft.
+    return finished(def, ctx.ownerId, ctx.clientId, result);
   } catch (error) {
     logged = loggedFailure(error);
     return toolErrorResult(error, def.name, claims.sub ?? "", def.fieldLabels);

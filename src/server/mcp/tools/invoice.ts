@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { INVOICE_STATUSES } from "@/lib/invoice";
+import { formatDiscount } from "@/lib/invoice-form";
+import { DISCOUNT_KINDS } from "@/lib/invoice-totals";
 import { amountDue } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
 import { McpToolError } from "../errors";
@@ -44,6 +46,9 @@ const output = z.object({
       quantityMilli: z.number().int(),
       unit: z.string(),
       unitPrice: moneySchema,
+      // As the edit form shows it, so update tools can send the line back unchanged.
+      discountKind: z.enum(DISCOUNT_KINDS),
+      discount: z.string(),
       net: moneySchema,
     }),
   ),
@@ -113,6 +118,8 @@ export const getInvoiceTool = defineTool({
         quantityMilli: line.quantityMilli,
         unit: line.unit,
         unitPrice: m(line.unitPriceMinor),
+        discountKind: line.discountKind,
+        discount: formatDiscount(line.discountKind, line.discountValue),
         net: m(line.netMinor),
       })),
       totals: {

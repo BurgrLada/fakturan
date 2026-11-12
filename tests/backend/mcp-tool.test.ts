@@ -1,14 +1,14 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { decodeJwt } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { TEXTS } from "@/lib/texts";
 import { createAuth } from "@/server/auth";
 import { setClockForTests } from "@/server/clock";
-import { auditLog, customer, oauthConsent, rateLimit, user } from "@/server/db/schema";
+import { auditLog, customer, mcpCallLog, oauthConsent, rateLimit, user } from "@/server/db/schema";
 import { parseEnv, type Env } from "@/server/env";
 import { McpToolError } from "@/server/mcp/errors";
 import { mcpEndpoint } from "@/server/mcp/server";
@@ -366,6 +366,44 @@ describe("obal nástrojů MCP", () => {
     );
     expect(textOf(own)).toBe("Faktura nenalezena");
     expect(sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  test("zápis použití po provedené změně, který selže, nezmění výsledek na chybu", async () => {
+    vi.stubEnv("SENTRY_DSN", "https://k@errors.example.cz/1");
+    const { claims } = await connect();
+    db.run(
+      sql`CREATE TEMP TRIGGER touch_fails BEFORE UPDATE ON oauth_consent BEGIN SELECT RAISE(ABORT, 'database is locked'); END`,
+    );
+    try {
+      const result = await runTool(createCustomer, claims, { text: "Po zámku" }, env);
+      expect(result.isError).toBeFalsy();
+      const id = (result.structuredContent as { id: string }).id;
+      expect(db.select().from(customer).where(eq(customer.id, id)).get()?.name).toBe("Po zámku");
+      expect(sentry.captureException).toHaveBeenCalledTimes(1);
+    } finally {
+      db.run(sql`DROP TRIGGER IF EXISTS touch_fails`);
+    }
+  });
+
+  test("výstup mimo schéma po provedené změně se nahlásí a asistent ji nezopakuje", async () => {
+    vi.stubEnv("SENTRY_DSN", "https://k@errors.example.cz/1");
+    const { claims } = await connect();
+    const mismatched = defineTool({
+      ...createCustomer,
+      name: "echo_mismatch",
+      output: z.object({ id: z.number() }) as unknown as typeof createCustomer.output,
+    });
+    const result = await runTool(mismatched, claims, { text: "Bez schématu" }, env);
+    // The SDK refuses a success without valid structured content; the text keeps the retry away.
+    expect(textOf(result)).toBe(T.doneWithoutSummary);
+    expect(db.select().from(customer).where(eq(customer.name, "Bez schématu")).get()).toBeTruthy();
+    expect(sentry.captureException).toHaveBeenCalledTimes(1);
+    const logged = db
+      .select({ outcome: mcpCallLog.outcome })
+      .from(mcpCallLog)
+      .where(and(eq(mcpCallLog.ownerId, ownerId), eq(mcpCallLog.tool, "echo_mismatch")))
+      .get();
+    expect(logged?.outcome).toBe("ok");
   });
 
   test("[MCP-036] chyba nástroje nepošle do Sentry argumenty", async () => {

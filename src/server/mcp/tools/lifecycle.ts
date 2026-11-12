@@ -25,7 +25,7 @@ import {
 import { deleteDraft, getInvoice, MAX_DOCUMENT_TEXT } from "../../services/invoices";
 import { getPreferences } from "../../services/preferences";
 import { setPartialReminders, setRemindersOff, snoozeReminders } from "../../services/reminders";
-import { documentInput, draftOfId, draftOutput, draftText, lineOf } from "./create-draft";
+import { documentInput, draftOfId, draftOutput, draftText, keptLine, lineOf } from "./create-draft";
 
 const T = TEXTS.mcp.lifecycle;
 const R = TEXTS.mcp.read;
@@ -228,16 +228,7 @@ export const updateIssuedInvoiceTool = defineTool({
     const unit = getPreferences(ctx.ownerId).unit;
     const lines = args.lines
       ? args.lines.map((line) => lineOf(ctx.ownerId, line, found.currency, unit))
-      : found.lines.map((line) => ({
-          catalogItemId: line.catalogItemId,
-          name: line.name,
-          description: line.description,
-          quantityMilli: line.quantityMilli,
-          unit: line.unit,
-          unitPriceMinor: line.unitPriceMinor,
-          discountKind: line.discountKind,
-          discountValue: line.discountValue,
-        }));
+      : found.lines.map(keptLine);
     // The whole document goes to the service as the web's edit form sends it; what the tool does
     // not take stays as it is.
     const result = updateIssuedWithTags(

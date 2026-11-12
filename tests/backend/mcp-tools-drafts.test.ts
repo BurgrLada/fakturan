@@ -113,6 +113,63 @@ describe("update_draft_invoice", () => {
     expect(lastAuditSource(db, ownerId)).toBe("mcp");
   });
 
+  const richLine = {
+    catalogItemId: null,
+    name: "Konzultace",
+    description: "Analýza požadavků",
+    quantityMilli: 2000,
+    unit: "hod",
+    unitPriceMinor: 150_000,
+    discountKind: "percent" as const,
+    discountValue: 1000,
+  };
+  const kept = (ownerId: string, id: string) =>
+    getInvoice(ownerId, id)!.lines.map((item) => ({
+      name: item.name,
+      description: item.description,
+      unit: item.unit,
+      discountKind: item.discountKind,
+      discountValue: item.discountValue,
+    }));
+
+  test("bez položek ponechá řádky z webu včetně popisu, jednotky a slevy", async () => {
+    const { ownerId, claims, customerId } = await account();
+    const { id, revision } = draftFor(ownerId, customerId, { lines: [richLine] });
+    const before = kept(ownerId, id);
+    const totalBefore = getInvoice(ownerId, id)!.totalMinor;
+    data(
+      await callTool("update_draft_invoice", claims, {
+        id,
+        revision,
+        customerId,
+        dueDate: "2026-12-31",
+      }),
+    );
+    const saved = getInvoice(ownerId, id)!;
+    expect(saved.dueDate).toBe("2026-12-31");
+    expect(kept(ownerId, id)).toEqual(before);
+    expect(saved.totalMinor).toBe(totalBefore);
+  });
+
+  test("řádek z get_invoice poslaný zpět zachová popis, jednotku a slevu", async () => {
+    const { ownerId, claims, customerId } = await account();
+    const { id, revision } = draftFor(ownerId, customerId, { lines: [richLine] });
+    const before = kept(ownerId, id);
+    const got = data(await callTool("get_invoice", claims, { id }));
+    const lines = got.lines.map((item: Data) => ({
+      name: item.name,
+      description: item.description,
+      quantity: "2",
+      unit: item.unit,
+      unitPrice: "1500",
+      discountKind: item.discountKind,
+      discount: item.discount,
+    }));
+    expect(got.lines[0]).toMatchObject({ discountKind: "percent", discount: "10" });
+    data(await callTool("update_draft_invoice", claims, { id, revision, customerId, lines }));
+    expect(kept(ownerId, id)).toEqual(before);
+  });
+
   test("[MCP-033] poznámka je v textu ohraničená", async () => {
     const { ownerId, claims, customerId } = await account();
     const { id, revision } = draftFor(ownerId, customerId);

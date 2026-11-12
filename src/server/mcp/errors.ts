@@ -63,7 +63,7 @@ function issuesText(error: z.ZodError, labels?: FieldLabels): string {
 }
 
 // Only the tool name and the user id leave the instance, never the arguments or the output (MCP-036).
-function reportMcpFailure(error: unknown, tool: string, userId: string): void {
+export function reportMcpFailure(error: unknown, tool: string, userId: string): void {
   const [name, message] =
     error instanceof Error ? [error.name, error.message] : ["", String(error)];
   logger.error("selhání nástroje MCP", {

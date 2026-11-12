@@ -205,7 +205,7 @@ function formatAmount(value: number): string {
 }
 
 // Percent is stored in basis points, which share the two decimal places of money.
-const formatDiscount = (kind: DiscountKind, value: number) =>
+export const formatDiscount = (kind: DiscountKind, value: number) =>
   kind === "none" ? "" : formatAmount(value);
 
 const parseAmount = (input: string, signed = false): number | null => {

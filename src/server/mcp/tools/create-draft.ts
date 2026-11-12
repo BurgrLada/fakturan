@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CURRENCIES, type Currency } from "@/lib/currency";
 import { MAX_DOCUMENT_LINES } from "@/lib/invoice";
-import { parseQuantity } from "@/lib/invoice-totals";
+import { DISCOUNT_KINDS, parseQuantity } from "@/lib/invoice-totals";
 import { parseMoney } from "@/lib/money";
 import { isCalendarDate } from "@/lib/number-format";
 import { TEXTS } from "@/lib/texts";
@@ -49,6 +49,11 @@ export const lineInput = z
       .describe(T.vatRate)
       .optional(),
     catalogItemId: z.string().min(1).max(100).describe(T.catalogItemId).optional(),
+    // What get_invoice returns for a line, so a resent line keeps it (the service checks the limits).
+    description: z.string().max(MAX_DOCUMENT_TEXT).describe(T.lineDescription).optional(),
+    unit: z.string().max(20).describe(T.lineUnit).optional(),
+    discountKind: z.enum(DISCOUNT_KINDS).describe(T.discountKind).optional(),
+    discount: z.string().refine(isPrice, T.discountInvalid).describe(T.discount).optional(),
   })
   .superRefine((line, ctx) => {
     if (line.catalogItemId) return;
@@ -154,15 +159,28 @@ export function lineOf(
   return {
     catalogItemId: item?.id ?? null,
     name: line.name ?? item?.name ?? "",
-    description: item?.description ?? "",
+    description: line.description ?? item?.description ?? "",
     quantityMilli: parseQuantity(line.quantity)!,
-    unit: item?.unit ?? defaultUnit,
+    unit: line.unit ?? item?.unit ?? defaultUnit,
     unitPriceMinor:
       line.unitPrice === undefined ? (item?.priceMinor ?? 0) : parseMoney(line.unitPrice)!,
-    discountKind: "none",
-    discountValue: 0,
+    // As the form reads it: percent in basis points and an amount in minor units share parseMoney.
+    discountKind: line.discountKind ?? "none",
+    discountValue: line.discount === undefined ? 0 : parseMoney(line.discount)!,
   };
 }
+
+// A stored line as the edit form sends it back unchanged.
+export const keptLine = (line: InvoiceDetail["lines"][number]): DraftInput["lines"][number] => ({
+  catalogItemId: line.catalogItemId,
+  name: line.name,
+  description: line.description,
+  quantityMilli: line.quantityMilli,
+  unit: line.unit,
+  unitPriceMinor: line.unitPriceMinor,
+  discountKind: line.discountKind,
+  discountValue: line.discountValue,
+});
 
 export const createDraftInvoiceTool = defineTool({
   name: T.name,
