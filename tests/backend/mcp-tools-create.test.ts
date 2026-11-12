@@ -326,6 +326,34 @@ describe("create_draft_invoice", () => {
     expect(db.select().from(invoiceLine).where(eq(invoiceLine.invoiceId, key)).all()).toEqual([]);
   });
 
+  test("[MCP-043] klíč vlastní zálohy nebo vystavené faktury se chová jako cizí klíč", async () => {
+    const draftAdvance = randomUUID();
+    saveDraft(actor(ownerId), {
+      ...newDraftDefaults(ownerId, mine.customer, "advance"),
+      clientId: draftAdvance,
+      lines: [],
+    });
+    const issuedKey = randomUUID();
+    saveDraft(actor(ownerId), {
+      ...newDraftDefaults(ownerId, mine.customer),
+      clientId: issuedKey,
+      lines: [],
+    });
+    db.update(invoice).set({ status: "issued" }).where(eq(invoice.id, issuedKey)).run();
+    for (const key of [draftAdvance, issuedKey]) {
+      const snapshot = db.select().from(invoice).where(eq(invoice.id, key)).get();
+      const { result, text } = await create({
+        customerId: mine.customer,
+        lines: [line()],
+        idempotency_key: key,
+      });
+      expect(result.isError).toBe(true);
+      expect(text).toContain("Doklad neexistuje");
+      expect(db.select().from(invoice).where(eq(invoice.id, key)).get()).toEqual(snapshot);
+      expect(db.select().from(invoiceLine).where(eq(invoiceLine.invoiceId, key)).all()).toEqual([]);
+    }
+  });
+
   test("[MCP-024] neplatný zákazník a prázdné položky → isError s výčtem polí česky", async () => {
     const before = invoicesOf(ownerId).length;
     const empty = await create({ customerId: "", lines: [] });

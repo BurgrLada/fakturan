@@ -456,10 +456,18 @@ describe("čtecí nástroje MCP", () => {
     const unpaid = await call(listUnpaidInvoicesTool);
     expect(unpaid.text).toContain("«Odběratel: Alfa s.r.o.»");
     expect(unpaid.text.replace(/«[^»]*»/g, "")).not.toContain("Alfa");
+    expect(text).toContain(`«Číslo: ${noted.number}»`);
+    expect(text).toContain("«Jednotka: hod.»");
+    expect(text.replace(/«[^»]*»/g, "")).not.toContain(noted.number);
+    expect(text.replace(/«[^»]*»/g, "")).not.toContain("hod.");
+    expect(unpaid.text).toContain(`«Číslo: ${noted.number}»`);
+    expect(unpaid.text.replace(/«[^»]*»/g, "")).not.toContain(noted.number);
     const customers = await call(searchCustomersTool, { query: "alfa" });
     expect(customers.text.replace(/«[^»]*»/g, "")).not.toContain("Alfa");
     const items = await call(searchCatalogTool, { query: "hodinov" });
     expect(items.text.replace(/«[^»]*»/g, "")).not.toContain("Hodinová");
+    expect(items.text).toContain("«Jednotka: hod.»");
+    expect(items.text.replace(/«[^»]*»/g, "")).not.toContain("hod.");
   });
 
   test("[MCP-031] čtecí nástroje nezapíšou žádný auditní záznam", async () => {

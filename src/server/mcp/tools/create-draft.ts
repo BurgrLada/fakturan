@@ -139,9 +139,16 @@ export const createDraftInvoiceTool = defineTool({
     const { ownerId, actor } = ctx;
     const key = args.idempotency_key;
     // A repeated call answers with the draft the first one made, whatever happened to it since. A key
-    // another account holds is not seen here and makes saveDraft refuse (MCP-043).
+    // another account holds is not seen here and makes saveDraft refuse; so does an own row that is
+    // not an invoice draft (an issued invoice, an advance), which is never echoed or edited (MCP-043).
     const earlier = key ? getInvoice(ownerId, key) : null;
-    if (earlier) return outputOf(ctx, earlier);
+    if (earlier) {
+      // saveDraft would treat an own row as an edit of it, so refuse here, as for a foreign key.
+      if (earlier.type !== "invoice" || earlier.status !== "draft") {
+        throw new McpToolError(TEXTS.invoices.validation.notFound);
+      }
+      return outputOf(ctx, earlier);
+    }
 
     // The web picker offers only the account's active customers; another account's looks missing.
     const customer = getCustomer(ownerId, args.customerId);

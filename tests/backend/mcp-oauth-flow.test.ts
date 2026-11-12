@@ -112,7 +112,7 @@ describe("přihlášení a souhlas v toku OAuth", () => {
     expect(consentPage?.pathname).toBe("/pristup-asistenta");
 
     // What the consent page reads from its own query.
-    expect(await consentRequest(db, env, oauthQuery(consentPage!))).toMatchObject({
+    expect(await consentRequest(env, oauthQuery(consentPage!))).toMatchObject({
       clientId,
       name: "Claude Code",
       host: "aplikace na tomto počítači",
@@ -173,8 +173,8 @@ describe("přihlášení a souhlas v toku OAuth", () => {
     const forged = new URLSearchParams(oauthQuery(consentPage!));
     forged.set("client_id", otherClient);
 
-    expect(await consentRequest(db, env, forged.toString())).toBeNull();
-    expect(await consentRequest(db, env, "client_id=" + clientId)).toBeNull();
+    expect(await consentRequest(env, forged.toString())).toBeNull();
+    expect(await consentRequest(env, "client_id=" + clientId)).toBeNull();
   });
 
   test("[MCP-004] cizí e-mail: sociální přihlášení během autorizace nezaloží účet", async () => {
@@ -202,7 +202,7 @@ describe("vypnutý přístup asistentů (MCP-006)", () => {
     // The login continues the authorization, which stops at the explanation, not at consent.
     const next = await signInDuringAuthorization(browser, loginPage, OWNER);
     expect(next?.pathname).toBe("/pristup-asistenta");
-    expect(await consentPage(db, env, oauthQuery(next!), ownerId())).toEqual({ kind: "disabled" });
+    expect(await consentPage(env, oauthQuery(next!), ownerId())).toEqual({ kind: "disabled" });
 
     // Calling the consent endpoint directly does not get around it.
     const refused = await browser.request("/oauth2/consent", {
@@ -235,7 +235,7 @@ describe("vypnutý přístup asistentů (MCP-006)", () => {
     const blocked = await authorize(browser, clientId);
     expect(blocked.location.pathname).toBe("/pristup-asistenta");
     expect(blocked.location.searchParams.get("code")).toBeNull();
-    expect(await consentPage(db, env, oauthQuery(blocked.location), ownerId())).toEqual({
+    expect(await consentPage(env, oauthQuery(blocked.location), ownerId())).toEqual({
       kind: "disabled",
     });
 
@@ -253,7 +253,7 @@ describe("vypnutý přístup asistentů (MCP-006)", () => {
     const clientId = await registerClient(auth);
     const { location: page } = await authorize(browser, clientId);
     expect(page.pathname).toBe("/pristup-asistenta");
-    expect((await consentPage(db, env, oauthQuery(page), ownerId())).kind).toBe("consent");
+    expect((await consentPage(env, oauthQuery(page), ownerId())).kind).toBe("consent");
 
     setAccess(false);
     const consent = await browser.request("/oauth2/consent", {

@@ -111,7 +111,7 @@ describe("strukturní pravidla", () => {
     expect(offenders(dirs, NEXT_IMPORT)).toEqual([]);
   });
 
-  test("[ARC-001] mcp nástroje neimportují drizzle", () => {
+  test("[ARC-001] mcp vrstva neimportuje drizzle ani db", () => {
     const DB_IMPORT =
       /(?:from\s+|import\s*\(\s*|import\s+)["'](?:drizzle-orm(?:\/[^"']*)?|better-sqlite3|(?:@\/server|\.\.?)(?:\/\.\.)*\/db(?:\/[^"']*)?)["']/;
     expect(DB_IMPORT.test('import { eq } from "drizzle-orm";')).toBe(true);
@@ -119,9 +119,14 @@ describe("strukturní pravidla", () => {
     expect(DB_IMPORT.test('import { db } from "@/server/db/schema";')).toBe(true);
     expect(DB_IMPORT.test('import { getInvoice } from "../../services/invoices";')).toBe(false);
 
-    const dir = join("src", "server", "mcp", "tools");
-    expect(sourceFiles(dir).length).toBeGreaterThanOrEqual(4);
+    const dir = join("src", "server", "mcp");
+    expect(sourceFiles(dir).length).toBeGreaterThanOrEqual(10);
     expect(offenders([dir], DB_IMPORT)).toEqual([]);
+    // Services are the lower layer: they never import the mcp layer.
+    const MCP_IMPORT =
+      /(?:from\s+|import\s*\(\s*|import\s+)["'](?:@\/server|\.\.?)(?:\/\.\.)*\/mcp(?:\/[^"']*)?["']/;
+    expect(MCP_IMPORT.test('import { x } from "../mcp/tool";')).toBe(true);
+    expect(offenders([join("src", "server", "services")], MCP_IMPORT)).toEqual([]);
   });
 
   test("[UI-003] komponenty nemají natvrdo barvy", () => {

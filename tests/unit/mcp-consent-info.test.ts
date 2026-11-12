@@ -56,4 +56,21 @@ describe("consentInfo", () => {
       consentInfo({ clientName: name, redirectUri: "http://127.0.0.1/cb", clientIdUrl: null }).name,
     ).toBe(name);
   });
+
+  test("[MCP-005] řídicí znaky směru textu a nulové šířky se z názvu odstraní", () => {
+    const name = "Cl\u202Eaude\u200B \u2066Code\u2069\uFEFF\u200F";
+    const info = consentInfo({
+      clientName: name,
+      redirectUri: "http://127.0.0.1/cb",
+      clientIdUrl: null,
+    });
+    expect(info.name).toBe("Claude Code");
+    expect(
+      consentInfo({
+        clientName: "\u202E\u200B",
+        redirectUri: "http://127.0.0.1/cb",
+        clientIdUrl: null,
+      }).name,
+    ).toBe("Neznámá aplikace");
+  });
 });

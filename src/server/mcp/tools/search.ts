@@ -99,7 +99,7 @@ export const searchCatalogTool = defineTool({
               row.id,
               quoted(T.catalog.label, row.name),
               row.price.formatted,
-              row.unit,
+              quoted(T.unitLabel, row.unit),
               row.link,
             ),
           ),

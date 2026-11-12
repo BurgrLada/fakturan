@@ -1,14 +1,36 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, lte, or } from "drizzle-orm";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { db, type Tx } from "../db";
 import { oauthAccessToken, oauthClient, oauthConsent, oauthRefreshToken, user } from "../db/schema";
-import { consentInfo } from "../mcp/consent-info";
 import { ServiceError } from "./access";
+import { consentInfo } from "./mcp-client-info";
 import { mutate } from "./mutation";
 
-export { touchMcpConnection } from "../mcp/connection-use";
+const TOUCH_INTERVAL_MS = 60_000;
+
+// „Naposledy použit“ to the minute is enough (MCP-013), so a busy assistant writes at most once a
+// minute per connection. Not account data and not a change the user made: outside the audit
+// (MCP-041). One conditional UPDATE, so concurrent calls cannot write twice.
+export function touchMcpConnection(ownerId: string, clientId: string, now: Date): void {
+  const due = new Date(now.getTime() - TOUCH_INTERVAL_MS);
+  db.update(oauthConsent)
+    .set({ lastUsedAt: now })
+    .where(
+      and(
+        eq(oauthConsent.userId, ownerId),
+        eq(oauthConsent.clientId, clientId),
+        or(isNull(oauthConsent.lastUsedAt), lte(oauthConsent.lastUsedAt, due)),
+      ),
+    )
+    .run();
+}
+
+// The registered client of an OAuth request, as the consent page needs it.
+export function findMcpClient(clientId: string) {
+  return db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId)).get();
+}
 
 const E = TEXTS.mcp.connections.errors;
 

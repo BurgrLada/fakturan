@@ -136,14 +136,14 @@ export const getInvoiceTool = defineTool({
     const kinds = I.kinds as Record<string, string>;
     const optional = (label: string, value: string) => (value ? [quoted(label, value)] : []);
     return [
-      I.header(o.number ?? T.noNumber, status, type),
+      I.header(o.number ? quoted(T.numberLabel, o.number) : T.noNumber, status, type),
       quoted(I.customer, o.customer.name),
       I.dates(o.issueDate ?? "–", o.dueDate ?? "–", o.taxableDate ?? "–"),
       ...o.lines.map((line) =>
         I.line(
           quoted(I.lineLabel(line.position + 1), line.name),
           quantityText(line.quantityMilli),
-          line.unit,
+          quoted(T.unitLabel, line.unit),
           line.unitPrice.formatted,
           line.net.formatted,
         ),

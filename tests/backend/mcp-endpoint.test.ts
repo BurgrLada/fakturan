@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
+import { TEXTS } from "@/lib/texts";
 import { createAuth } from "@/server/auth";
 import { setClockForTests } from "@/server/clock";
 import { auditLog, rateLimit, user } from "@/server/db/schema";
@@ -14,7 +15,7 @@ import { defineTool, TOOLS } from "@/server/mcp/tool";
 import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
 import { BASE, Browser } from "../helpers/auth-browser";
 import { createTestDb } from "../helpers/db";
-import { ISSUER, issueMcpToken, RESOURCE, serveJwksFrom } from "../helpers/mcp-oauth";
+import { ISSUER, issueMcpToken, refresh, RESOURCE, serveJwksFrom } from "../helpers/mcp-oauth";
 
 const db = createTestDb();
 const OWNER = "majitel@example.cz";
@@ -138,6 +139,51 @@ describe("endpoint /api/mcp", () => {
     const own = await mcpEndpoint(auth, env, post(await sign(RESOURCE), toolsList));
     expect(own.status).toBe(200);
     expect(claims.iss).toBe(ISSUER);
+  });
+
+  test("[MCP-007] token s cizím issuerem 401 a bez scope fakturan 403", async () => {
+    const { accessToken } = await issueMcpToken(auth, browser);
+    const claims = decodeJwt(accessToken);
+    const sign = async (payload: Record<string, unknown>) =>
+      (await auth.api.signJWT({ body: { payload: { ...claims, ...payload } } })).token;
+
+    const foreignIssuer = await mcpEndpoint(
+      auth,
+      env,
+      post(await sign({ iss: "https://jinde.example/api/auth" }), toolsList),
+    );
+    expect(foreignIssuer.status).toBe(401);
+    expect(foreignIssuer.headers.get("www-authenticate")).toContain("resource_metadata=");
+
+    const noScope = await mcpEndpoint(
+      auth,
+      env,
+      post(await sign({ scope: "openid profile" }), toolsList),
+    );
+    expect(noScope.status).toBe(403);
+
+    expect((await mcpEndpoint(auth, env, post(await sign({}), toolsList))).status).toBe(200);
+  });
+
+  test("[MCP-010] s vypnutým přístupem obnova tokenu projde, volání nástroje ne", async () => {
+    const { refreshToken, clientId } = await issueMcpToken(auth, browser);
+    setAccess({ enabled: false });
+    const renewed = await refresh(auth, clientId, refreshToken!);
+    const response = await mcpEndpoint(
+      auth,
+      env,
+      post(renewed.access_token, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "echo", arguments: { text: "ahoj" } },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await rpcResult(response)).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: TEXTS.mcp.tools.disabled }],
+    });
   });
 
   test("[MCP-035][MCP-025] tools/list s platným tokenem", async () => {

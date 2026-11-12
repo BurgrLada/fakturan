@@ -3222,6 +3222,8 @@ export const TEXTS = {
       noItems: "Žádná položka ceníku nevyhovuje hledání.",
       queryRequired: "Zadejte hledaný text.",
       noNumber: "bez čísla",
+      numberLabel: "Číslo",
+      unitLabel: "Jednotka",
       draft: "koncept",
       overview: {
         name: "get_overview",

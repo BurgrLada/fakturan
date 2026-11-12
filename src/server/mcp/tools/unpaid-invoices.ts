@@ -83,7 +83,7 @@ export const listUnpaidInvoicesTool = defineTool({
           T.unpaid.heading(o.invoices.length, o.page, o.hasNext),
           ...o.invoices.map((row) =>
             T.unpaid.row(
-              row.number ?? T.noNumber,
+              row.number ? quoted(T.numberLabel, row.number) : T.noNumber,
               quoted(T.invoice.customer, row.customerName),
               row.dueDate ?? "–",
               row.remaining.formatted,

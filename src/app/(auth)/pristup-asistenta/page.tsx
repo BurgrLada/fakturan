@@ -7,7 +7,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TEXTS } from "@/lib/texts";
 import { getCurrentSession } from "@/server/auth/session";
-import { db } from "@/server/db";
 import { env } from "@/server/env";
 import { consentPage, consentRequest } from "@/server/mcp/consent-info";
 
@@ -34,10 +33,10 @@ async function ConsentContent({
   const session = await getCurrentSession();
   // Without a session the login page takes the signed query and comes back here (MCP-003).
   if (!session) {
-    const request = await consentRequest(db, env, oauthQuery);
+    const request = await consentRequest(env, oauthQuery);
     redirect(request ? `/prihlaseni?${oauthQuery}` : "/prihlaseni");
   }
-  const page = await consentPage(db, env, oauthQuery, session.user.id);
+  const page = await consentPage(env, oauthQuery, session.user.id);
   if (page.kind === "invalid") {
     return (
       <Card>
