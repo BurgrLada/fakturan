@@ -330,6 +330,49 @@ Soubor nese jen nastavení widgetů, žádná data, má nejvýš 64 KiB a 50 wid
 nad daty cílového účtu, založí nový dashboard a stávající nezmění. Filtr na zákazníky, které cílový
 účet nemá, se zahodí. Soubor z novější verze aplikace import odmítne s výzvou k aktualizaci.
 
+## Asistenti (MCP)
+
+Fakturan umí zpřístupnit data AI asistentovi (Claude Code, Claude.ai) přes protokol MCP na adrese
+`<BETTER_AUTH_URL>/api/mcp`. Přihlášení běží přes OAuth, asistent nikdy nezná vaše heslo.
+
+**Zapnutí.** Každý uživatel si přístup povoluje sám v Nastavení › Asistenti volbou „Povolit
+připojení asistentů“ (ve výchozím stavu je vypnutá). Na stejné stránce je adresa pro asistenty
+s tlačítkem Kopírovat a stručný návod. Proměnná `MCP_ENABLED` (výchozí `true`) vypíná MCP pro celou
+instanci: endpoint, metadata OAuth i autorizace pak odpovídají 404 a stránka Asistenti se
+nezobrazí. V režimu ukázky (`DEMO_MODE`) je MCP vypnuté vždy, protože ukázkový účet je veřejný.
+
+**Připojení.**
+
+- Claude Code: `claude mcp add --transport http fakturan <BETTER_AUTH_URL>/api/mcp`. Při prvním
+  použití se otevře prohlížeč, přihlásíte se do Fakturanu a asistentovi přístup povolíte.
+- Claude.ai: Settings › Connectors › Add custom connector a vložte stejnou adresu. Claude.ai se
+  připojuje z internetu, instance proto musí být dostupná na veřejné adrese s HTTPS.
+
+**Adresa.** `BETTER_AUTH_URL` musí být přesně ta adresa, kterou asistent používá: z ní se skládá
+adresa endpointu, vydavatel tokenů i příjemce, kterému tokeny patří, a token pro jinou adresu se
+odmítne. Na `http://localhost:3000` funguje Claude Code spuštěný na stejném počítači. Webové
+asistenty tak nepřipojíte. Pro ně použijte veřejnou adresu instance nebo při vývoji tunel
+(například Cloudflare Tunnel či ngrok) a jeho adresu nastavte do `BETTER_AUTH_URL`.
+
+**Server volá sám sebe.** Endpoint ověřuje podpis tokenů klíči z `BETTER_AUTH_URL/api/auth/jwks`,
+tedy dotazem na vlastní veřejnou adresu. Nasazená instance se proto musí ke své veřejné adrese
+dostat i zevnitř (DNS a síť kontejneru, takzvaný hairpin). Když ne, každé volání asistenta skončí
+chybou HTTP 500 zhruba po 5 sekundách.
+
+**Co asistent umí.** Přehled účtu (`get_overview`), neuhrazené faktury (`list_unpaid_invoices`),
+detail faktury (`get_invoice`), hledání zákazníků a ceníku (`search_customers`, `search_catalog`)
+a zakládání konceptů faktur bez čísla (`create_draft_invoice`). Koncept nic nevystaví ani
+neodešle, vystavíte ho sami ve webu; opakované volání se stejným `idempotency_key` vrátí týž
+koncept. Schopnosti se přepínají v Nastavení › Asistenti: Číst je zapnuté, Zakládat koncepty je
+ve výchozím stavu vypnuté. Úpravy konceptů, vystavování a odesílání jsou připravené v nastavení, ale
+zatím nejdou zapnout. Přepínače se kontrolují při každém volání, změna platí hned bez nového
+připojení.
+
+**Odpojení a limity.** Tlačítko Odpojit u asistenta v Nastavení › Asistenti zruší jeho přístup
+okamžitě, i když má ještě platný token. Jeden asistent smí provést nejvýš 60 volání za minutu,
+další dostane HTTP 429 s hlavičkou `Retry-After`. Volání asistentů se zapisují do historie změn
+jako zdroj „Asistent“.
+
 ## Provoz za reverzní proxy
 
 Za reverzní proxy (Coolify, Traefik, nginx) je nutné nastavit `TRUST_PROXY=1`. Bez něj aplikace
