@@ -10,7 +10,10 @@ import { LIFECYCLE_TOOLS } from "./lifecycle";
 import { getOverviewTool } from "./overview";
 import { PAYMENT_TOOLS } from "./payments";
 import { RECURRING_TOOLS } from "./recurring";
-import { searchCatalogTool, searchCustomersTool } from "./search";
+import { AUDIT_TOOLS } from "./audit";
+import { IMPORT_TOOLS } from "./imports";
+import { REPORT_TOOLS } from "./reports";
+import { quickSearchTool, searchCatalogTool, searchCustomersTool } from "./search";
 import { SENDING_TOOLS } from "./sending";
 import { SERIES_TOOLS } from "./series";
 import { SETTINGS_TOOLS } from "./settings";
@@ -24,6 +27,7 @@ const ALL_TOOLS = [
   getInvoiceTool,
   searchCustomersTool,
   searchCatalogTool,
+  quickSearchTool,
   createDraftInvoiceTool,
   ...INVOICE_READ_TOOLS,
   ...DRAFT_TOOLS,
@@ -37,6 +41,9 @@ const ALL_TOOLS = [
   ...TEMPLATE_TOOLS,
   ...SERIES_TOOLS,
   ...SETTINGS_TOOLS,
+  ...REPORT_TOOLS,
+  ...AUDIT_TOOLS,
+  ...IMPORT_TOOLS,
 ];
 
 for (const tool of ALL_TOOLS) {

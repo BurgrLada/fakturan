@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { SEARCH_GROUPS } from "@/lib/quick-search";
 import { TEXTS } from "@/lib/texts";
 import { appLink, money, moneySchema, quoted } from "../format";
 import { defineTool } from "../tool";
 import { searchCatalog } from "../../services/catalog";
 import { searchCustomers } from "../../services/customers";
+import { quickSearch } from "../../services/quick-search";
 
 const T = TEXTS.mcp.read;
 const MAX_RESULTS = 10;
@@ -104,4 +106,58 @@ export const searchCatalogTool = defineTool({
             ),
           ),
         ].join("\n"),
+});
+
+const S = TEXTS.mcp.insights.search;
+
+export const quickSearchTool = defineTool({
+  name: S.name,
+  title: S.title,
+  description: S.description,
+  level: "read",
+  // One character is accepted and answered empty, as the search bar does (MIN_QUERY_LENGTH).
+  input: z.strictObject({ query: z.string().max(100).describe(S.query) }),
+  output: z.object({
+    hits: z.array(
+      z.object({
+        group: z.enum(SEARCH_GROUPS),
+        id: z.string(),
+        label: z.string(),
+        detail: z.string(),
+        link: z.string(),
+      }),
+    ),
+    limited: z.boolean(),
+  }),
+  fieldLabels: TEXTS.mcp.insights.fields,
+  run: (ctx, { query: term }) => {
+    const { hits, limited } = quickSearch(ctx.actor, term);
+    return {
+      hits: hits.map((hit) => ({
+        group: hit.group,
+        id: hit.id,
+        label: hit.label,
+        detail: hit.detail,
+        link: appLink(ctx.baseUrl, hit.href),
+      })),
+      limited,
+    };
+  },
+  text: (o) =>
+    o.limited
+      ? S.limited
+      : o.hits.length === 0
+        ? S.none
+        : [
+            S.heading(o.hits.length),
+            ...o.hits.map((hit) =>
+              S.row(
+                hit.group,
+                hit.id,
+                quoted(S.label, hit.label),
+                hit.detail ? quoted(S.detail, hit.detail) : "",
+                hit.link,
+              ),
+            ),
+          ].join("\n"),
 });

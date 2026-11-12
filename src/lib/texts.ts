@@ -4734,6 +4734,167 @@ export const TEXTS = {
         },
       },
     },
+    insights: {
+      fields: {
+        period: "období",
+        from: "od",
+        to: "do",
+        compare: "porovnání",
+        currency: "měna",
+        includeImported: "včetně importovaných",
+        year: "rok",
+        basis: "základ",
+        query: "hledaný text",
+        action: "akce",
+        entity: "druh záznamu",
+        entityId: "ID záznamu",
+        source: "zdroj",
+        actor: "kdo",
+        page: "stránka",
+        date: "datum",
+      },
+      report: {
+        name: "get_report",
+        title: "Přehledy",
+        description:
+          "Přehledy jako ve webu: fakturace a příjmy po obdobích, srovnání s předchozím obdobím, stáří pohledávek, nejlepší zákazníci a položky, měny, průměrná doba úhrady, limity obratu a výhled. Bez zadání je to letošní rok.",
+        period:
+          "Pojmenované období: this_month, this_quarter, this_year, last_year, last_30_days, last_12_months. Nelze kombinovat s from a to.",
+        from: "Začátek vlastního období RRRR-MM-DD.",
+        to: "Konec vlastního období RRRR-MM-DD.",
+        compare:
+          "S čím srovnat: previous (předchozí stejně dlouhé období) nebo year (stejné období loni).",
+        currency: "Jen doklady v této měně; částky jsou pak v ní, jinak v Kč.",
+        includeImported: "False vynechá doklady importované z jiných systémů.",
+        bothPeriods: "Zadejte buď pojmenované období, nebo from a to.",
+        heading: (from: string, to: string, currency: string) =>
+          `Přehled za ${from} – ${to} (${currency}):`,
+        summary: (
+          invoiced: string,
+          income: string,
+          outstanding: string,
+          overdue: string,
+          advanceOpen: string,
+        ) =>
+          `Vyfakturováno ${invoiced}, příjmy ${income}, neuhrazeno ${outstanding}, po splatnosti ${overdue}, otevřené zálohy ${advanceOpen}.`,
+        previous: (invoiced: string, income: string) =>
+          `Srovnávací období: vyfakturováno ${invoiced}, příjmy ${income}.`,
+        unconverted: (count: number) => `${count} dokladů zatím nemá kurz ČNB a v součtech chybí.`,
+        aging: (current: string, d30: string, d60: string, d90: string, older: string) =>
+          `Stáří pohledávek: do splatnosti ${current}, 1–30 dní ${d30}, 31–60 dní ${d60}, 61–90 dní ${d90}, déle ${older}.`,
+        customers: "Nejlepší zákazníci:",
+        items: "Nejlepší položky:",
+        others: "ostatní",
+        adjustment: "opravy a dobropisy",
+        rankRow: (name: string, amount: string) => `- ${name}: ${amount}`,
+        paymentDays: (days: number | null, count: number) =>
+          days === null
+            ? "Průměrnou dobu úhrady zatím nejde spočítat."
+            : `Průměrná doba úhrady ${days} dní (z ${count} plateb).`,
+        limit: (key: string, turnover: string, limit: string) =>
+          `Limit ${key}: obrat ${turnover} z ${limit}.`,
+        link: (url: string) => `Ve webu: ${url}`,
+      },
+      tax: {
+        name: "get_tax_overview",
+        title: "Podklady k dani",
+        description:
+          "Podklady k dani z příjmů za kalendářní rok: doklady s částkou v Kč a neuhrazené doklady. Základ paid počítá podle data úhrady, issued podle data vystavení.",
+        year: "Rok, např. 2026. Bez zadání předchozí rok, v prosinci letošní.",
+        basis: "paid (podle úhrady) nebo issued (podle vystavení).",
+        heading: (year: number, basis: string, total: string) =>
+          `Podklady k dani ${year} (${basis}): celkem ${total}.`,
+        bases: { paid: "podle úhrady", issued: "podle vystavení" },
+        line: (date: string, number: string, customer: string, amount: string) =>
+          `- ${date} ${number} ${customer}: ${amount}`,
+        unpaid: (count: number, total: string) => `Neuhrazeno ${count} dokladů za ${total}.`,
+        estimated: (count: number) => `${count} částek je odhadnutých podle kurzu.`,
+        more: (shown: number, total: number) => `Zobrazeno ${shown} z ${total}.`,
+        customer: "Odběratel",
+      },
+      search: {
+        name: "quick_search",
+        title: "Rychlé hledání",
+        description:
+          "Hledá napříč fakturami, zákazníky, ceníkem, opakovanými fakturami a stránkami webu, jako hledání v horní liště. Potřebuje aspoň 2 znaky.",
+        query: "Hledaný text, aspoň 2 znaky.",
+        none: "Nic nenalezeno.",
+        limited: "Hledání je teď omezené, zkuste to za chvíli.",
+        heading: (count: number) => `Nalezeno ${count}:`,
+        row: (group: string, id: string, label: string, detail: string, link: string) =>
+          `- [${group}] ${id} ${label} ${detail} ${link}`.replace(/\s+/g, " "),
+        label: "Název",
+        detail: "Podrobnosti",
+      },
+      audit: {
+        list: {
+          name: "list_audit",
+          title: "Historie změn",
+          description:
+            "Historie změn účtu, nejnovější první, po 50 záznamech. Filtr podle akce, druhu záznamu, zdroje (web, scheduler, import, system, mcp), autora a období.",
+          action: "Kód akce, např. invoice.issue.",
+          entity: "Druh záznamu, např. invoice, customer, payment.",
+          source: "Odkud změna přišla: web, scheduler, import, system nebo mcp.",
+          actor: "self pro vlastní změny, other pro změny jiných osob.",
+          from: "Od data RRRR-MM-DD.",
+          to: "Do data RRRR-MM-DD.",
+          page: "Číslo stránky od 1.",
+        },
+        history: {
+          name: "get_entity_history",
+          title: "Historie záznamu",
+          description: "Posledních 100 změn jednoho záznamu, např. faktury nebo zákazníka.",
+          entity: "Druh záznamu, např. invoice.",
+          entityId: "ID záznamu.",
+        },
+        none: "Žádné změny.",
+        heading: (count: number, page: number) => `Změny (${count}, stránka ${page}):`,
+        historyHeading: (count: number) => `Změny záznamu (${count}):`,
+        row: (at: string, source: string, label: string, entity: string, id: string) =>
+          `- ${at} [${source}] ${label} ${entity} ${id}`,
+        client: "Asistent",
+        before: "Před",
+        after: "Po",
+        hasNext: "Další záznamy jsou na další stránce.",
+      },
+      imports: {
+        list: {
+          name: "list_import_batches",
+          title: "Importy",
+          description:
+            "Posledních 20 importů s jejich stavem. Hotový import (done) jde vrátit nástrojem undo_import.",
+        },
+        undo: {
+          name: "undo_import",
+          title: "Vrátit import",
+          description:
+            "Vrátí hotový import: smaže doklady, platby a nové zákazníky, které přinesl. Nejde to, pokud na importované doklady už někdo navázal.",
+          id: "ID importu z list_import_batches.",
+          done: "Import je vrácený.",
+        },
+        none: "Žádné importy.",
+        row: (id: string, kind: string, status: string, created: string) =>
+          `- ${id} ${kind} ${status} ${created}`,
+        error: "Chyba",
+      },
+      rate: {
+        name: "get_exchange_rate",
+        title: "Kurz měny",
+        description:
+          "Kurz cizí měny vůči Kč k datu: pevný kurz z nastavení, nebo kurz ČNB platný k tomu dni.",
+        currency: "Měna, např. EUR.",
+        date: "Datum RRRR-MM-DD.",
+        none: (currency: string, date: string) => `Kurz ${currency} k ${date} není k dispozici.`,
+        found: (currency: string, rate: string, source: string, listDate: string) =>
+          `1 ${currency} = ${rate} Kč (${source}${listDate ? `, lístek ${listDate}` : ""}).`,
+        sources: {
+          cnb: "ČNB",
+          last_known: "poslední známý kurz ČNB",
+          fixed: "pevný kurz",
+          import: "kurz z importu",
+        },
+      },
+    },
   },
   demo: {
     locked: "V ukázce tohle nejde změnit",
