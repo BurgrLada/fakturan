@@ -3227,7 +3227,7 @@ export const TEXTS = {
         name: "get_overview",
         title: "Přehled faktur",
         description:
-          "Přehled za období (výchozí od 1. 1. letošního roku do dneška): vystaveno, uhrazeno, neuhrazeno a z toho po splatnosti, počty dokladů a rozdělení podle měny. Koncepty a storna se nepočítají. Součty jsou přepočtené na CZK, rozdělení podle měny je v původních měnách. Data ve tvaru RRRR-MM-DD.",
+          "Přehled za období (výchozí od 1. 1. letošního roku do dneška): vystaveno, uhrazeno, neuhrazeno a z toho po splatnosti, počty dokladů a neuhrazené zálohy a rozdělení podle měny. Koncepty a storna se nepočítají. Součty jsou přepočtené na CZK, rozdělení podle měny je v původních měnách. Data ve tvaru RRRR-MM-DD.",
         from: "Začátek období, RRRR-MM-DD (výchozí 1. 1. letošního roku).",
         to: "Konec období včetně, RRRR-MM-DD (výchozí dnes).",
         heading: (from: string, to: string) => `Přehled od ${from} do ${to} (součty v CZK):`,
@@ -3236,6 +3236,7 @@ export const TEXTS = {
         outstanding: (amount: string, count: number) => `Neuhrazeno: ${amount} (${count} dokladů)`,
         overdue: (amount: string, count: number) =>
           `z toho po splatnosti: ${amount} (${count} dokladů)`,
+        advanceOpen: (amount: string) => `Neuhrazené zálohy (zálohové faktury): ${amount}`,
         unconverted: (count: number) => `U ${count} dokladů chybí kurz, v přepočtu na CZK nejsou.`,
         byCurrency: "Podle měny:",
         currencyRow: (
@@ -3244,14 +3245,15 @@ export const TEXTS = {
           income: string,
           outstanding: string,
           overdue: string,
+          advanceOpen: string,
         ) =>
-          `${currency}: vystaveno ${invoiced}, uhrazeno ${income}, neuhrazeno ${outstanding}, po splatnosti ${overdue}`,
+          `${currency}: vystaveno ${invoiced}, uhrazeno ${income}, neuhrazeno ${outstanding}, po splatnosti ${overdue}, neuhrazené zálohy ${advanceOpen}`,
       },
       unpaid: {
         name: "list_unpaid_invoices",
         title: "Neuhrazené faktury",
         description:
-          "Vystavené faktury, které nejsou uhrazené nebo jsou uhrazené jen částečně, od nejstarší splatnosti. U každé je číslo, odběratel, vystavení, splatnost, dní po splatnosti, zbývá uhradit a odkaz do webu. Stránky po 25.",
+          "Vystavené faktury, které nejsou uhrazené nebo jsou uhrazené jen částečně, od nejstarší splatnosti. U každé je číslo, odběratel, vystavení, splatnost, dní po splatnosti, zbývá uhradit a odkaz do webu. Stránky po 25. Neuhrazené zálohové faktury (zálohy) v seznamu nejsou, jejich součet je v get_overview.",
         overdueOnly: "Jen faktury po splatnosti.",
         customerId: "Jen faktury tohoto zákazníka (id z search_customers).",
         page: "Číslo stránky od 1.",

@@ -26,6 +26,8 @@ const totals = z.object({
   income: moneySchema,
   outstanding: moneySchema,
   overdue: moneySchema,
+  // Open advance invoices: reports keep them out of the other sums (ADV-007).
+  advanceOpen: moneySchema,
 });
 
 const output = totals.extend({
@@ -57,6 +59,7 @@ export const getOverviewTool = defineTool({
       income: money(s.incomeMinor, currency),
       outstanding: money(s.outstandingMinor, currency),
       overdue: money(s.overdueMinor, currency),
+      advanceOpen: money(s.advanceOpenMinor, currency),
     });
     const byCurrency = invoiceSummary(ctx.ownerId, {})
       .map((entry) => entry.currency as Currency)
@@ -65,7 +68,7 @@ export const getOverviewTool = defineTool({
         ...row(reportSummary(ctx.ownerId, { ...filter, currency }, ctx.today), currency),
       }))
       .filter((entry) =>
-        [entry.invoiced, entry.income, entry.outstanding, entry.overdue].some(
+        [entry.invoiced, entry.income, entry.outstanding, entry.overdue, entry.advanceOpen].some(
           (m) => m.amount !== 0,
         ),
       );
@@ -85,6 +88,7 @@ export const getOverviewTool = defineTool({
       t.income(o.income.formatted),
       t.outstanding(o.outstanding.formatted, o.counts.unpaid),
       t.overdue(o.overdue.formatted, o.counts.overdue),
+      t.advanceOpen(o.advanceOpen.formatted),
       ...(o.unconvertedCount > 0 ? [t.unconverted(o.unconvertedCount)] : []),
       ...(o.byCurrency.length > 0
         ? [
@@ -96,6 +100,7 @@ export const getOverviewTool = defineTool({
                 c.income.formatted,
                 c.outstanding.formatted,
                 c.overdue.formatted,
+                c.advanceOpen.formatted,
               ),
             ),
           ]
