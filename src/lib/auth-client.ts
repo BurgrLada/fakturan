@@ -1,6 +1,9 @@
+import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { createAuthClient } from "better-auth/react";
 
-export const authClient = createAuthClient();
+// On a page the OAuth provider signed (login, consent), the plugin sends that page's query with
+// every POST, so a login continues the assistant's authorization (MCP-003).
+export const authClient = createAuthClient({ plugins: [oauthProviderClient()] });
 
 const MESSAGES: Record<string, string> = {
   INVITE_REQUIRED: "Přístup je jen na pozvánku.",

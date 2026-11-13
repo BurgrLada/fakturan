@@ -2238,6 +2238,7 @@ export const TEXTS = {
     automation: "Automatizace",
     mail: "Pošta",
     bankMailbox: "Avíza",
+    assistants: "Asistenti",
   },
   mailLook: {
     title: "Vzhled e-mailu",
@@ -3083,10 +3084,1836 @@ export const TEXTS = {
     emptyEntity: "Zatím žádné záznamy.",
     newer: "Novější",
     older: "Starší",
-    sources: { web: "Web", scheduler: "Plánovač", import: "Import", system: "Systém" },
+    sources: {
+      web: "Web",
+      scheduler: "Plánovač",
+      import: "Import",
+      system: "Systém",
+      mcp: "Asistent",
+    },
+    assistant: (name: string) => `Asistent: ${name}`,
     self: "Já",
     other: "Jiný uživatel",
     nobody: "Systém nebo nepřihlášený",
+  },
+  mcp: {
+    consent: {
+      pageTitle: "Přístup asistenta | Fakturan",
+      title: (name: string) => `${name} chce přístup k vašemu Fakturanu`,
+      unknownClient: "Neznámá aplikace",
+      localHost: "aplikace na tomto počítači",
+      hostLabel: "Odkud",
+      nameIsClaimed: "Název uvádí aplikace sama.",
+      level: (name: string) => `Úroveň oprávnění: ${name}`,
+      settingsHint: "Co asistent smí, změníte kdykoli v",
+      settingsLink: "Nastavení › Asistenti",
+      allow: "Povolit",
+      deny: "Zamítnout",
+      failed: "Odpověď se nepodařilo odeslat, zkuste to prosím znovu.",
+      invalidTitle: "Přístup asistenta",
+      invalid:
+        "Žádost o přístup neplatí nebo vypršela. Vraťte se do asistenta a připojte Fakturan znovu.",
+    },
+    disabled: {
+      title: "Přístup asistentů je vypnutý",
+      body: "Asistent se k Fakturanu nemůže připojit, dokud v Nastavení nezapnete „Povolit připojení asistentů“.",
+      retry:
+        "Po zapnutí obnovte tuto stránku, nebo asistenta připojte znovu. Žádost platí 10 minut.",
+      link: "Otevřít Nastavení › Asistenti",
+    },
+    settings: {
+      title: "Asistenti",
+      pageTitle: "Asistenti | Fakturan",
+      intro:
+        "Připojte AI asistenta, například Claude, aby mohl pracovat s vaší fakturací. Co smí, určuje zvolená úroveň oprávnění.",
+      saved: "Nastavení uloženo",
+      enable: "Povolit připojení asistentů",
+      enableHint:
+        "Když je vypnuto, žádný asistent se nepřipojí ani nic neudělá. Už propojení asistenti zůstanou.",
+      addressLabel: "Adresa Fakturanu pro asistenty",
+      copy: "Kopírovat",
+      copied: "Zkopírováno",
+      copyFailed: "Kopírování se nepovedlo, adresu označte ručně.",
+      guide: {
+        title: "Jak asistenta připojit",
+        claudeCode: "Claude Code: v terminálu spusťte",
+        claudeWeb: "Claude.ai: Settings › Connectors › Add custom connector, a vložte adresu výše.",
+        after: "Při připojení se přihlásíte do Fakturanu a asistentovi přístup povolíte.",
+        localhost:
+          "Tahle adresa je jen na tomto počítači, takže webové asistenty potřebují veřejnou adresu s HTTPS.",
+      },
+      levelTitle: "Co asistenti smějí",
+      levelLabel: "Úroveň oprávnění asistentů",
+      levelHint: "Každá úroveň obsahuje i všechno z úrovní nad ní.",
+      logCalls: "Zaznamenávat volání asistentů",
+      logCallsHint:
+        "Záznam každého volání asistenta, i odmítnutého. Změny dat se v Historii změn zapisují vždy.",
+      errors: {
+        invalid: "Nastavení asistentů se nepodařilo uložit, zkontrolujte volby.",
+        stale: "Nastavení mezitím změnil někdo jiný. Načtěte stránku znovu a změnu zopakujte.",
+        forbidden: "Pro změnu nastavení se přihlaste.",
+      },
+    },
+    // The call log in Nastavení › Asistenti (MCP-063, MCP-064).
+    callLog: {
+      title: "Log volání",
+      intro:
+        "Každé volání asistenta, i odmítnuté, bez obsahu dotazu a odpovědi. Záznamy starší než 90 dní se mažou samy.",
+      off: "Zaznamenávání je vypnuté, nové volání se do logu nezapíše.",
+      empty: "Zatím žádné volání.",
+      tableLabel: "Log volání asistentů",
+      columns: {
+        at: "Čas",
+        client: "Asistent",
+        tool: "Nástroj",
+        outcome: "Výsledek",
+        reason: "Důvod",
+        requiredLevel: "Potřebná úroveň",
+      },
+      outcomes: { ok: "Provedeno", denied: "Odmítnuto", error: "Chyba" },
+      reasons: {
+        level: "Nízká úroveň oprávnění",
+        disabled: "Přístup asistentů byl vypnutý",
+        not_connected: "Asistent nebyl propojený",
+        unavailable: "Přístup asistentů na této instanci není",
+        invalid_input: "Neplatné zadání",
+        service_error: "Operace se nepovedla",
+        confirm_in_web: "Vyžaduje potvrzení ve webu",
+      },
+      filterClient: "Asistent",
+      filterOutcome: "Výsledek",
+      all: "Vše",
+      filter: "Filtrovat",
+      previous: "Novější",
+      next: "Starší",
+      clear: "Smazat log",
+      confirmTitle: "Smazat celý log volání?",
+      confirmBody: "Záznamy volání asistentů zmizí. Historie změn zůstane beze změny.",
+      confirmAction: "Smazat log",
+      cancel: "Zrušit",
+      cleared: "Log volání je smazaný.",
+      errors: {
+        forbidden: "Pro správu logu se přihlaste.",
+        failed: "Log se nepodařilo smazat. Zkuste to znovu.",
+      },
+    },
+    connections: {
+      title: "Propojení asistenti",
+      empty: "Zatím není připojený žádný asistent.",
+      listLabel: "Seznam propojených asistentů",
+      host: "Odkud",
+      connected: (date: string) => `Připojen ${date}`,
+      lastUsed: (date: string) => `Naposledy ${date}`,
+      neverUsed: "Zatím nepoužito",
+      disconnect: "Odpojit",
+      confirmTitle: (name: string) => `Odpojit ${name}?`,
+      confirmBody:
+        "Asistent přestane mít přístup k vašim datům a nové připojení bude vyžadovat váš souhlas.",
+      confirmAction: "Odpojit",
+      cancel: "Zrušit",
+      done: "Asistent je odpojený.",
+      failed: "Odpojení se nepovedlo. Zkuste to znovu.",
+      errors: {
+        notFound: "Tento asistent není propojený.",
+        forbidden: "Pro správu asistentů se přihlaste.",
+      },
+    },
+    // The permission levels, lowest first (MCP-050, MCP-054).
+    levels: {
+      read: { name: "Jen čtení", description: "Vše číst. Nic nezměnit." },
+      drafts: {
+        name: "Koncepty",
+        description:
+          "Zakládat a upravovat koncepty faktur, zákazníky a položky ceníku. Nic, co vidí zákazník, a nic, co spotřebuje číslo.",
+      },
+      accounting: {
+        name: "Účetní operace",
+        description:
+          "Platby, bankovní avíza, účty, číselné řady, opakované faktury v režimu koncept, šablony a nastavení.",
+      },
+      issue_send: {
+        name: "Vystavování a odesílání",
+        description:
+          "Vystavit fakturu, odeslat ji zákazníkovi, upomínku nebo potvrzení platby; opakované faktury, které se vystaví samy.",
+      },
+      full: {
+        name: "Plný přístup",
+        description:
+          "Mazat, stornovat, dobropisy, úprava vystavené faktury a vracení avíz a importů.",
+      },
+    },
+    // MCP instructions sent to the assistant on initialize (MCP-053).
+    instructions: (levelName: string) =>
+      `Fakturan má pět úrovní oprávnění (Jen čtení, Koncepty, Účetní operace, Vystavování a odesílání, Plný přístup). Aktuální úroveň je ${levelName}. Pokud ti chybí nástroj pro to, co uživatel chce, je možné, že vyžaduje vyšší úroveň; řekni uživateli, že ji může nastavit v Nastavení › Asistenti. Operace, které ve webu potvrzuje člověk, přes asistenta nejdou vůbec.`,
+    // Tool results are read by the model and shown to the user (MCP-012).
+    tools: {
+      unavailable: "Přístup asistentů na této instanci Fakturanu není dostupný.",
+      noAccount: "Účet, ke kterému je asistent připojený, neexistuje nebo je deaktivovaný.",
+      disabled:
+        "Přístup asistentů je v Nastavení › Asistenti vypnutý. Zapněte ho tam a akci zopakujte.",
+      notConnected:
+        "Asistent už není s Fakturanem propojený. Připojte ho znovu a povolte mu přístup.",
+      // A write sent an old revision (MCP-072).
+      stale:
+        "Doklad se mezitím změnil. Načtěte ho znovu nástrojem get_invoice a pošlete aktuální revision.",
+      levelTooLow: (levelName: string) =>
+        `Tahle operace vyžaduje úroveň ${levelName}. Úroveň nastavíte v Nastavení › Asistenti.`,
+      higherLevelHint:
+        "Pokud ti chybí nástroj, může vyžadovat vyšší úroveň oprávnění, kterou uživatel nastaví v Nastavení › Asistenti.",
+      rateLimited: (seconds: number) =>
+        `Příliš mnoho volání najednou. Zkuste to znovu za ${seconds} s.`,
+      invalidInput: (issues: string) => `Neplatné vstupy: ${issues}`,
+      failed: "Akce se nepodařila kvůli chybě ve Fakturanu. Zkuste to prosím později.",
+      // The change is saved but its summary failed; repeating it would save it twice.
+      doneWithoutSummary:
+        "Akce proběhla, ale shrnutí výsledku se nepodařilo sestavit. Neopakujte ji; výsledek ověřte načtením dat.",
+      // A step the web asks a person to confirm (a repeated reminder, an unclear delivery) (MCP-060).
+      confirmInWeb: (link: string) =>
+        `Tohle musí potvrdit uživatel ve webu, asistent to potvrdit nemůže. Otevřete: ${link}`,
+    },
+    // Read tools: what the model gets as text next to the structured output (MCP-020 to MCP-023).
+    read: {
+      dateFormat: "Datum zadejte ve tvaru RRRR-MM-DD.",
+      periodReversed: "Období nesmí končit dřív, než začíná.",
+      invoiceNotFound: "Faktura nenalezena.",
+      customerNotFound: "Zákazník nenalezen.",
+      invoiceSelector: "Zadejte právě jedno z id a number.",
+      noUnpaid: "Žádné neuhrazené faktury.",
+      noCustomers: "Žádný zákazník nevyhovuje hledání.",
+      noItems: "Žádná položka ceníku nevyhovuje hledání.",
+      queryRequired: "Zadejte hledaný text.",
+      noNumber: "bez čísla",
+      numberLabel: "Číslo",
+      unitLabel: "Jednotka",
+      draft: "koncept",
+      overview: {
+        name: "get_overview",
+        title: "Přehled faktur",
+        description:
+          "Přehled za období (výchozí od 1. 1. letošního roku do dneška): vystaveno, uhrazeno, neuhrazeno a z toho po splatnosti, počty dokladů a neuhrazené zálohy a rozdělení podle měny. Koncepty a storna se nepočítají. Součty jsou přepočtené na CZK, rozdělení podle měny je v původních měnách. Data ve tvaru RRRR-MM-DD.",
+        from: "Začátek období, RRRR-MM-DD (výchozí 1. 1. letošního roku).",
+        to: "Konec období včetně, RRRR-MM-DD (výchozí dnes).",
+        heading: (from: string, to: string) => `Přehled od ${from} do ${to} (součty v CZK):`,
+        invoiced: (amount: string, count: number) => `Vystaveno: ${amount} (${count} dokladů)`,
+        income: (amount: string) => `Uhrazeno: ${amount}`,
+        outstanding: (amount: string, count: number) => `Neuhrazeno: ${amount} (${count} dokladů)`,
+        overdue: (amount: string, count: number) =>
+          `z toho po splatnosti: ${amount} (${count} dokladů)`,
+        advanceOpen: (amount: string) => `Neuhrazené zálohy (zálohové faktury): ${amount}`,
+        unconverted: (count: number) => `U ${count} dokladů chybí kurz, v přepočtu na CZK nejsou.`,
+        byCurrency: "Podle měny:",
+        currencyRow: (
+          currency: string,
+          invoiced: string,
+          income: string,
+          outstanding: string,
+          overdue: string,
+          advanceOpen: string,
+        ) =>
+          `${currency}: vystaveno ${invoiced}, uhrazeno ${income}, neuhrazeno ${outstanding}, po splatnosti ${overdue}, neuhrazené zálohy ${advanceOpen}`,
+      },
+      unpaid: {
+        name: "list_unpaid_invoices",
+        title: "Neuhrazené faktury",
+        description:
+          "Vystavené faktury, které nejsou uhrazené nebo jsou uhrazené jen částečně, od nejstarší splatnosti. U každé je číslo, odběratel, vystavení, splatnost, dní po splatnosti, zbývá uhradit a odkaz do webu. Stránky po 25. Neuhrazené zálohové faktury (zálohy) v seznamu nejsou, jejich součet je v get_overview.",
+        overdueOnly: "Jen faktury po splatnosti.",
+        customerId: "Jen faktury tohoto zákazníka (id z search_customers).",
+        page: "Číslo stránky od 1.",
+        heading: (count: number, page: number, hasNext: boolean) =>
+          `Neuhrazené faktury, stránka ${page}: ${count}${hasNext ? " (další stránka existuje)" : ""}`,
+        row: (
+          number: string,
+          customer: string,
+          dueDate: string,
+          remaining: string,
+          overdueDays: number,
+          link: string,
+        ) =>
+          `${number}, ${customer}, splatnost ${dueDate}${overdueDays > 0 ? ` (${overdueDays} dní po splatnosti)` : ""}, zbývá uhradit ${remaining}, ${link}`,
+      },
+      invoice: {
+        name: "get_invoice",
+        title: "Detail faktury",
+        description:
+          "Detail faktury podle id nebo čísla (zadejte právě jedno): hlavička, odběratel, položky, součty, stav, platby a odkaz do webu. Faktura jiného účtu se chová jako neexistující.",
+        id: "ID faktury.",
+        number: "Číslo faktury, například 2026001.",
+        header: (number: string, status: string, type: string) =>
+          `Faktura ${number}, ${type}, stav: ${status}`,
+        dates: (issue: string, due: string, taxable: string) =>
+          `Vystaveno ${issue}, splatnost ${due}, zdanitelné plnění ${taxable}`,
+        customer: "Odběratel",
+        lineLabel: (position: number) => `Položka ${position}`,
+        line: (label: string, quantity: string, unit: string, price: string, net: string) =>
+          `${label} (${quantity} ${unit} po ${price}, celkem ${net})`,
+        totals: (total: string, paid: string, remaining: string) =>
+          `Celkem ${total}, uhrazeno ${paid}, zbývá uhradit ${remaining}`,
+        payments: "Platby:",
+        payment: (date: string, amount: string, kind: string) => `${date}: ${amount} (${kind})`,
+        note: "Poznámka",
+        textBefore: "Text před položkami",
+        textAfter: "Text za položkami",
+        reference: "Reference",
+        orderRef: "Objednávka",
+        tags: "Štítky",
+        statuses: {
+          draft: "koncept",
+          issued: "vystavená",
+          sent: "odeslaná",
+          partially_paid: "částečně uhrazená",
+          paid: "uhrazená",
+          cancelled: "stornovaná",
+          credited: "dobropisovaná",
+        },
+        types: {
+          invoice: "faktura",
+          advance: "zálohová faktura",
+          credit_note: "dobropis",
+        },
+        kinds: { payment: "platba", refund: "vratka" },
+      },
+      customers: {
+        name: "search_customers",
+        title: "Hledání zákazníka",
+        description:
+          "Najde aktivní zákazníky podle názvu, IČO, DIČ nebo e-mailu (nejvýš 10). Slouží k zjištění id zákazníka, aby se nemuselo hádat.",
+        query: "Hledaný text, nejvýš 100 znaků.",
+        label: "Zákazník",
+        heading: (count: number) => `Nalezeno zákazníků: ${count}`,
+        row: (id: string, name: string, ico: string, link: string) =>
+          `${id}: ${name}${ico ? `, ${ico}` : ""}, ${link}`,
+        ico: "IČO",
+      },
+      catalog: {
+        name: "search_catalog",
+        title: "Hledání v ceníku",
+        description:
+          "Najde položky ceníku podle názvu nebo popisu (nejvýš 10), nejpoužívanější první. Slouží k zjištění id položky a její ceny.",
+        query: "Hledaný text, nejvýš 100 znaků.",
+        label: "Položka ceníku",
+        heading: (count: number) => `Nalezeno položek: ${count}`,
+        row: (id: string, name: string, price: string, unit: string, link: string) =>
+          `${id}: ${name}, ${price} / ${unit}, ${link}`,
+      },
+    },
+    // Reading invoices, versions, the mail log and prepared messages (spec 5.1).
+    invoicesRead: {
+      invoiceId: "ID faktury (z list_invoices nebo get_invoice).",
+      versionNotFound: "Verze faktury nenalezena.",
+      tagNotFound: "Štítek nenalezen.",
+      emailStatuses: {
+        queued: "ve frontě",
+        sending: "odesílá se",
+        sent: "odesláno",
+        failed: "selhalo",
+        unknown: "nejisté doručení",
+        held: "pozdrženo",
+        cancelled: "zrušeno",
+      },
+      list: {
+        name: "list_invoices",
+        title: "Seznam faktur",
+        description:
+          "Doklady účtu s filtrem jako v seznamu faktur na webu: stav (včetně overdue = po splatnosti), hledaný text, zákazník, období vystavení, měna, typ, štítek, jen neuhrazené. Stránky po 50. U každého dokladu je číslo, stav, odběratel, data, celkem, zbývá uhradit a odkaz do webu.",
+        q: "Hledaný text (číslo, odběratel, položky), nejvýš 100 znaků.",
+        status: "Stav dokladu; overdue jsou doklady po splatnosti.",
+        customerId: "Jen doklady tohoto zákazníka (id z search_customers).",
+        from: "Vystaveno od, RRRR-MM-DD.",
+        to: "Vystaveno do včetně, RRRR-MM-DD.",
+        currency: "Jen doklady v této měně.",
+        type: "Typ dokladu: invoice (faktura), advance (zálohová faktura), credit_note (dobropis).",
+        tagId: "Jen doklady s tímto štítkem (id z list_tags).",
+        unpaid: "Jen vystavené doklady, které zbývá uhradit (bez záloh).",
+        sort: "Řazení.",
+        dir: "Směr řazení: asc vzestupně, desc sestupně.",
+        page: "Číslo stránky od 1.",
+        empty: "Žádný doklad nevyhovuje filtru.",
+        heading: (count: number, page: number, hasNext: boolean) =>
+          `Doklady, stránka ${page}: ${count}${hasNext ? " (další stránka existuje)" : ""}`,
+        row: (
+          number: string,
+          status: string,
+          customer: string,
+          issueDate: string,
+          total: string,
+          remaining: string,
+          link: string,
+        ) =>
+          `${number}, ${status}, ${customer}, vystaveno ${issueDate}, celkem ${total}, zbývá uhradit ${remaining}, ${link}`,
+      },
+      versions: {
+        name: "list_invoice_versions",
+        title: "Verze faktury",
+        description:
+          "Uložené verze vystavené faktury (stav před každou úpravou), od nejnovější. Obsah verze vrátí get_invoice_version.",
+        empty: "Faktura nemá žádnou uloženou verzi.",
+        heading: (count: number) => `Uložené verze: ${count}`,
+        row: (versionNo: number, createdAt: string, id: string) =>
+          `Verze ${versionNo} z ${createdAt}, id ${id}`,
+      },
+      version: {
+        name: "get_invoice_version",
+        title: "Obsah verze faktury",
+        description:
+          "Obsah jedné uložené verze faktury: hlavička, položky a součty, jak byly před úpravou.",
+        versionId: "ID verze (z list_invoice_versions).",
+        header: (versionNo: number, number: string, createdAt: string) =>
+          `Verze ${versionNo} faktury ${number} z ${createdAt}`,
+        total: (total: string) => `Celkem ${total}`,
+      },
+      mailLog: {
+        name: "list_invoice_mail_log",
+        title: "Pošta k faktuře",
+        description:
+          "Záznamy e-mailů k faktuře od nejnovějšího: druh, stav, příjemci, předmět a čas. Ukáže, zda se právě něco odesílá a který záznam čeká na vyřešení na webu.",
+        empty: "K faktuře nebyl odeslán žádný e-mail.",
+        sending: "Právě se odesílá.",
+        problem: (id: string) => `Na vyřešení na webu čeká záznam ${id}.`,
+        subject: "Předmět",
+        recipients: "Příjemci",
+        row: (createdAt: string, status: string, recipients: string, subject: string, id: string) =>
+          `${createdAt}: ${status}, ${recipients}, ${subject}, id ${id}`,
+      },
+      reminders: {
+        name: "list_reminder_history",
+        title: "Historie upomínek",
+        description: "Upomínky odeslané k faktuře: kdy, ručně nebo automaticky, a stav e-mailu.",
+        empty: "K faktuře nebyla odeslána žádná upomínka.",
+        triggers: { manual: "ručně", automatic: "automaticky", bulk: "hromadně" },
+        row: (createdAt: string, trigger: string, status: string) =>
+          `${createdAt}: ${trigger}, ${status}`,
+      },
+      issuable: {
+        name: "check_invoice_issuable",
+        title: "Kontrola před vystavením",
+        description:
+          "Zkontroluje koncept, zda jde vystavit, a vrátí seznam problémů (prázdný = lze vystavit). Nic nemění.",
+        ok: "Koncept lze vystavit.",
+        problems: "Před vystavením je potřeba opravit:",
+      },
+      preview: {
+        name: "preview_issue",
+        title: "Náhled vystavení",
+        description:
+          "Ukáže, jak by koncept vystavení dopadlo: číslo, které by dostal, variabilní symbol, datum, odběratele, částku a problémy. Číslo se nespotřebuje a nic se nemění.",
+        number: (number: string) => `Číslo by bylo ${number}`,
+        noNumber: "Číslo zatím nejde určit.",
+        summary: (customer: string, total: string, issueDate: string) =>
+          `${customer}, celkem ${total}, vystaveno ${issueDate}`,
+        notes: "Poznámky:",
+      },
+      prepare: {
+        email: {
+          name: "prepare_invoice_email",
+          title: "Předvyplněný e-mail s fakturou",
+          description:
+            "Připraví e-mail s fakturou tak, jak ho předvyplní web: příjemci, předmět, text a revize faktury. Nic neodešle. S logId připraví znovuodeslání zprávy ze záznamu pošty.",
+          logId: "ID záznamu pošty (z list_invoice_mail_log) pro znovuodeslání.",
+        },
+        receipt: {
+          name: "prepare_payment_receipt",
+          title: "Předvyplněné potvrzení platby",
+          description:
+            "Připraví potvrzení přijaté platby e-mailem tak, jak ho předvyplní web. Nic neodešle.",
+          paymentId: "ID platby (z get_invoice, payments[].id).",
+        },
+        reminder: {
+          name: "prepare_reminder",
+          title: "Předvyplněná upomínka",
+          description:
+            "Připraví upomínku k odeslané neuhrazené faktuře tak, jak ji předvyplní web. Nic neodešle. Bez stageKey je to ruční upomínka.",
+          stageKey: "ID stupně upomínky z nastavení, nebo null pro ruční upomínku.",
+          repeat: "Tato upomínka už k faktuře odešla.",
+        },
+        recipients: "Příjemci",
+        copies: "Kopie",
+        subject: "Předmět",
+        body: "Text zprávy",
+        attachment: "Příloha",
+        revision: (revision: number) => `Revize faktury: ${revision}`,
+        unknownPending: "Dřívější zpráva má nejisté doručení; vyřešte ji na webu.",
+        paused: "Odesílání je pozastavené.",
+      },
+      tags: {
+        name: "list_tags",
+        title: "Štítky",
+        description: "Štítky účtu s jejich id, pro filtr v list_invoices.",
+        empty: "Účet nemá žádné štítky.",
+        label: "Štítek",
+        row: (id: string, name: string) => `${id}: ${name}`,
+      },
+    },
+    // create_draft_invoice (MCP-024, MCP-043).
+    create: {
+      name: "create_draft_invoice",
+      title: "Založit koncept faktury",
+      description:
+        "Založí koncept běžné faktury bez čísla. Nic nevystaví ani neodešle, uživatel koncept zkontroluje a vystaví ve webu přes vrácený odkaz. Co nezadáte, doplní výchozí nastavení stejně jako nová faktura ve webu: číselná řada, datum vystavení, splatnost podle zákazníka, bankovní účet a u cizí měny kurz ČNB. Ceny a množství jsou desetinná čísla jako text („1500.50“, „2“). Fakturan DPH nepočítá. Při opakování stejného volání pošlete stejný idempotency_key, vrátí se týž koncept.",
+      customerId: "ID zákazníka (z search_customers).",
+      lines: "Položky faktury, aspoň jedna.",
+      lineName: "Název položky. Povinný, pokud nezadáte catalogItemId.",
+      quantity: "Množství jako desetinné číslo v textu, například „2“ nebo „1.5“.",
+      unitPrice:
+        "Cena za jednotku v hlavní jednotce měny faktury, například „1500.50“. Povinná, pokud nezadáte catalogItemId.",
+      vatRate: "Sazba DPH v procentech. Fakturan DPH nepočítá, takže jde jen 0 nebo vynechat.",
+      catalogItemId:
+        "ID položky ceníku (ze search_catalog). Doplní název, popis, jednotku a cenu; zadané hodnoty mají přednost.",
+      lineDescription: "Popis položky pod názvem (výchozí z ceníku, jinak prázdný).",
+      lineUnit: "Jednotka položky, například „hod“ (výchozí z ceníku, jinak podle nastavení).",
+      discountKind:
+        "Sleva na položce: none (bez slevy), percent (v procentech) nebo amount (částka za řádek). Výchozí none.",
+      discount:
+        "Výše slevy jako desetinné číslo v textu: procenta („10“) nebo částka v měně faktury („250.50“), podle discountKind.",
+      issueDate: "Datum vystavení RRRR-MM-DD (výchozí podle nastavení, obvykle dnes).",
+      dueDate: "Datum splatnosti RRRR-MM-DD (výchozí podle zákazníka nebo nastavení).",
+      currency: "Měna faktury, například CZK nebo EUR (výchozí podle zákazníka nebo nastavení).",
+      note: "Poznámka na faktuře.",
+      tags: "Názvy štítků faktury. Chybějící štítky vzniknou, stejně jako ve webu.",
+      idempotencyKey:
+        "UUID zvolené asistentem. Opakované volání se stejným klíčem vrátí týž koncept místo nového.",
+      linesRequired: "Zadejte aspoň jednu položku.",
+      nameRequired: "Zadejte název položky nebo catalogItemId.",
+      priceRequired: "Zadejte cenu nebo catalogItemId.",
+      quantityInvalid: "Zadejte množství jako číslo, například „2“ nebo „1.5“.",
+      unitPriceInvalid: "Zadejte cenu jako nezáporné číslo, například „1500.50“.",
+      discountInvalid: "Zadejte slevu jako nezáporné číslo, například „10“ nebo „250.50“.",
+      vatRateInvalid:
+        "Fakturan DPH nepočítá (dodavatel není plátce DPH). Sazbu vynechte nebo zadejte 0.",
+      date: "Datum zadejte ve tvaru RRRR-MM-DD.",
+      catalogItemNotFound: "Položka ceníku nenalezena.",
+      catalogCurrency: (itemCurrency: string, currency: string) =>
+        `Položka ceníku má cenu v ${itemCurrency}, faktura je v ${currency}. Zadejte cenu položky (unitPrice) v ${currency}.`,
+      fields: {
+        customerId: "zákazník",
+        lines: "položky",
+        name: "název",
+        quantity: "množství",
+        unitPrice: "cena",
+        vatRate: "sazba DPH",
+        catalogItemId: "položka ceníku",
+        description: "popis",
+        unit: "jednotka",
+        discountKind: "druh slevy",
+        discount: "sleva",
+        issueDate: "datum vystavení",
+        dueDate: "splatnost",
+        currency: "měna",
+        note: "poznámka",
+        idempotency_key: "klíč opakování",
+        tags: "štítky",
+      },
+      created: "Koncept faktury je založený, zatím bez čísla. Nic se nevystavilo ani neodeslalo.",
+      customer: "Odběratel",
+      lineLabel: (position: number) => `Položka ${position}`,
+      line: (label: string, total: string) => `${label}: ${total}`,
+      noteLabel: "Poznámka",
+      tagsLabel: "Štítky",
+      total: (total: string) => `Celkem ${total}`,
+      revision: (revision: number) => `Revize ${revision} (pošlete ji při další úpravě).`,
+      problems: "Před vystavením je ještě potřeba:",
+      link: (link: string) => `Zkontrolovat a vystavit ve webu: ${link}`,
+    },
+    // Draft tools beyond create_draft_invoice (MCP-024, MCP-072).
+    drafts: {
+      notDraft: "Upravit jde jen koncept. Vystavenou fakturu upravíte ve webu.",
+      fields: {
+        id: "faktura",
+        revision: "revize",
+        customerId: "zákazník",
+        lines: "položky",
+        name: "název",
+        quantity: "množství",
+        unitPrice: "cena",
+        vatRate: "sazba DPH",
+        catalogItemId: "položka ceníku",
+        description: "popis",
+        unit: "jednotka",
+        discountKind: "druh slevy",
+        discount: "sleva",
+        issueDate: "datum vystavení",
+        dueDate: "splatnost",
+        currency: "měna",
+        note: "poznámka",
+        tags: "štítky",
+      },
+      update: {
+        name: "update_draft_invoice",
+        title: "Upravit koncept faktury",
+        description:
+          "Upraví koncept faktury: zákazníka a co dalšího zadáte. Co nezadáte (položky, datum, splatnost, měna, poznámka, štítky), zůstane, jak je; ostatní nastavení dokladu se nemění. Zadané položky nahradí všechny současné, takže pošlete i ty, které se nemění, s popisem, jednotkou a slevou z get_invoice. Pošlete revision z get_invoice nebo z předchozí úpravy; když se koncept mezitím změnil, úprava se odmítne. Vystavenou fakturu tímto nástrojem upravit nejde.",
+        id: "ID konceptu faktury.",
+        revision: "Revize konceptu, jak ji vrátil get_invoice nebo předchozí úprava.",
+        lines: "Položky, které nahradí všechny současné. Bez nich položky zůstanou.",
+        done: "Koncept faktury je upravený. Nic se nevystavilo ani neodeslalo.",
+      },
+      duplicate: {
+        name: "duplicate_invoice",
+        title: "Zkopírovat fakturu do konceptu",
+        description:
+          "Vytvoří nový koncept jako kopii faktury nebo zálohy (bez čísla, s dnešním datem a stejnou délkou splatnosti), stejně jako „Kopírovat“ ve webu. Dobropis kopírovat nejde.",
+        id: "ID faktury, kterou zkopírovat.",
+        done: "Kopie je založená jako koncept bez čísla. Nic se nevystavilo ani neodeslalo.",
+      },
+      template: {
+        name: "draft_from_template",
+        title: "Založit koncept ze šablony",
+        description:
+          "Založí koncept faktury z uložené šablony faktury, stejně jako „Použít šablonu“ ve webu.",
+        templateId: "ID šablony faktury.",
+        done: "Koncept ze šablony je založený, zatím bez čísla. Nic se nevystavilo ani neodeslalo.",
+      },
+      convert: {
+        name: "convert_advance_to_final",
+        title: "Vytvořit konečnou fakturu k záloze",
+        description:
+          "K vystavené zaplacené záloze vytvoří koncept konečné faktury, stejně jako ve webu. Číslo dostane až při vystavení. Když konečná faktura už existuje, vrátí ji.",
+        id: "ID vystavené zálohy.",
+        done: "Konečná faktura je založená jako koncept. Nic se nevystavilo ani neodeslalo.",
+      },
+    },
+    customers: {
+      nameLabel: "Zákazník",
+      noteLabel: "Poznámka",
+      empty: "Žádný zákazník nevyhovuje filtru.",
+      archivedMark: " (archivovaný)",
+      fields: {
+        id: "zákazník",
+        name: "název",
+        street: "ulice",
+        city: "město",
+        zip: "PSČ",
+        country: "stát",
+        ico: "IČO",
+        dic: "DIČ",
+        email: "e-mail",
+        extraEmails: "další e-maily",
+        phone: "telefon",
+        note: "poznámka",
+        dueDays: "splatnost",
+        language: "jazyk",
+        currency: "měna",
+        remindersEnabled: "upomínky",
+      },
+      id: "ID zákazníka (z list_customers nebo search_customers).",
+      row: (id: string, name: string, ico: string, link: string) =>
+        [`- ${id}`, name, ico, link].filter(Boolean).join(" · "),
+      heading: (count: number, page: number, more: boolean) =>
+        `Zákazníci na stránce ${page}: ${count}${more ? " (další na další stránce)" : ""}.`,
+      card: (name: string, ico: string, dic: string, email: string) =>
+        [name, ico, dic, email].filter(Boolean).join(" · "),
+      totals: (currency: string, invoiced: string, outstanding: string) =>
+        `${currency}: fakturováno ${invoiced}, neuhrazeno ${outstanding}`,
+      invoice: (number: string, status: string, total: string) =>
+        `- ${number} · ${status} · ${total}`,
+      averageDays: (days: number) => `Průměrná doba úhrady: ${days} dní.`,
+      list: {
+        name: "list_customers",
+        title: "Seznam zákazníků",
+        description:
+          "Zákazníci účtu jako v seznamu zákazníků na webu: hledaný text, jen zahraniční, stav (active aktivní, archived archivovaní, all všichni). Stránky po 50.",
+        q: "Hledaný text (název, IČO, DIČ, e-mail, město), nejvýš 100 znaků.",
+        foreign: "Jen zahraniční zákazníci.",
+        status: "active aktivní (výchozí), archived archivovaní, all všichni.",
+        page: "Číslo stránky od 1.",
+      },
+      get: {
+        name: "get_customer",
+        title: "Karta zákazníka",
+        description:
+          "Údaje zákazníka a souhrn jeho dokladů jako na kartě zákazníka ve webu: fakturováno a neuhrazeno po měnách, průměrná doba úhrady a poslední doklady.",
+      },
+      ares: {
+        name: "lookup_company_ares",
+        title: "Najít firmu v ARES",
+        description:
+          "Načte název, DIČ a adresu firmy z rejstříku ARES podle IČO, stejně jako tlačítko u IČO ve webu. Nic neukládá; údaje pak můžete předat do save_customer.",
+        ico: "IČO firmy, 8 číslic.",
+        notFound: "Firma s tímto IČO v ARES není.",
+        found: (ico: string) => `Firma s IČO ${ico} v ARES:`,
+      },
+      save: {
+        name: "save_customer",
+        title: "Uložit zákazníka",
+        description:
+          "Bez id založí nového zákazníka (název je povinný), s id upraví existujícího. Při úpravě se mění jen pole, která zadáte; ostatní zůstanou. Kontroly jsou stejné jako ve formuláři zákazníka na webu.",
+        id: "ID zákazníka pro úpravu; bez něj se zákazník založí.",
+        name_: "Název firmy nebo jméno.",
+        street: "Ulice a číslo.",
+        city: "Město.",
+        zip: "PSČ.",
+        country: "Stát.",
+        ico: "IČO.",
+        dic: "DIČ.",
+        email: "E-mail pro faktury.",
+        extraEmails: "Další e-maily (nejvýš 10).",
+        phone: "Telefon.",
+        note: "Interní poznámka.",
+        dueDays: "Splatnost ve dnech pro tohoto zákazníka; null = výchozí účtu.",
+        language: "Jazyk dokladů; null = výchozí účtu.",
+        currency: "Měna dokladů; null = výchozí účtu.",
+        remindersEnabled: "false vypne upomínky tomuto zákazníkovi; null = podle účtu.",
+        created: "Zákazník je založený.",
+        updated: "Zákazník je uložený.",
+        duplicateIco: (ico: string) => `Pozor: IČO ${ico} má i jiný zákazník tohoto účtu.`,
+      },
+      archive: {
+        name: "archive_customer",
+        title: "Archivovat zákazníka",
+        description: "Archivuje zákazníka; nebude se nabízet pro nové doklady. Doklady zůstanou.",
+        done: "Zákazník je archivovaný.",
+      },
+      restore: {
+        name: "restore_customer",
+        title: "Obnovit zákazníka z archivu",
+        description: "Vrátí archivovaného zákazníka mezi aktivní.",
+        done: "Zákazník je znovu aktivní.",
+      },
+      verifyVat: {
+        name: "verify_customer_vat",
+        title: "Ověřit DIČ v systému VIES",
+        description:
+          "Ověří DIČ zákazníka v systému VIES a uloží výsledek, stejně jako tlačítko ve webu.",
+        states: {
+          valid: "DIČ je ve VIES platné.",
+          invalid: "DIČ ve VIES platné není.",
+          unavailable: "VIES teď neodpovídá, zkuste to později. Nic se neuložilo.",
+        } as Record<string, string>,
+      },
+      delete: {
+        name: "delete_customer",
+        title: "Smazat zákazníka",
+        description:
+          "Trvale smaže zákazníka bez dokladů. Zákazníka s doklady smazat nejde, jen archivovat.",
+        done: "Zákazník je smazaný.",
+      },
+    },
+    catalog: {
+      nameLabel: "Položka",
+      categoryLabel: "Kategorie",
+      unitLabel: "Jednotka",
+      empty: "Žádná položka ceníku nevyhovuje filtru.",
+      noCategories: "Ceník nemá žádné kategorie.",
+      priceInvalid: "Cenu zadejte jako nezáporné číslo, například 1500 nebo 1500.50.",
+      priceRequired: "Nová položka ceníku potřebuje cenu.",
+      fields: {
+        id: "položka",
+        name: "název",
+        description: "popis",
+        unit: "jednotka",
+        price: "cena",
+        unitPrice: "cena",
+        currency: "měna",
+        category: "kategorie",
+        tags: "štítky",
+      },
+      id: "ID položky ceníku (z list_catalog nebo search_catalog).",
+      row: (id: string, name: string, price: string, unit: string, link: string) =>
+        `- ${id} · ${name} · ${price} / ${unit} · ${link}`,
+      heading: (count: number, page: number, more: boolean) =>
+        `Položky ceníku na stránce ${page}: ${count}${more ? " (další na další stránce)" : ""}.`,
+      archivedMark: " (archivovaná)",
+      list: {
+        name: "list_catalog",
+        title: "Seznam položek ceníku",
+        description:
+          "Položky ceníku jako v ceníku na webu: hledaný text, kategorie, stav (active, archived, all), řazení podle názvu nebo použití. Stránky po 50.",
+        q: "Hledaný text, nejvýš 100 znaků.",
+        category: "Jen položky této kategorie.",
+        status: "active aktivní (výchozí), archived archivované, all všechny.",
+        sort: "name podle názvu (výchozí), usage podle počtu použití.",
+        page: "Číslo stránky od 1.",
+      },
+      get: {
+        name: "get_catalog_item",
+        title: "Položka ceníku",
+        description: "Údaje jedné položky ceníku.",
+      },
+      categories: {
+        name: "list_catalog_categories",
+        title: "Kategorie ceníku",
+        description: "Kategorie, které položky ceníku používají.",
+        heading: "Kategorie ceníku:",
+      },
+      units: {
+        name: "list_units",
+        title: "Jednotky",
+        description: "Jednotky, které účet nabízí u položek.",
+        heading: "Jednotky:",
+      },
+      save: {
+        name: "save_catalog_item",
+        title: "Uložit položku ceníku",
+        description:
+          "Bez id založí položku ceníku (název, jednotka a cena jsou povinné), s id upraví existující; při úpravě se mění jen zadaná pole. Cena je text jako ve formuláři, například 1500 nebo 1500.50. Měna je bez zadání výchozí měna účtu.",
+        id: "ID položky pro úpravu; bez něj se položka založí.",
+        name_: "Název položky.",
+        description_: "Popis.",
+        unit: "Jednotka, například hod. nebo ks.",
+        price: "Cena za jednotku jako text, například 1500.50.",
+        currency: "Měna ceny.",
+        category: "Kategorie.",
+        tags: "Štítky položky (nejvýš 10).",
+        created: "Položka ceníku je založená.",
+        updated: "Položka ceníku je uložená.",
+      },
+      archive: {
+        name: "archive_catalog_item",
+        title: "Archivovat položku ceníku",
+        description: "Archivuje položku; nebude se nabízet na nových dokladech.",
+        done: "Položka ceníku je archivovaná.",
+      },
+      restore: {
+        name: "restore_catalog_item",
+        title: "Obnovit položku ceníku",
+        description: "Vrátí archivovanou položku mezi aktivní.",
+        done: "Položka ceníku je znovu aktivní.",
+      },
+      saveUnit: {
+        name: "save_unit",
+        title: "Přidat jednotku",
+        description: "Přidá jednotku do nabídky jednotek účtu.",
+        unitName: "Název jednotky, nejvýš 20 znaků.",
+        done: "Jednotka je přidaná.",
+      },
+      deleteUnit: {
+        name: "delete_unit",
+        title: "Smazat jednotku",
+        description:
+          "Smaže jednotku z nabídky. Doklady a položky, které ji používají, si ji ponechají.",
+        id: "ID jednotky z list_units.",
+        done: "Jednotka je smazaná.",
+      },
+      fromLine: {
+        name: "save_line_to_catalog",
+        title: "Uložit řádek faktury do ceníku",
+        description:
+          "Uloží řádek faktury jako novou položku ceníku (bez kategorie a štítků), stejně jako „Uložit do ceníku“ u řádku ve webu.",
+        name_: "Název řádku.",
+        description_: "Popis řádku.",
+        unit: "Jednotka řádku.",
+        unitPrice: "Cena za jednotku jako text, například 1500.50.",
+        currency: "Měna dokladu.",
+        done: "Řádek je uložený jako položka ceníku.",
+      },
+    },
+    payments: {
+      amountInvalid: "Částku zadejte jako kladné číslo, například 1500 nebo 1500.50.",
+      fields: {
+        invoiceId: "faktura",
+        paymentId: "platba",
+        id: "faktura",
+        ids: "faktury",
+        revision: "revize",
+        paidOn: "datum úhrady",
+        amount: "částka",
+        credited: "připsáno",
+        currency: "měna",
+        method: "způsob",
+        note: "poznámka",
+      },
+      invoiceId: "ID faktury.",
+      paymentId: "ID platby (z get_invoice, pole payments).",
+      revision: "Revize faktury z get_invoice nebo z předchozí operace.",
+      paidOn: "Datum úhrady RRRR-MM-DD, nejpozději dnes.",
+      amount: "Částka jako text, například 1500.50.",
+      credited:
+        "Když platba přišla v jiné měně než faktura: kolik se faktuře připíše v její měně, jako text.",
+      currency: "Měna platby; bez zadání měna faktury.",
+      method: "Způsob: transfer převodem, cash hotově, other jinak.",
+      note: "Poznámka k platbě.",
+      summary: (status: string, paid: string, remaining: string) =>
+        `Stav faktury: ${status}. Uhrazeno ${paid}, zbývá ${remaining}.`,
+      add: {
+        name: "add_payment",
+        title: "Zapsat platbu",
+        description:
+          "Zapíše platbu k vystavené faktuře, stejně jako „Zapsat platbu“ ve webu. Pošlete revision z get_invoice. Když je zapnuté automatické potvrzení platby, Fakturan ho pošle jako při zápisu ve webu.",
+        done: "Platba je zapsaná.",
+      },
+      refund: {
+        name: "add_refund",
+        title: "Zapsat vrácení peněz",
+        description:
+          "Zapíše vrácení peněz zákazníkovi (vratku) k faktuře, stejně jako ve webu. Částka se zadává kladně.",
+        done: "Vrácení peněz je zapsané.",
+      },
+      update: {
+        name: "update_payment",
+        title: "Upravit platbu",
+        description:
+          "Upraví zapsanou platbu; mění se jen zadaná pole. Částky platby z avíza banky změnit nejde.",
+        done: "Platba je upravená.",
+      },
+      markPaid: {
+        name: "mark_paid",
+        title: "Označit fakturu jako uhrazenou",
+        description:
+          "Zapíše platbu na celý zbývající dluh faktury, stejně jako „Uhrazeno“ ve webu.",
+        id: "ID faktury.",
+        paidOn: "Datum úhrady RRRR-MM-DD; bez zadání dnes.",
+        done: "Faktura je uhrazená.",
+      },
+      markPaidMany: {
+        name: "mark_paid_many",
+        title: "Označit faktury jako uhrazené",
+        description:
+          "Uhradí dnešním datem každou z faktur, které zbývá uhradit, jako hromadná akce ve webu. Faktury, které uhradit nejde, přeskočí.",
+        ids: "ID faktur.",
+        done: (done: number, skipped: number) =>
+          `Uhrazeno faktur: ${done}. Přeskočeno: ${skipped}.`,
+      },
+      delete: {
+        name: "delete_payment",
+        title: "Smazat platbu",
+        description:
+          "Smaže zapsanou platbu. Platbu z avíza banky vrátí zpět do fronty plateb, jako ve webu.",
+        done: "Platba je smazaná.",
+      },
+    },
+    bank: {
+      counterpartyLabel: "Plátce",
+      messageLabel: "Zpráva pro příjemce",
+      textLabel: "Text avíza",
+      accountNameLabel: "Účet",
+      noNotices: "Žádná avíza.",
+      noCandidates: "Žádná faktura k přiřazení.",
+      noAccounts: "Účet nemá žádný bankovní účet.",
+      statuses: {
+        pending: "čeká",
+        unrecognized: "nerozpoznané",
+        matched: "spárované",
+        ignored: "mimo sledované účty",
+        dismissed: "zahozené",
+      } as Record<string, string>,
+      fields: {
+        id: "avízo",
+        view: "pohled",
+        search: "hledání",
+        invoiceId: "faktura",
+        credited: "připsáno",
+        parts: "části",
+        amount: "částka",
+        name: "název",
+        currency: "měna",
+        number: "číslo účtu",
+        bankCode: "kód banky",
+        iban: "IBAN",
+        swift: "SWIFT",
+      },
+      noticeId: "ID avíza z list_bank_notices.",
+      invoiceId: "ID faktury z list_notice_candidates.",
+      credited:
+        "Když avízo přišlo v jiné měně než faktura: kolik se faktuře připíše v její měně, jako text.",
+      noticeRow: (id: string, status: string, paidOn: string, amount: string, vs: string) =>
+        `- ${id} · ${status} · ${paidOn} · ${amount}${vs ? ` · VS ${vs}` : ""}`,
+      noticeInvoices: (numbers: string) => `  faktury: ${numbers}`,
+      list: {
+        name: "list_bank_notices",
+        title: "Avíza banky",
+        description:
+          "Avíza z bankovní schránky jako na stránce Platby: queue = čekají na přiřazení, unrecognized = nerozpoznané zprávy, history = posledních 50 vyřízených.",
+        view: "queue, unrecognized nebo history.",
+      },
+      status: {
+        name: "get_bank_status",
+        title: "Stav bankovní schránky",
+        description:
+          "Jestli je bankovní schránka nastavená a zapnutá, kdy se naposled kontrolovala a kolik avíz čeká.",
+        notConfigured:
+          "Bankovní schránka není nastavená. Nastavíte ji ve webu v Nastavení › Avíza.",
+        summary: (enabled: boolean, lastCheck: string, pending: number, unrecognized: number) =>
+          `Schránka je ${enabled ? "zapnutá" : "vypnutá"}, naposled kontrolována ${lastCheck}. Čeká avíz: ${pending}, nerozpoznaných: ${unrecognized}.`,
+        counts: (pending: number, unrecognized: number) =>
+          `Čeká avíz: ${pending}, nerozpoznaných: ${unrecognized}.`,
+        failing: (failures: number) => `Posledních ${failures} kontrol selhalo.`,
+      },
+      candidates: {
+        name: "list_notice_candidates",
+        title: "Faktury k avízu",
+        description:
+          "Faktury, ke kterým jde avízo přiřadit: nejdřív se stejným variabilním symbolem (suggested), pak ostatní čekající na platbu.",
+        search: "Hledat v čísle a odběrateli.",
+        row: (id: string, number: string, customer: string, due: string, suggested: boolean) =>
+          `- ${id} · ${number} · ${customer} · zbývá ${due}${suggested ? " · navrženo" : ""}`,
+        more: "Další faktury najdete upřesněním hledání.",
+      },
+      assign: {
+        name: "assign_notice",
+        title: "Přiřadit avízo k faktuře",
+        description:
+          "Zapíše platbu z avíza k faktuře, stejně jako „Přiřadit“ na stránce Platby. Když je zapnuté automatické potvrzení platby, Fakturan ho pošle.",
+        done: "Avízo je přiřazené a platba zapsaná.",
+      },
+      split: {
+        name: "split_notice",
+        title: "Rozdělit avízo mezi faktury",
+        description:
+          "Rozdělí platbu z avíza mezi více faktur; části musí dát dohromady celou částku avíza.",
+        parts: "Části: faktura a částka jako text (2 až 10 částí).",
+        amount: "Částka části v měně avíza, jako text.",
+        done: "Avízo je rozdělené a platby zapsané.",
+      },
+      dismiss: {
+        name: "dismiss_notice",
+        title: "Zahodit avízo",
+        description: "Zahodí avízo nebo nerozpoznanou zprávu z fronty, jako ve webu.",
+        done: "Avízo je zahozené.",
+      },
+      restoreNotice: {
+        name: "restore_notice",
+        title: "Vrátit zahozené avízo",
+        description: "Vrátí zahozené avízo zpět do fronty.",
+        done: "Avízo je zpět ve frontě.",
+      },
+      undo: {
+        name: "undo_notice",
+        title: "Vrátit přiřazení avíza",
+        description:
+          "Odstraní platby zapsané z avíza a vrátí avízo do fronty, jako „Vrátit“ ve webu.",
+        done: "Přiřazení je vrácené a avízo čeká ve frontě.",
+      },
+      check: {
+        name: "check_mailbox_now",
+        title: "Zkontrolovat bankovní schránku",
+        description:
+          "Hned zkontroluje bankovní schránku s uloženými údaji, jako „Zkontrolovat teď“ ve webu. Údaje schránky nemění.",
+        done: "Kontrola schránky je naplánovaná. Nová avíza uvidíte za chvíli v list_bank_notices.",
+      },
+      accounts: {
+        id: "ID bankovního účtu z list_bank_accounts.",
+        notFound: "Účet neexistuje",
+        row: (id: string, name: string, currency: string, account: string, flags: string) =>
+          `- ${id} · ${name} · ${currency} · ${account}${flags}`,
+        defaultMark: " · výchozí",
+        hiddenMark: " · skrytý",
+        list: {
+          name: "list_bank_accounts",
+          title: "Bankovní účty",
+          description: "Bankovní účty dodavatele, výchozí účet pro každou měnu a skryté účty.",
+        },
+        save: {
+          name: "save_bank_account",
+          title: "Uložit bankovní účet",
+          description:
+            "Bez id založí bankovní účet (název, měna a číslo s kódem banky nebo IBAN), s id upraví existující; při úpravě se mění jen zadaná pole.",
+          id: "ID účtu pro úpravu; bez něj se účet založí.",
+          name_: "Název účtu.",
+          currency: "Měna účtu.",
+          number: "Číslo účtu (s předčíslím), bez kódu banky.",
+          bankCode: "Kód banky, 4 číslice.",
+          iban: "IBAN, když účet nemá české číslo.",
+          swift: "SWIFT/BIC.",
+          created: "Bankovní účet je založený.",
+          updated: "Bankovní účet je uložený.",
+        },
+        setDefault: {
+          name: "set_default_bank_account",
+          title: "Nastavit výchozí účet",
+          description: "Nastaví účet jako výchozí pro jeho měnu.",
+          done: "Účet je výchozí pro svou měnu.",
+        },
+        hide: {
+          name: "hide_bank_account",
+          title: "Skrýt bankovní účet",
+          description: "Skryje účet; nebude se nabízet na nových dokladech.",
+          done: "Účet je skrytý.",
+        },
+        unhide: {
+          name: "unhide_bank_account",
+          title: "Zobrazit skrytý účet",
+          description: "Vrátí skrytý účet do nabídky.",
+          done: "Účet je znovu v nabídce.",
+        },
+        delete: {
+          name: "delete_bank_account",
+          title: "Smazat bankovní účet",
+          description: "Smaže bankovní účet, který není na žádné faktuře; jinak ho jde jen skrýt.",
+          done: "Bankovní účet je smazaný.",
+        },
+      },
+    },
+    // Issuing, cancelling and amending invoices (Task 9).
+    lifecycle: {
+      fields: {
+        id: "faktura",
+        ids: "faktury",
+        revision: "revize",
+        variableSymbol: "variabilní symbol",
+        until: "odložit do",
+        off: "vypnuto",
+        on: "zapnuto",
+        versionId: "verze",
+        number: "číslo",
+        dueDate: "splatnost",
+        note: "poznámka",
+        lines: "položky",
+        name: "název",
+        quantity: "množství",
+        unitPrice: "cena",
+        vatRate: "sazba DPH",
+        catalogItemId: "položka ceníku",
+        tags: "štítky",
+      },
+      id: "ID faktury (z list_invoices nebo get_invoice).",
+      ids: "ID faktur, nejvýš 200.",
+      revision: "Revize faktury z get_invoice nebo z předchozí operace.",
+      state: (number: string, status: string, revision: number) =>
+        `Faktura ${number}: ${status}, revize ${revision}.`,
+      notIssuable: "Fakturu zatím nejde vystavit:",
+      issue: {
+        name: "issue_invoice",
+        title: "Vystavit fakturu",
+        description:
+          "Vystaví koncept: přidělí číslo z výchozí řady a doklad už nepůjde volně upravovat. Před vystavením se hodí preview_issue. Pošlete revision z get_invoice; když se koncept mezitím změnil, vystavení se odmítne. Když něco chybí, vrátí výčet problémů. Nic neodešle.",
+        variableSymbol:
+          "Vlastní variabilní symbol, nejvýš 10 číslic. Bez něj se použije číslo dokladu.",
+        done: "Faktura je vystavená. Nic se neodeslalo.",
+      },
+      markSent: {
+        name: "mark_sent",
+        title: "Označit jako odeslanou",
+        description:
+          "Označí vystavenou fakturu jako odeslanou bez posílání e-mailu, např. když ji uživatel předal jinak.",
+        done: "Faktura je označená jako odeslaná.",
+      },
+      markSentMany: {
+        name: "mark_sent_many",
+        title: "Označit více faktur jako odeslané",
+        description:
+          "Označí vystavené faktury jako odeslané bez posílání e-mailu. Faktury, které už odeslané jsou nebo to nejde, přeskočí.",
+        done: (done: number, skipped: number) =>
+          `Označeno jako odeslané: ${done}, přeskočeno: ${skipped}.`,
+      },
+      snooze: {
+        name: "snooze_reminders",
+        title: "Odložit upomínky",
+        description:
+          "Odloží automatické upomínky k faktuře do zadaného dne (RRRR-MM-DD, nejdéle o 30 dní), nebo odklad zruší (null).",
+        until: "Den RRRR-MM-DD, do kdy upomínky neodcházejí, nebo null pro zrušení odkladu.",
+        done: "Odklad upomínek je nastavený.",
+      },
+      remindersOff: {
+        name: "set_reminders_off",
+        title: "Vypnout upomínky k faktuře",
+        description:
+          "Vypne (off: true) nebo znovu zapne (off: false) automatické upomínky k faktuře.",
+        off: "true vypne upomínky, false je zapne.",
+        done: "Nastavení upomínek je uložené.",
+      },
+      partial: {
+        name: "set_partial_reminders",
+        title: "Upomínky při částečné úhradě",
+        description: "Zapne nebo vypne automatické upomínky i pro částečně uhrazenou fakturu.",
+        on: "true upomínky při částečné úhradě posílá, false ne.",
+        done: "Nastavení upomínek je uložené.",
+      },
+      deleteDraft: {
+        name: "delete_draft",
+        title: "Smazat koncept",
+        description:
+          "Smaže koncept faktury, který ještě nemá číslo. Vystavený doklad smazat nejde.",
+        done: "Koncept je smazaný.",
+      },
+      update: {
+        name: "update_issued_invoice",
+        title: "Upravit vystavenou fakturu",
+        description:
+          "Upraví vystavenou fakturu jako „Upravit“ ve webu: číslo, variabilní symbol, splatnost, poznámku, položky a štítky. Co nezadáte, zůstane. Předchozí podoba se uloží jako verze. Pošlete revision z get_invoice. Když už faktura odešla, výsledek doporučí poslat ji znovu.",
+        number: "Nové číslo dokladu.",
+        variableSymbol: "Variabilní symbol, nejvýš 10 číslic.",
+        lines: "Položky, které nahradí současné. Bez nich položky zůstanou.",
+        done: "Vystavená faktura je upravená. Nic se neodeslalo.",
+      },
+      refresh: {
+        name: "refresh_customer_snapshot",
+        title: "Převzít aktuální údaje zákazníka",
+        description:
+          "Přepíše údaje odběratele na vystavené faktuře aktuálními údaji ze zákazníka. Předchozí podoba se uloží jako verze.",
+        done: "Údaje zákazníka na faktuře jsou aktuální.",
+      },
+      restoreVersion: {
+        name: "restore_invoice_version",
+        title: "Obnovit verzi faktury",
+        description:
+          "Vrátí vystavenou fakturu do dřívější verze (z list_invoice_versions). Platby se nemění.",
+        versionId: "ID verze z list_invoice_versions.",
+        done: "Faktura je vrácená do zvolené verze.",
+      },
+      cancel: {
+        name: "cancel_invoice",
+        title: "Stornovat fakturu",
+        description:
+          "Stornuje vystavenou fakturu bez plateb a dobropisů. Číslo zůstane obsazené; storno jde vrátit nástrojem restore_cancelled_invoice.",
+        done: "Faktura je stornovaná.",
+      },
+      restore: {
+        name: "restore_cancelled_invoice",
+        title: "Obnovit stornovanou fakturu",
+        description: "Vrátí stornovanou fakturu do stavu před stornem.",
+        done: "Storno je zrušené.",
+      },
+      creditNote: {
+        name: "create_credit_note",
+        title: "Vytvořit dobropis",
+        description:
+          "K vystavené faktuře založí koncept dobropisu, stejně jako ve webu. Číslo dostane až při vystavení.",
+        done: "Dobropis je založený jako koncept bez čísla. Nic se nevystavilo ani neodeslalo.",
+      },
+      deleteImported: {
+        name: "delete_imported_invoice",
+        title: "Smazat importovaný doklad",
+        description:
+          "Smaže doklad importovaný z jiného systému i s jeho platbami. Doklad vystavený ve Fakturanu tímto smazat nejde.",
+        done: "Importovaný doklad je smazaný.",
+      },
+      edit: (revision: number) => `Nová revize: ${revision}.`,
+      resendSuggested: "Faktura už odešla; zvažte poslat zákazníkovi opravenou verzi.",
+      balance: {
+        overpaid: "Po úpravě je faktura přeplacená.",
+        underpaid: "Po úpravě už faktura není plně uhrazená.",
+      },
+    },
+    // Sending invoices, receipts and reminders (Task 9).
+    sending: {
+      fields: {
+        id: "faktura",
+        logId: "záznam pošty",
+        paymentId: "platba",
+        stageKey: "stupeň upomínky",
+        to: "příjemci",
+        cc: "kopie",
+        bcc: "skrytá kopie",
+        subject: "předmět",
+        body: "text",
+        revision: "revize",
+        attachIsdoc: "příloha ISDOC",
+        idempotency_key: "klíč opakování",
+      },
+      id: "ID faktury.",
+      to: "Adresy příjemců.",
+      cc: "Adresy v kopii.",
+      bcc: "Adresy ve skryté kopii.",
+      subject: "Předmět zprávy.",
+      body: "Text zprávy.",
+      revision: "Revize faktury, ke které je zpráva napsaná (z prepare_*).",
+      idempotencyKey:
+        "Náhodné UUID této zprávy, např. requestId z prepare_*. Opakované volání se stejným klíčem nic dalšího neodešle.",
+      queued: "Zpráva je zařazená k odeslání.",
+      invoice: {
+        name: "send_invoice",
+        title: "Odeslat fakturu e-mailem",
+        description:
+          "Odešle fakturu e-mailem zákazníkovi. Zprávu nejdřív připravte nástrojem prepare_invoice_email a předtím ji ukažte uživateli. Když je dřívější doručení nejisté, odeslání musí potvrdit uživatel ve webu.",
+        logId: "ID záznamu pošty, který tato zpráva nahrazuje (z prepare_invoice_email).",
+        attachIsdoc: "Přiložit i ISDOC.",
+      },
+      resend: {
+        name: "resend_from_log",
+        title: "Odeslat znovu ze záznamu pošty",
+        description:
+          "Odešle znovu zprávu, která selhala nebo byla zrušená, beze změny textu. Nejisté doručení musí potvrdit uživatel ve webu.",
+        logId: "ID záznamu pošty z list_invoice_mail_log.",
+      },
+      receipt: {
+        name: "send_payment_receipt",
+        title: "Odeslat potvrzení platby",
+        description:
+          "Odešle zákazníkovi potvrzení přijaté platby. Zprávu nejdřív připravte nástrojem prepare_payment_receipt.",
+        paymentId: "ID platby.",
+      },
+      reminder: {
+        name: "send_reminder",
+        title: "Odeslat upomínku",
+        description:
+          "Odešle upomínku k odeslané neuhrazené faktuře. Zprávu nejdřív připravte nástrojem prepare_reminder. Opakovanou upomínku musí potvrdit uživatel ve webu.",
+        stageKey: "ID stupně upomínky, nebo null pro ruční upomínku.",
+      },
+    },
+    // Recurring plans (spec 5.1, 5.3, 5.4, 5.5).
+    recurring: {
+      fields: {
+        id: "plán",
+        name: "název",
+        customerId: "zákazník",
+        lines: "položky",
+        note: "poznámka",
+        dueDays: "splatnost",
+        frequency: "četnost",
+        every: "každých",
+        issueRule: "den vystavení",
+        issueDay: "konkrétní den",
+        startsOn: "začátek",
+        endsOn: "konec",
+        maxCount: "nejvýš termínů",
+        periodOffset: "posun období",
+        mode: "režim",
+        notifyDaysBefore: "upozornění předem",
+        runId: "termín",
+        action: "volba",
+      },
+      id: "ID pravidelné faktury (z list_recurring).",
+      name: "Název plánu.",
+      customerId: "ID zákazníka (z search_customers), nebo null pro plán bez zákazníka.",
+      lines:
+        "Položky faktury. V textu lze použít proměnné období jako {{mesic}}, {{mesic_nazev}}, {{rok}}.",
+      note: "Poznámka na faktuře.",
+      dueDays: "Splatnost ve dnech od vystavení.",
+      frequency:
+        "Četnost: weekly, monthly, quarterly, half_yearly, yearly, every_weeks, every_months.",
+      every: "U every_weeks a every_months počet týdnů nebo měsíců.",
+      issueRule:
+        "Kdy vystavit: day (konkrétní den), period_end, first_working_day, last_working_day.",
+      issueDay: "Den v měsíci u issueRule day.",
+      startsOn: "Začátek plánu, RRRR-MM-DD.",
+      endsOn: "Konec plánu, RRRR-MM-DD, nebo null.",
+      maxCount: "Nejvýš termínů, nebo null.",
+      periodOffset: "Posun fakturovaného období proti datu vystavení (-1 předchozí, 0 aktuální).",
+      mode: "Režim: draft vytvoří koncept, issue fakturu vystaví, send ji vystaví a odešle. Plán, který vystavuje nebo odesílá, vyžaduje úroveň Vystavování a odesílání.",
+      notifyDaysBefore: "Upozornit uživatele tolik dní předem, nebo null.",
+      label: "Plán",
+      lineLabel: (n: number) => `Položka ${n}`,
+      noteLabel: "Poznámka",
+      customerLabel: "Zákazník",
+      noCustomer: "bez zákazníka",
+      empty: "Žádná pravidelná faktura.",
+      heading: (count: number, more: boolean) =>
+        `Pravidelné faktury: ${count}${more ? " (zobrazeno prvních 50)" : ""}`,
+      row: (id: string, name: string, status: string, mode: string, next: string, link: string) =>
+        `${id}: ${name}, ${status}, ${mode}, příště ${next}, ${link}`,
+      noNext: "už ne",
+      plan: (status: string, mode: string, frequency: string, next: string) =>
+        `Stav: ${status}, režim: ${mode}, četnost: ${frequency}, příští vystavení: ${next}`,
+      line: (name: string, quantity: string, price: string) => `${name}: ${quantity} × ${price}`,
+      list: {
+        name: "list_recurring",
+        title: "Seznam pravidelných faktur",
+        description:
+          "Pravidelné faktury účtu (nejvýš 50): název, zákazník, stav, režim a datum příštího vystavení.",
+      },
+      get: {
+        name: "get_recurring",
+        title: "Detail pravidelné faktury",
+        description: "Plán pravidelné faktury: pravidlo opakování, režim, stav a položky.",
+      },
+      runs: {
+        name: "list_recurring_runs",
+        title: "Termíny pravidelné faktury",
+        description:
+          "Proběhlé a zmeškané termíny plánu (nejvýš 50), nejnovější první. Zmeškaný termín vyřeší resolve_missed_run.",
+        empty: "Plán zatím nemá žádný termín.",
+        row: (id: string, date: string, status: string, number: string) =>
+          `${id}: ${date}, ${status}${number ? `, faktura ${number}` : ""}`,
+      },
+      invoices: {
+        name: "list_plan_invoices",
+        title: "Faktury z pravidelné faktury",
+        description: "Doklady, které plán vytvořil (nejvýš 50).",
+        empty: "Plán zatím nevytvořil žádný doklad.",
+        row: (id: string, number: string, status: string, total: string) =>
+          `${id}: ${number}, ${status}, ${total}`,
+        noNumber: "bez čísla",
+      },
+      preview: {
+        name: "preview_recurring",
+        title: "Náhled termínů pravidelné faktury",
+        description:
+          "Spočítá nejbližší termíny vystavení pro zadané pravidlo, nic neuloží. S id počítá s uloženým plánem a doplní, co v zadání chybí.",
+        heading: "Nejbližší termíny:",
+        row: (date: string, from: string, to: string) => `${date} (období ${from} až ${to})`,
+      },
+      save: {
+        name: "save_recurring",
+        title: "Uložit pravidelnou fakturu",
+        description:
+          "Založí plán pravidelné faktury, nebo s id upraví existující; co neuvedete, zůstane. Režim send musí poprvé potvrdit uživatel ve webu.",
+        done: "Plán je uložený.",
+      },
+      pause: {
+        name: "pause_recurring",
+        title: "Pozastavit pravidelnou fakturu",
+        description: "Pozastaví aktivní plán; do obnovení nic nevystaví.",
+        done: "Plán je pozastavený.",
+      },
+      resume: {
+        name: "resume_recurring",
+        title: "Obnovit pravidelnou fakturu",
+        description:
+          "Obnoví pozastavený plán. Termíny, které mezitím uplynuly, se označí jako zmeškané.",
+        done: "Plán je obnovený.",
+      },
+      missed: {
+        name: "resolve_missed_run",
+        title: "Vyřešit zmeškaný termín",
+        description:
+          "Zmeškaný termín plánu buď vytvoří jako koncept (draft), nebo vynechá (skip). Nic se neodešle.",
+        runId: "ID termínu z list_recurring_runs.",
+        action: "draft vytvoří koncept, skip termín vynechá.",
+        drafted: "Termín je vyřízený, vznikl koncept.",
+        skipped: "Termín je vynechaný.",
+      },
+      fromTemplate: {
+        name: "recurring_from_template",
+        title: "Pravidelná faktura ze šablony",
+        description:
+          "Založí měsíční plán v režimu koncept ze šablony faktury; pravidlo pak upravíte přes save_recurring.",
+        id: "ID šablony (z list_invoice_templates).",
+      },
+      delete: {
+        name: "delete_recurring",
+        title: "Smazat pravidelnou fakturu",
+        description: "Trvale smaže plán. Faktury, které vytvořil, zůstanou.",
+        done: "Plán je smazaný.",
+      },
+    },
+    // Invoice templates (spec 5.1, 5.4, 5.5).
+    templates: {
+      fields: { id: "šablona", name: "název" },
+      id: "ID šablony faktury (z list_invoice_templates).",
+      label: "Šablona",
+      lineLabel: (n: number) => `Položka ${n}`,
+      customerLabel: "Zákazník",
+      empty: "Žádná šablona faktury.",
+      heading: (count: number, more: boolean) =>
+        `Šablony faktur: ${count}${more ? " (zobrazeno prvních 50)" : ""}`,
+      row: (id: string, name: string, lines: number) => `${id}: ${name}, položek ${lines}`,
+      list: {
+        name: "list_invoice_templates",
+        title: "Seznam šablon faktur",
+        description: "Šablony faktur účtu (nejvýš 50) s počtem položek.",
+      },
+      get: {
+        name: "get_invoice_template",
+        title: "Detail šablony faktury",
+        description: "Šablona faktury: zákazník, měna, splatnost a položky.",
+      },
+      fromInvoice: {
+        name: "save_invoice_as_template",
+        title: "Uložit fakturu jako šablonu",
+        description: "Uloží položky a nastavení faktury jako novou šablonu.",
+        id: "ID faktury.",
+        name_: "Název šablony.",
+        done: "Šablona je uložená.",
+      },
+      delete: {
+        name: "delete_invoice_template",
+        title: "Smazat šablonu faktury",
+        description: "Trvale smaže šablonu. Plány a faktury z ní zůstanou.",
+        done: "Šablona je smazaná.",
+      },
+    },
+    // Number series (spec 5.1, 5.4, 5.5).
+    series: {
+      fields: {
+        id: "řada",
+        name: "název",
+        documentType: "typ dokladu",
+        template: "formát",
+        reset: "nulování",
+        next: "příští číslo",
+        date: "datum",
+      },
+      id: "ID číselné řady (z list_number_series).",
+      name: "Název řady.",
+      documentType: "Typ dokladu: invoice, advance, credit_note.",
+      template:
+        "Formát čísla, např. {RRRR}-{NNN}; {RRRR} rok, {RR} rok dvoumístně, {MM} měsíc, {NNN} pořadí.",
+      reset: "Kdy začít znovu od 1: yearly, quarterly, monthly, never.",
+      defaultMark: " (výchozí)",
+      heading: "Číselné řady:",
+      row: (id: string, name: string, type: string, template: string, next: string) =>
+        `${id}: ${name}, ${type}, ${template}, příští číslo ${next}`,
+      list: {
+        name: "list_number_series",
+        title: "Číselné řady",
+        description:
+          "Číselné řady účtu s formátem, výchozí řadou pro každý typ dokladu a číslem, které dostane příští vystavený doklad.",
+      },
+      save: {
+        name: "save_number_series",
+        title: "Uložit číselnou řadu",
+        description: "Založí číselnou řadu, nebo s id upraví existující.",
+        done: "Řada je uložená.",
+      },
+      setDefault: {
+        name: "set_default_series",
+        title: "Nastavit výchozí řadu",
+        description: "Nastaví řadu jako výchozí pro její typ dokladu.",
+        done: "Řada je výchozí.",
+      },
+      setNext: {
+        name: "set_next_number",
+        title: "Nastavit příští číslo řady",
+        description:
+          "Nastaví pořadí, které dostane příští vystavený doklad v aktuálním období řady. Obsazené číslo odmítne.",
+        next: "Příští pořadové číslo, od 1.",
+        date: "Den, jehož období se mění, RRRR-MM-DD; jinak dnešek.",
+        done: (next: number) => `Příští pořadí je ${next}.`,
+      },
+      delete: {
+        name: "delete_number_series",
+        title: "Smazat číselnou řadu",
+        description: "Smaže nepoužitou řadu, která není výchozí.",
+        done: "Řada je smazaná.",
+      },
+    },
+    config: {
+      fields: {
+        key: "automatizace",
+        time: "čas",
+        enabled: "zapnuto",
+        mode: "režim",
+        offsetDays: "posun ve dnech",
+        texts: "texty",
+        kind: "druh zprávy",
+        language: "jazyk",
+        subject: "předmět",
+        body: "text",
+        turnoverVatLimit: "limit obratu pro DPH",
+        turnoverFlatLimit: "limit obratu pro paušální daň",
+        fixedRates: "pevné kurzy",
+      },
+      supplier: {
+        field: "Údaj dodavatele; vynechané pole zůstane, jak je.",
+        missing: (fields: string) => `Před vystavením faktury chybí: ${fields}`,
+        complete: "Údaje potřebné k vystavení jsou vyplněné.",
+        vatIdentified: (yes: boolean) =>
+          yes ? "Identifikovaná osoba k DPH: ano" : "Identifikovaná osoba k DPH: ne",
+        get: {
+          name: "get_supplier",
+          title: "Údaje dodavatele",
+          description:
+            "Údaje dodavatele, které se tisknou na fakturách (jméno, adresa, IČO, DIČ, kontakt a texty), a seznam údajů, které chybí k vystavení.",
+        },
+        save: {
+          name: "save_supplier",
+          title: "Uložit údaje dodavatele",
+          description:
+            "Změní údaje dodavatele. Pošli jen pole, která se mění; ostatní zůstanou. Logo a podpis se nastavují jen ve webu.",
+          done: "Údaje dodavatele jsou uložené.",
+        },
+      },
+      preferences: {
+        field: "Výchozí hodnota pro nové faktury; vynechané pole zůstane, jak je.",
+        turnoverLimit:
+          "Vlastní limit obratu v Kč jako desetinné číslo, např. 1 500 000; null znamená zákonný limit.",
+        fixedRates:
+          'Pevné kurzy cizích měn vůči Kč, např. { "EUR": "25,1" }; měna, která chybí, používá kurz ČNB.',
+        heading: "Výchozí hodnoty:",
+        row: (label: string, value: string) => `${label}: ${value}`,
+        statutory: "zákonný",
+        get: {
+          name: "get_preferences",
+          title: "Výchozí hodnoty",
+          description:
+            "Výchozí hodnoty nových faktur: splatnost, jazyk, měna, způsob platby, jednotka, texty, formáty, kurzy a limity obratu. Vzhled dokladu sem nepatří, nastavuje se ve webu.",
+        },
+        save: {
+          name: "save_preferences",
+          title: "Uložit výchozí hodnoty",
+          description:
+            "Změní výchozí hodnoty nových faktur. Pošli jen pole, která se mění. Design, barvy a umístění loga se nastavují jen ve webu.",
+          done: "Výchozí hodnoty jsou uložené.",
+        },
+      },
+      automation: {
+        key: "Automatizace: recurringSend (odesílání pravidelných faktur), reminders (upomínky), paymentReceipt (potvrzení platby), advanceInvoice (daňový doklad k záloze).",
+        time: "Čas odesílání automatické pošty, HH:MM.",
+        enabled: "true zapne, false vypne.",
+        mode: "Souhrn za období: off, monthly, quarterly.",
+        on: "zapnuto",
+        off: "vypnuto",
+        state: (label: string, on: string) => `${label}: ${on}`,
+        labels: {
+          recurringSend: "Odesílání pravidelných faktur",
+          reminders: "Upomínky",
+          paymentReceipt: "Potvrzení přijaté platby",
+          advanceInvoice: "Daňový doklad k přijaté záloze",
+          paused: "Vše pozastaveno",
+          sendTime: "Čas odesílání",
+          dailyDigest: "Denní přehled",
+          periodSummary: "Souhrn za období",
+          taxReminder: "Připomínka daní",
+          limitMail: "Upozornění na limity obratu",
+        },
+        get: {
+          name: "get_automation",
+          title: "Automatizace",
+          description:
+            "Které automatizace jsou zapnuté, zda je vše pozastavené, čas odesílání a pošta, kterou Fakturan posílá vlastníkovi účtu.",
+        },
+        disable: {
+          name: "disable_automation",
+          title: "Vypnout automatizaci",
+          description:
+            "Vypne jednu automatizaci. Zapnout ji jde jen ve webu, protože to potvrzuje člověk.",
+          done: "Automatizace je vypnutá.",
+        },
+        pause: {
+          name: "pause_automation",
+          title: "Pozastavit automatizace",
+          description:
+            "Pozastaví všechny automatizace najednou. Obnovit je jde jen ve webu, protože to potvrzuje člověk.",
+          done: "Automatizace jsou pozastavené.",
+        },
+        sendTime: {
+          name: "set_send_time",
+          title: "Čas odesílání",
+          description: "Nastaví čas, kdy odchází automatická pošta.",
+          done: "Čas odesílání je uložený.",
+        },
+        dailyDigest: {
+          name: "set_daily_digest",
+          title: "Denní přehled",
+          description: "Zapne nebo vypne denní přehled, který chodí vlastníkovi účtu.",
+          done: "Denní přehled je nastavený.",
+        },
+        periodSummary: {
+          name: "set_period_summary",
+          title: "Souhrn za období",
+          description: "Nastaví měsíční nebo čtvrtletní souhrn pro vlastníka účtu, nebo ho vypne.",
+          done: "Souhrn za období je nastavený.",
+        },
+        taxReminder: {
+          name: "set_tax_reminder",
+          title: "Připomínka daní",
+          description: "Zapne nebo vypne připomínku daňových termínů pro vlastníka účtu.",
+          done: "Připomínka daní je nastavená.",
+        },
+        limitMail: {
+          name: "set_limit_mail",
+          title: "Upozornění na limity obratu",
+          description: "Zapne nebo vypne e-mail vlastníkovi, když se obrat blíží limitu.",
+          done: "Upozornění na limity je nastavené.",
+        },
+      },
+      reminders: {
+        id: "ID pravidla upomínky (z list_reminder_rules).",
+        offsetDays:
+          "Kolik dní po splatnosti upomínka odchází; záporné číslo znamená před splatností.",
+        texts:
+          "Vlastní texty upomínky podle jazyka { cs: { subject, body }, en: { subject, body } }; null znamená výchozí text.",
+        empty: "Žádná pravidla upomínek.",
+        heading: "Pravidla upomínek:",
+        row: (id: string, offset: number, custom: boolean) =>
+          `${id}: ${offset} dní po splatnosti${custom ? ", vlastní text" : ""}`,
+        subjectLabel: (language: string) => `Předmět (${language})`,
+        list: {
+          name: "list_reminder_rules",
+          title: "Pravidla upomínek",
+          description:
+            "Pravidla automatických upomínek: kolik dní po splatnosti odcházejí a jejich vlastní texty.",
+        },
+        save: {
+          name: "save_reminder_rule",
+          title: "Uložit pravidlo upomínky",
+          description:
+            "Založí pravidlo upomínky, nebo s id upraví existující; vynechané pole zůstane, jak je.",
+          done: "Pravidlo upomínky je uložené.",
+        },
+        delete: {
+          name: "delete_reminder_rule",
+          title: "Smazat pravidlo upomínky",
+          description: "Smaže pravidlo upomínky.",
+          done: "Pravidlo upomínky je smazané.",
+        },
+      },
+      templates: {
+        kind: "Druh zprávy: invoice, advance, credit_note, reminder, payment_receipt.",
+        language: "Jazyk zprávy: cs, en.",
+        subject: "Předmět; může obsahovat proměnné jako {{cislo_faktury}}.",
+        body: "Text zprávy; může obsahovat proměnné jako {{castka}} nebo {{splatnost}}.",
+        custom: " (vlastní)",
+        heading: "E-mailové šablony:",
+        row: (kind: string, language: string, custom: string) => `${kind} ${language}${custom}`,
+        subjectLabel: "Předmět",
+        bodyLabel: "Text",
+        list: {
+          name: "list_email_templates",
+          title: "E-mailové šablony",
+          description:
+            "Předměty a texty e-mailů podle druhu zprávy a jazyka; vlastní znění je označené.",
+        },
+        get: {
+          name: "get_email_template",
+          title: "E-mailová šablona",
+          description: "Předmět a text e-mailu pro jeden druh zprávy a jazyk.",
+        },
+        save: {
+          name: "save_email_template",
+          title: "Uložit e-mailovou šablonu",
+          description: "Uloží vlastní předmět nebo text e-mailu; vynechané pole zůstane, jak je.",
+          done: "Šablona je uložená.",
+        },
+        reset: {
+          name: "reset_email_template",
+          title: "Vrátit výchozí znění šablony",
+          description: "Smaže vlastní znění a vrátí výchozí předmět a text.",
+          done: "Šablona má výchozí znění.",
+        },
+      },
+    },
+    insights: {
+      fields: {
+        period: "období",
+        from: "od",
+        to: "do",
+        compare: "porovnání",
+        currency: "měna",
+        includeImported: "včetně importovaných",
+        year: "rok",
+        basis: "základ",
+        query: "hledaný text",
+        action: "akce",
+        entity: "druh záznamu",
+        entityId: "ID záznamu",
+        source: "zdroj",
+        actor: "kdo",
+        page: "stránka",
+        date: "datum",
+      },
+      report: {
+        name: "get_report",
+        title: "Přehledy",
+        description:
+          "Přehledy jako ve webu: fakturace a příjmy po obdobích, srovnání s předchozím obdobím, stáří pohledávek, nejlepší zákazníci a položky, měny, průměrná doba úhrady, limity obratu a výhled. Bez zadání je to letošní rok.",
+        period:
+          "Pojmenované období: this_month, this_quarter, this_year, last_year, last_30_days, last_12_months. Nelze kombinovat s from a to.",
+        from: "Začátek vlastního období RRRR-MM-DD.",
+        to: "Konec vlastního období RRRR-MM-DD.",
+        compare:
+          "S čím srovnat: previous (předchozí stejně dlouhé období) nebo year (stejné období loni).",
+        currency: "Jen doklady v této měně; částky jsou pak v ní, jinak v Kč.",
+        includeImported: "False vynechá doklady importované z jiných systémů.",
+        bothPeriods: "Zadejte buď pojmenované období, nebo from a to.",
+        heading: (from: string, to: string, currency: string) =>
+          `Přehled za ${from} – ${to} (${currency}):`,
+        summary: (
+          invoiced: string,
+          income: string,
+          outstanding: string,
+          overdue: string,
+          advanceOpen: string,
+        ) =>
+          `Vyfakturováno ${invoiced}, příjmy ${income}, neuhrazeno ${outstanding}, po splatnosti ${overdue}, otevřené zálohy ${advanceOpen}.`,
+        previous: (invoiced: string, income: string) =>
+          `Srovnávací období: vyfakturováno ${invoiced}, příjmy ${income}.`,
+        unconverted: (count: number) => `${count} dokladů zatím nemá kurz ČNB a v součtech chybí.`,
+        aging: (current: string, d30: string, d60: string, d90: string, older: string) =>
+          `Stáří pohledávek: do splatnosti ${current}, 1–30 dní ${d30}, 31–60 dní ${d60}, 61–90 dní ${d90}, déle ${older}.`,
+        customers: "Nejlepší zákazníci:",
+        items: "Nejlepší položky:",
+        others: "ostatní",
+        adjustment: "opravy a dobropisy",
+        rankRow: (name: string, amount: string) => `- ${name}: ${amount}`,
+        paymentDays: (days: number | null, count: number) =>
+          days === null
+            ? "Průměrnou dobu úhrady zatím nejde spočítat."
+            : `Průměrná doba úhrady ${days} dní (z ${count} plateb).`,
+        limit: (key: string, turnover: string, limit: string) =>
+          `Limit ${key}: obrat ${turnover} z ${limit}.`,
+        link: (url: string) => `Ve webu: ${url}`,
+      },
+      tax: {
+        name: "get_tax_overview",
+        title: "Podklady k dani",
+        description:
+          "Podklady k dani z příjmů za kalendářní rok: doklady s částkou v Kč a neuhrazené doklady. Základ paid počítá podle data úhrady, issued podle data vystavení.",
+        year: "Rok, např. 2026. Bez zadání předchozí rok, v prosinci letošní.",
+        basis: "paid (podle úhrady) nebo issued (podle vystavení).",
+        heading: (year: number, basis: string, total: string) =>
+          `Podklady k dani ${year} (${basis}): celkem ${total}.`,
+        bases: { paid: "podle úhrady", issued: "podle vystavení" },
+        line: (date: string, number: string, customer: string, amount: string) =>
+          `- ${date} ${number} ${customer}: ${amount}`,
+        unpaid: (count: number, total: string) => `Neuhrazeno ${count} dokladů za ${total}.`,
+        estimated: (count: number) => `${count} částek je odhadnutých podle kurzu.`,
+        more: (shown: number, total: number) => `Zobrazeno ${shown} z ${total}.`,
+        customer: "Odběratel",
+      },
+      search: {
+        name: "quick_search",
+        title: "Rychlé hledání",
+        description:
+          "Hledá napříč fakturami, zákazníky, ceníkem, opakovanými fakturami a stránkami webu, jako hledání v horní liště. Potřebuje aspoň 2 znaky.",
+        query: "Hledaný text, aspoň 2 znaky.",
+        none: "Nic nenalezeno.",
+        limited: "Hledání je teď omezené, zkuste to za chvíli.",
+        heading: (count: number) => `Nalezeno ${count}:`,
+        row: (group: string, id: string, label: string, detail: string, link: string) =>
+          `- [${group}] ${id} ${label} ${detail} ${link}`.replace(/\s+/g, " "),
+        label: "Název",
+        detail: "Podrobnosti",
+      },
+      audit: {
+        list: {
+          name: "list_audit",
+          title: "Historie změn",
+          description:
+            "Historie změn účtu, nejnovější první, po 50 záznamech. Filtr podle akce, druhu záznamu, zdroje (web, scheduler, import, system, mcp), autora a období.",
+          action: "Kód akce, např. invoice.issue.",
+          entity: "Druh záznamu, např. invoice, customer, payment.",
+          source: "Odkud změna přišla: web, scheduler, import, system nebo mcp.",
+          actor: "self pro vlastní změny, other pro změny jiných osob.",
+          from: "Od data RRRR-MM-DD.",
+          to: "Do data RRRR-MM-DD.",
+          page: "Číslo stránky od 1.",
+        },
+        history: {
+          name: "get_entity_history",
+          title: "Historie záznamu",
+          description: "Posledních 100 změn jednoho záznamu, např. faktury nebo zákazníka.",
+          entity: "Druh záznamu, např. invoice.",
+          entityId: "ID záznamu.",
+        },
+        none: "Žádné změny.",
+        heading: (count: number, page: number) => `Změny (${count}, stránka ${page}):`,
+        historyHeading: (count: number) => `Změny záznamu (${count}):`,
+        row: (at: string, source: string, label: string, entity: string, id: string) =>
+          `- ${at} [${source}] ${label} ${entity} ${id}`,
+        client: "Asistent",
+        before: "Před",
+        after: "Po",
+        hasNext: "Další záznamy jsou na další stránce.",
+      },
+      imports: {
+        list: {
+          name: "list_import_batches",
+          title: "Importy",
+          description:
+            "Posledních 20 importů s jejich stavem. Hotový import (done) jde vrátit nástrojem undo_import.",
+        },
+        undo: {
+          name: "undo_import",
+          title: "Vrátit import",
+          description:
+            "Vrátí hotový import: smaže doklady, platby a nové zákazníky, které přinesl. Nejde to, pokud na importované doklady už někdo navázal.",
+          id: "ID importu z list_import_batches.",
+          done: "Import je vrácený.",
+        },
+        none: "Žádné importy.",
+        row: (id: string, kind: string, status: string, created: string) =>
+          `- ${id} ${kind} ${status} ${created}`,
+        error: "Chyba",
+      },
+      rate: {
+        name: "get_exchange_rate",
+        title: "Kurz měny",
+        description:
+          "Kurz cizí měny vůči Kč k datu: pevný kurz z nastavení, nebo kurz ČNB platný k tomu dni.",
+        currency: "Měna, např. EUR.",
+        date: "Datum RRRR-MM-DD.",
+        none: (currency: string, date: string) => `Kurz ${currency} k ${date} není k dispozici.`,
+        found: (currency: string, rate: string, source: string, listDate: string) =>
+          `1 ${currency} = ${rate} Kč (${source}${listDate ? `, lístek ${listDate}` : ""}).`,
+        sources: {
+          cnb: "ČNB",
+          last_known: "poslední známý kurz ČNB",
+          fixed: "pevný kurz",
+          import: "kurz z importu",
+        },
+      },
+    },
   },
   demo: {
     locked: "V ukázce tohle nejde změnit",

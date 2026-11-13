@@ -46,8 +46,9 @@ import {
   type Totals,
 } from "@/lib/invoice-totals";
 import { AmountOutOfRangeError } from "@/lib/money";
-import { calendarDateInPrague, isCalendarDate } from "@/lib/number-format";
+import { calendarDateInPrague, isCalendarDate, type CalendarDate } from "@/lib/number-format";
 import { defaultIssueDate, LANGUAGES, PAYMENT_METHODS } from "@/lib/preferences";
+import { amountDue } from "@/lib/qr-payload";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { clock } from "../clock";
@@ -70,11 +71,12 @@ import { defaultAccountFor } from "./bank-accounts";
 import { MAX_PRICE_MINOR } from "./catalog";
 import { customerDefaults, escapeLike } from "./customers";
 import { mutate, type Audit } from "./mutation";
-import { defaultSeriesFor } from "./number-series";
+import { checkIssuable, type IssueProblem } from "./invoice-lifecycle";
+import { defaultSeriesFor, ensureDefaultSeries } from "./number-series";
 import { averagePaymentDays } from "./payments";
 import { colorSchema, designIdSchema, getPreferences, logoPositionSchema } from "./preferences";
 import { clauseDefaultsOf } from "./supplier";
-import { linkTags, listTags, tagsOf, type Tag } from "./tags";
+import { assertTagNames, linkTags, listTags, setInvoiceTags, tagsOf, type Tag } from "./tags";
 
 export { dueSql, fullDue, openCondition, overdueCondition } from "../db/invoice-sql";
 
@@ -317,6 +319,22 @@ export function linesOf(q: Reader, ownerId: string, invoiceId: string): InvoiceL
 export function getInvoice(ownerId: string, id: string): InvoiceDetail | null {
   const row = readOwned(db, ownerId, id);
   if (!row) return null;
+  return detailOf(row);
+}
+
+// The number is unique per account, so the same account scope as the id lookup applies.
+export function getInvoiceByNumber(ownerId: string, number: string): InvoiceDetail | null {
+  const row = db
+    .select()
+    .from(invoice)
+    .where(scoped(ownerId).where(invoice, (t, { eq }) => eq(t.number, number)))
+    .get();
+  return row ? detailOf(row) : null;
+}
+
+function detailOf(row: Invoice): InvoiceDetail {
+  const ownerId = row.userId;
+  const id = row.id;
   return {
     ...row,
     lines: linesOf(db, ownerId, id),
@@ -331,27 +349,33 @@ export function isFreeDraftId(ownerId: string, id: string): boolean {
   return !readOwned(db, ownerId, id);
 }
 
+// What a caller already chose for the new document; the rest follows from it as in the web form:
+// the due date keeps the customer's gap after the issue date, the account matches the currency.
+export type DraftChoices = { issueDate?: CalendarDate; currency?: Currency };
+
 export function newDraftDefaults(
   ownerId: string,
   customerId: string | null,
   type: InvoiceType = "invoice",
+  chosen: DraftChoices = {},
 ): DraftInput {
   const prefs = getPreferences(ownerId);
   const defaults = customerId
     ? customerDefaults(ownerId, customerId, prefs)
     : { ...prefs, foreign: false, dic: "" };
   const { vatIdentified, texts } = clauseDefaultsOf(ownerId);
-  const issueDate = defaultIssueDate(defaults.issueDateMode, clock.now());
+  const issueDate = chosen.issueDate ?? defaultIssueDate(defaults.issueDateMode, clock.now());
+  const currency = chosen.currency ?? defaults.currency;
   return {
     type,
     customerId,
-    bankAccountId: defaultAccountFor(ownerId, defaults.currency)?.id ?? null,
+    bankAccountId: defaultAccountFor(ownerId, currency)?.id ?? null,
     seriesId: defaultSeriesFor(ownerId, type)?.id ?? null,
     issueDate,
     dueDate: addDays(issueDate, defaults.dueDays),
     taxableDate: null,
     language: defaults.language,
-    currency: defaults.currency,
+    currency,
     exchangeRateMicros: null,
     foreign: defaults.foreign,
     clause: suggestedClause({
@@ -836,6 +860,9 @@ export type InvoiceFilter = {
   type?: InvoiceType;
   tagId?: string;
   external?: boolean;
+  // Issued, sent or partly paid documents with something left to pay; advances stay out like in
+  // the reports.
+  unpaid?: boolean;
   sort?: InvoiceSort;
   dir?: SortDirection;
   page?: number;
@@ -1020,6 +1047,7 @@ function invoiceConditions(ownerId: string, filter: InvoiceFilter): SQL {
       filter.currency ? eq(t.currency, filter.currency) : undefined,
       filter.type ? eq(t.type, filter.type) : undefined,
       filter.external ? eq(t.external, true) : undefined,
+      filter.unpaid ? and(openCondition, ne(t.type, "advance")) : undefined,
       tagId
         ? exists(
             db
@@ -1087,6 +1115,33 @@ export function listInvoices(ownerId: string, filter: InvoiceFilter): Page<Invoi
   return invoiceRows(invoiceConditions(ownerId, filter), filter);
 }
 
+export type UnpaidRow = InvoiceRow & { remainingMinor: number; daysOverdue: number };
+
+// What is still owed, oldest due date first, with the amount left and the days past due worked
+// out here so that a caller never does arithmetic on amounts or dates.
+export function listUnpaidInvoices(
+  ownerId: string,
+  filter: Pick<InvoiceFilter, "customerId" | "page" | "pageSize"> & { overdueOnly?: boolean },
+): Page<UnpaidRow> {
+  const { overdueOnly, ...rest } = filter;
+  const today = calendarDateInPrague(clock.now());
+  const page = listInvoices(ownerId, {
+    ...rest,
+    unpaid: true,
+    status: overdueOnly ? "overdue" : undefined,
+    sort: "dueDate",
+    dir: "asc",
+  });
+  return {
+    ...page,
+    rows: page.rows.map((row) => ({
+      ...row,
+      remainingMinor: amountDue(row),
+      daysOverdue: row.overdue && row.dueDate ? daysBetween(row.dueDate, today) : 0,
+    })),
+  };
+}
+
 export function invoiceSummary(ownerId: string, filter: InvoiceFilter): InvoiceSummaryRow[] {
   const overdue = and(
     overdueCondition(calendarDateInPrague(clock.now())),
@@ -1142,4 +1197,22 @@ export function invoiceFilterOptions(ownerId: string): InvoiceFilterOptions {
     .orderBy(asc(czech(customer.name)), asc(customer.id))
     .all();
   return { customers, tags: listTags(ownerId) };
+}
+
+// The draft form's save: tags are checked before anything is written, the default series exist
+// before the draft needs one, and the answer says what still blocks issuing.
+export function saveDraftWithTags(
+  actor: Actor,
+  draft: DraftInput,
+  tags: string[],
+): { id: string; revision: number; problems: IssueProblem[] } {
+  assertTagNames(tags);
+  ensureDefaultSeries(actor);
+  const saved = saveDraft(actor, draft);
+  setInvoiceTags(actor, saved.id, tags);
+  return {
+    id: saved.id,
+    revision: saved.revision,
+    problems: checkIssuable(ownerOf(actor), saved.id),
+  };
 }

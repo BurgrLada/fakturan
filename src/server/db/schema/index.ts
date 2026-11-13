@@ -25,3 +25,5 @@ export * from "./mail";
 export * from "./mail-look";
 export * from "./reminder";
 export * from "./dashboard";
+export * from "./oauth";
+export * from "./mcp";

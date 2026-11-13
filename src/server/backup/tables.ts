@@ -23,6 +23,7 @@ import {
   mailLook,
   mailSettings,
   mappingPreset,
+  mcpSettings,
   notification,
   numberSeries,
   numberSeriesCounter,
@@ -655,6 +656,20 @@ export const BACKUP_TABLES: BackupTable[] = [
     columns: { id: "id", user_id: "owner", year: C, threshold: C, created_at: C },
   },
   {
+    name: "mcp_settings",
+    table: mcpSettings,
+    since: 2,
+    // Restored with access switched off (MCP-042); OAuth clients, tokens and consents never go in.
+    columns: {
+      user_id: "owner",
+      enabled: C,
+      level: C,
+      log_calls: C,
+      revision: C,
+      updated_at: C,
+    },
+  },
+  {
     name: "email_template",
     table: emailTemplate,
     columns: {
@@ -706,6 +721,7 @@ export const BACKUP_SKIPPED_TABLES: Record<string, string> = {
   job: "fronta se neobnovuje",
   export_job: "exporty i zálohy jsou dočasné a vyprší",
   bank_mailbox: "řádek nemůže existovat bez hesla, které do zálohy nesmí",
+  mcp_call_log: "provozní záznam volání asistentů s krátkou životností (MCP-065)",
 };
 
 export type BackupFingerprint = { v: number; tables: Record<string, Record<string, ColumnRule>> };

@@ -7,11 +7,7 @@ import { MESSAGE_KINDS } from "@/lib/email-template";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, requireSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
-import {
-  getEmailTemplate,
-  resetEmailTemplate,
-  saveEmailTemplate,
-} from "@/server/services/email-templates";
+import { resetEmailTemplateAndRead, saveEmailTemplate } from "@/server/services/email-templates";
 
 type Failure = { ok: false; error: string };
 type Outcome = { ok: true } | Failure;
@@ -47,9 +43,5 @@ export async function resetEmailTemplateAction(raw: unknown): Promise<ResetOutco
   const parsed = resetSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: TEXTS.emailTemplates.errors.invalid };
   const { kind, language } = parsed.data;
-  return guarded((actor) => {
-    resetEmailTemplate(actor, kind, language);
-    const { subject, body } = getEmailTemplate(actor.userId ?? "", kind, language);
-    return { subject, body };
-  });
+  return guarded((actor) => resetEmailTemplateAndRead(actor, kind, language));
 }

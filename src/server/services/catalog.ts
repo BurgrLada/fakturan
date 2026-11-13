@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { CURRENCIES } from "@/lib/currency";
+import { CURRENCIES, type Currency } from "@/lib/currency";
 import { foldText } from "@/lib/fold-text";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
@@ -350,4 +350,19 @@ export function deleteUnit(actor: Actor, id: string): void {
       before: { name: row.name },
     });
   });
+}
+
+// A document line kept for reuse: no category and no tags, the description may be left out.
+export function saveLineToCatalog(
+  actor: Actor,
+  line: {
+    name: string;
+    description?: string;
+    unit: string;
+    priceMinor: number;
+    currency: Currency;
+  },
+): { id: string } {
+  const { description = "", ...rest } = line;
+  return saveCatalogItem(actor, { ...rest, description, category: "", tags: [] });
 }

@@ -1,3 +1,5 @@
+import { TEXTS } from "./texts";
+
 export const ACTION_LABELS: Record<string, string> = {
   "access.denied": "Odmítnutý přístup",
   "account.backup": "Spuštění zálohy účtu",
@@ -146,6 +148,10 @@ export const ACTION_LABELS: Record<string, string> = {
   "mail_settings.save": "Uložení nastavení pošty",
   "mail_settings.test": "Ověření vlastního SMTP",
   "mapping_preset.delete": "Smazání předlohy importu",
+  "mcp.connected": "Propojení asistenta",
+  "mcp.disconnected": "Odpojení asistenta",
+  "mcp.settings_changed": "Změna nastavení asistentů",
+  "mcp.call_log_cleared": "Smazání logu volání asistentů",
   "mapping_preset.save": "Uložení předlohy importu",
   "notification.read": "Přečtení upozornění",
   "notification.read_all": "Přečtení všech upozornění",
@@ -212,4 +218,12 @@ export const ACTION_LABELS: Record<string, string> = {
 
 export function auditActionLabel(action: string): string {
   return ACTION_LABELS[action] ?? "Jiná událost";
+}
+
+type SourceRow = { source: keyof typeof TEXTS.history.sources; clientName: string | null };
+
+// A change made through MCP names the assistant; its name is the client's own claim (MCP-030).
+export function auditSourceLabel(row: SourceRow): string {
+  if (row.source !== "mcp") return TEXTS.history.sources[row.source];
+  return TEXTS.history.assistant(row.clientName || TEXTS.mcp.consent.unknownClient);
 }

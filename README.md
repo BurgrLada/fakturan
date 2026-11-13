@@ -330,6 +330,105 @@ Soubor nese jen nastavení widgetů, žádná data, má nejvýš 64 KiB a 50 wid
 nad daty cílového účtu, založí nový dashboard a stávající nezmění. Filtr na zákazníky, které cílový
 účet nemá, se zahodí. Soubor z novější verze aplikace import odmítne s výzvou k aktualizaci.
 
+## Asistenti (MCP)
+
+Fakturan umí zpřístupnit data AI asistentovi (Claude Code, Claude.ai) přes protokol MCP na adrese
+`<BETTER_AUTH_URL>/api/mcp`. Přihlášení běží přes OAuth, asistent nikdy nezná vaše heslo.
+
+**Zapnutí.** Každý uživatel si přístup povoluje sám v Nastavení › Asistenti volbou „Povolit
+připojení asistentů“ (ve výchozím stavu je vypnutá). Na stejné stránce je adresa pro asistenty
+s tlačítkem Kopírovat a stručný návod. Proměnná `MCP_ENABLED` (výchozí `true`) vypíná MCP pro celou
+instanci: endpoint, metadata OAuth i autorizace pak odpovídají 404 a stránka Asistenti se
+nezobrazí. V režimu ukázky (`DEMO_MODE`) je MCP vypnuté vždy, protože ukázkový účet je veřejný.
+
+**Připojení.**
+
+- Claude Code: `claude mcp add --transport http fakturan <BETTER_AUTH_URL>/api/mcp`. Při prvním
+  použití se otevře prohlížeč, přihlásíte se do Fakturanu a asistentovi přístup povolíte.
+- Claude.ai: Settings › Connectors › Add custom connector a vložte stejnou adresu. Claude.ai se
+  připojuje z internetu, instance proto musí být dostupná na veřejné adrese s HTTPS.
+
+**Adresa.** `BETTER_AUTH_URL` musí být přesně ta adresa, kterou asistent používá: z ní se skládá
+adresa endpointu, vydavatel tokenů i příjemce, kterému tokeny patří, a token pro jinou adresu se
+odmítne. Na `http://localhost:3000` funguje Claude Code spuštěný na stejném počítači. Webové
+asistenty tak nepřipojíte. Pro ně použijte veřejnou adresu instance nebo při vývoji tunel
+(například Cloudflare Tunnel či ngrok) a jeho adresu nastavte do `BETTER_AUTH_URL`.
+
+**Server volá sám sebe.** Endpoint ověřuje podpis tokenů klíči z `BETTER_AUTH_URL/api/auth/jwks`,
+tedy dotazem na vlastní veřejnou adresu. Nasazená instance se proto musí ke své veřejné adrese
+dostat i zevnitř (DNS a síť kontejneru, takzvaný hairpin). Když ne, každé volání asistenta skončí
+chybou HTTP 500 zhruba po 5 sekundách.
+
+**Úrovně oprávnění.** Co asistent smí, určuje jedna úroveň v Nastavení › Asistenti; platí pro
+všechny vaše asistenty a každá vyšší úroveň obsahuje všechno z nižších. Výchozí je Jen čtení.
+
+| Úroveň                  | Co přidává                                                                                                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Jen čtení               | Vše číst, nic nezměnit.                                                                                                                                                                                      |
+| Koncepty                | Koncepty faktur, zákazníci, položky ceníku a jednotky. Nic, co vidí zákazník, a nic, co spotřebuje číslo.                                                                                                    |
+| Účetní operace          | Platby, bankovní avíza a účty, číselné řady, opakované faktury v režimu koncept, šablony faktur, nastavení dodavatele, výchozích hodnot, upomínek a e-mailových šablon, vypínání a pozastavení automatizací. |
+| Vystavování a odesílání | Vystavení faktury, odeslání faktury, upomínky a potvrzení platby, obnovení opakované faktury, další číslo řady.                                                                                              |
+| Plný přístup            | Mazání, storno a jeho obnovení, dobropisy, úprava vystavené faktury a obnovení její verze, vrácení avíza a importu.                                                                                          |
+
+Úroveň se kontroluje při každém volání a změna platí hned. Asistent v seznamu nástrojů vidí jen
+nástroje své úrovně; po změně úrovně si seznam načte znovu. Když mu nástroj chybí, ví, že může jít
+o vyšší úroveň, a řekne vám to. Nástroj nad úrovní skončí chybou s názvem potřebné úrovně.
+
+Nástroje po úrovních (každý volá stejnou službu jako web, s toutéž validací a historií změn):
+
+- **Jen čtení:** `get_overview`, `list_unpaid_invoices`, `list_invoices`, `get_invoice`,
+  `list_invoice_versions`, `get_invoice_version`, `list_invoice_mail_log`, `list_reminder_history`,
+  `check_invoice_issuable`, `preview_issue`, `prepare_invoice_email`, `prepare_payment_receipt`,
+  `prepare_reminder`, `list_tags`, `search_customers`, `list_customers`, `get_customer`,
+  `lookup_company_ares`, `search_catalog`, `list_catalog`, `get_catalog_item`,
+  `list_catalog_categories`, `list_units`, `list_bank_notices`, `get_bank_status`,
+  `list_notice_candidates`, `list_bank_accounts`, `list_recurring`, `get_recurring`,
+  `list_recurring_runs`, `list_plan_invoices`, `preview_recurring`, `list_invoice_templates`,
+  `get_invoice_template`, `list_number_series`, `get_supplier`, `get_preferences`,
+  `get_automation`, `list_reminder_rules`, `list_email_templates`, `get_email_template`,
+  `get_report`, `get_tax_overview`, `quick_search`, `list_audit`, `get_entity_history`,
+  `list_import_batches`, `get_exchange_rate`.
+- **Koncepty:** `create_draft_invoice`, `update_draft_invoice`, `duplicate_invoice`,
+  `draft_from_template`, `convert_advance_to_final`, `save_customer`, `archive_customer`,
+  `restore_customer`, `verify_customer_vat`, `save_catalog_item`, `archive_catalog_item`,
+  `restore_catalog_item`, `save_unit`, `save_line_to_catalog`.
+- **Účetní operace:** `mark_sent`, `mark_sent_many`, `snooze_reminders`, `set_reminders_off`,
+  `set_partial_reminders`, `add_payment`, `add_refund`, `update_payment`, `mark_paid`,
+  `mark_paid_many`, `assign_notice`, `split_notice`, `dismiss_notice`, `restore_notice`,
+  `check_mailbox_now`, `save_bank_account`, `set_default_bank_account`, `hide_bank_account`,
+  `unhide_bank_account`, `save_recurring` (plán, který sám vystavuje nebo odesílá, vyžaduje
+  Vystavování a odesílání), `pause_recurring`, `resolve_missed_run`, `recurring_from_template`,
+  `save_invoice_as_template`, `save_number_series`, `set_default_series`, `save_supplier`,
+  `save_preferences`, `disable_automation`, `pause_automation`, `set_send_time`,
+  `set_daily_digest`, `set_period_summary`, `set_tax_reminder`, `set_limit_mail`,
+  `save_reminder_rule`, `save_email_template`, `reset_email_template`.
+- **Vystavování a odesílání:** `issue_invoice`, `send_invoice`, `resend_from_log`,
+  `send_payment_receipt`, `send_reminder`, `resume_recurring`, `set_next_number`.
+- **Plný přístup:** `delete_draft`, `update_issued_invoice`, `refresh_customer_snapshot`,
+  `restore_invoice_version`, `cancel_invoice`, `restore_cancelled_invoice`, `create_credit_note`,
+  `delete_imported_invoice`, `delete_customer`, `delete_unit`, `delete_payment`,
+  `delete_bank_account`, `delete_recurring`, `delete_invoice_template`, `delete_number_series`,
+  `delete_reminder_rule`, `undo_notice`, `undo_import`.
+
+**Co zůstává jen ve webu.** Na žádné úrovni asistent nesmí: administraci (uživatelé, pozvánky,
+stav instance, záloha a obnova, smazání účtu), soubory (stažení PDF a ISDOC, import ze souborů,
+exporty, logo; nástroje místo souboru vracejí odkaz do webu), vzhled webu, dokladů a e-mailů,
+přístupové údaje k SMTP a bankovní schránce a nastavení samotného MCP. Nejde ani nic, co ve webu
+potvrzuje člověk: uzavření rozdílu platby, potvrzení nejistého doručení e-mailu, hromadné odeslání,
+zapnutí automatizace, obnovení pozastavených automatizací a první uložení opakované faktury, která
+se sama odesílá. Kde služba potvrzení chce jen v některém stavu, asistent dostane větu, že operaci
+je potřeba dokončit ve webu, a odkaz.
+
+**Log volání.** Každé volání asistenta, i čtení a odmítnutí, se zapíše do logu v Nastavení ›
+Asistenti: čas, asistent, nástroj, výsledek a důvod odmítnutí. Argumenty ani výstup se neukládají.
+Záznamy starší než 90 dní se mažou samy a log jde smazat i ručně. Přepínačem „Zaznamenávat volání
+asistentů“ (výchozí zapnuto) log vypnete. Historie změn na přepínači nezávisí: každá změna dat
+od asistenta se do ní zapíše vždy, se zdrojem „Asistent“.
+
+**Odpojení a limity.** Tlačítko Odpojit u asistenta v Nastavení › Asistenti zruší jeho přístup
+okamžitě, i když má ještě platný token. Jeden asistent smí provést nejvýš 60 volání za minutu,
+další dostane HTTP 429 s hlavičkou `Retry-After`.
+
 ## Provoz za reverzní proxy
 
 Za reverzní proxy (Coolify, Traefik, nginx) je nutné nastavit `TRUST_PROXY=1`. Bez něj aplikace

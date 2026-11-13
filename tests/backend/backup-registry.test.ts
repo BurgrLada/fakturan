@@ -56,8 +56,15 @@ describe("registr zálohy", () => {
 
   test("[EXP-006] jen auditní tabulky mají vlastníka mimo registr a audit jde zvlášť", () => {
     const tables = [...BACKUP_TABLES.map((entry) => entry.table), ...USER_OWNED_TABLES];
+    // OAuth tajemství, MCP-042: clients, tokens and consents never go into a backup.
+    const oauth = ["oauth_client", "oauth_access_token", "oauth_refresh_token", "oauth_consent"];
     expect(
-      findUnregisteredOwnedTables(schema, tables, ["audit_log", "audit_purge", "invitation"]),
+      findUnregisteredOwnedTables(schema, tables, [
+        "audit_log",
+        "audit_purge",
+        "invitation",
+        ...oauth,
+      ]),
     ).toEqual([]);
     expect(registered).not.toContain("audit_log");
   });
@@ -148,6 +155,7 @@ describe("registr zálohy", () => {
     expect(added.map((entry) => [entry.name, entry.since])).toEqual([
       ["mail_look", 2],
       ["limit_mail_sent", 2],
+      ["mcp_settings", 2],
     ]);
     for (const entry of BACKUP_TABLES.filter((item) => v1.includes(item.name))) {
       expect(entry.since ?? 1).toBe(1);
@@ -170,6 +178,7 @@ describe("registr zálohy", () => {
     }
     delete v1.tables.limit_mail_sent;
     delete v1.tables.mail_look;
+    delete v1.tables.mcp_settings;
     expect(fixture(1)).toEqual({ ...v1, v: 1 });
     const row = { id: "a", name: "b" };
     expect(BACKUP_UPGRADES[1]!("customer", row)).toEqual(row);

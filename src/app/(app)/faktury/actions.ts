@@ -12,10 +12,10 @@ import { paymentInputSchema } from "@/lib/payments";
 import { TEXTS } from "@/lib/texts";
 import { actorFromRequest, getCurrentSession } from "@/server/auth/session";
 import { ServiceError } from "@/server/services/access";
-import { convertAdvance } from "@/server/services/advances";
+import { convertAdvanceWithSeries } from "@/server/services/advances";
 import { getAutomation } from "@/server/services/automation";
-import { saveCatalogItem, searchCatalog } from "@/server/services/catalog";
-import { createCreditNote } from "@/server/services/credit-notes";
+import { saveLineToCatalog, searchCatalog } from "@/server/services/catalog";
+import { createCreditNoteWithSeries } from "@/server/services/credit-notes";
 import { creditPreview, loadRate } from "@/server/services/exchange-rates";
 import {
   customerInputSchema,
@@ -26,7 +26,6 @@ import {
 import { clauseDefaultsOf } from "@/server/services/supplier";
 import {
   cancelInvoice,
-  checkIssuable,
   issueInvoice,
   markSent,
   markSentMany,
@@ -48,7 +47,7 @@ import {
 import {
   refreshCustomerSnapshot,
   restoreVersion,
-  updateIssuedInvoice,
+  updateIssuedWithTags,
 } from "@/server/services/invoice-versions";
 import {
   deleteDraft,
@@ -57,9 +56,8 @@ import {
   issuedInputSchema,
   newDraftDefaults,
   ownerOf,
-  saveDraft,
+  saveDraftWithTags,
 } from "@/server/services/invoices";
-import { ensureDefaultSeries } from "@/server/services/number-series";
 import {
   addPayment,
   addRefund,
@@ -76,7 +74,6 @@ import {
   setRemindersOff,
   snoozeReminders,
 } from "@/server/services/reminders";
-import { assertTagNames, setInvoiceTags } from "@/server/services/tags";
 
 type Failure = {
   ok: false;
@@ -186,17 +183,9 @@ async function run<Input, Output extends object>(
 
 // No revalidation here: a save after every pause in typing would re-render the page for nothing.
 export async function saveDraftAction(raw: unknown) {
-  return run(draftInput, raw, ({ draft, tags: names }, actor) => {
-    assertTagNames(names);
-    ensureDefaultSeries(actor);
-    const saved = saveDraft(actor, draft);
-    setInvoiceTags(actor, saved.id, names);
-    return {
-      id: saved.id,
-      revision: saved.revision,
-      problems: checkIssuable(ownerOf(actor), saved.id),
-    };
-  });
+  return run(draftInput, raw, ({ draft, tags: names }, actor) =>
+    saveDraftWithTags(actor, draft, names),
+  );
 }
 
 export async function issuePreviewAction(raw: unknown) {
@@ -213,18 +202,14 @@ export async function issueAction(raw: unknown) {
 
 export async function updateIssuedAction(raw: unknown) {
   return run(updateInput, raw, ({ id: invoiceId, tags: names, document }, actor) => {
-    assertTagNames(names);
-    const result = updateIssuedInvoice(actor, invoiceId, document);
-    setInvoiceTags(actor, invoiceId, names);
+    const result = updateIssuedWithTags(actor, invoiceId, document, names);
     changedInvoices();
     return result;
   });
 }
 
 export async function saveLineToCatalogAction(raw: unknown) {
-  return run(lineInput, raw, ({ description = "", priceMinor, ...line }, actor) =>
-    saveCatalogItem(actor, { ...line, description, priceMinor, category: "", tags: [] }),
-  );
+  return run(lineInput, raw, (line, actor) => saveLineToCatalog(actor, line));
 }
 
 export async function createCustomerAction(raw: unknown) {
@@ -341,8 +326,7 @@ export async function duplicateInvoiceAction(raw: unknown) {
 
 export async function createCreditNoteAction(raw: unknown) {
   return run(idInput, raw, ({ id: invoiceId }, actor) => {
-    ensureDefaultSeries(actor);
-    const note = createCreditNote(actor, invoiceId);
+    const note = createCreditNoteWithSeries(actor, invoiceId);
     changedInvoices();
     return note;
   });
@@ -350,8 +334,7 @@ export async function createCreditNoteAction(raw: unknown) {
 
 export async function convertAdvanceAction(raw: unknown) {
   return run(idInput, raw, ({ id: invoiceId }, actor) => {
-    ensureDefaultSeries(actor);
-    const final = convertAdvance(actor, invoiceId);
+    const final = convertAdvanceWithSeries(actor, invoiceId);
     changedInvoices();
     return final;
   });

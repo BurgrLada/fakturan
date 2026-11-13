@@ -55,6 +55,7 @@ import {
   type IssuedInput,
 } from "./invoices";
 import { mutate } from "./mutation";
+import { assertTagNames, setInvoiceTags } from "./tags";
 import { hasDifference } from "./payments";
 import { isNumberTaken } from "./number-series";
 
@@ -481,4 +482,17 @@ export function restoreVersion(actor: Actor, versionId: string): EditResult {
       });
     }),
   );
+}
+
+// An issued document's edit with its tags; a bad tag name stops it before the document changes.
+export function updateIssuedWithTags(
+  actor: Actor,
+  id: string,
+  document: IssuedInput,
+  tags: string[],
+): EditResult {
+  assertTagNames(tags);
+  const result = updateIssuedInvoice(actor, id, document);
+  setInvoiceTags(actor, id, tags);
+  return result;
 }

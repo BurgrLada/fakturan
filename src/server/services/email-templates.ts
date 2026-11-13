@@ -242,3 +242,14 @@ export function composeMail(
     attachmentName: fileNameFor(getPreferences(ownerId).pdfFileName, doc),
   };
 }
+
+// The reset answers with the text that now applies, the built-in one.
+export function resetEmailTemplateAndRead(
+  actor: Actor,
+  kind: MessageKind,
+  language: Language,
+): { subject: string; body: string } {
+  resetEmailTemplate(actor, kind, language);
+  const { subject, body } = getEmailTemplate(actor.userId ?? "", kind, language);
+  return { subject, body };
+}

@@ -79,6 +79,9 @@ function checksFor(ctx: GenericEndpointContext, env: Env): Check[] {
       return [{ rule: RATE_RULES.socialLoginIp, key: ip }];
     case "/sign-up/email":
       return [{ rule: RATE_RULES.signupIp, key: ip }];
+    // Open registration for MCP clients (MCP-032); Better Auth's own limiter is off instance-wide.
+    case "/oauth2/register":
+      return [{ rule: RATE_RULES.oauthRegisterIp, key: ip }];
     default:
       return [];
   }

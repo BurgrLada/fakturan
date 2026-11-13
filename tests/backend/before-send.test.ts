@@ -128,6 +128,17 @@ describe("monitoring", () => {
     });
   });
 
+  test("[MCP-036] u chyby nástroje MCP zůstane jen název nástroje a ID uživatele", () => {
+    const out = scrubEvent({
+      event_id: "e",
+      tags: { "mcp.tool": "get_invoice", argument: "FV-2026-001" },
+      user: { id: "u1", email: "a@b.cz" },
+      extra: { input: { invoice: "FV-2026-001" } },
+      contexts: { mcp: { arguments: "FV-2026-001" } },
+    } as unknown as Event);
+    expect(out).toEqual({ event_id: "e", tags: { "mcp.tool": "get_invoice" }, user: { id: "u1" } });
+  });
+
   test("[MON-004] beforeSendTransaction je také scrubEvent", () => {
     const sdk = { init: vi.fn() };
     initMonitoring({ SENTRY_DSN: "https://k@h.example.cz/1" }, sdk);

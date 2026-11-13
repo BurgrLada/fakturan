@@ -4,17 +4,23 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SETTINGS_TABS } from "@/lib/nav";
+import { settingsTabs } from "@/lib/nav";
 import { TEXTS } from "@/lib/texts";
 import { cn } from "@/lib/utils";
 
 const FADE = "2.5rem";
 
-export function SettingsTabs() {
-  return <SettingsTabsView pathname={usePathname()} />;
+export function SettingsTabs({ mcpAvailable }: { mcpAvailable: boolean }) {
+  return <SettingsTabsView pathname={usePathname()} mcpAvailable={mcpAvailable} />;
 }
 
-export function SettingsTabsView({ pathname }: { pathname: string | null }) {
+export function SettingsTabsView({
+  pathname,
+  mcpAvailable,
+}: {
+  pathname: string | null;
+  mcpAvailable: boolean;
+}) {
   const scroller = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: false, end: false });
 
@@ -57,7 +63,7 @@ export function SettingsTabsView({ pathname }: { pathname: string | null }) {
         style={{ maskImage: mask, WebkitMaskImage: mask }}
         className="flex snap-x gap-1 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {SETTINGS_TABS.map((tab) => {
+        {settingsTabs(mcpAvailable).map((tab) => {
           const active = pathname !== null && pathname.startsWith(tab.href);
           return (
             <Link

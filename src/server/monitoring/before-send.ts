@@ -54,8 +54,9 @@ function cleanFrames(frames: Frame) {
   }));
 }
 
-// Set by reportFailure from job metadata, the only tags that identify a failed job (R-30).
-const JOB_TAGS = ["task", "kind", "job_id"] as const;
+// Set by reportFailure from job metadata, the only tags that identify a failed job (R-30), and the
+// name of a failed MCP tool, never its arguments (MCP-036).
+const ALLOWED_TAGS = ["task", "kind", "job_id", "mcp.tool"] as const;
 
 // Allowlist: a field not copied here (headers, cookies, bodies, extra, other tags, contexts, spans,
 // breadcrumbs, frame variables) never leaves the instance (MON-004).
@@ -74,7 +75,7 @@ export function scrubEvent<T extends Event>(event: T): T {
   ] as const) {
     if (event[key] !== undefined) (out as Record<string, unknown>)[key] = event[key];
   }
-  const tags = JOB_TAGS.filter((key) => event.tags?.[key] !== undefined);
+  const tags = ALLOWED_TAGS.filter((key) => event.tags?.[key] !== undefined);
   if (tags.length) out.tags = Object.fromEntries(tags.map((key) => [key, event.tags?.[key]]));
   if (event.user?.id !== undefined) out.user = { id: event.user.id };
   if (event.message) out.message = scrubText(event.message);

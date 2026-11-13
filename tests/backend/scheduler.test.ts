@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { setClockForTests } from "@/server/clock";
-import { job, schedulerState } from "@/server/db/schema";
+import { job, mcpCallLog, schedulerState, user } from "@/server/db/schema";
 import { checkHealth } from "@/server/health";
 import { claimNext, completeJob, enqueue } from "@/server/jobs/queue";
 import { jobDefinition, registerJob } from "@/server/jobs/registry";
@@ -320,6 +320,29 @@ describe("tick", () => {
       .run();
     jobCleanupTask.run(later);
     expect(db.select().from(job).all()).toHaveLength(1);
+  });
+
+  test("[MCP-064] denní údržba smaže log volání asistentů starší než 90 dní", () => {
+    // Another day than the test above, so the daily run is due again.
+    const now = new Date(T0.getTime() + 400 * 86_400_000);
+    const day = 86_400_000;
+    db.insert(user)
+      .values({ id: "logujici", name: "L", email: "l@example.cz", createdAt: now, updatedAt: now })
+      .run();
+    const row = (at: Date) => ({
+      ownerId: "logujici",
+      at,
+      clientId: "klient",
+      clientName: "Claude Code",
+      tool: "get_overview",
+      outcome: "ok" as const,
+      requestId: String(at.getTime()),
+    });
+    db.insert(mcpCallLog)
+      .values([row(new Date(now.getTime() - 91 * day)), row(new Date(now.getTime() - 89 * day))])
+      .run();
+    jobCleanupTask.run(now);
+    expect(db.select().from(mcpCallLog).all()).toHaveLength(1);
   });
 });
 

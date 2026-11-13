@@ -109,8 +109,17 @@ function productionAuditActions(): string[] {
 }
 
 // purgeAccount handles these by hand: the audit tables have their own purge, and invitations are
-// matched by e-mail as well as by id.
-const EXCEPTIONS = ["audit_log", "audit_purge", "invitation"];
+// matched by e-mail as well as by id. OAuth tajemství, MCP-042: deleting the user cascades to its
+// tokens and consents, and an instance-wide client only loses its owner.
+const EXCEPTIONS = [
+  "audit_log",
+  "audit_purge",
+  "invitation",
+  "oauth_client",
+  "oauth_access_token",
+  "oauth_refresh_token",
+  "oauth_consent",
+];
 
 function roleOf(id: string) {
   return db.select().from(user).where(eq(user.id, id)).get()?.role;

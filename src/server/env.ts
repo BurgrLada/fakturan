@@ -4,10 +4,10 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 
 const optional = z.string().min(1).optional();
-const flag = z
-  .enum(["true", "false", "1", "0"])
-  .default("false")
-  .transform((v) => v === "true" || v === "1");
+const boolText = z.enum(["true", "false", "1", "0"]);
+const isTrue = (v: string) => v === "true" || v === "1";
+const flag = boolText.default("false").transform(isTrue);
+const flagOn = boolText.default("true").transform(isTrue);
 
 const schema = z
   .object({
@@ -59,6 +59,7 @@ const schema = z
     DEMO_MODE: flag,
     DEMO_EMAIL: z.email().optional(),
     DEMO_PASSWORD: optional,
+    MCP_ENABLED: flagOn,
   })
   .superRefine((value, ctx) => {
     if (!value.DEMO_MODE) return;

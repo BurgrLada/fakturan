@@ -26,6 +26,8 @@ export const RATE_RULES = {
   socialLoginIp: rule("socialLoginIp", 30, 60),
   socialCallbackIp: rule("socialCallbackIp", 30, 60),
   signupIp: rule("signupIp", 5, 3600),
+  oauthRegisterIp: rule("oauthRegisterIp", 10, 3600),
+  mcpCallUserClient: rule("mcpCallUserClient", 60, 60),
   invitationsUser: rule("invitationsUser", 20, 3600),
   accountDeleteUser: rule("accountDeleteUser", 5, 3600),
   sendUser: rule("sendUser", 60, 60),

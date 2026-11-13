@@ -479,6 +479,14 @@
       "updated_at": "copy",
       "user_id": "owner"
     },
+    "mcp_settings": {
+      "enabled": "copy",
+      "level": "copy",
+      "log_calls": "copy",
+      "revision": "copy",
+      "updated_at": "copy",
+      "user_id": "owner"
+    },
     "email_template": {
       "body": "copy",
       "id": "id",

@@ -39,6 +39,7 @@ import { writeBlob } from "@/server/files/store";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
+import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
 import {
   asVersion1,
   asRestored,
@@ -526,5 +527,33 @@ describe("záloha účtu s dokumenty a řádky z dřívějška", () => {
       .filter((row) => row.ownerId === again)
       .at(-1)!;
     expect(restore.after).toMatchObject({ shortened: { "email_log.subject": sent } });
+  });
+
+  test("[MCP-042] záloha obsahuje mcp_settings a obnova vrátí enabled=false", async () => {
+    const source = seedOwner(db, NOW);
+    saveMcpSettings(
+      { userId: source, source: "web" },
+      { enabled: true, level: "accounting", logCalls: false, revision: 0 },
+    );
+    const archive = await backupArchive(db, source);
+    const rows = readJsonl(unzipSync(archive)["data/mcp_settings.jsonl"]!);
+    expect(rows).toEqual([
+      expect.objectContaining({ enabled: true, level: "accounting", log_calls: false }),
+    ]);
+    // OAuth secrets never go into an archive.
+    expect(Object.keys(unzipSync(archive)).filter((name) => name.includes("oauth"))).toEqual([]);
+
+    const target = emptyAccount();
+    // Settings the target already chose do not make the account count as filled.
+    saveMcpSettings(
+      { userId: target, source: "web" },
+      { enabled: true, level: "read", logCalls: true, revision: 0 },
+    );
+    expect((await restoreArchive(db, target, archive)).status).toBe("done");
+    expect(getMcpSettings(target)).toMatchObject({
+      enabled: false,
+      level: "accounting",
+      logCalls: false,
+    });
   });
 });

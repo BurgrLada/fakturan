@@ -1,0 +1,332 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { and, eq, sql } from "drizzle-orm";
+import { decodeJwt } from "jose";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { createAuth } from "@/server/auth";
+import { SOCIAL_REJECTED_PATH } from "@/server/auth/audit-hooks";
+import { auditLog, instanceMeta, oauthRefreshToken, rateLimit, user } from "@/server/db/schema";
+import { parseEnv, type Env } from "@/server/env";
+import { consentPage, consentRequest } from "@/server/mcp/consent-info";
+import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
+import { BASE, Browser, fakeGithub } from "../helpers/auth-browser";
+import {
+  answerConsent,
+  authorize,
+  codeParams,
+  exchangeCode,
+  githubDuringAuthorization,
+  oauthQuery,
+  REDIRECT_URI,
+  refresh,
+  registerClient,
+  RESOURCE,
+  signInDuringAuthorization,
+  tokenResponse,
+} from "../helpers/mcp-oauth";
+import { createTestDb } from "../helpers/db";
+
+const db = createTestDb();
+
+const OWNER = "majitel@example.cz";
+const dataDir = mkdtempSync(join(tmpdir(), "fakturan-mcp-flow-"));
+
+function testEnv(extra: Record<string, string> = {}): Env {
+  return parseEnv({
+    DATA_DIR: dataDir,
+    BETTER_AUTH_URL: BASE,
+    BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
+    ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    GITHUB_CLIENT_ID: "gh-id",
+    GITHUB_CLIENT_SECRET: "gh-secret",
+    ...extra,
+  });
+}
+
+function userCount(): number {
+  return (
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(user)
+      .get()?.n ?? 0
+  );
+}
+
+function ownerId(): string {
+  return db.select({ id: user.id }).from(user).where(eq(user.email, OWNER)).get()!.id;
+}
+
+// Assistant access is off by default (MCP-010); the flow tests switch it on like the settings page.
+function setAccess(enabled: boolean): void {
+  const id = ownerId();
+  const current = getMcpSettings(id);
+  saveMcpSettings({ userId: id, source: "web" }, { ...current, enabled });
+}
+
+function refreshTokensOfOwner(): number {
+  return (
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(oauthRefreshToken)
+      .where(eq(oauthRefreshToken.userId, ownerId()))
+      .get()?.n ?? 0
+  );
+}
+
+function connectedAudits(clientId: string) {
+  return db
+    .select()
+    .from(auditLog)
+    .where(and(eq(auditLog.action, "mcp.connected"), eq(auditLog.entityId, clientId)))
+    .all();
+}
+
+const env = testEnv();
+const auth = createAuth(env);
+
+beforeEach(async () => {
+  db.delete(rateLimit).run();
+  db.delete(user).run();
+  db.delete(instanceMeta).run();
+  // The first account on an empty instance needs no invitation.
+  await new Browser(auth).signUp(OWNER);
+  db.update(user).set({ emailVerified: true }).run();
+  setAccess(true);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("přihlášení a souhlas v toku OAuth", () => {
+  test("[MCP-002][MCP-003][MCP-007] tok s PKCE: přihlášení heslem, souhlas, token a jeho obnova", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+
+    const { location: loginPage, flow } = await authorize(browser, clientId);
+    expect(loginPage.pathname).toBe("/prihlaseni");
+    expect(loginPage.searchParams.get("client_id")).toBe(clientId);
+
+    const consentPage = await signInDuringAuthorization(browser, loginPage, OWNER);
+    expect(consentPage?.pathname).toBe("/pristup-asistenta");
+
+    // What the consent page reads from its own query.
+    expect(await consentRequest(env, oauthQuery(consentPage!))).toMatchObject({
+      clientId,
+      name: "Claude Code",
+      host: "aplikace na tomto počítači",
+      nameIsClaimed: true,
+      oauthQuery: oauthQuery(consentPage!),
+    });
+
+    const callback = await answerConsent(browser, consentPage!, true);
+    expect(callback.origin + callback.pathname).toBe(REDIRECT_URI);
+    expect(callback.searchParams.get("state")).toBe("stav-1");
+    const code = callback.searchParams.get("code")!;
+    expect(code).toEqual(expect.any(String));
+
+    const tokens = await exchangeCode(auth, flow, code);
+    const claims = decodeJwt(tokens.access_token);
+    expect([claims.aud].flat()).toContain(RESOURCE);
+    expect(claims.exp! - claims.iat!).toBeLessThanOrEqual(900);
+    expect(tokens.refresh_token).toEqual(expect.any(String));
+
+    const renewed = await refresh(auth, clientId, tokens.refresh_token!);
+    expect(renewed.refresh_token).toEqual(expect.any(String));
+    expect(renewed.refresh_token).not.toBe(tokens.refresh_token);
+    expect([decodeJwt(renewed.access_token).aud].flat()).toContain(RESOURCE);
+  });
+
+  test("[MCP-003] sociální přihlášení během autorizace pokračuje na souhlas", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage } = await authorize(browser, clientId);
+    fakeGithub(OWNER);
+
+    const next = await githubDuringAuthorization(browser, loginPage);
+
+    expect(next.pathname).toBe("/pristup-asistenta");
+    expect(next.searchParams.get("client_id")).toBe(clientId);
+    expect(await browser.sessionUser()).toMatchObject({ email: OWNER });
+  });
+
+  test("[MCP-005] zamítnutí vrátí klientovi access_denied", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage } = await authorize(browser, clientId);
+    const consentPage = await signInDuringAuthorization(browser, loginPage, OWNER);
+
+    const callback = await answerConsent(browser, consentPage!, false);
+
+    expect(callback.origin + callback.pathname).toBe(REDIRECT_URI);
+    expect(callback.searchParams.get("error")).toBe("access_denied");
+    expect(callback.searchParams.get("code")).toBeNull();
+  });
+
+  test("[MCP-005] souhlasová stránka nepřijme podvržený ani cizí dotaz", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const otherClient = await registerClient(auth, "https://zly.example/cb");
+    const { location: loginPage } = await authorize(browser, clientId);
+    const consentPage = await signInDuringAuthorization(browser, loginPage, OWNER);
+    const forged = new URLSearchParams(oauthQuery(consentPage!));
+    forged.set("client_id", otherClient);
+
+    expect(await consentRequest(env, forged.toString())).toBeNull();
+    expect(await consentRequest(env, "client_id=" + clientId)).toBeNull();
+  });
+
+  test("[MCP-004] cizí e-mail: sociální přihlášení během autorizace nezaloží účet", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage } = await authorize(browser, clientId);
+    const before = userCount();
+    fakeGithub("cizi@example.cz");
+
+    const next = await githubDuringAuthorization(browser, loginPage);
+
+    expect(next.href).toBe(new URL(SOCIAL_REJECTED_PATH, BASE).href);
+    expect(userCount()).toBe(before);
+    expect(await browser.sessionUser()).toBeNull();
+  });
+});
+
+describe("vypnutý přístup asistentů (MCP-006)", () => {
+  test("[MCP-006] vypnutý přístup: authorize skončí na stránce s vysvětlením, token se nevydá", async () => {
+    setAccess(false);
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage } = await authorize(browser, clientId);
+
+    // The login continues the authorization, which stops at the explanation, not at consent.
+    const next = await signInDuringAuthorization(browser, loginPage, OWNER);
+    expect(next?.pathname).toBe("/pristup-asistenta");
+    expect(await consentPage(env, oauthQuery(next!), ownerId())).toEqual({ kind: "disabled" });
+
+    // Calling the consent endpoint directly does not get around it.
+    const refused = await browser.request("/oauth2/consent", {
+      body: { accept: true, oauth_query: oauthQuery(next!) },
+    });
+    expect(refused.status).toBe(403);
+    expect(JSON.stringify(await refused.json())).not.toContain("code=");
+    // A denial still reaches the client.
+    expect((await answerConsent(browser, next!, false)).searchParams.get("error")).toBe(
+      "access_denied",
+    );
+    expect(refreshTokensOfOwner()).toBe(0);
+    expect(connectedAudits(clientId)).toEqual([]);
+  });
+
+  test("[MCP-006] dřívější souhlas po vypnutí neobejde vysvětlení a vydaný kód token nedostane", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage, flow } = await authorize(browser, clientId);
+    const consent = await signInDuringAuthorization(browser, loginPage, OWNER);
+    const first = await answerConsent(browser, consent!, true);
+    await exchangeCode(auth, flow, first.searchParams.get("code")!);
+
+    // With a remembered consent the provider would send the code straight to the client.
+    const again = await authorize(browser, clientId);
+    expect(again.location.searchParams.get("code")).toEqual(expect.any(String));
+    const pendingCode = again.location.searchParams.get("code")!;
+
+    setAccess(false);
+    const blocked = await authorize(browser, clientId);
+    expect(blocked.location.pathname).toBe("/pristup-asistenta");
+    expect(blocked.location.searchParams.get("code")).toBeNull();
+    expect(await consentPage(env, oauthQuery(blocked.location), ownerId())).toEqual({
+      kind: "disabled",
+    });
+
+    // A code handed out before the switch was turned off is refused at the token endpoint.
+    const before = refreshTokensOfOwner();
+    const response = await tokenResponse(auth, codeParams(again.flow, pendingCode));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid_grant" });
+    expect(refreshTokensOfOwner()).toBe(before);
+  });
+
+  test("[MCP-054] souhlas nese aktuální úroveň", async () => {
+    const browser = new Browser(auth);
+    await browser.signIn(OWNER);
+    const { location: page } = await authorize(browser, await registerClient(auth));
+    const id = ownerId();
+    for (const level of ["read", "issue_send"] as const) {
+      saveMcpSettings({ userId: id, source: "web" }, { ...getMcpSettings(id), level });
+      expect(await consentPage(env, oauthQuery(page), id)).toMatchObject({
+        kind: "consent",
+        level,
+      });
+    }
+  });
+
+  test("[MCP-006] stránka souhlasu otevřená před vypnutím už souhlas neudělí", async () => {
+    const browser = new Browser(auth);
+    await browser.signIn(OWNER);
+    const clientId = await registerClient(auth);
+    const { location: page } = await authorize(browser, clientId);
+    expect(page.pathname).toBe("/pristup-asistenta");
+    expect((await consentPage(env, oauthQuery(page), ownerId())).kind).toBe("consent");
+
+    setAccess(false);
+    const consent = await browser.request("/oauth2/consent", {
+      body: { accept: true, oauth_query: oauthQuery(page) },
+    });
+    expect(consent.status).toBe(403);
+    // The post-login continuation would otherwise skip the check the consent page passed.
+    const continued = await browser.request("/oauth2/continue", {
+      body: { postLogin: true, oauth_query: oauthQuery(page) },
+    });
+    expect(continued.status).toBe(403);
+    expect(refreshTokensOfOwner()).toBe(0);
+  });
+
+  test("[MCP-010] vypnutí propojení nesmaže: obnovovací token platí dál", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage, flow } = await authorize(browser, clientId);
+    const consent = await signInDuringAuthorization(browser, loginPage, OWNER);
+    const callback = await answerConsent(browser, consent!, true);
+    const tokens = await exchangeCode(auth, flow, callback.searchParams.get("code")!);
+
+    setAccess(false);
+    // Tool calls are refused by the MCP endpoint itself (MCP-012); the connection stays.
+    const renewed = await refresh(auth, clientId, tokens.refresh_token!);
+    expect(renewed.refresh_token).toEqual(expect.any(String));
+  });
+});
+
+describe("audit propojení", () => {
+  test("[MCP-031] souhlas zapíše mcp.connected, opakovaná autorizace bez souhlasu ne", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage } = await authorize(browser, clientId);
+    const consent = await signInDuringAuthorization(browser, loginPage, OWNER);
+    await answerConsent(browser, consent!, true);
+
+    const rows = connectedAudits(clientId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      source: "web",
+      actorId: ownerId(),
+      ownerId: ownerId(),
+      scope: "user",
+      entity: "mcp_client",
+    });
+    expect(rows[0]!.after).toMatchObject({ clientId, name: "Claude Code" });
+
+    const again = await authorize(browser, clientId);
+    expect(again.location.searchParams.get("code")).toEqual(expect.any(String));
+    expect(connectedAudits(clientId)).toHaveLength(1);
+  });
+
+  test("[MCP-031] zamítnutí mcp.connected nezapíše", async () => {
+    const browser = new Browser(auth);
+    const clientId = await registerClient(auth);
+    const { location: loginPage } = await authorize(browser, clientId);
+    const consent = await signInDuringAuthorization(browser, loginPage, OWNER);
+    await answerConsent(browser, consent!, false);
+    expect(connectedAudits(clientId)).toEqual([]);
+  });
+});

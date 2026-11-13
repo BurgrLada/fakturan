@@ -3,14 +3,14 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { eq } from "drizzle-orm";
+import { eq, getTableColumns } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { registerSqlFunctions } from "@/lib/sql-functions";
 import { textLimit } from "@/lib/text-limits";
 import { setClockForTests } from "@/server/clock";
 import { createDb, runMigrations, setDbForTests, type Db } from "@/server/db";
-import { invoice, job, schedulerState, user } from "@/server/db/schema";
+import { auditLog, invoice, job, mcpSettings, schedulerState, user } from "@/server/db/schema";
 import { registerJob } from "@/server/jobs/registry";
 import { recoverBackupJob, runBackup } from "@/server/services/account-backup";
 import { recoverRestore, runRestore } from "@/server/services/account-restore";
@@ -54,6 +54,24 @@ afterEach(() => {
   for (const db of opened.splice(0)) db.$client.close();
   vi.restoreAllMocks();
 });
+
+// The services write the audit with today's columns. Seeding a database stopped at an older
+// migration adds the audit columns it does not have yet and removes them before the upgrade, which
+// then adds them for real.
+function seedOnOlderSchema<T>(db: Db, seed: () => T): T {
+  const present = new Set(
+    db.$client.prepare("SELECT name FROM pragma_table_info('audit_log')").pluck().all() as string[],
+  );
+  const missing = Object.values(getTableColumns(auditLog))
+    .map((column) => column.name)
+    .filter((name) => !present.has(name));
+  for (const name of missing) db.$client.exec(`ALTER TABLE audit_log ADD \`${name}\` text`);
+  try {
+    return seed();
+  } finally {
+    for (const name of missing) db.$client.exec(`ALTER TABLE audit_log DROP COLUMN \`${name}\``);
+  }
+}
 
 function freshDb(): Db {
   const db = createDb(join(mkdtempSync(join(tmpdir(), "fakturan-upgrade-db-")), "app.db"));
@@ -133,8 +151,10 @@ describe("upgrade databáze", () => {
     const db = freshDb();
     migrate(db, { migrationsFolder: prefixFolder(at) });
     setDbForTests(db);
-    const owner = seedOwner(db, NOW);
-    const id = issuedInvoice(owner, seedCustomer(owner));
+    const { owner, id } = seedOnOlderSchema(db, () => {
+      const seeded = seedOwner(db, NOW);
+      return { owner: seeded, id: issuedInvoice(seeded, seedCustomer(seeded)) };
+    });
     const limit = textLimit("invoice", "search_text")!;
     db.update(invoice)
       .set({ searchText: "x".repeat(limit + 5_000) })
@@ -286,5 +306,35 @@ describe("doplnění záznamů o e-mailu k limitu", () => {
     ]);
     for (const row of rows) expect(row.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
     assertSound(db);
+  });
+});
+
+describe("převod schopností asistenta na úroveň", () => {
+  test("[MCP-055] migrace převede can_create na drafts", () => {
+    const db = freshDb();
+    const before = journal.entries.findIndex((entry) => entry.tag.startsWith("0054_"));
+    migrate(db, { migrationsFolder: prefixFolder(before) });
+    const insertUser = db.$client.prepare(
+      "INSERT INTO user (id, name, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    );
+    const insertSettings = db.$client.prepare(
+      "INSERT INTO mcp_settings (user_id, enabled, can_read, can_create, revision, updated_at) VALUES (?, 1, 1, ?, 3, ?)",
+    );
+    for (const [id, create] of [
+      ["u-create", 1],
+      ["u-read", 0],
+    ] as const) {
+      insertUser.run(id, id, `${id}@example.cz`, NOW.getTime(), NOW.getTime());
+      insertSettings.run(id, create, NOW.getTime());
+    }
+    runMigrations(db);
+    assertSound(db);
+    const rows = db.select().from(mcpSettings).all();
+    expect(Object.fromEntries(rows.map((row) => [row.userId, row.level]))).toEqual({
+      "u-create": "drafts",
+      "u-read": "read",
+    });
+    expect(rows.every((row) => row.enabled && row.logCalls && row.revision === 3)).toBe(true);
+    expect(tableColumns(db, "mcp_settings").filter((name) => name.startsWith("can_"))).toEqual([]);
   });
 });
