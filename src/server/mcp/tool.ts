@@ -9,13 +9,9 @@ import { czechError } from "@/lib/validation-issue";
 import { runWithActor, type Actor } from "../audit/context";
 import { clock } from "../clock";
 import type { Env } from "../env";
-import {
-  isMcpAccountActive,
-  isMcpConnected,
-  mcpClientName,
-  touchMcpConnection,
-} from "../services/mcp-connections";
-import { recordMcpCall, type McpCallOutcome, type McpCallReason } from "../services/mcp-call-log";
+import { isMcpAccountActive, isMcpConnected, mcpClientName } from "../services/mcp-connections";
+import type { McpCallOutcome, McpCallReason } from "../services/mcp-call-log";
+import { recordMcpCall, touchMcpConnection } from "../mcp-usage";
 import { activeLevel, getMcpSettings } from "../services/mcp-settings";
 import { isMcpAvailable } from "./availability";
 import {

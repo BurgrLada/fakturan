@@ -3,13 +3,8 @@ import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { auditLog, invoice, mcpCallLog, user } from "@/server/db/schema";
 import { saveBankAccount } from "@/server/services/bank-accounts";
 import { saveCustomer } from "@/server/services/customers";
-import {
-  clearMcpCallLog,
-  listMcpCalls,
-  MCP_CALL_LOG_DAYS,
-  purgeMcpCallLog,
-  recordMcpCall,
-} from "@/server/services/mcp-call-log";
+import { MCP_CALL_LOG_DAYS, purgeMcpCallLog, recordMcpCall } from "@/server/mcp-usage";
+import { clearMcpCallLog, listMcpCalls } from "@/server/services/mcp-call-log";
 import { disconnectMcpClient } from "@/server/services/mcp-connections";
 import { getMcpSettings, saveMcpSettings } from "@/server/services/mcp-settings";
 import { saveSupplier } from "@/server/services/supplier";

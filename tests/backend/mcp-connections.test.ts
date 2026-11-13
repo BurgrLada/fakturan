@@ -18,8 +18,8 @@ import {
   disconnectMcpClient,
   isMcpConnected,
   listMcpConnections,
-  touchMcpConnection,
 } from "@/server/services/mcp-connections";
+import { touchMcpConnection } from "@/server/mcp-usage";
 import { createTestDb } from "../helpers/db";
 
 vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");

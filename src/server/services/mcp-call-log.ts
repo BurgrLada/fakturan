@@ -1,16 +1,12 @@
 import "server-only";
-import * as Sentry from "@sentry/nextjs";
-import { and, desc, eq, lt } from "drizzle-orm";
-import type { McpLevel } from "@/lib/mcp-settings";
+import { and, desc, eq } from "drizzle-orm";
 import { TEXTS } from "@/lib/texts";
 import type { Actor } from "../audit/context";
 import { db } from "../db";
 import { mcpCallLog, type McpCallLogRow } from "../db/schema";
 import { scoped } from "../db/scoped";
-import { logger } from "../logger";
 import { ServiceError } from "./access";
 import type { Page } from "./audit-read";
-import { getMcpSettings } from "./mcp-settings";
 import { mutate } from "./mutation";
 
 export type McpCallOutcome = "ok" | "denied" | "error";
@@ -24,38 +20,7 @@ export type McpCallReason =
   | "confirm_in_web";
 export type McpCallRow = McpCallLogRow;
 
-export const MCP_CALL_LOG_DAYS = 90;
 const PAGE_SIZE = 50;
-const DAY_MS = 86_400_000;
-
-export type McpCallEntry = {
-  ownerId: string;
-  clientId: string;
-  clientName: string;
-  tool: string;
-  outcome: McpCallOutcome;
-  reason: McpCallReason | null;
-  requiredLevel: McpLevel | null;
-  requestId: string;
-  at: Date;
-};
-
-// One line per call while the switch is on (MCP-062), never the arguments or the output (MCP-060).
-// Outside the service's transaction, and a failure here never changes the call's result (MCP-061).
-export function recordMcpCall(entry: McpCallEntry): void {
-  try {
-    if (!getMcpSettings(entry.ownerId).logCalls) return;
-    db.insert(mcpCallLog).values(entry).run();
-  } catch (error) {
-    logger.error("zápis logu volání asistenta selhal", { tool: entry.tool });
-    if (process.env.SENTRY_DSN) {
-      Sentry.captureException(error, {
-        tags: { "mcp.tool": entry.tool },
-        user: { id: entry.ownerId },
-      });
-    }
-  }
-}
 
 // Newest first, 50 per page, filtered by assistant and outcome (MCP-063).
 export function listMcpCalls(
@@ -111,10 +76,4 @@ export function clearMcpCallLog(actor: Actor): void {
       after: { rows: 0 },
     });
   });
-}
-
-// Lines older than 90 days go (MCP-064): an operational record, not history.
-export function purgeMcpCallLog(now: Date): void {
-  const cutoff = new Date(now.getTime() - MCP_CALL_LOG_DAYS * DAY_MS);
-  db.delete(mcpCallLog).where(lt(mcpCallLog.at, cutoff)).run();
 }
